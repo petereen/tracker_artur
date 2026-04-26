@@ -1,0 +1,29 @@
+import time
+
+import bcrypt
+from jose import JWTError, jwt
+
+from app.core.config import settings
+
+ALGORITHM = "HS256"
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
+
+
+def create_access_token(data: dict) -> str:
+    payload = data.copy()
+    payload["exp"] = int(time.time()) + settings.ACCESS_TOKEN_EXPIRE_HOURS * 3600
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_token(token: str) -> dict | None:
+    try:
+        return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return None
