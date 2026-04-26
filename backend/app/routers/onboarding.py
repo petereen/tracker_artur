@@ -26,9 +26,17 @@ class OnboardingTemplate(BaseModel):
 async def get_template(db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
     result = await db.execute(select(ManagerSettings))
     s = result.scalar_one_or_none()
-    return OnboardingTemplate(message=DEFAULT_TEMPLATE)
+    message = s.onboarding_template if s and s.onboarding_template else DEFAULT_TEMPLATE
+    return OnboardingTemplate(message=message)
 
 
 @router.put("/template", status_code=200)
 async def update_template(data: OnboardingTemplate, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+    result = await db.execute(select(ManagerSettings))
+    s = result.scalar_one_or_none()
+    if s:
+        s.onboarding_template = data.message
+    else:
+        db.add(ManagerSettings(onboarding_template=data.message))
+    await db.commit()
     return {"ok": True}

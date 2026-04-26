@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: sales_tracker
       POSTGRES_USER: tracker
-      POSTGRES_PASSWORD: secret
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -21,13 +21,13 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://tracker:secret@db/sales_tracker
-      SYNC_DATABASE_URL: postgresql+psycopg2://tracker:secret@db/sales_tracker
-      SECRET_KEY: change_me_in_production_please
+      DATABASE_URL: ${DATABASE_URL}
+      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
       BOT_TOKEN: ${BOT_TOKEN:-}
       MANAGER_TG_ID: ${MANAGER_TG_ID:-306983322}
-      ADMIN_EMAIL: admin@company.ru
-      ADMIN_PASSWORD: admin123
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     ports:
       - "8010:8000"
 
@@ -38,13 +38,13 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+asyncpg://tracker:secret@db/sales_tracker
-      SYNC_DATABASE_URL: postgresql+psycopg2://tracker:secret@db/sales_tracker
-      SECRET_KEY: change_me_in_production_please
+      DATABASE_URL: ${DATABASE_URL}
+      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
       BOT_TOKEN: ${BOT_TOKEN:-}
       MANAGER_TG_ID: ${MANAGER_TG_ID:-306983322}
-      ADMIN_EMAIL: admin@company.ru
-      ADMIN_PASSWORD: admin123
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     command: python -m app.bot.main
 
   frontend:

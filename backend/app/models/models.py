@@ -124,6 +124,7 @@ class ManagerSettings(Base):
     alerts_enabled = Column(Boolean, default=True)
     gamification_enabled = Column(Boolean, default=True)
     soft_mode_weeks = Column(Integer, default=1)
+    onboarding_template = Column(Text, nullable=True)
 
 
 class Streak(Base):
