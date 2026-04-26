@@ -27,7 +27,7 @@ tracker.vitamarine.kz
 │             ├── /manager-settings
 │             ├── /dashboard/summary
 │             ├── /answers + /answers/export
-│             └── /onboarding
+│             └── /onboarding/template
 │
 ├── /       → React SPA (порт 3010)
 │             ├── Dashboard   — KPI, графики, топ сотрудников
@@ -56,15 +56,24 @@ git clone https://github.com/bronxtc52/tracker_artur.git
 cd tracker_artur
 ```
 
-Создайте `.env` в корне:
+Создайте `.env` в корне (все переменные обязательны):
 
 ```env
-POSTGRES_USER=tracker
-POSTGRES_PASSWORD=secret
-POSTGRES_DB=sales_tracker
-SECRET_KEY=your-secret-key-min-32-chars
+POSTGRES_PASSWORD=your-strong-db-password
+DATABASE_URL=postgresql+asyncpg://tracker:your-strong-db-password@db:5432/sales_tracker
+SYNC_DATABASE_URL=postgresql+psycopg2://tracker:your-strong-db-password@db:5432/sales_tracker
+
+SECRET_KEY=your-random-key-min-32-chars
 BOT_TOKEN=your-telegram-bot-token
 MANAGER_TG_ID=your-telegram-id
+
+ADMIN_EMAIL=admin@company.ru
+ADMIN_PASSWORD=your-admin-password
+```
+
+Сгенерировать надёжный `SECRET_KEY`:
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 Запустите:
@@ -73,21 +82,9 @@ MANAGER_TG_ID=your-telegram-id
 docker compose up -d
 ```
 
-Создайте admin-пользователя:
+Миграции и admin-пользователь создаются автоматически при первом запуске.
 
-```bash
-docker compose exec backend python -c "
-from app.core.database import sync_engine
-from app.core.security import hash_password
-from app.models.models import Base, AdminUser
-from sqlalchemy.orm import Session
-with Session(sync_engine) as s:
-    s.add(AdminUser(email='admin@company.ru', password_hash=hash_password('admin123')))
-    s.commit()
-"
-```
-
-Панель управления: `http://localhost:3010`
+Панель управления: `https://your-domain` или `http://localhost:3010`
 
 ## Продуктовые правила
 

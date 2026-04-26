@@ -7,8 +7,8 @@
 - **Сервер:** 172.201.9.182 (Azure, Ubuntu)
 - **Рабочая папка:** `/home/sadmin/artur/sales-tracker/`
 - **Домен:** https://tracker.vitamarine.kz
-- **БД:** PostgreSQL 15, пользователь `tracker`, база `sales_tracker`, пароль `secret`
-- **Admin панель:** admin@company.ru / admin123
+- **БД:** PostgreSQL 15, пользователь `tracker`, база `sales_tracker`
+- **Учётные данные:** хранятся в `.env` (не в репозитории)
 
 ## Запуск и остановка
 
@@ -83,6 +83,9 @@ docker compose run --rm backend alembic downgrade -1
 docker compose run --rm backend alembic current
 ```
 
+Миграции применяются автоматически через `start.sh` при каждом старте backend.
+Если добавляешь новую миграцию — сначала пересобери образ (`docker compose build backend`), затем она применится при `docker compose up -d backend`.
+
 ## Подключение к базе данных
 
 ```bash
@@ -109,7 +112,7 @@ docker compose exec db psql -U tracker -d sales_tracker -c "SELECT * FROM manage
 
 ```bash
 # Разовый дамп в файл с датой
-docker compose exec db pg_dump -U tracker sales_tracker > /home/sadmin/backups/sales_tracker_$(date +%Y%m%d_%H%M).sql
+docker compose exec -T db pg_dump -U tracker sales_tracker > /home/sadmin/backups/sales_tracker_$(date +%Y%m%d_%H%M).sql
 
 # Создать папку если не существует
 mkdir -p /home/sadmin/backups
@@ -127,8 +130,7 @@ crontab -e
 ### Восстановить из бэкапа
 
 ```bash
-# Восстановить из дампа
-docker compose exec -T db psql -U tracker sales_tracker < /home/sadmin/backups/sales_tracker_20260426.sql
+docker compose exec -T db psql -U tracker sales_tracker < /home/sadmin/backups/sales_tracker_YYYYMMDD_HHMM.sql
 ```
 
 ### Список бэкапов
@@ -146,45 +148,27 @@ cd sales-tracker
 
 # 2. Создать .env файл
 cat > .env << 'EOF'
-POSTGRES_USER=tracker
-POSTGRES_PASSWORD=secret
-POSTGRES_DB=sales_tracker
-DATABASE_URL=postgresql+asyncpg://tracker:secret@db:5432/sales_tracker
+POSTGRES_PASSWORD=your-strong-db-password
+DATABASE_URL=postgresql+asyncpg://tracker:your-strong-db-password@db:5432/sales_tracker
+SYNC_DATABASE_URL=postgresql+psycopg2://tracker:your-strong-db-password@db:5432/sales_tracker
+
 SECRET_KEY=замените-на-случайную-строку-минимум-32-символа
 ACCESS_TOKEN_EXPIRE_HOURS=24
+
 BOT_TOKEN=токен-от-botfather
 MANAGER_TG_ID=telegram-id-руководителя
+
+ADMIN_EMAIL=admin@company.ru
+ADMIN_PASSWORD=сложный-пароль-для-панели
 EOF
 
-# 3. Запустить БД и применить миграции
-docker compose up -d db
-sleep 5
-docker compose run --rm backend alembic upgrade head
+# 3. Сгенерировать надёжный SECRET_KEY
+python3 -c "import secrets; print(secrets.token_hex(32))"
 
-# 4. Создать admin-пользователя
-docker compose run --rm backend python -c "
-import asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from app.core.security import hash_password
-from app.models.models import AdminUser
-from app.core.config import settings
-
-async def create_admin():
-    engine = create_async_engine(settings.DATABASE_URL)
-    async_session = sessionmaker(engine, class_=AsyncSession)
-    async with async_session() as s:
-        s.add(AdminUser(email='admin@company.ru', password_hash=hash_password('admin123')))
-        await s.commit()
-    await engine.dispose()
-
-asyncio.run(create_admin())
-"
-
-# 5. Запустить все сервисы
+# 4. Запустить — миграции и admin создаются автоматически
 docker compose up -d
 
-# 6. Проверить
+# 5. Проверить
 docker compose ps
 curl -s https://your-domain/api/health
 ```
@@ -214,15 +198,19 @@ certbot renew --dry-run
 | bot | ./backend | — | — |
 | frontend | ./frontend | 80 | 3010 |
 
-## Переменные окружения backend
+## Переменные окружения (.env)
 
 | Переменная | Описание |
 |-----------|----------|
+| `POSTGRES_PASSWORD` | Пароль PostgreSQL |
 | `DATABASE_URL` | asyncpg URL к PostgreSQL |
-| `SECRET_KEY` | Ключ для подписи JWT |
+| `SYNC_DATABASE_URL` | psycopg2 URL (для Alembic и APScheduler) |
+| `SECRET_KEY` | Ключ для подписи JWT (минимум 32 символа) |
 | `ACCESS_TOKEN_EXPIRE_HOURS` | Срок жизни токена (default: 24) |
 | `BOT_TOKEN` | Токен Telegram-бота |
 | `MANAGER_TG_ID` | Telegram ID руководителя |
+| `ADMIN_EMAIL` | Email admin-пользователя панели |
+| `ADMIN_PASSWORD` | Пароль admin-пользователя панели |
 
 ## Частые проблемы
 
@@ -246,12 +234,11 @@ docker compose restart bot
 docker compose run --rm backend alembic current
 # Посмотреть историю
 docker compose run --rm backend alembic history
+# Применить вручную (после пересборки образа)
+docker compose run --rm backend alembic upgrade head
 ```
 
 **Порт занят**
 ```bash
-# Найти что занимает порт
 ss -tlnp | grep 8010
-# Или
-lsof -i :8010
 ```
