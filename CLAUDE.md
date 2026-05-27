@@ -242,3 +242,14 @@ docker compose run --rm backend alembic upgrade head
 ```bash
 ss -tlnp | grep 8010
 ```
+
+## Секреты
+
+**Где искать:** Key Vault `kv-bronxtc-dev` (RG `bronxtc_group`, RBAC, northeurope). Namespace для этого репо — **`tracker-artur`** (с дефисом, не `tracker_artur` — Key Vault names не допускают подчёркивание; 8 секретов на 2026-05-27: BOT-TOKEN, ADMIN-EMAIL/PASSWORD, DATABASE-URL, SYNC-DATABASE-URL, SECRET-KEY, MANAGER-TG-ID, ACCESS-TOKEN-EXPIRE-HOURS).
+
+```bash
+az keyvault secret show --vault-name kv-bronxtc-dev --name tracker-artur--backend--<KEY> --query value -o tsv
+az keyvault secret list --vault-name kv-bronxtc-dev --query "[?starts_with(name, 'tracker-artur--')].name" -o tsv
+```
+
+**Правило:** не выдумываю значения секретов, не прошу пользователя ввести вручную — **сначала проверяю vault**. Если в vault нужного ключа нет — спрашиваю пользователя где взять, а не придумываю.
