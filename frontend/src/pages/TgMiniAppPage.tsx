@@ -202,6 +202,11 @@ export function TgMiniAppPage() {
         })}
       </div>
 
+      <div className="px-4 pb-4 flex justify-center gap-3 text-[11px] text-gray-600">
+        <a href="/privacy" className="text-gray-500">Конфиденциальность</a>
+        <a href="/terms" className="text-gray-500">Условия</a>
+      </div>
+
       {/* FAB */}
       <button
         onClick={() => setShowCreate(true)}

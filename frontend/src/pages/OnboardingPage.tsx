@@ -4,14 +4,14 @@ import { useOnboardingTemplate, useUpdateOnboardingTemplate } from '../api/hooks
 
 const DEFAULT = `Привет, {имя}! 👋
 
-Я — бот трекера активности отдела продаж.
+Я — бот «Трекер и постановщик задач» компании.
 
 Каждый день в {время} я буду присылать тебе короткий опрос из 5 вопросов — он займёт буквально 2–3 минуты.
 
 Что ты получаешь:
 📊 Видишь свою динамику — /my_stats
 🔥 Следишь за серией заполнений
-🏆 Смотришь на рейтинг отдела — /leaderboard
+🏆 Смотришь на рейтинг команды — /leaderboard
 
 Нажми /start, чтобы начать!`
 
@@ -58,7 +58,7 @@ export function OnboardingPage() {
             <div className="flex items-center gap-2.5 mb-4">
               <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-lg">🤖</div>
               <div>
-                <div className="font-semibold text-white text-[13px]">Трекер Активности</div>
+                <div className="font-semibold text-white text-[13px]">Трекер и постановщик задач</div>
                 <div className="text-[11px]" style={{ color: '#8899A6' }}>бот</div>
               </div>
             </div>

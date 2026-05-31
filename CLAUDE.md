@@ -1,4 +1,4 @@
-# CLAUDE.md — Sales Tracker
+# CLAUDE.md — Трекер и постановщик задач (ранее Sales Tracker)
 
 Инструкции для Claude Code по работе с этим проектом.
 

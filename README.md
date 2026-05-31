@@ -1,6 +1,6 @@
-# Sales Tracker — Трекер активности + таск-менеджер
+# Трекер и постановщик задач
 
-Платформа для отдела продаж: ежедневные опросы метрик **и** управление задачами через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://artur.adarasoft.com** (Azure Container Apps).
+Корпоративный сервис для всей компании: постановка и контроль задач **и** ежедневные опросы метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://artur.adarasoft.com** (Azure Container Apps). Документы: [Политика конфиденциальности](https://artur.adarasoft.com/privacy) · [Условия использования](https://artur.adarasoft.com/terms).
 
 ## Стек
 

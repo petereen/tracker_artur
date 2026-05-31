@@ -33,7 +33,7 @@ async def seed_admin():
             await db.commit()
 
 
-app = FastAPI(title="Sales Tracker API", lifespan=lifespan)
+app = FastAPI(title="Трекер и постановщик задач — API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -20,8 +20,8 @@ export function Sidebar({ active, onNav }: { active: string; onNav: (id: string)
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-base font-bold text-white">T</div>
           <div>
-            <div className="text-sm font-semibold leading-tight">Трекер</div>
-            <div className="text-[11px] text-muted">Активность продаж</div>
+            <div className="text-sm font-semibold leading-tight">Трекер задач</div>
+            <div className="text-[11px] text-muted">и постановщик</div>
           </div>
         </div>
       </div>
