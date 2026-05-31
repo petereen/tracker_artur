@@ -23,22 +23,38 @@ def _make_bot():
 
 def rebuild_jobs():
     from app.bot.db import get_all_active_employees, get_manager_settings, get_schedule
+    from app.services.notification_policy import load_policy
 
     employees = get_all_active_employees()
     manager_settings = get_manager_settings()
+    policy = load_policy(manager_settings)
+    digest_dow = ",".join(str(d - 1) for d in sorted(policy.work_weekdays)) or "0,1,2,3,4"
 
     for job in scheduler.get_jobs():
-        if any(job.id.startswith(p) for p in ("survey_", "reminder1_", "reminder2_", "missed_")):
+        if any(job.id.startswith(p) for p in
+               ("survey_", "reminder1_", "reminder2_", "missed_", "task_morning_", "task_evening_")):
             job.remove()
 
+    from app.services.digest_service import send_employee_morning_digest, send_employee_evening_digest
+    md, ed = policy.morning_digest, policy.evening_digest
+
     for emp in employees:
-        sch = get_schedule(emp.id)
-        if not sch:
-            continue
         try:
             tz = pytz.timezone(emp.timezone)
         except Exception:
             tz = pytz.timezone("Europe/Moscow")
+
+        # Дайджесты по задачам — для ВСЕХ активных сотрудников (не зависят от опросов).
+        scheduler.add_job(send_employee_morning_digest, "cron",
+            hour=md.hour, minute=md.minute, day_of_week=digest_dow, timezone=tz,
+            id=f"task_morning_{emp.id}", replace_existing=True, args=[emp.id])
+        scheduler.add_job(send_employee_evening_digest, "cron",
+            hour=ed.hour, minute=ed.minute, day_of_week=digest_dow, timezone=tz,
+            id=f"task_evening_{emp.id}", replace_existing=True, args=[emp.id])
+
+        sch = get_schedule(emp.id)
+        if not sch:
+            continue
 
         weekdays = sch.weekdays or [1, 2, 3, 4, 5]
         dow = ",".join(str(d - 1) for d in weekdays)
@@ -77,14 +93,20 @@ def rebuild_jobs():
             day_of_week=wd - 1, hour=wt.hour, minute=wt.minute,
             id="weekly_summary", replace_existing=True)
 
-    # Реконсайл напоминаний по задачам (догоняет задачи, созданные из веб/Mini App,
-    # где планировщик не запущен). Идемпотентно.
-    from app.services.reminder_service import reconcile_task_reminders
+    # Менеджерский дайджест по задачам (утро). tz менеджера неизвестен — берём tz сервера/UTC.
+    md = policy.morning_digest
+    from app.services.digest_service import send_manager_task_digest
+    scheduler.add_job(send_manager_task_digest, "cron",
+        hour=md.hour, minute=md.minute, day_of_week=digest_dow,
+        id="task_manager_digest", replace_existing=True)
 
-    scheduler.add_job(
-        reconcile_task_reminders, "interval", minutes=2,
-        id="reconcile_tasks", replace_existing=True,
-    )
+    # Реконсайл напоминаний + дренаж outbox (догоняют задачи/уведомления из веб/Mini App).
+    from app.services.reminder_service import reconcile_task_reminders, drain_notification_outbox
+
+    scheduler.add_job(reconcile_task_reminders, "interval", minutes=2,
+        id="reconcile_tasks", replace_existing=True)
+    scheduler.add_job(drain_notification_outbox, "interval", minutes=1,
+        id="drain_outbox", replace_existing=True)
 
     log.info("Scheduler rebuilt for %d employees", len(employees))
 

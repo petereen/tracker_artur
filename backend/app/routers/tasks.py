@@ -7,13 +7,15 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.telegram_auth import verify_init_data
-from app.models.models import DEFAULT_REMINDER_INTERVALS_MIN, Employee, ManagerSettings, Task, TaskComment
+from app.models.models import DEFAULT_REMINDER_INTERVALS_MIN, Employee, ManagerSettings, NotificationOutbox, Task, TaskComment
+from app.services.notification_policy import load_policy, next_allowed
 
 router = APIRouter()          # admin, mount /tasks
 miniapp_router = APIRouter()  # Mini App, mount /miniapp
@@ -78,6 +80,32 @@ async def _serialize(db: AsyncSession, task: Task) -> TaskOut:
     )
 
 
+async def _enqueue_assignment(db: AsyncSession, task: Task, actor_tg: Optional[str]) -> None:
+    """Кладёт уведомление о назначении в outbox (его дренит бот с учётом тихих часов)."""
+    if not task.assignee_id:
+        return
+    assignee = await db.get(Employee, task.assignee_id)
+    if not assignee or not assignee.telegram_id:
+        return
+    if actor_tg and str(assignee.telegram_id) == str(actor_tg):
+        return  # сам себе не шлём
+    ms = (await db.execute(select(ManagerSettings))).scalars().first()
+    policy = load_policy(ms)
+    nb = next_allowed(datetime.now(timezone.utc), assignee.timezone or "Europe/Moscow", policy)
+    payload = {
+        "title": task.title,
+        "deadline_iso": task.deadline_at.astimezone(timezone.utc).isoformat() if task.deadline_at else None,
+    }
+    stmt = (
+        pg_insert(NotificationOutbox)
+        .values(task_id=task.id, recipient_tg=str(assignee.telegram_id), kind="task_assigned",
+                payload=payload, not_before=nb, status="pending", dedup_key=f"task_assigned:{task.id}")
+        .on_conflict_do_nothing(index_elements=["dedup_key"])
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
 async def _apply_update(task: Task, data: TaskUpdate) -> None:
     if data.status is not None:
         if data.status not in VALID_STATUSES:
@@ -126,6 +154,7 @@ async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), _=De
     db.add(task)
     await db.commit()
     await db.refresh(task)
+    await _enqueue_assignment(db, task, None)
     return await _serialize(db, task)
 
 
@@ -175,6 +204,15 @@ async def _miniapp_actor(db: AsyncSession, init_data: Optional[str]) -> tuple[Em
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid initData")
     tg_id = str(tg_user.get("id"))
     emp = (await db.execute(select(Employee).where(Employee.telegram_id == tg_id))).scalar_one_or_none()
+    # Фолбэк: найти по username из initData и автопроставить числовой telegram_id.
+    if emp is None and tg_user.get("username"):
+        uname = str(tg_user["username"]).lstrip("@")
+        emp = (await db.execute(
+            select(Employee).where(Employee.telegram_username.ilike(uname))
+        )).scalar_one_or_none()
+        if emp and emp.telegram_id != tg_id:
+            emp.telegram_id = tg_id
+            await db.commit()
     is_manager = tg_id == str(settings.MANAGER_TG_ID)
     if not is_manager:
         ms = (await db.execute(select(ManagerSettings))).scalars().first()
@@ -199,9 +237,11 @@ async def miniapp_tasks(
     db: AsyncSession = Depends(get_db),
     x_telegram_init_data: Optional[str] = Header(None),
     scope: str = Query("mine", pattern="^(mine|assigned|created|all)$"),
+    include_done: bool = False,
 ):
     emp, is_manager = await _miniapp_actor(db, x_telegram_init_data)
-    q = select(Task).where(Task.status.in_(ACTIVE_STATUSES))
+    statuses = list(ACTIVE_STATUSES) + (["done"] if include_done else [])
+    q = select(Task).where(Task.status.in_(statuses))
     if scope == "all" and is_manager:
         pass
     elif scope == "assigned" and emp:
@@ -237,6 +277,7 @@ async def miniapp_create(
     db.add(task)
     await db.commit()
     await db.refresh(task)
+    await _enqueue_assignment(db, task, emp.telegram_id if emp else None)
     return await _serialize(db, task)
 
 

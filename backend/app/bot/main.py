@@ -13,6 +13,7 @@ from app.bot.handlers import router
 from app.bot.middlewares import EmployeeMiddleware
 from app.bot.scheduler import rebuild_jobs, scheduler
 from app.bot.tasks_handlers import router as tasks_router
+from app.bot.menu import setup_bot_menus
 from app.core.config import settings
 from app.observability.sentry import init_from_env
 
@@ -42,6 +43,7 @@ async def main():
 
     scheduler.start()
     rebuild_jobs()
+    await setup_bot_menus(bot, settings.MANAGER_TG_ID)
     log.info("Scheduler started, bot polling...")
 
     await dp.start_polling(bot)

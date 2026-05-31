@@ -125,6 +125,14 @@ class ManagerSettings(Base):
     gamification_enabled = Column(Boolean, default=True)
     soft_mode_weeks = Column(Integer, default=1)
     onboarding_template = Column(Text, nullable=True)
+    # ── Политика уведомлений (тихие часы / дайджесты / эскалация) ──
+    quiet_start = Column(Time, default=time(20, 0))            # начало тихих часов (вечер)
+    quiet_end = Column(Time, default=time(9, 0))              # конец тихих часов (утро) = начало рабочего окна
+    work_weekdays = Column(ARRAY(Integer), default=lambda: [1, 2, 3, 4, 5])  # ISO 1=Пн..7=Вс
+    morning_digest_time = Column(Time, default=time(9, 0))
+    evening_digest_time = Column(Time, default=time(18, 0))
+    overdue_escalation_days = Column(Integer, default=1)      # рабочих дней просрочки до эскалации руководителю
+    notifications_enabled = Column(Boolean, default=True)     # глобальный рубильник рутинных пушей
 
 
 class Streak(Base):
@@ -180,6 +188,7 @@ class Task(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True))
     completed_by_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    overdue_pinged_at = Column(DateTime(timezone=True))  # когда был отправлен немедленный пинг о просрочке
 
     assignee = relationship("Employee", foreign_keys=[assignee_id])
     creator = relationship("Employee", foreign_keys=[created_by_id])
@@ -197,3 +206,20 @@ class TaskComment(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     task = relationship("Task", back_populates="comments")
+
+
+class NotificationOutbox(Base):
+    """Очередь уведомлений — мост между api-процессом (без планировщика) и ботом.
+    Бот дренит её (drain_notification_outbox) с учётом тихих часов (not_before)."""
+    __tablename__ = "notification_outbox"
+
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"))
+    recipient_tg = Column(Text, nullable=False)
+    kind = Column(Text, nullable=False)  # 'task_assigned' и т.п.
+    payload = Column(JSONB)
+    not_before = Column(DateTime(timezone=True))
+    status = Column(Text, default="pending", nullable=False)  # pending | sent | failed
+    dedup_key = Column(Text, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    sent_at = Column(DateTime(timezone=True))

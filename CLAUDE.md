@@ -6,17 +6,19 @@
 
 Проект пересоздан с нуля на Azure Container Apps после потери старого хоста `172.201.9.182` (был удалён 2026-05-27, БД утеряны). БД стартовала пустой; admin-пользователь засеивается автоматически из `ADMIN_EMAIL`/`ADMIN_PASSWORD` при старте backend.
 
-### Расширение v2 — таск-менеджер (2026-05-31, ветка `feature/tasks-and-miniapp`, не закоммичена)
+### Расширение v2 — таск-менеджер (2026-05-31, ветка `feature/tasks-and-miniapp`)
 
-Поверх трекера ежедневных опросов добавлен модуль задач (опросы/streak/leaderboard сохранены — задачи их дополняют):
-- **Бот:** `/task [@кто] что [когда]`, `/mytasks`, `/assigned`, `/done <id>`, `/snooze <id> <время>`, `/dashboard`. Голосом — voice→Whisper (env `OPENAI_API_KEY` опционально; без ключа — вежливый fallback). Парсер русских дат/`@username`/приоритета — `services/task_parser.py` (`dateparser`).
-- **Архитектура бота почищена:** общий `get_session()` (без инлайновых `create_engine`), `EmployeeMiddleware` (инъекция `employee`/`is_manager`), `keyboards.py`, `tasks_handlers.py`, сводка опроса в `services/survey_service.py`.
-- **Напоминания:** `services/reminder_service.py` — date-джобы на `reminder_intervals_min` + эскалация менеджеру при просрочке. Задачи, созданные из веба, догоняет `reconcile_task_reminders` (interval-джоб 2 мин в процессе бота — APScheduler живёт только в боте).
-- **REST API:** `routers/tasks.py` — admin `/api/tasks` (JWT) + Mini App `/api/miniapp/*` (Telegram initData, валидация в `core/telegram_auth.py`).
-- **Веб:** `/tasks` — канбан для админа (4 колонки). **Telegram Mini App:** `/tg` (`window.Telegram.WebApp`, initData-auth). Кнопка меню бота → `/tg` выставлена через Bot API `setChatMenuButton` (не BotFather).
-- **Руководитель:** `manager_settings.telegram_id=201374791` (Арман Тосканбаев) + env бота `MANAGER_TG_ID=201374791`.
-- **Тесты:** `backend/tests/` (parser, telegram_auth) гоняются в облаке через `backend/Dockerfile.test` (`az acr build` → `python -m pytest`; локально pip на VM нет).
-- **Отложено:** LLM-слой поверх парсера; Sentry (по просьбе — отдельно).
+Поверх трекера ежедневных опросов добавлен модуль задач (опросы/streak/leaderboard сохранены — задачи их дополняют). Миграции: `c1a2b3d4e5f6` (tasks/task_comments), `d2e3f4a5b6c7` (политика уведомлений + `notification_outbox` + `tasks.overdue_pinged_at`).
+- **Бот-команды:** `/task [@кто] что [когда]`, `/mytasks`, `/assigned`, `/done <id>`, `/snooze <id> <время>`, `/dashboard`, `/myid`. **Ролевое меню** (`bot/menu.py`, `set_my_commands` scope): сотрудник 6 / руководитель 12.
+- **AI-постановка задач** (`services/task_ai.py`, OpenAI gpt-4o-mini, fallback на `task_parser`): руководитель пишет текстом ИЛИ голосом (Whisper, `services/voice_service.py`) → LLM формулирует → **черновик** с кнопками ✅/✏️/❌ (FSM `TaskDraft` в `tasks_handlers.py`) → ставит исполнителю. «Поставь задачу мне» → self-assign (детерминированный `_SELF_RE`-фолбэк). Любой отправитель становится `Employee` через `task_service.ensure_employee` (без расписания опросов).
+- **Архитектура бота почищена:** общий `get_session()`, `EmployeeMiddleware` (инъекция `employee`/`is_manager`, автопривязка `telegram_id` по username), `keyboards.py`, сводка опроса в `services/survey_service.py`.
+- **Уведомления (enterprise):** `services/notification_policy.py` — тихие часы/рабочее окно (09:00–20:00 Пн–Пт по умолч., DST-safe `next_allowed`); конфиг в `manager_settings` (quiet_start/end, work_weekdays, morning/evening_digest_time, overdue_escalation_days, notifications_enabled). `services/digest_service.py` — утро/вечер сотруднику + утренний обзор+эскалация руководителю (пустые не шлём), per-employee cron в `rebuild_jobs` для всех активных. `services/reminder_service.py` — напоминания с clamp в окно; просрочка = 1 пинг исполнителю (`overdue_pinged_at`), эскалация через `overdue_escalation_days` раб. дней.
+- **Outbox:** пуш о назначении из веб/Mini App пишется в `notification_outbox`; бот шлёт джобом `drain_notification_outbox` (1 мин); задачи из api догоняет `reconcile_task_reminders` (2 мин). APScheduler живёт ТОЛЬКО в боте.
+- **REST API:** `routers/tasks.py` — admin `/api/tasks` (JWT) + Mini App `/api/miniapp/*` (Telegram initData, `core/telegram_auth.py`; ⚠️ `BOT_TOKEN` нужен и api, и боту).
+- **Веб:** `/tasks` — канбан для админа. **Telegram Mini App:** `/tg` — вертикальный канбан (Просрочено/Открыто/В работе/Завершено), initData-auth. Кнопка меню бота → `/tg` через Bot API `setChatMenuButton`.
+- **Руководитель:** `manager_settings.telegram_id=201374791` + env бота `MANAGER_TG_ID=201374791`; также заведён как `Employee` id=1 (без расписания — для self-assign).
+- **Sentry:** подключён (коммит `c01fe7a`, `app/observability/sentry.py` — api+bot+frontend).
+- **Тесты:** `backend/tests/` (parser, telegram_auth, notification_policy, task_ai) — облачный прогон через `backend/Dockerfile.test` (`az acr build` → `python -m pytest`; локально pip на VM нет).
 
 - **Resource group:** `rg-tracker-artur-prod-neu` (North Europe)
 - **ACA environment:** `cae-tracker-artur-prod-neu` (default domain `wittyhill-ad6320ed.northeurope.azurecontainerapps.io`)

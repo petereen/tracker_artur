@@ -5,16 +5,39 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.db import get_session
 from app.models.models import (
     DEFAULT_REMINDER_INTERVALS_MIN,
     Employee,
+    NotificationOutbox,
     Task,
     TaskComment,
 )
 
 ACTIVE_STATUSES = ("open", "in_progress", "overdue")
+
+
+def ensure_employee(tg_id, name: Optional[str] = None, username: Optional[str] = None) -> dict:
+    """Get-or-create Employee для telegram-пользователя БЕЗ Schedule (значит без
+    ежедневных опросов). Делает руководителя/любого отправителя «назначаемым».
+    Возвращает плоский dict (detached-safe)."""
+    tg = str(tg_id)
+    uname = (username or "").lstrip("@") or None
+    with get_session() as s:
+        emp = s.execute(select(Employee).where(Employee.telegram_id == tg)).scalar_one_or_none()
+        if emp:
+            if uname and not emp.telegram_username:
+                emp.telegram_username = uname
+                s.commit()
+        else:
+            emp = Employee(name=name or "Сотрудник", telegram_id=tg, telegram_username=uname, is_active=True)
+            s.add(emp)
+            s.commit()
+            s.refresh(emp)
+        return {"id": emp.id, "name": emp.name, "telegram_id": emp.telegram_id,
+                "telegram_username": emp.telegram_username, "timezone": emp.timezone}
 
 
 def resolve_employee_by_username(username: str) -> Optional[Employee]:
@@ -130,6 +153,7 @@ def snooze(task_id: int, new_deadline: datetime) -> Optional[dict]:
         if not task:
             return None
         task.deadline_at = new_deadline
+        task.overdue_pinged_at = None  # перенос срока — снова разрешаем пинг о просрочке
         if task.status == "overdue":
             task.status = "open"
         s.commit()
@@ -155,6 +179,65 @@ def can_modify(task: dict, *, employee_id: Optional[int], tg_id: Optional[str], 
     return False
 
 
+def mark_overdue_pinged(task_id: int) -> None:
+    with get_session() as s:
+        t = s.get(Task, task_id)
+        if t:
+            t.overdue_pinged_at = datetime.now(timezone.utc)
+            s.commit()
+
+
+# ─── Notification outbox (мост api → бот) ──────────────────────────────────────
+
+def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, task_id=None) -> None:
+    if not recipient_tg:
+        return
+    with get_session() as s:
+        stmt = (
+            pg_insert(NotificationOutbox)
+            .values(
+                task_id=task_id, recipient_tg=str(recipient_tg), kind=kind,
+                payload=payload, not_before=not_before, status="pending", dedup_key=dedup_key,
+            )
+            .on_conflict_do_nothing(index_elements=["dedup_key"])
+        )
+        s.execute(stmt)
+        s.commit()
+
+
+def fetch_due_outbox(limit: int = 25) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    with get_session() as s:
+        rows = s.execute(
+            select(NotificationOutbox)
+            .where(
+                NotificationOutbox.status == "pending",
+                or_(NotificationOutbox.not_before.is_(None), NotificationOutbox.not_before <= now),
+            )
+            .order_by(NotificationOutbox.id)
+            .limit(limit)
+        ).scalars().all()
+        out = []
+        for r in rows:
+            task = s.get(Task, r.task_id) if r.task_id else None
+            out.append({
+                "id": r.id, "recipient_tg": r.recipient_tg, "kind": r.kind,
+                "payload": r.payload or {}, "task_id": r.task_id,
+                "task_status": task.status if task else None,
+            })
+        return out
+
+
+def mark_outbox(outbox_id: int, status: str) -> None:
+    with get_session() as s:
+        r = s.get(NotificationOutbox, outbox_id)
+        if r:
+            r.status = status
+            if status == "sent":
+                r.sent_at = datetime.now(timezone.utc)
+            s.commit()
+
+
 def _to_dict(s, task: Task) -> dict:
     assignee = s.get(Employee, task.assignee_id) if task.assignee_id else None
     creator = s.get(Employee, task.created_by_id) if task.created_by_id else None
@@ -167,9 +250,11 @@ def _to_dict(s, task: Task) -> dict:
         "deadline_at": task.deadline_at,
         "created_at": task.created_at,
         "completed_at": task.completed_at,
+        "overdue_pinged_at": task.overdue_pinged_at,
         "assignee_id": task.assignee_id,
         "assignee_name": assignee.name if assignee else None,
         "assignee_tg": assignee.telegram_id if assignee else None,
+        "assignee_tz": assignee.timezone if assignee else None,
         "created_by_id": task.created_by_id,
         "created_by_tg": task.created_by_tg,
         "creator_name": creator.name if creator else None,

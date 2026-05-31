@@ -224,6 +224,20 @@ async def cmd_leaderboard(message: Message):
 
 # ─── /help ────────────────────────────────────────────────────────────────────
 
+@router.message(Command("myid"))
+async def cmd_myid(message: Message, employee=None):
+    u = message.from_user
+    uname = f"@{u.username}" if u.username else "—"
+    if employee:
+        reg = f"\n✅ Ты зарегистрирован: <b>{employee.name}</b>"
+    else:
+        reg = "\n❗️Ты пока не зарегистрирован. Передай этот ID руководителю — он добавит тебя."
+    await message.answer(
+        f"🆔 Твой Telegram ID: <code>{u.id}</code>\nUsername: {uname}{reg}",
+        parse_mode="HTML",
+    )
+
+
 @router.message(Command("help"))
 async def cmd_help(message: Message, is_manager: bool = False):
     tasks_block = (
@@ -234,6 +248,7 @@ async def cmd_help(message: Message, is_manager: bool = False):
         "/dashboard — сводный дашборд\n"
         "/done &lt;id&gt; — отметить выполненной\n"
         "/snooze &lt;id&gt; &lt;время&gt; — перенести срок\n"
+        "/myid — мой Telegram ID\n"
     )
     if is_manager:
         text = (

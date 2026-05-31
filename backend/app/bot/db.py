@@ -19,6 +19,23 @@ def get_employee_by_tg(tg_id: str) -> Employee | None:
         return s.execute(select(Employee).where(Employee.telegram_id == tg_id)).scalar_one_or_none()
 
 
+def link_employee_telegram(username: str | None, tg_id: str) -> Employee | None:
+    """Фолбэк: ищет сотрудника по telegram_username и автопроставляет числовой
+    telegram_id при первом контакте (чтобы заводить сотрудников по @username)."""
+    uname = (username or "").lstrip("@")
+    if not uname:
+        return None
+    with get_session() as s:
+        emp = s.execute(
+            select(Employee).where(Employee.telegram_username.ilike(uname))
+        ).scalar_one_or_none()
+        if emp and emp.telegram_id != tg_id:
+            emp.telegram_id = tg_id
+            s.commit()
+            s.refresh(emp)
+        return emp
+
+
 def get_all_active_employees() -> list[Employee]:
     with get_session() as s:
         return list(s.execute(select(Employee).where(Employee.is_active == True)).scalars())
