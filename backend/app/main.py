@@ -1,5 +1,9 @@
 from contextlib import asynccontextmanager
 
+from app.observability.sentry import init_from_env
+
+init_from_env(server_name="tracker-artur-api")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -29,7 +33,7 @@ async def seed_admin():
             await db.commit()
 
 
-app = FastAPI(title="Sales Tracker API", lifespan=lifespan)
+app = FastAPI(title="Трекер и постановщик задач — API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

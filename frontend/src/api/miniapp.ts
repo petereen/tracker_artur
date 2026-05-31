@@ -52,10 +52,11 @@ export function useMiniMe() {
   })
 }
 
-export function useMiniTasks(scope: TaskScope = 'mine') {
+export function useMiniTasks(scope: TaskScope = 'mine', includeDone = true) {
   return useQuery<MiniTaskOut[]>({
-    queryKey: ['miniapp', 'tasks', scope],
-    queryFn: () => miniApi.get(`/miniapp/tasks?scope=${scope}`).then((r) => r.data),
+    queryKey: ['miniapp', 'tasks', scope, includeDone],
+    queryFn: () =>
+      miniApi.get(`/miniapp/tasks?scope=${scope}&include_done=${includeDone}`).then((r) => r.data),
     retry: 1,
   })
 }

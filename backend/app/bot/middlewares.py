@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 
-from app.bot.db import get_employee_by_tg, get_manager_settings
+from app.bot.db import get_employee_by_tg, get_manager_settings, link_employee_telegram
 from app.core.config import settings
 
 
@@ -30,7 +30,10 @@ class EmployeeMiddleware(BaseMiddleware):
         if user is not None:
             tg_id = str(user.id)
             data["tg_id"] = tg_id
-            data["employee"] = get_employee_by_tg(tg_id)
+            emp = get_employee_by_tg(tg_id)
+            if emp is None and getattr(user, "username", None):
+                emp = link_employee_telegram(user.username, tg_id)
+            data["employee"] = emp
             data["is_manager"] = _is_manager(tg_id)
         else:
             data["tg_id"] = None

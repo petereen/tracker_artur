@@ -11,6 +11,7 @@ import { ManagerSettingsPage } from './pages/ManagerSettingsPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { TasksPage } from './pages/TasksPage'
 import { TgMiniAppPage } from './pages/TgMiniAppPage'
+import { PrivacyPage, TermsPage } from './pages/LegalPages'
 
 // Check if this is the Telegram Mini App route
 const isTgRoute = () => window.location.pathname === '/tg'
@@ -39,10 +40,12 @@ export default function App() {
     return unsub
   }, [])
 
-  // Public route: /tg — Telegram Mini App (no auth required)
+  // Public routes (no auth required)
   if (isTgRoute()) {
     return <TgMiniAppPage />
   }
+  if (window.location.pathname === '/privacy') return <PrivacyPage />
+  if (window.location.pathname === '/terms') return <TermsPage />
 
   if (!hydrated) {
     return (

@@ -68,11 +68,11 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
     ms = get_manager_settings()
     onboarding_text = (
         f"👋 Привет, {emp.name.split()[0]}!\n\n"
-        f"Я — бот трекера активности отдела продаж.\n\n"
+        f"Я — бот «Трекер и постановщик задач».\n\n"
         f"Каждый день я буду присылать тебе короткий опрос из нескольких вопросов.\n\n"
         f"📊 /my_stats — твоя статистика\n"
         f"📋 /today — заполнить чек-ин\n"
-        f"🏆 /leaderboard — рейтинг отдела\n"
+        f"🏆 /leaderboard — рейтинг команды\n"
         f"❓ /help — помощь"
     )
     await message.answer(onboarding_text)
@@ -214,7 +214,7 @@ async def cmd_leaderboard(message: Message):
         ).all())
 
     medals = ["🥇", "🥈", "🥉"]
-    lines = ["🏆 <b>Топ-3 отдела (серия дней)</b>\n"]
+    lines = ["🏆 <b>Топ-3 команды (серия дней)</b>\n"]
     for i, (emp, streak) in enumerate(rows):
         cur = streak.current_streak if streak else 0
         lines.append(f"{medals[i]} {emp.name} — {cur} дн.")
@@ -223,6 +223,20 @@ async def cmd_leaderboard(message: Message):
 
 
 # ─── /help ────────────────────────────────────────────────────────────────────
+
+@router.message(Command("myid"))
+async def cmd_myid(message: Message, employee=None):
+    u = message.from_user
+    uname = f"@{u.username}" if u.username else "—"
+    if employee:
+        reg = f"\n✅ Ты зарегистрирован: <b>{employee.name}</b>"
+    else:
+        reg = "\n❗️Ты пока не зарегистрирован. Передай этот ID руководителю — он добавит тебя."
+    await message.answer(
+        f"🆔 Твой Telegram ID: <code>{u.id}</code>\nUsername: {uname}{reg}",
+        parse_mode="HTML",
+    )
+
 
 @router.message(Command("help"))
 async def cmd_help(message: Message, is_manager: bool = False):
@@ -234,6 +248,7 @@ async def cmd_help(message: Message, is_manager: bool = False):
         "/dashboard — сводный дашборд\n"
         "/done &lt;id&gt; — отметить выполненной\n"
         "/snooze &lt;id&gt; &lt;время&gt; — перенести срок\n"
+        "/myid — мой Telegram ID\n"
     )
     if is_manager:
         text = (
@@ -248,7 +263,7 @@ async def cmd_help(message: Message, is_manager: bool = False):
             "📋 <b>Команды</b>\n\n"
             "/today — заполнить чек-ин\n"
             "/my_stats — моя статистика\n"
-            "/leaderboard — рейтинг отдела\n"
+            "/leaderboard — рейтинг команды\n"
             "/help — эта справка\n"
             + tasks_block
         )

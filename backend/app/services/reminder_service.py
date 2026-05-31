@@ -6,14 +6,25 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.services import task_service
+from app.services.notification_policy import load_policy, next_allowed
 
 log = logging.getLogger(__name__)
 
 ESCALATION_DELAY_MIN = 15
+DEFAULT_TZ = "Europe/Moscow"
 
 
 def _job_prefix(task_id: int) -> str:
     return f"task:{task_id}:"
+
+
+def _policy():
+    from app.bot.db import get_manager_settings
+    return load_policy(get_manager_settings())
+
+
+def _task_tz(task: dict) -> str:
+    return task.get("assignee_tz") or DEFAULT_TZ
 
 
 def cancel_task_jobs(task_id: int) -> None:
@@ -40,11 +51,18 @@ def schedule_task_reminders(task: dict) -> None:
 
     cancel_task_jobs(task["id"])
     now = datetime.now(timezone.utc)
+    policy = _policy()
+    tz = _task_tz(task)
 
+    scheduled_at: set[int] = set()  # дедуп схлопнувшихся в тихие часы напоминаний
     for minutes_before in task.get("reminder_intervals_min") or []:
-        run_at = deadline - timedelta(minutes=minutes_before)
+        run_at = next_allowed(deadline - timedelta(minutes=minutes_before), tz, policy)
         if run_at <= now:
             continue
+        key = int(run_at.timestamp() // 60)
+        if key in scheduled_at:
+            continue
+        scheduled_at.add(key)
         scheduler.add_job(
             send_task_reminder, "date", run_date=run_at,
             args=[task["id"], minutes_before],
@@ -52,13 +70,16 @@ def schedule_task_reminders(task: dict) -> None:
             replace_existing=True,
         )
 
-    scheduler.add_job(
-        escalate_overdue, "date",
-        run_date=deadline + timedelta(minutes=ESCALATION_DELAY_MIN),
-        args=[task["id"]],
-        id=f"{_job_prefix(task['id'])}escalate",
-        replace_existing=True,
-    )
+    # Эскалация (маркер просрочки) — фиксированный момент deadline+15м; не клампим,
+    # но сам пинг исполнителю отправляется через outbox с учётом тихих часов.
+    esc_run = deadline + timedelta(minutes=ESCALATION_DELAY_MIN)
+    if esc_run > now:
+        scheduler.add_job(
+            escalate_overdue, "date", run_date=esc_run,
+            args=[task["id"]],
+            id=f"{_job_prefix(task['id'])}escalate",
+            replace_existing=True,
+        )
 
 
 def reconcile_task_reminders() -> None:
@@ -67,6 +88,8 @@ def reconcile_task_reminders() -> None:
     from app.bot.scheduler import scheduler
 
     for task in task_service.list_active_with_deadline():
+        if task["status"] == "overdue":
+            continue  # уже просрочена и обработана — не пересоздаём джобы
         if scheduler.get_job(f"{_job_prefix(task['id'])}escalate"):
             continue
         try:
@@ -121,27 +144,75 @@ async def send_task_reminder(task_id: int, minutes_before: int) -> None:
         await bot.session.close()
 
 
-async def escalate_overdue(task_id: int) -> None:
-    from app.bot.scheduler import _make_bot
-
+def escalate_overdue(task_id: int) -> None:
+    """Маркер просрочки: статус→overdue + ОДИН пинг исполнителю через outbox
+    (с учётом тихих часов). Руководителю — НЕ здесь, а в утреннем дайджесте
+    после `overdue_escalation_days` рабочих дней. Sync (date-job в threadpool)."""
     task = task_service.get_task(task_id)
     if not task or task["status"] in ("done", "cancelled"):
         return
 
     task_service.set_status(task_id, "overdue")
+    if task.get("overdue_pinged_at"):
+        return  # уже пинговали (защита от повторного запуска джоба)
+
+    if task["assignee_tg"]:
+        policy = _policy()
+        not_before = next_allowed(datetime.now(timezone.utc), _task_tz(task), policy)
+        task_service.enqueue_notification(
+            task_id=task_id,
+            recipient_tg=task["assignee_tg"],
+            kind="task_overdue",
+            payload={"title": task["title"], "deadline_iso": _iso(task["deadline_at"])},
+            not_before=not_before,
+            dedup_key=f"task_overdue:{task_id}",
+        )
+    task_service.mark_overdue_pinged(task_id)
+
+
+def _iso(dt: datetime | None) -> str | None:
+    return dt.astimezone(timezone.utc).isoformat() if dt else None
+
+
+async def drain_notification_outbox() -> None:
+    """Отправляет готовые (not_before<=now) уведомления из outbox. Interval-джоб бота."""
+    from app.bot.keyboards import task_actions_kb
+    from app.bot.scheduler import _make_bot
+
+    due = task_service.fetch_due_outbox()
+    if not due:
+        return
     bot = _make_bot()
     try:
-        if task["assignee_tg"]:
-            await bot.send_message(
-                task["assignee_tg"],
-                f"🔴 Задача просрочена: #{task['id']} {task['title']}\nОтметь /done {task['id']} или перенеси /snooze {task['id']} <время>.",
-            )
-        mgr = _manager_tg()
-        if mgr:
-            await bot.send_message(
-                mgr,
-                f"🚨 Просрочена задача #{task['id']} «{task['title']}»\n"
-                f"Исполнитель: {task['assignee_name'] or '—'}\nДедлайн был: {_fmt_deadline(task['deadline_at'])}",
-            )
+        for item in due:
+            try:
+                # Для задач, которые уже закрыты — не слать (но пометить отправленным).
+                if item["task_id"] and item["task_status"] in ("done", "cancelled"):
+                    task_service.mark_outbox(item["id"], "sent")
+                    continue
+                text, kb = _render_outbox(item)
+                await bot.send_message(item["recipient_tg"], text, reply_markup=kb)
+                task_service.mark_outbox(item["id"], "sent")
+            except Exception:  # noqa: BLE001
+                log.exception("drain: ошибка отправки outbox id=%s", item["id"])
+                task_service.mark_outbox(item["id"], "failed")
     finally:
         await bot.session.close()
+
+
+def _render_outbox(item: dict):
+    from app.bot.keyboards import task_actions_kb
+
+    p = item.get("payload") or {}
+    tid = item["task_id"]
+    title = p.get("title", "")
+    deadline = p.get("deadline_iso")
+    dl_h = _fmt_deadline(datetime.fromisoformat(deadline)) if deadline else "без срока"
+    if item["kind"] == "task_assigned":
+        text = (f"📌 Тебе поставили задачу #{tid}:\n«{title}»\nДедлайн: {dl_h}")
+        return text, (task_actions_kb(tid) if tid else None)
+    if item["kind"] == "task_overdue":
+        text = (f"🔴 Задача просрочена: #{tid} {title}\n"
+                f"Отметь /done {tid} или перенеси /snooze {tid} <время>.")
+        return text, (task_actions_kb(tid) if tid else None)
+    return p.get("text", "🔔 Уведомление"), None

@@ -1,18 +1,21 @@
-# Sales Tracker — Трекер активности отдела продаж
+# Трекер и постановщик задач
 
-Платформа для ежедневного сбора метрик от менеджеров по продажам через Telegram-бот с веб-панелью для руководителя.
+Корпоративный сервис для всей компании: постановка и контроль задач **и** ежедневные опросы метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://artur.adarasoft.com** (Azure Container Apps). Документы: [Политика конфиденциальности](https://artur.adarasoft.com/privacy) · [Условия использования](https://artur.adarasoft.com/terms).
 
 ## Стек
 
 | Слой | Технологии |
 |------|-----------|
-| Backend | FastAPI, SQLAlchemy 2.0 async, Alembic, PostgreSQL 15 |
-| Auth | JWT (python-jose) + bcrypt |
-| Telegram-бот | aiogram 3.x, FSM-опросы |
-| Планировщик | APScheduler 3.x + SQLAlchemyJobStore |
+| Backend | FastAPI, SQLAlchemy 2.0 async, Alembic, PostgreSQL 16 |
+| Auth | JWT (python-jose) + bcrypt; Telegram `initData` (HMAC) для Mini App |
+| Telegram-бот | aiogram 3.x, FSM (опросы + черновики задач), ролевое меню |
+| Планировщик | APScheduler 3.x + SQLAlchemyJobStore (напоминания, дайджесты, эскалация) |
+| AI | OpenAI Whisper (голос→текст) + gpt-4o-mini (структуризация задач), `dateparser` |
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS v3 |
 | State | Zustand v5 (persist), TanStack Query v5 |
-| Инфраструктура | Docker Compose, Nginx, Let's Encrypt SSL |
+| Mini App | Telegram WebApp (`/tg`) поверх того же SPA |
+| Observability | Sentry (api + bot + frontend) |
+| Хостинг | **Azure Container Apps** (web/api/bot) + PG Flexible; локально — Docker Compose |
 
 ## Архитектура
 
@@ -117,10 +120,33 @@ sales-tracker/
 
 ## Команды бота
 
-| Команда | Описание |
-|---------|----------|
-| `/start` | Регистрация / главное меню |
-| `/today` | Заполнить опрос за сегодня |
-| `/my_stats` | Личная статистика и streak |
-| `/leaderboard` | Топ-3 сотрудников |
-| `/help` | Справка |
+Меню **ролевое** (`set_my_commands` со scope): сотрудник видит базовый набор, руководитель — расширенный.
+
+| Команда | Кому | Описание |
+|---------|------|----------|
+| `/start`, `/help`, `/myid` | все | регистрация / справка / свой Telegram ID |
+| `/today`, `/my_stats`, `/leaderboard` | все | опрос за сегодня, статистика/streak, топ-3 |
+| `/mytasks` | все | мои активные задачи |
+| `/done <id>`, `/snooze <id> <время>` | все | завершить / перенести срок |
+| `/task [@кто] что [когда]` | руководитель | поставить задачу (быстрый детерминированный путь) |
+| `/assigned`, `/dashboard` | руководитель | что я поставил / сводный дашборд |
+| `/summary`, `/week`, `/blockers` | руководитель | сводки по опросам |
+
+**AI-постановка задач:** руководитель пишет задачу **свободным текстом** или **голосовым** прямо в чат → бот распознаёт (Whisper) и формулирует через LLM → показывает **черновик** (заголовок/описание/исполнитель/срок/приоритет) с кнопками **✅ Поставить / ✏️ Изменить / ❌ Отмена**. «Поставь задачу мне» — назначает на себя. Без `OPENAI_API_KEY` — fallback на детерминированный парсер.
+
+## Задачи, уведомления и Mini App
+
+- **Задачи** (`tasks`/`task_comments`) дополняют опросы: статусы `open/in_progress/done/overdue/cancelled`, приоритет, дедлайн, исполнитель/постановщик, комментарии.
+- **Веб-канбан** `/tasks` (админ, JWT) и **Telegram Mini App** `/tg` (вертикальный канбан, авторизация по Telegram `initData`).
+- **Политика уведомлений (enterprise):**
+  - Тихие часы / рабочее окно (по умолч. **09:00–20:00, Пн–Пт**) — рутинные пуши вне окна **откладываются** на ближайшее начало рабочего дня (DST-safe).
+  - **Дайджесты** (батчинг вместо спама): сотруднику — утро (на сегодня + просрочка) и вечер (остаток/закрытое); руководителю — утренний обзор по команде + эскалация. Пустые не отправляются.
+  - **Напоминания** до дедлайна по `reminder_intervals_min` (по умолч. за сутки / за 2 ч / в момент), с clamp в рабочее окно.
+  - **Просрочка:** 1 пинг исполнителю, эскалация руководителю — через `overdue_escalation_days` рабочих дней.
+  - Конфиг политики — в `manager_settings` (`quiet_start/quiet_end/work_weekdays/morning_digest_time/evening_digest_time/overdue_escalation_days/notifications_enabled`).
+- **Архитектура уведомлений:** APScheduler живёт в процессе **бота**; задачи/уведомления, созданные из веб/Mini App (процесс **api**), подхватываются джобами `reconcile_task_reminders` (2 мин) и `drain_notification_outbox` (1 мин, таблица `notification_outbox`).
+
+## REST API (задачи)
+
+- **Админ (JWT):** `GET/POST /api/tasks`, `GET/PATCH /api/tasks/{id}`, `GET/POST /api/tasks/{id}/comments`.
+- **Mini App (`X-Telegram-Init-Data`):** `GET /api/miniapp/me`, `GET /api/miniapp/tasks?scope=&include_done=`, `POST /api/miniapp/tasks`, `PATCH /api/miniapp/tasks/{id}`.

@@ -25,7 +25,7 @@ export function LoginPage() {
         <div className="flex items-center gap-3 mb-8">
           <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center text-xl font-bold text-white">T</div>
           <div>
-            <div className="text-base font-semibold">Трекер активности</div>
+            <div className="text-base font-semibold">Трекер и постановщик задач</div>
             <div className="text-xs text-muted">Панель администратора</div>
           </div>
         </div>
@@ -45,6 +45,10 @@ export function LoginPage() {
             {login.isPending ? 'Вход...' : 'Войти'}
           </button>
         </form>
+        <div className="mt-6 pt-4 border-t border-border flex justify-center gap-4 text-[11px] text-muted">
+          <a href="/privacy" className="hover:text-text">Конфиденциальность</a>
+          <a href="/terms" className="hover:text-text">Условия</a>
+        </div>
       </div>
     </div>
   )
