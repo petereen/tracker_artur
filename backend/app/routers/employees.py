@@ -45,6 +45,14 @@ class EmployeeOut(BaseModel):
         # client-side default, e.g. the seeded manager) to the logical default.
         return v if v else "Europe/Moscow"
 
+    @field_validator("is_active", mode="before")
+    @classmethod
+    def _default_is_active(cls, v):
+        # Same class as the timezone bug (Sentry #28): is_active had only a
+        # client-side default and no server_default, so a seed/legacy row could
+        # be NULL and crash serialization of this required field.
+        return True if v is None else v
+
 
 @router.get("", response_model=list[EmployeeOut])
 async def list_employees(db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):

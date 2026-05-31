@@ -1,6 +1,6 @@
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,24 @@ class QuestionOut(BaseModel):
     sort_order: int
 
     model_config = {"from_attributes": True}
+
+    # Defense-in-depth (same class as Sentry #28): these columns had only
+    # client-side defaults and no server_default, so a raw/legacy row could be
+    # NULL and crash serialization of these required fields.
+    @field_validator("options", mode="before")
+    @classmethod
+    def _default_options(cls, v):
+        return [] if v is None else v
+
+    @field_validator("is_required", mode="before")
+    @classmethod
+    def _default_is_required(cls, v):
+        return True if v is None else v
+
+    @field_validator("sort_order", mode="before")
+    @classmethod
+    def _default_sort_order(cls, v):
+        return 0 if v is None else v
 
 
 class ReorderRequest(BaseModel):
