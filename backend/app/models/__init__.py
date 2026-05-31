@@ -8,4 +8,6 @@ from app.models.models import (  # noqa: F401
     Schedule,
     Streak,
     SurveySession,
+    Task,
+    TaskComment,
 )

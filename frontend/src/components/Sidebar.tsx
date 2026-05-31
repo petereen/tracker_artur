@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/auth'
 const NAV = [
   { id: 'dashboard',  label: 'Дашборд',       icon: '▦' },
   { id: 'employees',  label: 'Сотрудники',    icon: '◉' },
+  { id: 'tasks',      label: 'Задачи',        icon: '✓' },
   { id: 'questions',  label: 'Вопросы',       icon: '≡' },
   { id: 'schedule',   label: 'Расписание',    icon: '◷' },
   { id: 'journal',    label: 'Журнал',        icon: '☰' },

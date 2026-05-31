@@ -8,11 +8,15 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
 
+from sqlalchemy import func, select
+
 from app.bot.db import (
-    complete_session, create_session, get_employee_by_tg, get_manager_settings,
-    get_questions, get_streak, get_yesterday_summary, mark_employee_onboarded, save_answer,
+    complete_session, create_session, get_manager_settings,
+    get_questions, get_session, get_streak, get_yesterday_summary,
+    mark_employee_onboarded, save_answer,
 )
-from app.core.config import settings
+from app.models.models import Answer, Employee, Question, Streak, SurveySession
+from app.services.survey_service import build_checkin_summary
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -23,10 +27,6 @@ class Survey(StatesGroup):
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
-
-def _is_manager(tg_id: str) -> bool:
-    return tg_id == settings.MANAGER_TG_ID
-
 
 def _numeric_keyboard(question_text: str) -> InlineKeyboardMarkup:
     """Кнопки 0–15 для числовых вопросов."""
@@ -58,10 +58,8 @@ async def _ask_question(message_or_cb, question, state: FSMContext, session_id: 
 # ─── /start ──────────────────────────────────────────────────────────────────
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
-    tg_id = str(message.from_user.id)
-    emp = get_employee_by_tg(tg_id)
-
+async def cmd_start(message: Message, state: FSMContext, employee=None):
+    emp = employee
     if not emp:
         await message.answer("❌ Вы не зарегистрированы в системе. Обратитесь к руководителю.")
         return
@@ -83,9 +81,8 @@ async def cmd_start(message: Message, state: FSMContext):
 # ─── /today (опрос) ───────────────────────────────────────────────────────────
 
 @router.message(Command("today"))
-async def cmd_today(message: Message, state: FSMContext):
-    tg_id = str(message.from_user.id)
-    emp = get_employee_by_tg(tg_id)
+async def cmd_today(message: Message, state: FSMContext, employee=None):
+    emp = employee
     if not emp:
         await message.answer("❌ Вы не зарегистрированы.")
         return
@@ -130,17 +127,10 @@ async def msg_answer(message: Message, state: FSMContext):
 
 
 async def _process_answer(message: Message, state: FSMContext, session_id: int, q_index: int, question_ids: list, value: str):
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session as OrmSession
-    from app.models.models import Question
-    from app.core.config import settings as cfg
-    from sqlalchemy import select
-
-    eng = create_engine(cfg.SYNC_DATABASE_URL)
-    with OrmSession(eng) as s:
+    with get_session() as s:
         q = s.get(Question, question_ids[q_index])
-        if not q:
-            return
+    if not q:
+        return
 
     value_text = None
     value_numeric = None
@@ -157,70 +147,28 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
 
     next_index = q_index + 1
     if next_index < len(question_ids):
-        eng = create_engine(settings.SYNC_DATABASE_URL)
-        with OrmSession(eng) as s:
+        with get_session() as s:
             next_q = s.get(Question, question_ids[next_index])
+            all_qs = list(s.execute(select(Question).order_by(Question.sort_order)).scalars())
         await state.update_data(q_index=next_index)
-        all_qs_eng = create_engine(settings.SYNC_DATABASE_URL)
-        with OrmSession(all_qs_eng) as s:
-            from sqlalchemy import select as sel
-            all_qs = list(s.execute(sel(Question).order_by(Question.sort_order)).scalars())
         await _ask_question(message, next_q, state, session_id, next_index, all_qs)
     else:
         complete_session(session_id)
         await state.clear()
-
-        # Итоговая сводка
-        from sqlalchemy import create_engine as ce
-        from sqlalchemy.orm import Session as S2
-        from app.models.models import Answer, Question as Q2
-        from sqlalchemy import select as sel2
-        eng2 = ce(settings.SYNC_DATABASE_URL)
-        with S2(eng2) as s:
-            answers = list(s.execute(sel2(Answer).where(Answer.session_id == session_id)).scalars())
-            lines = ["✅ <b>Чек-ин заполнен!</b> Сегодня ты:"]
-            for a in answers:
-                ques = s.get(Q2, a.question_id)
-                if ques and a.value_numeric is not None:
-                    lines.append(f"• {ques.text[:35]}: <b>{int(a.value_numeric)}</b>")
-                elif ques and a.value_text:
-                    lines.append(f"• {ques.text[:35]}: {a.value_text[:50]}")
-
-        streak = get_streak(
-            next(e.employee_id for e in [type('X', (), {'employee_id': session_id})()]) if False else None
-        )
-        from sqlalchemy import create_engine as ce3
-        from sqlalchemy.orm import Session as S3
-        from app.models.models import SurveySession
-        eng3 = ce3(settings.SYNC_DATABASE_URL)
-        with S3(eng3) as s:
-            sess_obj = s.get(SurveySession, session_id)
-            if sess_obj:
-                from app.models.models import Streak as StreakModel
-                streak_obj = s.execute(sel2(StreakModel).where(StreakModel.employee_id == sess_obj.employee_id)).scalar_one_or_none()
-                if streak_obj and streak_obj.current_streak > 1:
-                    lines.append(f"\n🔥 Серия: {streak_obj.current_streak} дней подряд!")
-
-        await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer(build_checkin_summary(session_id), parse_mode="HTML")
 
 
 # ─── /my_stats ────────────────────────────────────────────────────────────────
 
 @router.message(Command("my_stats"))
-async def cmd_stats(message: Message):
-    tg_id = str(message.from_user.id)
-    emp = get_employee_by_tg(tg_id)
+async def cmd_stats(message: Message, employee=None):
+    emp = employee
     if not emp:
         await message.answer("❌ Вы не зарегистрированы.")
         return
 
     streak = get_streak(emp.id)
-    from sqlalchemy import create_engine, func, select
-    from sqlalchemy.orm import Session
-    from app.models.models import SurveySession, Answer, Question
-
-    eng = create_engine(settings.SYNC_DATABASE_URL)
-    with Session(eng) as s:
+    with get_session() as s:
         week_ago = date.today() - timedelta(days=7)
         month_ago = date.today() - timedelta(days=30)
 
@@ -256,12 +204,7 @@ async def cmd_leaderboard(message: Message):
         await message.answer("🏆 Рейтинг временно отключён администратором.")
         return
 
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import Session
-    from app.models.models import Employee, Streak
-
-    eng = create_engine(settings.SYNC_DATABASE_URL)
-    with Session(eng) as s:
+    with get_session() as s:
         rows = list(s.execute(
             select(Employee, Streak)
             .outerjoin(Streak, Streak.employee_id == Employee.id)
@@ -282,14 +225,23 @@ async def cmd_leaderboard(message: Message):
 # ─── /help ────────────────────────────────────────────────────────────────────
 
 @router.message(Command("help"))
-async def cmd_help(message: Message):
-    tg_id = str(message.from_user.id)
-    if _is_manager(tg_id):
+async def cmd_help(message: Message, is_manager: bool = False):
+    tasks_block = (
+        "\n📝 <b>Задачи</b>\n"
+        "/task [@кто] что сделать [когда] — поставить задачу\n"
+        "/mytasks — мои задачи\n"
+        "/assigned — что я поставил\n"
+        "/dashboard — сводный дашборд\n"
+        "/done &lt;id&gt; — отметить выполненной\n"
+        "/snooze &lt;id&gt; &lt;время&gt; — перенести срок\n"
+    )
+    if is_manager:
         text = (
             "👔 <b>Команды руководителя</b>\n\n"
             "/summary — сводка за вчера\n"
             "/week — статистика за 7 дней\n"
             "/blockers — топ блокеров\n"
+            + tasks_block
         )
     else:
         text = (
@@ -297,7 +249,8 @@ async def cmd_help(message: Message):
             "/today — заполнить чек-ин\n"
             "/my_stats — моя статистика\n"
             "/leaderboard — рейтинг отдела\n"
-            "/help — эта справка"
+            "/help — эта справка\n"
+            + tasks_block
         )
     await message.answer(text, parse_mode="HTML")
 
@@ -305,8 +258,8 @@ async def cmd_help(message: Message):
 # ─── Команды руководителя ────────────────────────────────────────────────────
 
 @router.message(Command("summary"))
-async def cmd_summary(message: Message):
-    if not _is_manager(str(message.from_user.id)):
+async def cmd_summary(message: Message, is_manager: bool = False):
+    if not is_manager:
         await message.answer("❌ Только для руководителя.")
         return
     data = get_yesterday_summary()
@@ -319,17 +272,12 @@ async def cmd_summary(message: Message):
 
 
 @router.message(Command("week"))
-async def cmd_week(message: Message):
-    if not _is_manager(str(message.from_user.id)):
+async def cmd_week(message: Message, is_manager: bool = False):
+    if not is_manager:
         await message.answer("❌ Только для руководителя.")
         return
 
-    from sqlalchemy import create_engine, func, select
-    from sqlalchemy.orm import Session
-    from app.models.models import Employee, SurveySession
-
-    eng = create_engine(settings.SYNC_DATABASE_URL)
-    with Session(eng) as s:
+    with get_session() as s:
         week_ago = date.today() - timedelta(days=7)
         rows = list(s.execute(
             select(Employee.name, func.count(SurveySession.id).label("cnt"))
@@ -346,19 +294,13 @@ async def cmd_week(message: Message):
 
 
 @router.message(Command("blockers"))
-async def cmd_blockers(message: Message):
-    if not _is_manager(str(message.from_user.id)):
+async def cmd_blockers(message: Message, is_manager: bool = False):
+    if not is_manager:
         await message.answer("❌ Только для руководителя.")
         return
 
-    from sqlalchemy import create_engine, func, select
-    from sqlalchemy.orm import Session
-    from app.models.models import Answer, Question
-
-    eng = create_engine(settings.SYNC_DATABASE_URL)
-    with Session(eng) as s:
+    with get_session() as s:
         month_ago = date.today() - timedelta(days=30)
-        from app.models.models import SurveySession
         text_qs = list(s.execute(select(Question).where(Question.answer_type == "text")).scalars())
         if not text_qs:
             await message.answer("Текстовых вопросов нет.")

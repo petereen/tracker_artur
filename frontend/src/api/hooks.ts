@@ -125,3 +125,75 @@ export function useUpdateOnboardingTemplate() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['onboarding'] }); toast.success('Шаблон сохранён') },
   })
 }
+
+// --- Tasks ---
+export interface TaskOut {
+  id: number
+  title: string
+  description: string | null
+  status: 'open' | 'in_progress' | 'done' | 'overdue' | 'cancelled'
+  priority: 1 | 2 | 3
+  deadline_at: string | null
+  created_at: string | null
+  completed_at: string | null
+  assignee_id: number | null
+  assignee_name: string | null
+  created_by_id: number | null
+  created_by_tg: string | null
+  creator_name: string | null
+  reminder_intervals_min: number[]
+}
+
+export function useTasks(filters: { status?: string; assignee_id?: number; active?: boolean } = {}) {
+  const params = new URLSearchParams()
+  if (filters.status) params.set('status', filters.status)
+  if (filters.assignee_id) params.set('assignee_id', String(filters.assignee_id))
+  if (filters.active !== undefined) params.set('active', String(filters.active))
+  return useQuery<TaskOut[]>({
+    queryKey: ['tasks', filters],
+    queryFn: () => api.get(`/tasks?${params}`).then((r) => r.data),
+  })
+}
+
+export function useTask(id: number) {
+  return useQuery<TaskOut>({
+    queryKey: ['tasks', id],
+    queryFn: () => api.get(`/tasks/${id}`).then((r) => r.data),
+  })
+}
+
+export function useCreateTask() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (d: { title: string; description?: string; assignee_id?: number; deadline_at?: string; priority: number }) =>
+      api.post('/tasks', d).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success('Задача создана') },
+    onError: () => toast.error('Ошибка при создании задачи'),
+  })
+}
+
+export function useUpdateTask() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...d }: { id: number; title?: string; description?: string; assignee_id?: number; deadline_at?: string; priority?: number; status?: string }) =>
+      api.patch(`/tasks/${id}`, d).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success('Задача обновлена') },
+    onError: () => toast.error('Ошибка при обновлении задачи'),
+  })
+}
+
+export function useTaskComments(taskId: number) {
+  return useQuery({
+    queryKey: ['tasks', taskId, 'comments'],
+    queryFn: () => api.get(`/tasks/${taskId}/comments`).then((r) => r.data),
+    enabled: taskId > 0,
+  })
+}
+
+export function useAddTaskComment(taskId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (text: string) => api.post(`/tasks/${taskId}/comments`, { text }).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', taskId, 'comments'] }),
+  })
+}

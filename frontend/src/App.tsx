@@ -9,10 +9,16 @@ import { SchedulePage } from './pages/SchedulePage'
 import { JournalPage } from './pages/JournalPage'
 import { ManagerSettingsPage } from './pages/ManagerSettingsPage'
 import { OnboardingPage } from './pages/OnboardingPage'
+import { TasksPage } from './pages/TasksPage'
+import { TgMiniAppPage } from './pages/TgMiniAppPage'
+
+// Check if this is the Telegram Mini App route
+const isTgRoute = () => window.location.pathname === '/tg'
 
 const PAGES: Record<string, JSX.Element> = {
   dashboard:  <DashboardPage />,
   employees:  <EmployeesPage />,
+  tasks:      <TasksPage />,
   questions:  <QuestionsPage />,
   schedule:   <SchedulePage />,
   journal:    <JournalPage />,
@@ -32,6 +38,11 @@ export default function App() {
     if (useAuthStore.persist.hasHydrated()) setHydrated(true)
     return unsub
   }, [])
+
+  // Public route: /tg — Telegram Mini App (no auth required)
+  if (isTgRoute()) {
+    return <TgMiniAppPage />
+  }
 
   if (!hydrated) {
     return (

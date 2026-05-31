@@ -77,40 +77,44 @@ def rebuild_jobs():
             day_of_week=wd - 1, hour=wt.hour, minute=wt.minute,
             id="weekly_summary", replace_existing=True)
 
+    # Реконсайл напоминаний по задачам (догоняет задачи, созданные из веб/Mini App,
+    # где планировщик не запущен). Идемпотентно.
+    from app.services.reminder_service import reconcile_task_reminders
+
+    scheduler.add_job(
+        reconcile_task_reminders, "interval", minutes=2,
+        id="reconcile_tasks", replace_existing=True,
+    )
+
     log.info("Scheduler rebuilt for %d employees", len(employees))
 
 
 async def send_survey(employee_id: int):
-    from app.core.config import settings as cfg
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session
     from app.models.models import Employee
-    from app.bot.db import create_session
+    from app.bot.db import create_session, get_session
 
     bot = _make_bot()
     try:
-        eng = create_engine(cfg.SYNC_DATABASE_URL)
-        with Session(eng) as s:
+        with get_session() as s:
             emp = s.get(Employee, employee_id)
             if not emp or not emp.is_active:
                 return
+            telegram_id = emp.telegram_id
         create_session(employee_id)
-        await bot.send_message(emp.telegram_id, "⏰ Время для вечернего чек-ина!\nНапиши /today чтобы начать.")
+        await bot.send_message(telegram_id, "⏰ Время для вечернего чек-ина!\nНапиши /today чтобы начать.")
     finally:
         await bot.session.close()
 
 
 async def send_reminder(employee_id: int, num: int):
     from datetime import date as d
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import Session
+    from sqlalchemy import select
     from app.models.models import Employee, SurveySession
-    from app.core.config import settings as cfg
+    from app.bot.db import get_session
 
     bot = _make_bot()
     try:
-        eng = create_engine(cfg.SYNC_DATABASE_URL)
-        with Session(eng) as s:
+        with get_session() as s:
             emp = s.get(Employee, employee_id)
             if not emp:
                 return
@@ -121,18 +125,16 @@ async def send_reminder(employee_id: int, num: int):
                     SurveySession.status == "pending",
                 )
             ).scalar_one_or_none()
-            if sess:
-                await bot.send_message(emp.telegram_id, f"⚠️ Напоминание #{num}: не забудь заполнить чек-ин! /today")
+            telegram_id = emp.telegram_id
+        if sess:
+            await bot.send_message(telegram_id, f"⚠️ Напоминание #{num}: не забудь заполнить чек-ин! /today")
     finally:
         await bot.session.close()
 
 
 async def mark_missed_job(employee_id: int):
-    from app.bot.db import mark_session_missed, get_manager_settings
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session
+    from app.bot.db import mark_session_missed, get_manager_settings, get_session
     from app.models.models import Employee
-    from app.core.config import settings as cfg
 
     mark_session_missed(employee_id)
     ms = get_manager_settings()
@@ -141,11 +143,11 @@ async def mark_missed_job(employee_id: int):
 
     bot = _make_bot()
     try:
-        eng = create_engine(cfg.SYNC_DATABASE_URL)
-        with Session(eng) as s:
+        with get_session() as s:
             emp = s.get(Employee, employee_id)
-            if emp:
-                await bot.send_message(ms.telegram_id, f"🚨 {emp.name} не заполнил чек-ин сегодня.")
+            emp_name = emp.name if emp else None
+        if emp_name:
+            await bot.send_message(ms.telegram_id, f"🚨 {emp_name} не заполнил чек-ин сегодня.")
     finally:
         await bot.session.close()
 

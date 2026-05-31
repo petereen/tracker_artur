@@ -8,7 +8,9 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.bot.handlers import router
+from app.bot.middlewares import EmployeeMiddleware
 from app.bot.scheduler import rebuild_jobs, scheduler
+from app.bot.tasks_handlers import router as tasks_router
 from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -22,6 +24,9 @@ async def main():
 
     bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
+    dp.message.middleware(EmployeeMiddleware())
+    dp.callback_query.middleware(EmployeeMiddleware())
+    dp.include_router(tasks_router)
     dp.include_router(router)
 
     scheduler.start()

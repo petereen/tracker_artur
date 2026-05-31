@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
 from app.models.models import AdminUser, ManagerSettings
-from app.routers import auth, dashboard, employees, journal, manager, onboarding, questions, schedules
+from app.routers import auth, dashboard, employees, journal, manager, onboarding, questions, schedules, tasks
 from sqlalchemy import select
 
 
@@ -33,7 +33,7 @@ app = FastAPI(title="Sales Tracker API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://tracker.vitamarine.kz"],
+    allow_origins=["https://artur.adarasoft.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,6 +47,8 @@ app.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 app.include_router(journal.router, prefix="/answers", tags=["answers"])
 app.include_router(manager.router, prefix="/manager-settings", tags=["manager"])
 app.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
+app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
+app.include_router(tasks.miniapp_router, prefix="/miniapp", tags=["miniapp"])
 
 
 @app.get("/health")
