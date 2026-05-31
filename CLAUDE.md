@@ -2,25 +2,44 @@
 
 Инструкции для Claude Code по работе с этим проектом.
 
-## 🛑 Статус проекта: ОТКЛЮЧЁН (2026-05-27)
+## ✅ Статус проекта: АКТИВЕН на Azure ACA (реактивирован 2026-05-31)
 
-**Проект НЕ работает.** Хост `172.201.9.182` (Azure VM, отдельная подписка) был удалён по ошибке. Сервисы `tracker.vitamarine.kz` (frontend + backend + bot + db) больше не отвечают (HTTP 000). Бэкапов БД у нас нет (бэкапы лежали на том же хосте).
+Проект пересоздан с нуля на Azure Container Apps после потери старого хоста `172.201.9.182` (был удалён 2026-05-27, БД утеряны). БД стартовала пустой; admin-пользователь засеивается автоматически из `ADMIN_EMAIL`/`ADMIN_PASSWORD` при старте backend.
 
-**Что делать с этим репо сейчас:** ничего не деплоить, не запускать локально кроме тестовых целей. Перед любыми изменениями уточнить у пользователя нужно ли реактивировать проект и где.
+### Расширение v2 — таск-менеджер (2026-05-31, ветка `feature/tasks-and-miniapp`, не закоммичена)
 
-**Если реактивация:** придётся пересоздать стек с нуля на Azure ACA — backend + bot + frontend + PostgreSQL flexible + nginx routing для `tracker.vitamarine.kz`. БД стартует пустой.
+Поверх трекера ежедневных опросов добавлен модуль задач (опросы/streak/leaderboard сохранены — задачи их дополняют):
+- **Бот:** `/task [@кто] что [когда]`, `/mytasks`, `/assigned`, `/done <id>`, `/snooze <id> <время>`, `/dashboard`. Голосом — voice→Whisper (env `OPENAI_API_KEY` опционально; без ключа — вежливый fallback). Парсер русских дат/`@username`/приоритета — `services/task_parser.py` (`dateparser`).
+- **Архитектура бота почищена:** общий `get_session()` (без инлайновых `create_engine`), `EmployeeMiddleware` (инъекция `employee`/`is_manager`), `keyboards.py`, `tasks_handlers.py`, сводка опроса в `services/survey_service.py`.
+- **Напоминания:** `services/reminder_service.py` — date-джобы на `reminder_intervals_min` + эскалация менеджеру при просрочке. Задачи, созданные из веба, догоняет `reconcile_task_reminders` (interval-джоб 2 мин в процессе бота — APScheduler живёт только в боте).
+- **REST API:** `routers/tasks.py` — admin `/api/tasks` (JWT) + Mini App `/api/miniapp/*` (Telegram initData, валидация в `core/telegram_auth.py`).
+- **Веб:** `/tasks` — канбан для админа (4 колонки). **Telegram Mini App:** `/tg` (`window.Telegram.WebApp`, initData-auth). Кнопка меню бота → `/tg` выставлена через Bot API `setChatMenuButton` (не BotFather).
+- **Руководитель:** `manager_settings.telegram_id=201374791` (Арман Тосканбаев) + env бота `MANAGER_TG_ID=201374791`.
+- **Тесты:** `backend/tests/` (parser, telegram_auth) гоняются в облаке через `backend/Dockerfile.test` (`az acr build` → `python -m pytest`; локально pip на VM нет).
+- **Отложено:** LLM-слой поверх парсера; Sentry (по просьбе — отдельно).
 
-**Инструкции ниже — историческая справка** (как работало до отключения). Не пытаться выполнять команды против `172.201.9.182` или `tracker.vitamarine.kz` — они не отвечают.
+- **Resource group:** `rg-tracker-artur-prod-neu` (North Europe)
+- **ACA environment:** `cae-tracker-artur-prod-neu` (default domain `wittyhill-ad6320ed.northeurope.azurecontainerapps.io`)
+- **Apps:**
+  - `ca-tracker-artur-web` — React/Vite + nginx, **external** ingress :80. `/api/`→backend по HTTPS:443 (см. `frontend/nginx.conf`).
+  - `ca-tracker-artur-api` — FastAPI/uvicorn, **internal** ingress :8000. Alembic-миграции в `start.sh` при каждом старте.
+  - `ca-tracker-artur-bot` — aiogram long-polling (`python -m app.bot.main`), без ingress, ровно 1 реплика (иначе дубль polling).
+- **ACR:** `acrtrackerarturprod` → образы `tracker-artur/backend`, `tracker-artur/frontend`. Сборка: `az acr build -r acrtrackerarturprod -t tracker-artur/<svc>:latest ./<svc>`.
+- **PostgreSQL:** `psql-tracker-artur-prod` (Flexible Server, PG16, B1ms, North Europe), база `sales_tracker`, юзер `trackeradmin`, **SSL required** (`?ssl=require` для asyncpg, `?sslmode=require` для psycopg2).
+- **Домен:** **`artur.adarasoft.com`** (CNAME→web FQDN + TXT `asuid.artur` в зоне `adarasoft.com`/`dns-rg`) + managed SSL.
+- **Секреты:** [[reference-kv-bronxtc-dev]] namespace `tracker-artur--production--{POSTGRES-PASSWORD,SECRET-KEY,ADMIN-EMAIL,ADMIN-PASSWORD,DATABASE-URL,SYNC-DATABASE-URL,BOT-TOKEN}`. В ACA проброшены как app-secrets (не keyvaultref). Admin email — `admin@adarasoft.com`.
+- **⚠️ `pushed != deployed`:** после `az acr build` тег `:latest` не создаёт новую ревизию web/bot — деплоить обновление по digest (`...@sha256:...`) либо с `--revision-suffix`, затем сверять `az containerapp revision list`.
+
+**Ниже — историческая справка** (как работало на старом VM-хосте; команды против `172.201.9.182`/`tracker.vitamarine.kz` не выполнять — мертвы).
 
 ---
 
-## Окружение (HISTORICAL — сервер удалён)
+## Окружение (HISTORICAL — старый VM-хост удалён)
 
 - **Сервер:** ~~172.201.9.182 (Azure, Ubuntu)~~ — DELETED 2026-05-27
 - **Рабочая папка:** ~~`/home/sadmin/artur/sales-tracker/`~~ — была на удалённом сервере
-- **Домен:** ~~https://tracker.vitamarine.kz~~ — DNS всё ещё указывает на 172.201.9.182, но хост не отвечает
+- **Домен:** ~~https://tracker.vitamarine.kz~~ — устаревший, заменён на `artur.adarasoft.com`
 - **БД:** PostgreSQL 15, пользователь `tracker`, база `sales_tracker` — данные потеряны вместе с сервером
-- **Учётные данные:** были в `.env` на сервере (потеряны); namespace в [[reference-kv-bronxtc-dev]] — `tracker-artur--backend--*` (8 секретов скопированы перед удалением)
 
 ## Запуск и остановка
 

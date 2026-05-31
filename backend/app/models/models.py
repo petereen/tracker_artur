@@ -146,3 +146,54 @@ class AdminUser(Base):
     email = Column(Text, unique=True, nullable=False)
     password_hash = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ─── Задачи (task-manager поверх трекера опросов) ──────────────────────────────
+
+TASK_STATUSES = ("open", "in_progress", "done", "overdue", "cancelled")
+DEFAULT_REMINDER_INTERVALS_MIN = [1440, 120, 0]  # за сутки, за 2ч, в момент дедлайна
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(Text, nullable=False)
+    description = Column(Text)
+    # Постановщик: employee, если зарегистрирован; иначе фиксируем telegram_id
+    # (руководитель по MANAGER_TG_ID может не быть в employees).
+    created_by_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    created_by_tg = Column(Text)
+    assignee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    deadline_at = Column(DateTime(timezone=True))
+    status = Column(
+        Text,
+        CheckConstraint(
+            "status IN ('open','in_progress','done','overdue','cancelled')",
+            name="ck_tasks_status",
+        ),
+        default="open",
+        nullable=False,
+    )
+    priority = Column(Integer, default=2)  # 1=срочно, 2=обычно, 3=низкий
+    reminder_intervals_min = Column(ARRAY(Integer), default=lambda: list(DEFAULT_REMINDER_INTERVALS_MIN))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True))
+    completed_by_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+
+    assignee = relationship("Employee", foreign_keys=[assignee_id])
+    creator = relationship("Employee", foreign_keys=[created_by_id])
+    comments = relationship("TaskComment", back_populates="task", cascade="all, delete-orphan")
+
+
+class TaskComment(Base):
+    __tablename__ = "task_comments"
+
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    author_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    author_tg = Column(Text)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    task = relationship("Task", back_populates="comments")

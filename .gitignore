@@ -9,3 +9,6 @@ dist/
 .DS_Store
 *.log
 pgdata/
+
+# TS incremental build cache
+*.tsbuildinfo
