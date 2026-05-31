@@ -17,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text as sa_text
 
 from app.core.database import Base
 
@@ -30,7 +30,7 @@ class Employee(Base):
     telegram_id = Column(Text, unique=True, nullable=False)
     telegram_username = Column(Text)
     timezone = Column(Text, nullable=False, server_default="Europe/Moscow", default="Europe/Moscow")
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     onboarded_at = Column(DateTime(timezone=True))
 
@@ -49,9 +49,9 @@ class Question(Base):
         CheckConstraint("answer_type IN ('integer','decimal','boolean','choice','text')"),
         nullable=False,
     )
-    options = Column(JSONB, default=list)
-    is_required = Column(Boolean, default=True)
-    sort_order = Column(Integer, default=0)
+    options = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    is_required = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
 
 
 class EmployeeQuestion(Base):
@@ -68,7 +68,7 @@ class Schedule(Base):
 
     id = Column(Integer, primary_key=True)
     employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), unique=True)
-    variant = Column(String(1), default="A")
+    variant = Column(String(1), nullable=False, server_default="A", default="A")
     evening_time = Column(Time, default=time(17, 30))
     morning_time = Column(Time, default=time(9, 15))
     weekdays = Column(ARRAY(Integer), default=lambda: [1, 2, 3, 4, 5])
@@ -120,10 +120,10 @@ class ManagerSettings(Base):
     telegram_username = Column(Text)
     summary_time = Column(Time, default=time(9, 0))
     weekly_summary_time = Column(Time, default=time(17, 0))
-    weekly_summary_day = Column(Integer, default=5)
-    alerts_enabled = Column(Boolean, default=True)
-    gamification_enabled = Column(Boolean, default=True)
-    soft_mode_weeks = Column(Integer, default=1)
+    weekly_summary_day = Column(Integer, nullable=False, server_default="5", default=5)
+    alerts_enabled = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    gamification_enabled = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    soft_mode_weeks = Column(Integer, nullable=False, server_default="1", default=1)
     onboarding_template = Column(Text, nullable=True)
     # ── Политика уведомлений (тихие часы / дайджесты / эскалация) ──
     quiet_start = Column(Time, default=time(20, 0))            # начало тихих часов (вечер)
@@ -183,7 +183,7 @@ class Task(Base):
         default="open",
         nullable=False,
     )
-    priority = Column(Integer, default=2)  # 1=срочно, 2=обычно, 3=низкий
+    priority = Column(Integer, nullable=False, server_default="2", default=2)  # 1=срочно, 2=обычно, 3=низкий
     reminder_intervals_min = Column(ARRAY(Integer), default=lambda: list(DEFAULT_REMINDER_INTERVALS_MIN))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True))

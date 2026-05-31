@@ -71,7 +71,8 @@ async def _serialize(db: AsyncSession, task: Task) -> TaskOut:
     creator = await db.get(Employee, task.created_by_id) if task.created_by_id else None
     return TaskOut(
         id=task.id, title=task.title, description=task.description, status=task.status,
-        priority=task.priority, deadline_at=task.deadline_at, created_at=task.created_at,
+        priority=task.priority if task.priority is not None else 2,
+        deadline_at=task.deadline_at, created_at=task.created_at,
         completed_at=task.completed_at, assignee_id=task.assignee_id,
         assignee_name=assignee.name if assignee else None,
         created_by_id=task.created_by_id, created_by_tg=task.created_by_tg,
