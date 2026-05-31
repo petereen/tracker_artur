@@ -1,5 +1,9 @@
 from contextlib import asynccontextmanager
 
+from app.observability.sentry import init_from_env
+
+init_from_env(server_name="tracker-artur-api")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
