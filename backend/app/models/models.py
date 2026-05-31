@@ -29,7 +29,7 @@ class Employee(Base):
     name = Column(Text, nullable=False)
     telegram_id = Column(Text, unique=True, nullable=False)
     telegram_username = Column(Text)
-    timezone = Column(Text, default="Europe/Moscow")
+    timezone = Column(Text, nullable=False, server_default="Europe/Moscow", default="Europe/Moscow")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     onboarded_at = Column(DateTime(timezone=True))

@@ -1,6 +1,6 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,10 +30,20 @@ class EmployeeOut(BaseModel):
     name: str
     telegram_id: str
     telegram_username: Optional[str]
-    timezone: str
+    # Legacy rows (e.g. seeded manager) may have NULL timezone — the model's
+    # logical default is Europe/Moscow, so return that instead of crashing
+    # serialization (Sentry issue 28: ResponseValidationError on GET /employees).
+    timezone: str = "Europe/Moscow"
     is_active: bool
 
     model_config = {"from_attributes": True}
+
+    @field_validator("timezone", mode="before")
+    @classmethod
+    def _default_timezone(cls, v):
+        # Coerce legacy NULL timezone (from rows inserted without the
+        # client-side default, e.g. the seeded manager) to the logical default.
+        return v if v else "Europe/Moscow"
 
 
 @router.get("", response_model=list[EmployeeOut])
