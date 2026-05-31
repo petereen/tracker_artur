@@ -1,7 +1,7 @@
 from datetime import time
 from typing import Optional
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,25 @@ class ManagerSettingsOut(BaseModel):
     soft_mode_weeks: int
 
     model_config = {"from_attributes": True}
+
+    # The manager_settings singleton was partly seeded (only telegram_id set),
+    # so these required columns — which had only client-side defaults and no
+    # server_default — could be NULL and crash serialization (same class as
+    # Sentry #28). Coerce to the model defaults defensively.
+    @field_validator("weekly_summary_day", mode="before")
+    @classmethod
+    def _default_weekly_summary_day(cls, v):
+        return 5 if v is None else v
+
+    @field_validator("alerts_enabled", "gamification_enabled", mode="before")
+    @classmethod
+    def _default_flags(cls, v):
+        return True if v is None else v
+
+    @field_validator("soft_mode_weeks", mode="before")
+    @classmethod
+    def _default_soft_mode_weeks(cls, v):
+        return 1 if v is None else v
 
 
 class ManagerSettingsUpdate(BaseModel):

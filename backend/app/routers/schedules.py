@@ -34,7 +34,7 @@ class ScheduleOut(BaseModel):
     def from_orm_custom(cls, s: Schedule):
         return cls(
             employee_id=s.employee_id,
-            variant=s.variant,
+            variant=s.variant or "A",
             evening_time=str(s.evening_time) if s.evening_time else None,
             morning_time=str(s.morning_time) if s.morning_time else None,
             weekdays=s.weekdays or [],
