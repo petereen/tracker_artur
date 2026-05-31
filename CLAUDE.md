@@ -16,6 +16,7 @@
 - **Outbox:** пуш о назначении из веб/Mini App пишется в `notification_outbox`; бот шлёт джобом `drain_notification_outbox` (1 мин); задачи из api догоняет `reconcile_task_reminders` (2 мин). APScheduler живёт ТОЛЬКО в боте.
 - **REST API:** `routers/tasks.py` — admin `/api/tasks` (JWT) + Mini App `/api/miniapp/*` (Telegram initData, `core/telegram_auth.py`; ⚠️ `BOT_TOKEN` нужен и api, и боту).
 - **Веб:** `/tasks` — канбан для админа. **Telegram Mini App:** `/tg` — вертикальный канбан (Просрочено/Открыто/В работе/Завершено), initData-auth. Кнопка меню бота → `/tg` через Bot API `setChatMenuButton`.
+- **Сотрудники (`/employees`, `EmployeesPage.tsx`):** кнопка «Изм.» открывает модалку редактирования (ФИО / telegram_username / часовой пояс / статус), Telegram ID read-only; та же модалка переиспользуется для создания. Бэкенд — `PUT /employees/{id}` (поля name/telegram_username/timezone/is_active, `exclude_none`). ⚠️ У сотрудников **нет поля phone и нет логина/пароля** — в веб-панель логинится только admin (`admin_users`, email+пароль); сотрудники взаимодействуют только через Telegram-бота.
 - **Руководитель:** `manager_settings.telegram_id=201374791` + env бота `MANAGER_TG_ID=201374791`; также заведён как `Employee` id=1 (без расписания — для self-assign).
 - **Sentry:** подключён (коммит `c01fe7a`, `app/observability/sentry.py` — api+bot+frontend).
 - **Тесты:** `backend/tests/` (parser, telegram_auth, notification_policy, task_ai) — облачный прогон через `backend/Dockerfile.test` (`az acr build` → `python -m pytest`; локально pip на VM нет).
