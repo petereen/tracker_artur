@@ -1,6 +1,6 @@
 # Трекер и постановщик задач
 
-Корпоративный сервис для всей компании: постановка и контроль задач **и** ежедневные опросы метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://artur.adarasoft.com** (Azure Container Apps). Документы: [Политика конфиденциальности](https://artur.adarasoft.com/privacy) · [Условия использования](https://artur.adarasoft.com/terms).
+Корпоративный сервис для всей компании: постановка и контроль задач **и** ежедневные опросы метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://tracker.adarasoft.com** (Azure Container Apps). Документы: [Политика конфиденциальности](https://tracker.adarasoft.com/privacy) · [Условия использования](https://tracker.adarasoft.com/terms).
 
 ## Стек
 

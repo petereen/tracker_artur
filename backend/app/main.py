@@ -37,7 +37,7 @@ app = FastAPI(title="Трекер и постановщик задач — API",
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://artur.adarasoft.com"],
+    allow_origins=["https://tracker.adarasoft.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
