@@ -4,7 +4,7 @@
 const UPDATED = '31 мая 2026 г.'
 const OPERATOR = 'оператор сервиса «Трекер и постановщик задач»'
 const CONTACT = 'admin@adarasoft.com'
-const DOMAIN = 'artur.adarasoft.com'
+const DOMAIN = 'tracker.adarasoft.com'
 
 function LegalShell({ title, children }: { title: string; children: React.ReactNode }) {
   return (

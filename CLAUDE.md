@@ -30,7 +30,7 @@
   - `ca-tracker-artur-bot` — aiogram long-polling (`python -m app.bot.main`), без ingress, ровно 1 реплика (иначе дубль polling).
 - **ACR:** `acrtrackerarturprod` → образы `tracker-artur/backend`, `tracker-artur/frontend`. Сборка: `az acr build -r acrtrackerarturprod -t tracker-artur/<svc>:latest ./<svc>`.
 - **PostgreSQL:** `psql-tracker-artur-prod` (Flexible Server, PG16, B1ms, North Europe), база `sales_tracker`, юзер `trackeradmin`, **SSL required** (`?ssl=require` для asyncpg, `?sslmode=require` для psycopg2).
-- **Домен:** **`artur.adarasoft.com`** (CNAME→web FQDN + TXT `asuid.artur` в зоне `adarasoft.com`/`dns-rg`) + managed SSL.
+- **Домен:** **`tracker.adarasoft.com`** (CNAME→web FQDN + TXT `asuid.tracker` в зоне `adarasoft.com`/`dns-rg`) + managed SSL. _(Был `artur.adarasoft.com` до 2026-06-01 — заменён полностью: старые DNS-записи `artur`/`asuid.artur` и ACA-биндинг удалены.)_
 - **Секреты:** [[reference-kv-bronxtc-dev]] namespace `tracker-artur--production--{POSTGRES-PASSWORD,SECRET-KEY,ADMIN-EMAIL,ADMIN-PASSWORD,DATABASE-URL,SYNC-DATABASE-URL,BOT-TOKEN}`. В ACA проброшены как app-secrets (не keyvaultref). Admin email — `admin@adarasoft.com`.
 - **⚠️ `pushed != deployed`:** после `az acr build` тег `:latest` не создаёт новую ревизию web/bot — деплоить обновление по digest (`...@sha256:...`) либо с `--revision-suffix`, затем сверять `az containerapp revision list`.
 
@@ -42,7 +42,7 @@
 
 - **Сервер:** ~~172.201.9.182 (Azure, Ubuntu)~~ — DELETED 2026-05-27
 - **Рабочая папка:** ~~`/home/sadmin/artur/sales-tracker/`~~ — была на удалённом сервере
-- **Домен:** ~~https://tracker.vitamarine.kz~~ — устаревший, заменён на `artur.adarasoft.com`
+- **Домен:** ~~https://tracker.vitamarine.kz~~ — устаревший, заменён на `tracker.adarasoft.com`
 - **БД:** PostgreSQL 15, пользователь `tracker`, база `sales_tracker` — данные потеряны вместе с сервером
 
 ## Запуск и остановка
