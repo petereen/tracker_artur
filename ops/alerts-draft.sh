@@ -32,7 +32,9 @@ az monitor scheduled-query create -n "al-tracker-artur-aca-system-failures" -g "
   --condition-query rows="ContainerAppSystemLogs_CL | where TimeGenerated > ago(5m)
     | where ContainerAppName_s startswith 'ca-tracker-artur-'
     | where Reason_s in~ ('ProbeFailed','RevisionFailed','ContainerFailed','Failed')
-       or Log_s has_any ('Probe failed','Revision failed','Container failed','failed startup probe')" \
+       or Log_s has_any ('Probe failed','Revision failed','Container failed','failed startup probe')
+    | summarize total=count(), hard=countif(Reason_s in~ ('RevisionFailed','ContainerFailed','Failed') or Log_s has_any ('Revision failed','Container failed'))
+    | where hard > 0 or total >= 10" \
   --description "ACA system failures across tracker_artur apps" --tags $TAGS
 
 az monitor scheduled-query create -n "al-tracker-artur-console-critical-errors" -g "$RG" \
