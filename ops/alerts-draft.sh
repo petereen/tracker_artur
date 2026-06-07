@@ -15,8 +15,10 @@ for APP in "${APPS[@]}"; do
   az monitor metrics alert create -n "al-${APP}-no-replicas" -g "$RG" --scopes "$SCOPE" \
     --condition "min Replicas < 1" --window-size 5m --evaluation-frequency 1m --severity 1 \
     --description "[$APP] нет активных реплик ≥5м" --tags $TAGS
+  # RestartCount — кумулятивный per-replica счётчик: агрегация total суммирует его по семплам окна → ложно залипает в Fired. Берём max (реальный текущий счётчик) + auto-mitigate (новая реплика после деплоя = 0 → алёрт сам закрывается).
   az monitor metrics alert create -n "al-${APP}-restarts" -g "$RG" --scopes "$SCOPE" \
-    --condition "total RestartCount > 5" --window-size 15m --evaluation-frequency 5m --severity 2 \
+    --condition "max RestartCount > 3" --window-size 15m --evaluation-frequency 5m --severity 2 \
+    --auto-mitigate true \
     --description "[$APP] >5 рестартов за 15м" --tags $TAGS
   az monitor metrics alert create -n "al-${APP}-cpu-high" -g "$RG" --scopes "$SCOPE" \
     --condition "avg UsageNanoCores > 400000000" --window-size 10m --evaluation-frequency 5m --severity 3 \
