@@ -1,0 +1,309 @@
+{
+  "id": "/subscriptions/c05debcb-f65a-4aee-9d1e-0f598536a024/resourceGroups/rg-tracker-artur-prod-neu/providers/Microsoft.App/containerapps/ca-tracker-artur-bot",
+  "identity": {
+    "type": "None"
+  },
+  "location": "North Europe",
+  "name": "ca-tracker-artur-bot",
+  "properties": {
+    "configuration": {
+      "activeRevisionsMode": "Single",
+      "dapr": null,
+      "identitySettings": [],
+      "ingress": null,
+      "maxInactiveRevisions": 100,
+      "registries": [
+        {
+          "identity": "",
+          "passwordSecretRef": "acr-pass",
+          "server": "acrtrackerarturprod.azurecr.io",
+          "username": "acrtrackerarturprod"
+        }
+      ],
+      "revisionTransitionThreshold": null,
+      "runtime": null,
+      "secrets": [
+        {
+          "name": "sync-database-url"
+        },
+        {
+          "name": "acr-pass"
+        },
+        {
+          "name": "bot-token"
+        },
+        {
+          "name": "database-url"
+        },
+        {
+          "name": "secret-key"
+        },
+        {
+          "name": "openai-api-key"
+        }
+      ],
+      "service": null,
+      "targetLabel": ""
+    },
+    "customDomainVerificationId": "3108305AB1AA7C4388162B1D4950A16369ECD4AD0CD65BC30EF1F05079A11BC7",
+    "delegatedIdentities": [],
+    "environmentId": "/subscriptions/c05debcb-f65a-4aee-9d1e-0f598536a024/resourceGroups/rg-tracker-artur-prod-neu/providers/Microsoft.App/managedEnvironments/cae-tracker-artur-prod-neu",
+    "eventStreamEndpoint": "https://northeurope.azurecontainerapps.dev/subscriptions/c05debcb-f65a-4aee-9d1e-0f598536a024/resourceGroups/rg-tracker-artur-prod-neu/containerApps/ca-tracker-artur-bot/eventstream",
+    "latestReadyRevisionName": "ca-tracker-artur-bot--0000012",
+    "latestRevisionFqdn": "",
+    "latestRevisionName": "ca-tracker-artur-bot--0000012",
+    "managedEnvironmentId": "/subscriptions/c05debcb-f65a-4aee-9d1e-0f598536a024/resourceGroups/rg-tracker-artur-prod-neu/providers/Microsoft.App/managedEnvironments/cae-tracker-artur-prod-neu",
+    "outboundIpAddresses": [
+      "20.105.70.20",
+      "20.105.70.58",
+      "20.105.69.247",
+      "20.105.70.28",
+      "20.105.47.15",
+      "20.105.47.12",
+      "4.208.220.175",
+      "4.208.218.235",
+      "4.208.219.44",
+      "4.208.219.6",
+      "20.105.32.76",
+      "20.105.32.139",
+      "20.105.33.209",
+      "20.105.33.28",
+      "20.105.32.212",
+      "20.105.32.182",
+      "20.105.33.168",
+      "20.105.33.212",
+      "20.105.33.155",
+      "20.105.33.195",
+      "4.208.20.29",
+      "132.164.219.65",
+      "128.251.88.173",
+      "4.207.105.28",
+      "4.208.96.159",
+      "20.223.25.183",
+      "4.207.216.65",
+      "20.13.249.149",
+      "4.207.64.63",
+      "172.205.33.239",
+      "20.223.122.169",
+      "52.155.173.170",
+      "20.223.250.21",
+      "20.123.103.147",
+      "135.236.217.236",
+      "20.105.55.247",
+      "20.54.2.141",
+      "20.223.38.196",
+      "20.166.132.191",
+      "4.245.147.211",
+      "4.209.224.55",
+      "172.205.44.7",
+      "20.54.3.244",
+      "20.54.98.7",
+      "4.207.211.109",
+      "20.223.21.222",
+      "4.208.97.27",
+      "132.164.148.204",
+      "132.164.148.121",
+      "128.251.88.75",
+      "20.82.159.125",
+      "4.207.64.51",
+      "20.166.233.193",
+      "20.107.137.66",
+      "4.207.32.247",
+      "20.238.6.182",
+      "132.164.148.57",
+      "52.156.203.41",
+      "4.231.131.52",
+      "4.210.16.13",
+      "52.236.10.233",
+      "4.207.209.95",
+      "172.205.44.20",
+      "20.166.138.202",
+      "128.251.110.10",
+      "52.236.13.121",
+      "20.166.138.114",
+      "128.251.108.109",
+      "4.207.156.22",
+      "135.236.217.232",
+      "172.205.33.183",
+      "4.207.104.97",
+      "52.142.85.185",
+      "20.13.229.235",
+      "20.223.98.139",
+      "128.251.104.153",
+      "52.142.85.215",
+      "20.166.137.254",
+      "4.207.216.58",
+      "52.236.8.157",
+      "20.105.124.149",
+      "20.105.123.192",
+      "20.105.123.181",
+      "20.105.124.100",
+      "20.123.115.147",
+      "20.123.115.110",
+      "4.210.23.209",
+      "4.210.23.217",
+      "4.210.23.181",
+      "4.210.23.186",
+      "52.178.141.116",
+      "52.178.138.108",
+      "52.178.138.196",
+      "52.178.141.59",
+      "52.178.141.173",
+      "52.178.141.228",
+      "52.178.139.43",
+      "52.169.76.168",
+      "52.178.141.140",
+      "52.178.138.54",
+      "20.13.204.202",
+      "4.207.217.91",
+      "52.155.234.156",
+      "172.205.35.249",
+      "172.205.35.229",
+      "48.209.157.68",
+      "4.209.25.170",
+      "40.67.253.40",
+      "20.223.120.156",
+      "20.223.123.166",
+      "132.164.189.149",
+      "20.166.148.123",
+      "20.105.33.160",
+      "4.207.105.136",
+      "48.209.172.155",
+      "20.105.17.204",
+      "128.251.111.10",
+      "134.149.0.27",
+      "52.155.232.34",
+      "172.205.110.108",
+      "132.164.189.61",
+      "172.205.110.119",
+      "20.54.120.47",
+      "20.13.205.127",
+      "20.54.120.50",
+      "20.107.164.137",
+      "4.231.133.137",
+      "4.210.22.253",
+      "52.155.234.111",
+      "4.210.8.84",
+      "4.208.46.8",
+      "20.54.102.243",
+      "20.166.148.86",
+      "20.93.57.181",
+      "20.54.24.37",
+      "20.13.210.210",
+      "4.209.73.224",
+      "40.127.254.87",
+      "40.127.254.100",
+      "20.166.96.165",
+      "20.107.142.246",
+      "52.142.112.78",
+      "135.236.200.227",
+      "132.164.159.156",
+      "52.142.87.254",
+      "4.208.97.209",
+      "4.207.70.255",
+      "48.209.157.6",
+      "4.210.20.122",
+      "4.210.23.21",
+      "4.207.169.135",
+      "132.164.159.145",
+      "4.208.46.25",
+      "20.13.210.209",
+      "132.164.189.57",
+      "52.142.112.141",
+      "20.223.116.200",
+      "4.207.216.228",
+      "4.210.8.92",
+      "20.166.96.168",
+      "40.127.211.58"
+    ],
+    "patchingMode": "Automatic",
+    "provisioningState": "Succeeded",
+    "runningStatus": "Stopped",
+    "template": {
+      "containers": [
+        {
+          "command": [
+            "python",
+            "-m",
+            "app.bot.main"
+          ],
+          "env": [
+            {
+              "name": "DATABASE_URL",
+              "secretRef": "database-url"
+            },
+            {
+              "name": "SYNC_DATABASE_URL",
+              "secretRef": "sync-database-url"
+            },
+            {
+              "name": "SECRET_KEY",
+              "secretRef": "secret-key"
+            },
+            {
+              "name": "BOT_TOKEN",
+              "secretRef": "bot-token"
+            },
+            {
+              "name": "MANAGER_TG_ID",
+              "value": "201374791"
+            },
+            {
+              "name": "OPENAI_API_KEY",
+              "secretRef": "openai-api-key"
+            },
+            {
+              "name": "SENTRY_DSN",
+              "value": "https://b20008725df5d5d7d7bf8a3216e0f6c2@sentry.adarasoft.com/37"
+            },
+            {
+              "name": "SENTRY_ENVIRONMENT",
+              "value": "production"
+            },
+            {
+              "name": "SENTRY_TRACES_SAMPLE_RATE",
+              "value": "0.1"
+            }
+          ],
+          "image": "acrtrackerarturprod.azurecr.io/tracker-artur/backend@sha256:4c71399089c9adf63530e298619d0c61360e8ddc0124988d1457894b2c45c603",
+          "imageType": "ContainerImage",
+          "name": "bot",
+          "resources": {
+            "cpu": 0.25,
+            "ephemeralStorage": "1Gi",
+            "memory": "0.5Gi"
+          }
+        }
+      ],
+      "customMetricsSettings": null,
+      "initContainers": null,
+      "revisionSuffix": "",
+      "scale": {
+        "cooldownPeriod": 300,
+        "maxReplicas": 1,
+        "minReplicas": 1,
+        "pollingInterval": 30,
+        "rules": null
+      },
+      "serviceBinds": null,
+      "terminationGracePeriodSeconds": null,
+      "volumes": null
+    },
+    "workloadProfileName": "Consumption"
+  },
+  "resourceGroup": "rg-tracker-artur-prod-neu",
+  "systemData": {
+    "createdAt": "2026-05-31T07:28:47.7645059",
+    "createdBy": "bronxtc52@gmail.com",
+    "createdByType": "User",
+    "lastModifiedAt": "2026-06-02T18:14:51.2524334",
+    "lastModifiedBy": "bronxtc52@gmail.com",
+    "lastModifiedByType": "User"
+  },
+  "tags": {
+    "env": "prod",
+    "owner": "bronxtc52",
+    "project": "tracker_artur"
+  },
+  "type": "Microsoft.App/containerApps"
+}
