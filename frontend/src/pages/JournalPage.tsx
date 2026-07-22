@@ -16,10 +16,10 @@ export function JournalPage() {
 
   return (
     <div>
-      <PageHeader title="Журнал ответов" sub={`${rows.length} записей`}>
+      <PageHeader title="Хариултын бүртгэл" sub={`${rows.length} бичлэг`}>
         <a href="/api/answers/export?format=xlsx"
           className="inline-flex items-center gap-1.5 font-medium rounded-lg transition-all cursor-pointer border text-[13px] px-3 py-1 bg-accent text-white border-accent hover:opacity-85">
-          Экспорт Excel
+          Excel татах
         </a>
       </PageHeader>
 
@@ -27,20 +27,20 @@ export function JournalPage() {
         <div className="px-5 py-3.5 border-b border-border flex gap-3 flex-wrap items-center">
           <select value={empFilter} onChange={(e) => setEmpFilter(e.target.value)}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">
-            <option value="">Все сотрудники</option>
+            <option value="">Бүх ажилтан</option>
             {employees.map((e: any) => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
-          <div className="ml-auto text-[13px] text-muted">{rows.length} записей</div>
+          <div className="ml-auto text-[13px] text-muted">{rows.length} бичлэг</div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse min-w-[700px]">
             <thead>
               <tr className="bg-surface2">
-                {['Сотрудник', 'Дата', 'Вопросы / Ответы', 'Статус'].map((h) => (
+                {['Ажилтан', 'Огноо', 'Асуулт / Хариулт', 'Төлөв'].map((h) => (
                   <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted border-b border-border whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -57,14 +57,14 @@ export function JournalPage() {
                   </td>
                   <td className="px-4 py-2.5">
                     <Badge color={r.status === 'completed' ? 'green' : r.status === 'missed' ? 'red' : 'yellow'}>
-                      {r.status === 'completed' ? 'Заполнен' : r.status === 'missed' ? 'Пропущен' : 'Частично'}
+                      {r.status === 'completed' ? 'Бөглөсөн' : r.status === 'missed' ? 'Алгассан' : 'Хэсэгчлэн'}
                     </Badge>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {rows.length === 0 && <div className="px-5 py-8 text-center text-muted">Нет данных</div>}
+          {rows.length === 0 && <div className="px-5 py-8 text-center text-muted">Мэдээлэл алга</div>}
         </div>
       </Card>
     </div>

@@ -92,7 +92,7 @@ async def _enqueue_assignment(db: AsyncSession, task: Task, actor_tg: Optional[s
         return  # сам себе не шлём
     ms = (await db.execute(select(ManagerSettings))).scalars().first()
     policy = load_policy(ms)
-    nb = next_allowed(datetime.now(timezone.utc), assignee.timezone or "Europe/Moscow", policy)
+    nb = next_allowed(datetime.now(timezone.utc), assignee.timezone or "Asia/Ulaanbaatar", policy)
     payload = {
         "title": task.title,
         "deadline_iso": task.deadline_at.astimezone(timezone.utc).isoformat() if task.deadline_at else None,
@@ -228,7 +228,7 @@ async def miniapp_me(db: AsyncSession = Depends(get_db), x_telegram_init_data: O
     emp, is_manager = await _miniapp_actor(db, x_telegram_init_data)
     return {
         "employee_id": emp.id if emp else None,
-        "name": emp.name if emp else "Руководитель",
+        "name": emp.name if emp else "Удирдлага",
         "is_manager": is_manager,
     }
 

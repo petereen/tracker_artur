@@ -24,22 +24,22 @@ _PRIORITY_EMOJI = {1: "🔴", 2: "🟡", 3: "🟢"}
 
 def _now_tz(tz: str | None) -> datetime:
     try:
-        zone = pytz.timezone(tz or "Europe/Moscow")
+        zone = pytz.timezone(tz or "Asia/Ulaanbaatar")
     except Exception:
-        zone = pytz.timezone("Europe/Moscow")
+        zone = pytz.timezone("Asia/Ulaanbaatar")
     return datetime.now(zone)
 
 
 def _fmt_deadline(dt: datetime | None) -> str:
     if not dt:
-        return "без срока"
+        return "Хугацаагүй"
     return dt.astimezone(timezone.utc).strftime("%d.%m %H:%M UTC")
 
 
 def _fmt_task_line(t: dict, *, with_assignee: bool = False) -> str:
     em = _PRIORITY_EMOJI.get(t["priority"], "🟡")
     who = f" → {t['assignee_name']}" if with_assignee and t.get("assignee_name") else ""
-    overdue = " ⚠️просрочено" if t["status"] == "overdue" else ""
+    overdue = " ⚠️хугацаа хэтэрсэн" if t["status"] == "overdue" else ""
     return f"{em} #{t['id']} {t['title']}{who} — {_fmt_deadline(t['deadline_at'])}{overdue}"
 
 
@@ -50,24 +50,24 @@ async def _create_task_from_text(
 ) -> None:
     """Парсит фразу, резолвит исполнителя, создаёт задачу, планирует напоминания и
     уведомляет исполнителя. Используется и /task, и голосовым вводом."""
-    tz = employee.timezone if employee else "Europe/Moscow"
+    tz = employee.timezone if employee else "Asia/Ulaanbaatar"
     parsed = parse_task_text(text, now=_now_tz(tz), tz=tz)
 
     assignee_id = None
-    assignee_label = "тебе"
+    assignee_label = "та"
     if parsed.assignee_username:
         target = task_service.resolve_employee_by_username(parsed.assignee_username)
         if not target:
-            await message.answer(f"❌ Не нашёл сотрудника @{parsed.assignee_username}. Проверь username.")
+            await message.answer(f"❌ @{parsed.assignee_username} хэрэглэгчтэй ажилтан олдсонгүй. Username-ийг шалгана уу.")
             return
         if not is_manager and (not employee or target.id != employee.id):
-            await message.answer("❌ Назначать задачи другим может только руководитель.")
+            await message.answer("❌ Бусдад даалгавар өгөх эрх зөвхөн удирдлагад бий.")
             return
         assignee_id = target.id
         assignee_label = target.name
     else:
         if not employee:
-            await message.answer("❌ Укажи исполнителя через @username (ты не зарегистрирован как сотрудник).")
+            await message.answer("❌ Гүйцэтгэгчийг @username-аар заана уу. Та ажилтнаар бүртгэгдээгүй байна.")
             return
         assignee_id = employee.id
 
@@ -85,11 +85,11 @@ async def _create_task_from_text(
         log.exception("Не удалось запланировать напоминания task=%s", task["id"])
 
     await message.answer(
-        f"✅ Задача создана: <b>#{task['id']}</b>\n"
+        f"✅ Даалгавар үүслээ: <b>#{task['id']}</b>\n"
         f"«{task['title']}»\n"
-        f"Исполнитель: {assignee_label}\n"
-        f"Приоритет: {_PRIORITY_EMOJI.get(task['priority'], '🟡')}\n"
-        f"Дедлайн: <b>{_fmt_deadline(task['deadline_at'])}</b>",
+        f"Гүйцэтгэгч: {assignee_label}\n"
+        f"Тэргүүлэх зэрэг: {_PRIORITY_EMOJI.get(task['priority'], '🟡')}\n"
+        f"Хугацаа: <b>{_fmt_deadline(task['deadline_at'])}</b>",
         parse_mode="HTML",
         reply_markup=task_actions_kb(task["id"]),
     )
@@ -106,7 +106,7 @@ def _enqueue_assignment_bot(task: dict, actor_tg: str | None) -> None:
     if not task.get("assignee_tg") or str(task["assignee_tg"]) == str(actor_tg or ""):
         return
     policy = load_policy(get_manager_settings())
-    nb = next_allowed(datetime.now(timezone.utc), task.get("assignee_tz") or "Europe/Moscow", policy)
+    nb = next_allowed(datetime.now(timezone.utc), task.get("assignee_tz") or "Asia/Ulaanbaatar", policy)
     task_service.enqueue_notification(
         task_id=task["id"], recipient_tg=task["assignee_tg"], kind="task_assigned",
         payload={"title": task["title"], "deadline_iso": _iso(task["deadline_at"])},
@@ -119,12 +119,12 @@ async def cmd_task(message: Message, command: CommandObject, employee=None, is_m
     text = (command.args or "").strip()
     if not text:
         await message.answer(
-            "📝 <b>Поставить задачу</b>\n\n"
-            "Формат: <code>/task [@исполнитель] что сделать [когда]</code>\n"
-            "Примеры:\n"
-            "• <code>/task позвонить клиенту завтра в 15:00</code>\n"
-            "• <code>/task @ivan подготовить отчёт к пятнице, срочно</code>\n\n"
-            "🎙 Можно надиктовать голосовым.",
+            "📝 <b>Даалгавар үүсгэх</b>\n\n"
+            "Хэлбэр: <code>/task [@гүйцэтгэгч] юу хийх [хэзээ]</code>\n"
+            "Жишээ:\n"
+            "• <code>/task харилцагч руу маргааш 15:00-д залгах</code>\n"
+            "• <code>/task @bat баасан гарагт тайлан бэлдэх, яаралтай</code>\n\n"
+            "🎙 Мөн дуу хоолойгоор хэлж болно.",
             parse_mode="HTML",
         )
         return
@@ -143,21 +143,21 @@ def _roster() -> list[dict]:
 
 def _draft_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Поставить", callback_data="taskdraft:confirm"),
-        InlineKeyboardButton(text="✏️ Изменить", callback_data="taskdraft:edit"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data="taskdraft:cancel"),
+        InlineKeyboardButton(text="✅ Үүсгэх", callback_data="taskdraft:confirm"),
+        InlineKeyboardButton(text="✏️ Засах", callback_data="taskdraft:edit"),
+        InlineKeyboardButton(text="❌ Цуцлах", callback_data="taskdraft:cancel"),
     ]])
 
 
 async def _show_draft(message: Message, draft: dict) -> None:
     desc = f"\n📝 {draft['description']}" if draft.get("description") else ""
     await message.answer(
-        f"🤖 <b>Черновик задачи</b>\n\n"
+        f"🤖 <b>Даалгаврын ноорог</b>\n\n"
         f"<b>{draft['title']}</b>{desc}\n"
-        f"👤 Исполнитель: <b>{draft.get('assignee_name') or '—'}</b>\n"
-        f"{_PRIORITY_EMOJI.get(draft.get('priority', 2), '🟡')} Приоритет: {draft.get('priority', 2)}\n"
-        f"🕒 Дедлайн: <b>{_fmt_deadline(draft.get('deadline_at'))}</b>\n\n"
-        f"Поставить задачу?",
+        f"👤 Гүйцэтгэгч: <b>{draft.get('assignee_name') or '—'}</b>\n"
+        f"{_PRIORITY_EMOJI.get(draft.get('priority', 2), '🟡')} Тэргүүлэх зэрэг: {draft.get('priority', 2)}\n"
+        f"🕒 Хугацаа: <b>{_fmt_deadline(draft.get('deadline_at'))}</b>\n\n"
+        f"Даалгаврыг үүсгэх үү?",
         parse_mode="HTML", reply_markup=_draft_kb(),
     )
 
@@ -179,11 +179,11 @@ async def _ai_intake(message: Message, state: FSMContext, text: str, *, employee
         )
     else:
         self_emp = None
-    tz = (self_emp.get("timezone") if self_emp else None) or "Europe/Moscow"
+    tz = (self_emp.get("timezone") if self_emp else None) or "Asia/Ulaanbaatar"
 
     roster = _roster()
     if self_emp and not any(r["id"] == self_emp["id"] for r in roster):
-        roster.append({"id": self_emp["id"], "name": f"{self_emp['name']} (это вы)", "username": self_emp.get("telegram_username")})
+        roster.append({"id": self_emp["id"], "name": f"{self_emp['name']} (та өөрөө)", "username": self_emp.get("telegram_username")})
 
     structured = None
     if task_ai.ai_enabled():
@@ -205,14 +205,14 @@ async def _ai_intake(message: Message, state: FSMContext, text: str, *, employee
     if not assignee_id:
         others = [r for r in roster if not self_emp or r["id"] != self_emp["id"]]
         if not others:
-            await message.answer("👥 Пока некому делегировать. Скажи «поставь задачу мне» — поставлю на тебя, либо добавь сотрудников в админке.")
+            await message.answer("👥 Одоогоор даалгавар өгөх өөр хүн алга. «Надад даалгавар өг» гэж бичих эсвэл админ самбараас ажилтан нэмнэ үү.")
         else:
-            await message.answer("🤔 Не понял, кому поставить задачу. Укажи исполнителя (@username или имя).")
+            await message.answer("🤔 Хэнд даалгавар өгөхийг ойлгосонгүй. Гүйцэтгэгчийн @username эсвэл нэрийг бичнэ үү.")
         return
 
     name = next((e["name"] for e in roster if e["id"] == assignee_id), None)
     if name:
-        name = name.replace(" (это вы)", "")
+        name = name.replace(" (та өөрөө)", "")
     draft = {
         "title": structured["title"], "description": structured.get("description"),
         "assignee_id": assignee_id, "assignee_name": name,
@@ -227,21 +227,21 @@ async def _ai_intake(message: Message, state: FSMContext, text: str, *, employee
 @router.message(F.voice)
 async def cmd_voice_task(message: Message, state: FSMContext, employee=None, is_manager: bool = False, tg_id: str | None = None):
     if not voice_service.transcription_enabled():
-        await message.answer("🎙 Голосовые задачи пока не подключены. Напиши текстом: <code>/task …</code>", parse_mode="HTML")
+        await message.answer("🎙 Дуу хоолойгоор даалгавар үүсгэх боломж идэвхгүй байна. Текстээр бичнэ үү: <code>/task …</code>", parse_mode="HTML")
         return
-    await message.answer("🎙 Распознаю голосовое…")
+    await message.answer("🎙 Дуу хоолойг таньж байна…")
     try:
         buf = await message.bot.download(message.voice)
         audio = buf.read()
     except Exception:  # noqa: BLE001
         log.exception("Не удалось скачать голосовое")
-        await message.answer("❌ Не смог получить аудио. Напиши задачу текстом: <code>/task …</code>", parse_mode="HTML")
+        await message.answer("❌ Аудиог авч чадсангүй. Даалгавраа текстээр бичнэ үү: <code>/task …</code>", parse_mode="HTML")
         return
     text = await voice_service.transcribe(audio)
     if not text:
-        await message.answer("❌ Не разобрал голосовое. Напиши задачу текстом: <code>/task …</code>", parse_mode="HTML")
+        await message.answer("❌ Дуу хоолойг ойлгосонгүй. Даалгавраа текстээр бичнэ үү: <code>/task …</code>", parse_mode="HTML")
         return
-    await message.answer(f"📝 Распознано: «{text}»")
+    await message.answer(f"📝 Танигдсан текст: «{text}»")
     await _ai_intake(message, state, text, employee=employee, is_manager=is_manager, tg_id=tg_id)
 
 
@@ -258,7 +258,7 @@ async def cb_draft_confirm(cb: CallbackQuery, state: FSMContext, tg_id: str | No
     d = (await state.get_data()).get("draft")
     await state.clear()
     if not d:
-        await cb.answer("Черновик истёк", show_alert=True)
+        await cb.answer("Ноорогийн хугацаа дууссан", show_alert=True)
         return
     task = task_service.create_task(
         title=d["title"], assignee_id=d["assignee_id"],
@@ -271,23 +271,23 @@ async def cb_draft_confirm(cb: CallbackQuery, state: FSMContext, tg_id: str | No
         log.exception("draft: не удалось запланировать напоминания task=%s", task["id"])
     _enqueue_assignment_bot(task, tg_id)
     await cb.message.answer(
-        f"✅ Задача <b>#{task['id']}</b> поставлена: «{task['title']}» → {d.get('assignee_name') or '—'}",
+        f"✅ <b>#{task['id']}</b> даалгавар үүслээ: «{task['title']}» → {d.get('assignee_name') or '—'}",
         parse_mode="HTML", reply_markup=task_actions_kb(task["id"]),
     )
-    await cb.answer("Готово ✅")
+    await cb.answer("Боллоо ✅")
 
 
 @router.callback_query(F.data == "taskdraft:edit", TaskDraft.confirming)
 async def cb_draft_edit(cb: CallbackQuery, state: FSMContext):
     await state.clear()
-    await cb.message.answer("✏️ Ок, пришли задачу заново — текстом или голосом.")
+    await cb.message.answer("✏️ За, даалгавраа текст эсвэл дуу хоолойгоор дахин илгээнэ үү.")
     await cb.answer()
 
 
 @router.callback_query(F.data == "taskdraft:cancel", TaskDraft.confirming)
 async def cb_draft_cancel(cb: CallbackQuery, state: FSMContext):
     await state.clear()
-    await cb.message.answer("❌ Отменено.")
+    await cb.message.answer("❌ Цуцлагдлаа.")
     await cb.answer()
 
 
@@ -296,15 +296,15 @@ async def cb_draft_cancel(cb: CallbackQuery, state: FSMContext):
 @router.message(Command("mytasks"))
 async def cmd_mytasks(message: Message, employee=None):
     if not employee:
-        await message.answer("❌ Ты не зарегистрирован как сотрудник.")
+        await message.answer("❌ Та ажилтнаар бүртгэгдээгүй байна.")
         return
     tasks = task_service.list_assigned_to(employee.id, only_active=True)
     if not tasks:
-        await message.answer("✨ У тебя нет активных задач.")
+        await message.answer("✨ Танд идэвхтэй даалгавар алга.")
         return
-    lines = [f"📋 <b>Твои задачи ({len(tasks)})</b>\n"]
+    lines = [f"📋 <b>Миний даалгаврууд ({len(tasks)})</b>\n"]
     lines += [_fmt_task_line(t) for t in tasks]
-    lines.append("\nОтметить: /done &lt;id&gt; · Перенести: /snooze &lt;id&gt; &lt;время&gt;")
+    lines.append("\nДуусгах: /done &lt;id&gt; · Хугацаа хойшлуулах: /snooze &lt;id&gt; &lt;цаг&gt;")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -316,9 +316,9 @@ async def cmd_assigned(message: Message, employee=None, tg_id: str | None = None
         employee_id=employee.id if employee else None, tg_id=tg_id, only_active=True
     )
     if not tasks:
-        await message.answer("📭 Ты пока не ставил активных задач другим.")
+        await message.answer("📭 Та бусдад идэвхтэй даалгавар өгөөгүй байна.")
         return
-    lines = [f"📤 <b>Поставленные тобой ({len(tasks)})</b>\n"]
+    lines = [f"📤 <b>Миний өгсөн даалгаврууд ({len(tasks)})</b>\n"]
     lines += [_fmt_task_line(t, with_assignee=True) for t in tasks]
     await message.answer("\n".join(lines), parse_mode="HTML")
 
@@ -329,7 +329,7 @@ async def cmd_assigned(message: Message, employee=None, tg_id: str | None = None
 async def cmd_done(message: Message, command: CommandObject, employee=None, is_manager: bool = False, tg_id: str | None = None):
     arg = (command.args or "").strip()
     if not arg.isdigit():
-        await message.answer("Формат: <code>/done &lt;id&gt;</code>", parse_mode="HTML")
+        await message.answer("Хэлбэр: <code>/done &lt;id&gt;</code>", parse_mode="HTML")
         return
     await _complete_task(message, int(arg), employee, is_manager, tg_id)
 
@@ -337,14 +337,14 @@ async def cmd_done(message: Message, command: CommandObject, employee=None, is_m
 async def _complete_task(target, task_id: int, employee, is_manager: bool, tg_id: str | None):
     task = task_service.get_task(task_id)
     if not task:
-        await target.answer("❌ Задача не найдена.")
+        await target.answer("❌ Даалгавар олдсонгүй.")
         return
     if not task_service.can_modify(task, employee_id=employee.id if employee else None, tg_id=tg_id, is_manager=is_manager):
-        await target.answer("❌ Нет прав на эту задачу.")
+        await target.answer("❌ Энэ даалгаварт хандах эрх алга.")
         return
     task_service.set_status(task_id, "done", by_employee_id=employee.id if employee else None)
     reminder_service.cancel_task_jobs(task_id)
-    await target.answer(f"✅ Задача #{task_id} «{task['title']}» отмечена выполненной.")
+    await target.answer(f"✅ #{task_id} «{task['title']}» даалгаврыг дууссанд тэмдэглэлээ.")
 
 
 # ─── /snooze <id> <время> ────────────────────────────────────────────────────────
@@ -353,24 +353,24 @@ async def _complete_task(target, task_id: int, employee, is_manager: bool, tg_id
 async def cmd_snooze(message: Message, command: CommandObject, employee=None, is_manager: bool = False, tg_id: str | None = None):
     parts = (command.args or "").strip().split(maxsplit=1)
     if len(parts) < 2 or not parts[0].isdigit():
-        await message.answer("Формат: <code>/snooze &lt;id&gt; &lt;время&gt;</code>, напр. <code>/snooze 12 завтра 10:00</code>", parse_mode="HTML")
+        await message.answer("Хэлбэр: <code>/snooze &lt;id&gt; &lt;цаг&gt;</code>, жишээ нь <code>/snooze 12 маргааш 10:00</code>", parse_mode="HTML")
         return
     task_id = int(parts[0])
     task = task_service.get_task(task_id)
     if not task:
-        await message.answer("❌ Задача не найдена.")
+        await message.answer("❌ Даалгавар олдсонгүй.")
         return
     if not task_service.can_modify(task, employee_id=employee.id if employee else None, tg_id=tg_id, is_manager=is_manager):
-        await message.answer("❌ Нет прав на эту задачу.")
+        await message.answer("❌ Энэ даалгаварт хандах эрх алга.")
         return
-    tz = employee.timezone if employee else "Europe/Moscow"
+    tz = employee.timezone if employee else "Asia/Ulaanbaatar"
     new_dt = parse_when(parts[1], now=_now_tz(tz), tz=tz)
     if not new_dt:
-        await message.answer("❌ Не понял время. Примеры: «завтра 10:00», «через 2 дня», «в пятницу 18:00».")
+        await message.answer("❌ Хугацааг ойлгосонгүй. Жишээ: «маргааш 10:00», «2 хоногийн дараа», «баасан гарагт 18:00».")
         return
     updated = task_service.snooze(task_id, new_dt)
     reminder_service.schedule_task_reminders(updated)
-    await message.answer(f"⏰ Дедлайн #{task_id} перенесён на <b>{_fmt_deadline(new_dt)}</b>.", parse_mode="HTML")
+    await message.answer(f"⏰ #{task_id} даалгаврын хугацааг <b>{_fmt_deadline(new_dt)}</b> болгон хойшлууллаа.", parse_mode="HTML")
 
 
 # ─── /dashboard ──────────────────────────────────────────────────────────────────
@@ -380,16 +380,16 @@ async def cmd_dashboard(message: Message, employee=None, is_manager: bool = Fals
     if is_manager:
         groups = task_service.all_active_grouped_by_assignee()
         if not groups:
-            await message.answer("✨ Активных задач нет.")
+            await message.answer("✨ Идэвхтэй даалгавар алга.")
             return
         total = sum(len(v) for v in groups.values())
         overdue = sum(1 for v in groups.values() for t in v if t["status"] == "overdue")
-        lines = [f"👔 <b>Активные задачи ({total})</b>\n"]
+        lines = [f"👔 <b>Идэвхтэй даалгаврууд ({total})</b>\n"]
         for name, items in groups.items():
             lines.append(f"\n👤 <b>{name}</b> ({len(items)}):")
             lines += [f"  {_fmt_task_line(t)}" for t in items]
         if overdue:
-            lines.append(f"\n⚠️ Просрочено: {overdue}")
+            lines.append(f"\n⚠️ Хугацаа хэтэрсэн: {overdue}")
         await message.answer("\n".join(lines), parse_mode="HTML")
         return
 
@@ -398,9 +398,9 @@ async def cmd_dashboard(message: Message, employee=None, is_manager: bool = Fals
     created = task_service.list_created_by(
         employee_id=employee.id if employee else None, tg_id=tg_id, only_active=True
     )
-    lines = ["📊 <b>Твой дашборд</b>\n", f"\n📋 На тебе ({len(mine)}):"]
+    lines = ["📊 <b>Миний хянах самбар</b>\n", f"\n📋 Надад оноосон ({len(mine)}):"]
     lines += [f"  {_fmt_task_line(t)}" for t in mine] or ["  —"]
-    lines.append(f"\n📤 Поставил ({len(created)}):")
+    lines.append(f"\n📤 Миний өгсөн ({len(created)}):")
     lines += [f"  {_fmt_task_line(t, with_assignee=True)}" for t in created] or ["  —"]
     await message.answer("\n".join(lines), parse_mode="HTML")
 
@@ -411,7 +411,7 @@ async def cmd_dashboard(message: Message, employee=None, is_manager: bool = Fals
 async def cb_task_done(cb: CallbackQuery, employee=None, is_manager: bool = False, tg_id: str | None = None):
     task_id = int(cb.data.split(":")[2])
     await _complete_task(cb.message, task_id, employee, is_manager, tg_id)
-    await cb.answer("Готово ✅")
+    await cb.answer("Боллоо ✅")
 
 
 @router.callback_query(F.data.startswith("task:snooze:"))
@@ -420,10 +420,10 @@ async def cb_task_snooze(cb: CallbackQuery, employee=None, is_manager: bool = Fa
     task_id, mins = int(task_id_s), int(mins_s)
     task = task_service.get_task(task_id)
     if not task:
-        await cb.answer("Задача не найдена", show_alert=True)
+        await cb.answer("Даалгавар олдсонгүй", show_alert=True)
         return
     if not task_service.can_modify(task, employee_id=employee.id if employee else None, tg_id=tg_id, is_manager=is_manager):
-        await cb.answer("Нет прав", show_alert=True)
+        await cb.answer("Хандах эрх алга", show_alert=True)
         return
     from datetime import timedelta
 
@@ -433,4 +433,4 @@ async def cb_task_snooze(cb: CallbackQuery, employee=None, is_manager: bool = Fa
     new_dt = base + timedelta(minutes=mins)
     updated = task_service.snooze(task_id, new_dt)
     reminder_service.schedule_task_reminders(updated)
-    await cb.answer(f"Перенёс на {_fmt_deadline(new_dt)}")
+    await cb.answer(f"Хугацааг {_fmt_deadline(new_dt)} болгон хойшлууллаа")

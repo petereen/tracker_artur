@@ -17,13 +17,11 @@ export function Sidebar({ active, onNav }: { active: string; onNav: (id: string)
   return (
     <div className="w-[220px] bg-surface border-r border-border flex flex-col flex-shrink-0 h-screen sticky top-0">
       <div className="px-5 pt-5 pb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-base font-bold text-white">T</div>
-          <div>
-            <div className="text-sm font-semibold leading-tight">Даалгавар</div>
-            <div className="text-[11px] text-muted">хянах систем</div>
-          </div>
-        </div>
+        <img
+          src="/oyuns-aio-logo.png"
+          alt="OYUNS All-in-One"
+          className="w-full h-auto max-h-9 object-contain object-left"
+        />
       </div>
       <div className="h-px bg-border mx-4 mb-3" />
       <nav className="flex-1 px-2.5 overflow-y-auto">

@@ -2,18 +2,18 @@ import { useState, useEffect } from 'react'
 import { Btn, Card, PageHeader } from '../components/ui'
 import { useOnboardingTemplate, useUpdateOnboardingTemplate } from '../api/hooks'
 
-const DEFAULT = `Привет, {имя}! 👋
+const DEFAULT = `Сайн байна уу, {нэр}! 👋
 
-Я — бот «Трекер и постановщик задач» компании.
+Би компанийн «Даалгавар хянагч» бот байна.
 
-Каждый день в {время} я буду присылать тебе короткий опрос из 5 вопросов — он займёт буквально 2–3 минуты.
+Өдөр бүр {цаг}-т танд 5 асуулттай богино асуулга илгээнэ. Бөглөхөд ердөө 2–3 минут зарцуулна.
 
-Что ты получаешь:
-📊 Видишь свою динамику — /my_stats
-🔥 Следишь за серией заполнений
-🏆 Смотришь на рейтинг команды — /leaderboard
+Танд боломжтой зүйлс:
+📊 Өөрийн статистикаа харах — /my_stats
+🔥 Бөглөлтийн цувралаа хянах
+🏆 Багийн чансааг харах — /leaderboard
 
-Нажми /start, чтобы начать!`
+/start командыг дарж эхлээрэй!`
 
 export function OnboardingPage() {
   const { data } = useOnboardingTemplate()
@@ -24,41 +24,41 @@ export function OnboardingPage() {
 
   useEffect(() => { if (data?.message) setMsg(data.message) }, [data])
 
-  const preview = msg.replace('{имя}', 'Иван').replace('{время}', '17:30')
+  const preview = msg.replace('{нэр}', 'Бат').replace('{цаг}', '17:30')
 
   return (
     <div>
-      <PageHeader title="Онбординг" sub="Шаблон приветствия и мягкий старт" />
+      <PageHeader title="Танилцуулга" sub="Мэндчилгээний загвар ба зөөлөн эхлэл" />
       <div className="grid grid-cols-2 gap-4">
         <div className="flex flex-col gap-4">
           <Card>
-            <div className="font-semibold text-[15px] mb-1">Приветственное сообщение</div>
-            <div className="text-xs text-muted mb-3.5">Отправляется при первом /start. Переменные: {'{имя}'}, {'{время}'}</div>
+            <div className="font-semibold text-[15px] mb-1">Мэндчилгээний мессеж</div>
+            <div className="text-xs text-muted mb-3.5">Эхний /start дээр илгээнэ. Хувьсагч: {'{нэр}'}, {'{цаг}'}</div>
             <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={14}
               className="w-full bg-surface2 border border-border rounded-lg p-3 text-text font-mono text-xs leading-relaxed resize-y outline-none focus:border-accent" />
             <div className="flex gap-2 mt-3">
-              <Btn onClick={() => setMsg(DEFAULT)}>Сбросить</Btn>
-              <Btn variant="primary" onClick={() => save.mutate({ message: msg })} disabled={save.isPending}>Сохранить шаблон</Btn>
+              <Btn onClick={() => setMsg(DEFAULT)}>Сэргээх</Btn>
+              <Btn variant="primary" onClick={() => save.mutate({ message: msg })} disabled={save.isPending}>Загвар хадгалах</Btn>
             </div>
           </Card>
 
           <Card>
-            <div className="font-semibold text-[15px] mb-1">Мягкий режим</div>
-            <div className="text-xs text-muted mb-3.5">Первые N недель — напоминания только сотруднику, без алертов руководителю</div>
+            <div className="font-semibold text-[15px] mb-1">Зөөлөн горим</div>
+            <div className="text-xs text-muted mb-3.5">Эхний N долоо хоногт сануулгыг зөвхөн ажилтанд илгээнэ</div>
             <div className="flex items-center gap-3">
               <input type="range" min={0} max={4} value={softWeeks} onChange={(e) => setSoftWeeks(+e.target.value)} className="flex-1 accent-accent" />
-              <span className="font-mono font-semibold text-accent min-w-[60px]">{softWeeks === 0 ? 'Выкл.' : `${softWeeks} нед.`}</span>
+              <span className="font-mono font-semibold text-accent min-w-[60px]">{softWeeks === 0 ? 'Унтраалттай' : `${softWeeks} долоо хоног`}</span>
             </div>
           </Card>
         </div>
 
         <Card>
-          <div className="font-semibold text-[15px] mb-4">Предпросмотр в Telegram</div>
+          <div className="font-semibold text-[15px] mb-4">Telegram урьдчилан харах</div>
           <div className="rounded-xl p-5" style={{ background: '#17212B', fontFamily: 'system-ui' }}>
             <div className="flex items-center gap-2.5 mb-4">
               <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-lg">🤖</div>
               <div>
-                <div className="font-semibold text-white text-[13px]">Трекер и постановщик задач</div>
+                <div className="font-semibold text-white text-[13px]">Даалгавар хянагч</div>
                 <div className="text-[11px]" style={{ color: '#8899A6' }}>бот</div>
               </div>
             </div>

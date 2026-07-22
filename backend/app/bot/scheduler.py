@@ -10,8 +10,9 @@ from app.core.config import settings
 
 log = logging.getLogger(__name__)
 
+DEFAULT_TIMEZONE = pytz.timezone("Asia/Ulaanbaatar")
 jobstores = {"default": SQLAlchemyJobStore(url=settings.SYNC_DATABASE_URL)}
-scheduler = AsyncIOScheduler(jobstores=jobstores)
+scheduler = AsyncIOScheduler(jobstores=jobstores, timezone=DEFAULT_TIMEZONE)
 
 
 def _make_bot():
@@ -42,7 +43,7 @@ def rebuild_jobs():
         try:
             tz = pytz.timezone(emp.timezone)
         except Exception:
-            tz = pytz.timezone("Europe/Moscow")
+            tz = DEFAULT_TIMEZONE
 
         # Дайджесты по задачам — для ВСЕХ активных сотрудников (не зависят от опросов).
         scheduler.add_job(send_employee_morning_digest, "cron",
@@ -85,19 +86,22 @@ def rebuild_jobs():
         st: time = manager_settings.summary_time or time(9, 0)
         scheduler.add_job(morning_summary, "cron",
             hour=st.hour, minute=st.minute,
+            timezone=DEFAULT_TIMEZONE,
             id="morning_summary", replace_existing=True)
 
         wt: time = manager_settings.weekly_summary_time or time(17, 0)
         wd = manager_settings.weekly_summary_day or 5
         scheduler.add_job(morning_summary, "cron",
             day_of_week=wd - 1, hour=wt.hour, minute=wt.minute,
+            timezone=DEFAULT_TIMEZONE,
             id="weekly_summary", replace_existing=True)
 
-    # Менеджерский дайджест по задачам (утро). tz менеджера неизвестен — берём tz сервера/UTC.
+    # Manager task digest uses the application's default timezone.
     md = policy.morning_digest
     from app.services.digest_service import send_manager_task_digest
     scheduler.add_job(send_manager_task_digest, "cron",
         hour=md.hour, minute=md.minute, day_of_week=digest_dow,
+        timezone=DEFAULT_TIMEZONE,
         id="task_manager_digest", replace_existing=True)
 
     # Реконсайл напоминаний + дренаж outbox (догоняют задачи/уведомления из веб/Mini App).
@@ -182,11 +186,11 @@ async def morning_summary():
         return
 
     data = get_yesterday_summary()
-    lines = [f"📊 <b>Сводка за {data['date']}</b>\n"]
+    lines = [f"📊 <b>{data['date']}-ны хураангуй</b>\n"]
     for q_text, val in data["totals"].items():
         lines.append(f"• {q_text[:40]}: <b>{val}</b>")
     if data["missed"]:
-        lines.append(f"\n⚠️ Не заполнили: {', '.join(data['missed'])}")
+        lines.append(f"\n⚠️ Бөглөөгүй: {', '.join(data['missed'])}")
 
     bot = _make_bot()
     try:

@@ -3,24 +3,24 @@ import { useMiniMe, useMiniTasks, useMiniCreateTask, useMiniUpdateTask, MiniTask
 
 const PRIORITY_BAR: Record<number, string> = { 1: 'bg-red-500', 2: 'bg-amber-400', 3: 'bg-green-500' }
 
-// Вертикальные «колонки» канбана (секции сверху вниз)
+// Канбанын босоо хэсгүүд.
 const COLUMNS: { key: string; label: string; icon: string; accent: string; dot: string }[] = [
-  { key: 'overdue', label: 'Просрочено', icon: '🔴', accent: 'text-red-300', dot: 'bg-red-500' },
-  { key: 'open', label: 'Открыто', icon: '📥', accent: 'text-sky-300', dot: 'bg-sky-500' },
-  { key: 'in_progress', label: 'В работе', icon: '🔧', accent: 'text-amber-300', dot: 'bg-amber-400' },
-  { key: 'done', label: 'Завершено', icon: '✅', accent: 'text-emerald-300', dot: 'bg-emerald-500' },
+  { key: 'overdue', label: 'Хугацаа хэтэрсэн', icon: '🔴', accent: 'text-red-300', dot: 'bg-red-500' },
+  { key: 'open', label: 'Нээлттэй', icon: '📥', accent: 'text-sky-300', dot: 'bg-sky-500' },
+  { key: 'in_progress', label: 'Хийгдэж байгаа', icon: '🔧', accent: 'text-amber-300', dot: 'bg-amber-400' },
+  { key: 'done', label: 'Дууссан', icon: '✅', accent: 'text-emerald-300', dot: 'bg-emerald-500' },
 ]
 
 function formatDeadline(dt: string | null): string {
   if (!dt) return ''
-  return new Date(dt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  return new Date(dt).toLocaleString('mn-MN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 function isPast(dt: string | null): boolean {
   return !!dt && new Date(dt) < new Date()
 }
 
-/** Колонка задачи: done/cancelled как есть; просроченные активные — в «Просрочено». */
+/** Дууссан, цуцлагдсан төлөвийг хэвээр үлдээнэ; хугацаа хэтэрснийг тусад нь харуулна. */
 function columnOf(t: MiniTaskOut): string {
   if (t.status === 'done') return 'done'
   if (t.status === 'cancelled') return 'cancelled'
@@ -57,23 +57,23 @@ function TaskCard({ task, onStatus, onPostpone, busy }: {
         {done ? (
           <button disabled={busy} onClick={() => onStatus(task.id, 'in_progress')}
             className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-gray-700 text-gray-200 active:opacity-70 disabled:opacity-40">
-            ↩ Вернуть
+            ↩ Буцаах
           </button>
         ) : (
           <>
             {(task.status === 'open' || task.status === 'overdue') && (
               <button disabled={busy} onClick={() => onStatus(task.id, 'in_progress')}
                 className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-amber-600/80 text-white active:opacity-70 disabled:opacity-40">
-                ▶ В работу
+                ▶ Эхлүүлэх
               </button>
             )}
             <button disabled={busy} onClick={() => onStatus(task.id, 'done')}
               className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-emerald-600 text-white active:opacity-70 disabled:opacity-40">
-              ✓ Завершить
+              ✓ Дуусгах
             </button>
             <button disabled={busy} onClick={() => onPostpone(task.id)}
               className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-gray-700 text-gray-300 active:opacity-70 disabled:opacity-40">
-              ⏰ +1д
+              ⏰ +1 өдөр
             </button>
           </>
         )}
@@ -114,14 +114,14 @@ export function TgMiniAppPage() {
   }, [tasks])
 
   if (initData === null) {
-    return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-gray-400 text-sm">Загрузка…</div>
+    return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-gray-400 text-sm">Ачаалж байна…</div>
   }
   if (initData === '') {
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center px-6 text-center">
         <div className="text-6xl mb-4">📱</div>
-        <div className="text-white text-xl font-semibold mb-2">Откройте через Telegram</div>
-        <div className="text-gray-400 text-sm">Это приложение работает только внутри Telegram.</div>
+        <div className="text-white text-xl font-semibold mb-2">Telegram-аар нээнэ үү</div>
+        <div className="text-gray-400 text-sm">Энэ апп зөвхөн Telegram дотор ажиллана.</div>
       </div>
     )
   }
@@ -150,12 +150,12 @@ export function TgMiniAppPage() {
   return (
     <div className="min-h-screen bg-gray-950 text-white pb-24">
       <div className="bg-gray-900/95 backdrop-blur border-b border-gray-800 px-4 py-3 sticky top-0 z-10">
-        <div className="text-[15px] font-semibold">Задачи</div>
-        {me && <div className="text-[11px] text-gray-400">{me.name}{me.is_manager ? ' · руководитель' : ''}</div>}
+        <div className="text-[15px] font-semibold">Даалгаврууд</div>
+        {me && <div className="text-[11px] text-gray-400">{me.name}{me.is_manager ? ' · удирдлага' : ''}</div>}
         {me?.is_manager && (
           <div className="flex gap-2 mt-2 overflow-x-auto -mx-1 px-1">
             {(['mine', 'assigned', 'created', 'all'] as TaskScope[]).map((s) => {
-              const labels: Record<TaskScope, string> = { mine: 'Мои', assigned: 'Назначено мной', created: 'Созданные', all: 'Все' }
+              const labels: Record<TaskScope, string> = { mine: 'Миний', assigned: 'Миний оноосон', created: 'Миний үүсгэсэн', all: 'Бүгд' }
               return (
                 <button key={s} onClick={() => setScope(s)}
                   className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap border ${scope === s ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-800 text-gray-400 border-gray-700'}`}>
@@ -169,11 +169,11 @@ export function TgMiniAppPage() {
 
       <div className="px-4 pt-3">
         {meQuery.isError && (
-          <div className="text-red-400 text-sm text-center py-8">Ошибка авторизации. Убедитесь, что вы зарегистрированы (или откройте через кнопку бота).</div>
+          <div className="text-red-400 text-sm text-center py-8">Нэвтрэхэд алдаа гарлаа. Та бүртгэлтэй эсэхээ шалгах эсвэл ботын товчоор нээнэ үү.</div>
         )}
-        {tasksQuery.isLoading && <div className="text-gray-400 text-sm text-center py-8">Загрузка задач…</div>}
+        {tasksQuery.isLoading && <div className="text-gray-400 text-sm text-center py-8">Даалгавруудыг ачаалж байна…</div>}
         {!tasksQuery.isLoading && !meQuery.isError && tasks.length === 0 && (
-          <div className="text-gray-500 text-sm text-center py-12">Пока нет задач. Нажмите «+», чтобы создать.</div>
+          <div className="text-gray-500 text-sm text-center py-12">Одоогоор даалгавар алга. «+» дээр дарж үүсгэнэ үү.</div>
         )}
 
         {!tasksQuery.isLoading && !meQuery.isError && tasks.length > 0 && COLUMNS.map((col) => {
@@ -192,7 +192,7 @@ export function TgMiniAppPage() {
               </button>
               {!isCollapsed && (
                 items.length === 0
-                  ? <div className="text-gray-600 text-[12px] py-1 pl-4">пусто</div>
+                  ? <div className="text-gray-600 text-[12px] py-1 pl-4">хоосон</div>
                   : items.map((t) => (
                       <TaskCard key={t.id} task={t} onStatus={handleStatus} onPostpone={handlePostpone} busy={busy} />
                     ))
@@ -203,61 +203,61 @@ export function TgMiniAppPage() {
       </div>
 
       <div className="px-4 pb-4 flex justify-center gap-3 text-[11px] text-gray-600">
-        <a href="/privacy" className="text-gray-500">Конфиденциальность</a>
-        <a href="/terms" className="text-gray-500">Условия</a>
+        <a href="/privacy" className="text-gray-500">Нууцлал</a>
+        <a href="/terms" className="text-gray-500">Нөхцөл</a>
       </div>
 
       {/* FAB */}
       <button
         onClick={() => setShowCreate(true)}
         className="fixed bottom-5 right-5 z-20 w-14 h-14 rounded-full bg-blue-600 text-white text-3xl leading-none shadow-lg shadow-blue-900/50 active:scale-95 flex items-center justify-center"
-        aria-label="Новая задача"
+        aria-label="Шинэ даалгавар"
       >+</button>
 
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={() => { setShowCreate(false); setForm(EMPTY_FORM) }}>
           <div className="bg-gray-900 border-t border-gray-700 rounded-t-2xl w-full p-5 pb-8" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <div className="text-[16px] font-semibold">Новая задача</div>
+              <div className="text-[16px] font-semibold">Шинэ даалгавар</div>
               <button onClick={() => { setShowCreate(false); setForm(EMPTY_FORM) }} className="text-gray-400 text-lg px-2">✕</button>
             </div>
             <div className="flex flex-col gap-3">
               <input
                 value={form.title}
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                placeholder="Название задачи *"
+                placeholder="Даалгаврын гарчиг *"
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-[14px] outline-none focus:border-blue-500"
               />
               <textarea
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                placeholder="Описание (необязательно)"
+                placeholder="Тайлбар (заавал биш)"
                 rows={2}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-[14px] outline-none focus:border-blue-500 resize-none"
               />
-              <label className="text-xs text-gray-400">Дедлайн</label>
+              <label className="text-xs text-gray-400">Хугацаа</label>
               <input
                 type="datetime-local"
                 value={form.deadline_at}
                 onChange={(e) => setForm((f) => ({ ...f, deadline_at: e.target.value }))}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-[14px] outline-none focus:border-blue-500"
               />
-              <label className="text-xs text-gray-400">Приоритет</label>
+              <label className="text-xs text-gray-400">Тэргүүлэх зэрэг</label>
               <select
                 value={form.priority}
                 onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white text-[14px] outline-none focus:border-blue-500"
               >
-                <option value="1">🔴 Высокий</option>
-                <option value="2">🟡 Средний</option>
-                <option value="3">🟢 Низкий</option>
+                <option value="1">🔴 Өндөр</option>
+                <option value="2">🟡 Дунд</option>
+                <option value="3">🟢 Бага</option>
               </select>
               <button
                 onClick={handleCreate}
                 disabled={!form.title.trim() || createTask.isPending}
                 className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold text-[15px] disabled:opacity-40 active:opacity-75 mt-1"
               >
-                {createTask.isPending ? 'Создание…' : 'Создать задачу'}
+                {createTask.isPending ? 'Үүсгэж байна…' : 'Даалгавар үүсгэх'}
               </button>
             </div>
           </div>

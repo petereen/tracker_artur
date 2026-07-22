@@ -66,8 +66,8 @@ export function useMiniCreateTask() {
   return useMutation({
     mutationFn: (d: { title: string; description?: string; assignee_id?: number; deadline_at?: string; priority: number }) =>
       miniApi.post('/miniapp/tasks', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['miniapp', 'tasks'] }); toast.success('Задача создана') },
-    onError: () => toast.error('Ошибка при создании'),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['miniapp', 'tasks'] }); toast.success('Даалгавар үүслээ') },
+    onError: () => toast.error('Үүсгэхэд алдаа гарлаа'),
   })
 }
 
@@ -77,6 +77,6 @@ export function useMiniUpdateTask() {
     mutationFn: ({ id, ...d }: { id: number; status?: string; deadline_at?: string }) =>
       miniApi.patch(`/miniapp/tasks/${id}`, d).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['miniapp', 'tasks'] }),
-    onError: () => toast.error('Ошибка при обновлении'),
+    onError: () => toast.error('Шинэчлэхэд алдаа гарлаа'),
   })
 }

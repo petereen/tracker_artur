@@ -50,3 +50,49 @@ def test_parse_when_relative():
 def test_title_fallback_not_empty():
     p = parse_task_text("@ivan", now=NOW)
     assert p.title  # не пустой даже если остался только username
+
+
+MNG = pytz.timezone("Asia/Ulaanbaatar")
+MONGOLIAN_NOW = MNG.localize(datetime(2026, 6, 1, 10, 0))  # Monday
+
+
+def test_parses_mongolian_relative_deadline_and_priority():
+    p = parse_task_text("@bat тайланг маргааш 15 цагт илгээ, яаралтай", now=MONGOLIAN_NOW, tz="Asia/Ulaanbaatar")
+    assert p.assignee_username == "bat"
+    assert p.priority == PRIORITY_URGENT
+    assert p.deadline_at is not None
+    assert p.deadline_at.hour == 15
+    assert p.deadline_at > MONGOLIAN_NOW
+    assert "тайланг" in p.title
+    assert "маргааш" not in p.title
+
+
+def test_parses_mongolian_weekday_and_relative_duration():
+    friday = parse_when("дараагийн баасан гарагт 14 цаг", now=MONGOLIAN_NOW, tz="Asia/Ulaanbaatar")
+    in_two_days = parse_when("2 хоногийн дараа", now=MONGOLIAN_NOW, tz="Asia/Ulaanbaatar")
+    assert friday is not None
+    assert friday.weekday() == 4
+    assert friday.hour == 14
+    assert in_two_days is not None
+    assert in_two_days > MONGOLIAN_NOW
+
+
+def test_parses_mongolian_time_postposition_and_cleans_title():
+    p = parse_task_text("тайланг маргааш 15:00-д илгээ", now=MONGOLIAN_NOW, tz="Asia/Ulaanbaatar")
+    assert p.deadline_at is not None
+    assert p.deadline_at.hour == 15
+    assert p.title == "тайланг илгээ"
+
+
+def test_recognizes_mongolian_low_priority():
+    p = parse_task_text("танилцуулгыг завтай үедээ бэлд", now=MONGOLIAN_NOW, tz="Asia/Ulaanbaatar")
+    assert p.priority == PRIORITY_LOW
+
+
+def test_parses_mongolian_today_and_day_genitive_forms():
+    today = parse_when("өнөөдөртөө", now=MONGOLIAN_NOW, tz="Asia/Ulaanbaatar")
+    in_two_days = parse_when("2 өдрийн дараа", now=MONGOLIAN_NOW, tz="Asia/Ulaanbaatar")
+    assert today is not None
+    assert today.date() == MONGOLIAN_NOW.date()
+    assert in_two_days is not None
+    assert in_two_days.date() == MONGOLIAN_NOW.date().replace(day=3)

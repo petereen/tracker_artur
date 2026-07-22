@@ -81,7 +81,7 @@ async def export_answers(
     if format == "csv":
         output = io.StringIO()
         writer = csv.writer(output)
-        headers = ["Сотрудник", "Дата", "Статус"] + [q.text for q in questions]
+        headers = ["Ажилтан", "Огноо", "Төлөв"] + [q.text for q in questions]
         writer.writerow(headers)
         for session, emp in rows:
             ans_r = await db.execute(
@@ -107,8 +107,8 @@ async def export_answers(
     import openpyxl
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Ответы"
-    headers = ["Сотрудник", "Дата", "Статус"] + [q.text for q in questions]
+    ws.title = "Хариултууд"
+    headers = ["Ажилтан", "Огноо", "Төлөв"] + [q.text for q in questions]
     ws.append(headers)
     for session, emp in rows:
         ans_r = await db.execute(select(Answer).where(Answer.session_id == session.id))

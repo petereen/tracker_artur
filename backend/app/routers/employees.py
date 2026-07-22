@@ -15,7 +15,7 @@ class EmployeeCreate(BaseModel):
     name: str
     telegram_id: str
     telegram_username: Optional[str] = None
-    timezone: str = "Europe/Moscow"
+    timezone: str = "Asia/Ulaanbaatar"
 
 
 class EmployeeUpdate(BaseModel):
@@ -31,9 +31,9 @@ class EmployeeOut(BaseModel):
     telegram_id: str
     telegram_username: Optional[str]
     # Legacy rows (e.g. seeded manager) may have NULL timezone — the model's
-    # logical default is Europe/Moscow, so return that instead of crashing
+    # logical default is Asia/Ulaanbaatar, so return that instead of crashing
     # serialization (Sentry issue 28: ResponseValidationError on GET /employees).
-    timezone: str = "Europe/Moscow"
+    timezone: str = "Asia/Ulaanbaatar"
     is_active: bool
 
     model_config = {"from_attributes": True}
@@ -43,7 +43,7 @@ class EmployeeOut(BaseModel):
     def _default_timezone(cls, v):
         # Coerce legacy NULL timezone (from rows inserted without the
         # client-side default, e.g. the seeded manager) to the logical default.
-        return v if v else "Europe/Moscow"
+        return v if v else "Asia/Ulaanbaatar"
 
     @field_validator("is_active", mode="before")
     @classmethod

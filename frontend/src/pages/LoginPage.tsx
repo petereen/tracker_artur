@@ -15,19 +15,20 @@ export function LoginPage() {
       const data = await login.mutateAsync({ email, password })
       setToken(data.access_token)
     } catch {
-      toast.error('Неверный email или пароль')
+      toast.error('И-мэйл эсвэл нууц үг буруу байна')
     }
   }
 
   return (
     <div className="min-h-screen bg-bg flex items-center justify-center">
       <div className="bg-surface border border-border rounded-2xl p-8 w-full max-w-sm">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center text-xl font-bold text-white">T</div>
-          <div>
-            <div className="text-base font-semibold">Трекер и постановщик задач</div>
-            <div className="text-xs text-muted">Панель администратора</div>
-          </div>
+        <div className="mb-8">
+          <img
+            src="/oyuns-aio-logo.png"
+            alt="OYUNS All-in-One"
+            className="w-full max-w-[280px] h-auto max-h-14 object-contain object-left"
+          />
+          <div className="mt-3 text-xs text-muted">Админ самбар</div>
         </div>
         <form onSubmit={submit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
@@ -36,18 +37,18 @@ export function LoginPage() {
               className="bg-surface2 border border-border rounded-lg px-3 py-2 text-text outline-none focus:border-accent transition-colors" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-muted font-medium">Пароль</label>
+            <label className="text-xs text-muted font-medium">Нууц үг</label>
             <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required
               className="bg-surface2 border border-border rounded-lg px-3 py-2 text-text outline-none focus:border-accent transition-colors" />
           </div>
           <button type="submit" disabled={login.isPending}
             className="mt-2 bg-accent text-white border-none rounded-lg py-2 font-medium text-sm cursor-pointer hover:opacity-85 transition-opacity disabled:opacity-40">
-            {login.isPending ? 'Вход...' : 'Войти'}
+            {login.isPending ? 'Нэвтэрч байна...' : 'Нэвтрэх'}
           </button>
         </form>
         <div className="mt-6 pt-4 border-t border-border flex justify-center gap-4 text-[11px] text-muted">
-          <a href="/privacy" className="hover:text-text">Конфиденциальность</a>
-          <a href="/terms" className="hover:text-text">Условия</a>
+          <a href="/privacy" className="hover:text-text">Нууцлал</a>
+          <a href="/terms" className="hover:text-text">Үйлчилгээний нөхцөл</a>
         </div>
       </div>
     </div>

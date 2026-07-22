@@ -32,7 +32,7 @@ def ensure_employee(tg_id, name: Optional[str] = None, username: Optional[str] =
                 emp.telegram_username = uname
                 s.commit()
         else:
-            emp = Employee(name=name or "Сотрудник", telegram_id=tg, telegram_username=uname, is_active=True)
+            emp = Employee(name=name or "Ажилтан", telegram_id=tg, telegram_username=uname, is_active=True)
             s.add(emp)
             s.commit()
             s.refresh(emp)

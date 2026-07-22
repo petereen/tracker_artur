@@ -241,30 +241,30 @@ async def cmd_myid(message: Message, employee=None):
 @router.message(Command("help"))
 async def cmd_help(message: Message, is_manager: bool = False):
     tasks_block = (
-        "\n📝 <b>Задачи</b>\n"
-        "/task [@кто] что сделать [когда] — поставить задачу\n"
-        "/mytasks — мои задачи\n"
-        "/assigned — что я поставил\n"
-        "/dashboard — сводный дашборд\n"
-        "/done &lt;id&gt; — отметить выполненной\n"
-        "/snooze &lt;id&gt; &lt;время&gt; — перенести срок\n"
-        "/myid — мой Telegram ID\n"
+        "\n📝 <b>Даалгавар</b>\n"
+        "/task [@гүйцэтгэгч] юу хийх [хэзээ] — даалгавар үүсгэх\n"
+        "/mytasks — миний даалгаврууд\n"
+        "/assigned — миний өгсөн даалгаврууд\n"
+        "/dashboard — хянах самбар\n"
+        "/done &lt;id&gt; — дууссанд тэмдэглэх\n"
+        "/snooze &lt;id&gt; &lt;цаг&gt; — хугацаа хойшлуулах\n"
+        "/myid — миний Telegram ID\n"
     )
     if is_manager:
         text = (
-            "👔 <b>Команды руководителя</b>\n\n"
-            "/summary — сводка за вчера\n"
-            "/week — статистика за 7 дней\n"
-            "/blockers — топ блокеров\n"
+            "👔 <b>Удирдлагын командууд</b>\n\n"
+            "/summary — өчигдрийн хураангуй\n"
+            "/week — 7 хоногийн статистик\n"
+            "/blockers — гол саад бэрхшээлүүд\n"
             + tasks_block
         )
     else:
         text = (
-            "📋 <b>Команды</b>\n\n"
-            "/today — заполнить чек-ин\n"
-            "/my_stats — моя статистика\n"
-            "/leaderboard — рейтинг команды\n"
-            "/help — эта справка\n"
+            "📋 <b>Командууд</b>\n\n"
+            "/today — чек-ин бөглөх\n"
+            "/my_stats — миний статистик\n"
+            "/leaderboard — багийн чансаа\n"
+            "/help — энэ тусламж\n"
             + tasks_block
         )
     await message.answer(text, parse_mode="HTML")
@@ -275,21 +275,21 @@ async def cmd_help(message: Message, is_manager: bool = False):
 @router.message(Command("summary"))
 async def cmd_summary(message: Message, is_manager: bool = False):
     if not is_manager:
-        await message.answer("❌ Только для руководителя.")
+        await message.answer("❌ Зөвхөн удирдлагад зориулсан команд.")
         return
     data = get_yesterday_summary()
-    lines = [f"📊 <b>Сводка за {data['date']}</b>\n"]
+    lines = [f"📊 <b>{data['date']}-ны хураангуй</b>\n"]
     for q_text, val in data["totals"].items():
         lines.append(f"• {q_text[:35]}: <b>{val}</b>")
     if data["missed"]:
-        lines.append(f"\n⚠️ Не заполнили: {', '.join(data['missed'])}")
-    await message.answer("\n".join(lines) or "Нет данных за вчера.", parse_mode="HTML")
+        lines.append(f"\n⚠️ Бөглөөгүй: {', '.join(data['missed'])}")
+    await message.answer("\n".join(lines) or "Өчигдрийн мэдээлэл алга.", parse_mode="HTML")
 
 
 @router.message(Command("week"))
 async def cmd_week(message: Message, is_manager: bool = False):
     if not is_manager:
-        await message.answer("❌ Только для руководителя.")
+        await message.answer("❌ Зөвхөн удирдлагад зориулсан команд.")
         return
 
     with get_session() as s:
@@ -302,23 +302,23 @@ async def cmd_week(message: Message, is_manager: bool = False):
             .order_by(func.count(SurveySession.id).desc())
         ).all())
 
-    lines = ["📅 <b>Заполнения за 7 дней</b>\n"]
+    lines = ["📅 <b>Сүүлийн 7 хоногийн бөглөлт</b>\n"]
     for name, cnt in rows:
-        lines.append(f"• {name}: {cnt} из 7")
-    await message.answer("\n".join(lines) or "Нет данных.", parse_mode="HTML")
+        lines.append(f"• {name}: 7-оос {cnt}")
+    await message.answer("\n".join(lines) or "Мэдээлэл алга.", parse_mode="HTML")
 
 
 @router.message(Command("blockers"))
 async def cmd_blockers(message: Message, is_manager: bool = False):
     if not is_manager:
-        await message.answer("❌ Только для руководителя.")
+        await message.answer("❌ Зөвхөн удирдлагад зориулсан команд.")
         return
 
     with get_session() as s:
         month_ago = date.today() - timedelta(days=30)
         text_qs = list(s.execute(select(Question).where(Question.answer_type == "text")).scalars())
         if not text_qs:
-            await message.answer("Текстовых вопросов нет.")
+            await message.answer("Текстэн асуулт алга.")
             return
         q_ids = [q.id for q in text_qs]
         rows = list(s.execute(
@@ -330,7 +330,7 @@ async def cmd_blockers(message: Message, is_manager: bool = False):
             .limit(5)
         ).all())
 
-    lines = ["🚧 <b>Топ блокеров за месяц</b>\n"]
+    lines = ["🚧 <b>Сарын гол саад бэрхшээлүүд</b>\n"]
     for text_val, cnt in rows:
         lines.append(f"• {text_val[:50]} — {cnt}×")
-    await message.answer("\n".join(lines) or "Нет данных.", parse_mode="HTML")
+    await message.answer("\n".join(lines) or "Мэдээлэл алга.", parse_mode="HTML")

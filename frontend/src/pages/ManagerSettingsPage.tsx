@@ -3,10 +3,10 @@ import { Btn, Card, Input, PageHeader, Select, Toggle } from '../components/ui'
 import { useManagerSettings, useUpdateManagerSettings } from '../api/hooks'
 
 const DAY_OPTIONS = [
-  { value: '1', label: 'Понедельник' }, { value: '2', label: 'Вторник' },
-  { value: '3', label: 'Среда' },       { value: '4', label: 'Четверг' },
-  { value: '5', label: 'Пятница' },     { value: '6', label: 'Суббота' },
-  { value: '0', label: 'Воскресенье' },
+  { value: '1', label: 'Даваа' }, { value: '2', label: 'Мягмар' },
+  { value: '3', label: 'Лхагва' }, { value: '4', label: 'Пүрэв' },
+  { value: '5', label: 'Баасан' }, { value: '6', label: 'Бямба' },
+  { value: '0', label: 'Ням' },
 ]
 
 export function ManagerSettingsPage() {
@@ -35,35 +35,35 @@ export function ManagerSettingsPage() {
   const f = (k: string, v: any) => setForm((prev) => ({ ...prev, [k]: v }))
 
   const OPTIONS = [
-    { key: 'alerts_enabled',        label: 'Алерты о пропусках',                desc: 'Уведомлять руководителя, если сотрудник не заполнил после дедлайна' },
-    { key: 'gamification_enabled',  label: 'Геймификация (streaks, leaderboard)', desc: 'Показывать сотрудникам рейтинг и серии заполнений — только топ-3' },
+    { key: 'alerts_enabled',        label: 'Алгасалтын анхааруулга', desc: 'Ажилтан хугацаа дууссаны дараа бөглөөгүй бол удирдлагад мэдэгдэх' },
+    { key: 'gamification_enabled',  label: 'Урамшууллын систем', desc: 'Ажилтнуудад чансаа болон бөглөлтийн цувралыг харуулах' },
   ]
 
   return (
     <div>
-      <PageHeader title="Настройки руководителя" sub="Telegram-интеграция и параметры уведомлений" />
+      <PageHeader title="Удирдлагын тохиргоо" sub="Telegram холболт ба мэдэгдлийн тохиргоо" />
       <div className="flex flex-col gap-4 max-w-[700px]">
         <Card>
           <div className="font-semibold text-[15px] mb-4">Telegram</div>
           <div className="grid grid-cols-2 gap-3.5">
-            <Input label="Telegram ID руководителя" value={form.telegram_id} onChange={(v) => f('telegram_id', v)} placeholder="100012345" />
+            <Input label="Удирдлагын Telegram ID" value={form.telegram_id} onChange={(v) => f('telegram_id', v)} placeholder="100012345" />
             <Input label="Username" value={form.telegram_username} onChange={(v) => f('telegram_username', v)} placeholder="@username" />
           </div>
         </Card>
 
         <Card>
-          <div className="font-semibold text-[15px] mb-4">Сводки</div>
+          <div className="font-semibold text-[15px] mb-4">Хураангуй</div>
           <div className="grid grid-cols-2 gap-3.5">
-            <Input label="Время утренней сводки" value={form.summary_time} onChange={(v) => f('summary_time', v)} type="time" />
+            <Input label="Өглөөний хураангуйн цаг" value={form.summary_time} onChange={(v) => f('summary_time', v)} type="time" />
             <div className="grid grid-cols-2 gap-2">
-              <Select label="День недельной сводки" value={form.weekly_summary_day} onChange={(v) => f('weekly_summary_day', v)} options={DAY_OPTIONS} />
-              <Input label="Время" value={form.weekly_summary_time} onChange={(v) => f('weekly_summary_time', v)} type="time" />
+              <Select label="7 хоногийн хураангуйн өдөр" value={form.weekly_summary_day} onChange={(v) => f('weekly_summary_day', v)} options={DAY_OPTIONS} />
+              <Input label="Цаг" value={form.weekly_summary_time} onChange={(v) => f('weekly_summary_time', v)} type="time" />
             </div>
           </div>
         </Card>
 
         <Card>
-          <div className="font-semibold text-[15px] mb-4">Опции</div>
+          <div className="font-semibold text-[15px] mb-4">Сонголтууд</div>
           <div className="flex flex-col gap-3.5">
             {OPTIONS.map((opt) => (
               <div key={opt.key} className="flex items-start justify-between gap-4">
@@ -76,8 +76,8 @@ export function ManagerSettingsPage() {
             ))}
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="font-medium text-[13px]">Мягкий режим онбординга</div>
-                <div className="text-xs text-muted mt-0.5">Первые {form.soft_mode_weeks} нед. — напоминания только сотруднику</div>
+                <div className="font-medium text-[13px]">Танилцуулгын зөөлөн горим</div>
+                <div className="text-xs text-muted mt-0.5">Эхний {form.soft_mode_weeks} долоо хоногт сануулгыг зөвхөн ажилтанд илгээнэ</div>
               </div>
               <input type="range" min={0} max={4} value={form.soft_mode_weeks}
                 onChange={(e) => f('soft_mode_weeks', +e.target.value)}
@@ -87,8 +87,8 @@ export function ManagerSettingsPage() {
         </Card>
 
         <div className="flex justify-end gap-2.5">
-          <Btn>Сбросить</Btn>
-          <Btn variant="primary" size="lg" onClick={() => save.mutate(form)} disabled={save.isPending}>Сохранить настройки</Btn>
+          <Btn>Сэргээх</Btn>
+          <Btn variant="primary" size="lg" onClick={() => save.mutate(form)} disabled={save.isPending}>Тохиргоо хадгалах</Btn>
         </div>
       </div>
     </div>

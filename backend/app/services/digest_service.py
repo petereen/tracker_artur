@@ -31,7 +31,7 @@ def _now_utc() -> datetime:
 
 
 def _local_today(tz: str | None) -> date:
-    zone = pytz.timezone(tz or "Europe/Moscow")
+    zone = pytz.timezone(tz or "Asia/Ulaanbaatar")
     return datetime.now(zone).date()
 
 
@@ -55,7 +55,7 @@ def _is_due_today(t: dict, tz: str | None, now: datetime) -> bool:
     dl = _deadline(t)
     if not dl or _is_overdue(t, now):
         return False
-    zone = pytz.timezone(tz or "Europe/Moscow")
+    zone = pytz.timezone(tz or "Asia/Ulaanbaatar")
     return dl.astimezone(zone).date() == _local_today(tz)
 
 
@@ -63,7 +63,7 @@ def _line(t: dict, *, with_assignee: bool = False) -> str:
     em = _PRI.get(t["priority"], "🟡")
     who = f" → {t['assignee_name']}" if with_assignee and t.get("assignee_name") else ""
     dl = _deadline(t)
-    dls = dl.astimezone(timezone.utc).strftime("%d.%m %H:%M") if dl else "без срока"
+    dls = dl.astimezone(timezone.utc).strftime("%d.%m %H:%M") if dl else "Хугацаагүй"
     return f"{em} #{t['id']} {t['title']}{who} — {dls}"
 
 
@@ -81,12 +81,12 @@ def build_employee_morning(emp_id: int, tz: str | None) -> str | None:
     today = [t for t in tasks if _is_due_today(t, tz, now)]
     if not overdue and not today:
         return None
-    lines = ["🌅 <b>Доброе утро! Задачи на сегодня</b>"]
+    lines = ["🌅 <b>Өглөөний мэнд! Өнөөдрийн даалгавар</b>"]
     if overdue:
-        lines.append(f"\n🔴 Просрочено ({len(overdue)}):")
+        lines.append(f"\n🔴 Хугацаа хэтэрсэн ({len(overdue)}):")
         lines += [f"  {_line(t)}" for t in overdue]
     if today:
-        lines.append(f"\n📌 Сегодня дедлайн ({len(today)}):")
+        lines.append(f"\n📌 Өнөөдөр дуусах хугацаатай ({len(today)}):")
         lines += [f"  {_line(t)}" for t in today]
     return "\n".join(lines)
 
@@ -99,21 +99,21 @@ def build_employee_evening(emp_id: int, tz: str | None) -> str | None:
     done_today = _done_today(emp_id, tz)
     if not active and not done_today:
         return None
-    lines = ["🌆 <b>Итоги дня</b>"]
+    lines = ["🌆 <b>Өдрийн дүн</b>"]
     if done_today:
-        lines.append(f"\n✅ Закрыто сегодня: {done_today}")
+        lines.append(f"\n✅ Өнөөдөр дуусгасан: {done_today}")
     if active:
-        lines.append(f"\n📋 Ещё открыто ({len(active)}):")
+        lines.append(f"\n📋 Нээлттэй үлдсэн ({len(active)}):")
         lines += [f"  {_line(t)}" for t in active[:10]]
         if len(active) > 10:
-            lines.append(f"  …и ещё {len(active) - 10}")
+            lines.append(f"  …мөн {len(active) - 10}")
     return "\n".join(lines)
 
 
 def _done_today(emp_id: int, tz: str | None) -> int:
     from app.models.models import Task
     today = _local_today(tz)
-    zone = pytz.timezone(tz or "Europe/Moscow")
+    zone = pytz.timezone(tz or "Asia/Ulaanbaatar")
     with get_session() as s:
         rows = s.execute(
             select(Task).where(Task.assignee_id == emp_id, Task.status == "done", Task.completed_at.isnot(None))
@@ -135,7 +135,7 @@ def build_manager_overview() -> str | None:
         t for t in overdue_all
         if _deadline(t) and working_days_between(_deadline(t), now, policy) >= policy.escalation_days
     ]
-    lines = [f"👔 <b>Обзор задач команды ({total})</b>"]
+    lines = [f"👔 <b>Багийн даалгаврын тойм ({total})</b>"]
     for name, items in groups.items():
         od = [t for t in items if _is_overdue(t, now)]
         td = [t for t in items if _is_due_today(t, t.get("assignee_tz"), now)]
@@ -144,7 +144,7 @@ def build_manager_overview() -> str | None:
         lines.append(f"\n👤 <b>{name}</b>:")
         lines += [f"  {_line(t)}" for t in od + td]
     if escalate:
-        lines.append(f"\n🚨 <b>Эскалация</b> (висят &gt; {policy.escalation_days} раб. дн.):")
+        lines.append(f"\n🚨 <b>Анхаарал шаардлагатай</b> (&gt; {policy.escalation_days} ажлын өдөр):")
         lines += [f"  {_line(t, with_assignee=True)}" for t in escalate]
     if len(lines) == 1:
         return None

@@ -1,5 +1,4 @@
-"""Парсер фразы задачи → структура. Детерминированный (dateparser) как основной
-путь; LLM можно подключить позже опционально (без жёсткой зависимости)."""
+"""Чөлөөт текстээс даалгаврын бүтэц гаргах детерминист парсер."""
 from __future__ import annotations
 
 import re
@@ -31,21 +30,36 @@ _MONGOLIAN_DAYS = {
 
 
 def _normalize_mongolian_dates(text: str) -> str:
-    """Converts common Mongolian time phrases into dateparser's Russian forms.
+    """Convert common Mongolian time phrases into forms dateparser understands.
 
     dateparser 1.2 does not provide a Mongolian locale, so this keeps the
     deterministic fallback usable without relying on the optional LLM path.
     """
     normalized = text
-    replacements = {"нөгөөдөр": "послезавтра", "маргааш": "завтра", "өнөөдөр": "сегодня"}
+    replacements = {
+        "нөгөөдөр": "послезавтра",
+        "маргааш": "завтра",
+        "өнөөдөртөө": "сегодня",
+        "өнөөдөр": "сегодня",
+    }
     for source, target in replacements.items():
-        normalized = re.sub(rf"\b{source}\b", target, normalized, flags=re.IGNORECASE)
+        normalized = re.sub(rf"\b{source}(?:ын|ийн)?\b", target, normalized, flags=re.IGNORECASE)
     for source, target in _MONGOLIAN_DAYS.items():
-        normalized = re.sub(rf"\bдараагийн\s+{source}\b", f"следующий {target}", normalized, flags=re.IGNORECASE)
-        normalized = re.sub(rf"\b{source}\b", target, normalized, flags=re.IGNORECASE)
+        day = rf"{source}(?:\s+гараг)?(?:т|д)?"
+        # dateparser recognises Russian weekday names but not reliably the
+        # inflected "next weekday" forms.  With PREFER_DATES_FROM=future, the
+        # bare weekday correctly resolves to the next occurrence.
+        normalized = re.sub(rf"\b(?:дараагийн|ирэх)\s+{day}\b", target, normalized, flags=re.IGNORECASE)
+        normalized = re.sub(rf"\bэнэ\s+{day}\b", target, normalized, flags=re.IGNORECASE)
+        normalized = re.sub(rf"\b{day}\b", target, normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\b(\d+)\s*(?:минут(?:ын)?|мин)\s+дараа\b", r"через \1 минут", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\b(\d+)\s*цаг(?:ийн)?\s+дараа\b", r"через \1 часов", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\b(\d+)\s*хоног(?:ийн)?\s+дараа\b", r"через \1 дней", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\b(\d+)\s*(?:хоног(?:ийн)?|өдөр(?:ийн)?|өдрийн)\s+дараа\b", r"через \1 дней", normalized, flags=re.IGNORECASE)
+    # "маргааш 10 цагт" and "баасан гарагт 15 цаг" are common in task text.
+    normalized = re.sub(r"\b(\d{1,2}):(\d{2})\s+цаг(?:т)?\b", r"\1:\2", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\b(\d{1,2})\s+цаг(?:т)?\b", r"\1:00", normalized, flags=re.IGNORECASE)
+    # Mongolian postpositions often follow a numeric time: "15:00-д".
+    normalized = re.sub(r"\b(\d{1,2}:\d{2})(?:-?[дт])(?=\s|$|[,.])", r"\1", normalized, flags=re.IGNORECASE)
     return normalized
 
 
@@ -58,7 +72,7 @@ class ParsedTask:
 
 
 def _detect_priority(text: str) -> int:
-    # LOW проверяем раньше: «не срочно» иначе ловится URGENT-паттерном «срочно».
+    # Check low priority first because the Russian legacy phrase contains "срочно".
     if _LOW_RE.search(text):
         return PRIORITY_LOW
     if _URGENT_RE.search(text):
@@ -66,14 +80,14 @@ def _detect_priority(text: str) -> int:
     return PRIORITY_NORMAL
 
 
-def parse_task_text(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> ParsedTask:
-    """Разбирает свободную фразу на русском в структуру задачи.
+def parse_task_text(text: str, *, now: datetime, tz: str = "Asia/Ulaanbaatar") -> ParsedTask:
+    """Монгол (мөн хуучин орос) чөлөөт текстийг даалгавар болгон задлана.
 
-    now — таймзоно-осведомлённое «сейчас» в tz пользователя (база для относительных дат).
+    ``now`` нь хэрэглэгчийн цагийн бүсэд байгаа timezone-aware утга байна.
     """
     raw = _normalize_mongolian_dates((text or "").strip())
 
-    # @username исполнителя
+    # @username гүйцэтгэгч
     assignee_username = None
     m = _USERNAME_RE.search(raw)
     if m:
@@ -81,7 +95,7 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> P
 
     priority = _detect_priority(raw)
 
-    # Поиск даты/времени во фразе
+    # Өгүүлбэр доторх огноо, цагийг хайна.
     deadline_at: Optional[datetime] = None
     matched_phrase: Optional[str] = None
     settings = {
@@ -96,10 +110,10 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> P
     except Exception:
         found = None
     if found:
-        # Берём последнее совпадение — обычно дедлайн в конце фразы
+        # Ихэвчлэн хугацаа өгүүлбэрийн төгсгөлд байдаг тул сүүлийнхийг авна.
         matched_phrase, deadline_at = found[-1]
 
-    # Чистим title: убираем @username и распознанную дату-фразу
+    # Гарчгаас @username болон танигдсан хугацааг авна.
     title = raw
     if assignee_username:
         title = title.replace(f"@{assignee_username}", " ")
@@ -107,7 +121,7 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> P
         title = title.replace(matched_phrase, " ")
     title = re.sub(r"\s+", " ", title).strip(" .,–—-")
     if not title:
-        title = raw[:60] or "Без названия"
+        title = raw[:60] or "Гарчиггүй"
 
     return ParsedTask(
         title=title[:200],
@@ -117,8 +131,8 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> P
     )
 
 
-def parse_when(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> Optional[datetime]:
-    """Разбор отдельной фразы времени для /snooze (например «+1 день», «завтра 10:00»)."""
+def parse_when(text: str, *, now: datetime, tz: str = "Asia/Ulaanbaatar") -> Optional[datetime]:
+    """/snooze-д зориулж хугацааны тусдаа хэллэгийг задлана."""
     raw = _normalize_mongolian_dates((text or "").strip())
     settings = {
         "PREFER_DATES_FROM": "future",

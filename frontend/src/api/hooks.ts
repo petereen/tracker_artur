@@ -18,22 +18,22 @@ export function useCreateEmployee() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (d: any) => api.post('/employees', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Сотрудник добавлен') },
-    onError: () => toast.error('Ошибка при добавлении'),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Ажилтан нэмэгдлээ') },
+    onError: () => toast.error('Нэмэхэд алдаа гарлаа'),
   })
 }
 export function useUpdateEmployee() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, ...d }: any) => api.put(`/employees/${id}`, d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Сохранено') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Хадгалагдлаа') },
   })
 }
 export function useDeleteEmployee() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/employees/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Удалено') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Устгагдлаа') },
   })
 }
 
@@ -45,21 +45,21 @@ export function useCreateQuestion() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (d: any) => api.post('/questions', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success('Вопрос добавлен') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success('Асуулт нэмэгдлээ') },
   })
 }
 export function useUpdateQuestion() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, ...d }: any) => api.put(`/questions/${id}`, d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success('Сохранено') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success('Хадгалагдлаа') },
   })
 }
 export function useDeleteQuestion() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/questions/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success('Удалено') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success('Устгагдлаа') },
   })
 }
 export function useReorderQuestions() {
@@ -78,7 +78,7 @@ export function useUpdateSchedule() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ employee_id, ...d }: any) => api.put(`/schedules/${employee_id}`, d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['schedules'] }); toast.success('Расписание сохранено') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['schedules'] }); toast.success('Хуваарь хадгалагдлаа') },
   })
 }
 
@@ -110,7 +110,7 @@ export function useUpdateManagerSettings() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (d: any) => api.put('/manager-settings', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['manager-settings'] }); toast.success('Настройки сохранены') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['manager-settings'] }); toast.success('Тохиргоо хадгалагдлаа') },
   })
 }
 
@@ -122,7 +122,7 @@ export function useUpdateOnboardingTemplate() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (d: any) => api.put('/onboarding/template', d),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['onboarding'] }); toast.success('Шаблон сохранён') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['onboarding'] }); toast.success('Загвар хадгалагдлаа') },
   })
 }
 
@@ -167,8 +167,8 @@ export function useCreateTask() {
   return useMutation({
     mutationFn: (d: { title: string; description?: string; assignee_id?: number; deadline_at?: string; priority: number }) =>
       api.post('/tasks', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success('Задача создана') },
-    onError: () => toast.error('Ошибка при создании задачи'),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success('Даалгавар үүслээ') },
+    onError: () => toast.error('Даалгавар үүсгэхэд алдаа гарлаа'),
   })
 }
 
@@ -177,8 +177,8 @@ export function useUpdateTask() {
   return useMutation({
     mutationFn: ({ id, ...d }: { id: number; title?: string; description?: string; assignee_id?: number; deadline_at?: string; priority?: number; status?: string }) =>
       api.patch(`/tasks/${id}`, d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success('Задача обновлена') },
-    onError: () => toast.error('Ошибка при обновлении задачи'),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success('Даалгавар шинэчлэгдлээ') },
+    onError: () => toast.error('Даалгавар шинэчлэхэд алдаа гарлаа'),
   })
 }
 

@@ -11,7 +11,7 @@ from app.services.notification_policy import load_policy, next_allowed
 log = logging.getLogger(__name__)
 
 ESCALATION_DELAY_MIN = 15
-DEFAULT_TZ = "Europe/Moscow"
+DEFAULT_TZ = "Asia/Ulaanbaatar"
 
 
 def _job_prefix(task_id: int) -> str:
@@ -109,7 +109,7 @@ def _manager_tg() -> str | None:
 
 def _fmt_deadline(dt: datetime | None) -> str:
     if not dt:
-        return "без срока"
+        return "Хугацаагүй"
     return dt.astimezone(timezone.utc).strftime("%d.%m %H:%M UTC")
 
 
@@ -124,18 +124,18 @@ async def send_task_reminder(task_id: int, minutes_before: int) -> None:
         return
 
     if minutes_before == 0:
-        when = "сейчас дедлайн"
+        when = "хугацаа яг одоо"
     elif minutes_before % 1440 == 0:
-        when = f"через {minutes_before // 1440} дн."
+        when = f"{minutes_before // 1440} хоногийн дараа"
     elif minutes_before % 60 == 0:
-        when = f"через {minutes_before // 60} ч."
+        when = f"{minutes_before // 60} цагийн дараа"
     else:
-        when = f"через {minutes_before} мин."
+        when = f"{minutes_before} минутын дараа"
 
     text = (
-        f"⏰ <b>Напоминание о задаче</b>\n\n"
+        f"⏰ <b>Даалгаврын сануулга</b>\n\n"
         f"#{task['id']} {task['title']}\n"
-        f"Дедлайн: <b>{_fmt_deadline(task['deadline_at'])}</b> ({when})"
+        f"Хугацаа: <b>{_fmt_deadline(task['deadline_at'])}</b> ({when})"
     )
     bot = _make_bot()
     try:
@@ -207,12 +207,12 @@ def _render_outbox(item: dict):
     tid = item["task_id"]
     title = p.get("title", "")
     deadline = p.get("deadline_iso")
-    dl_h = _fmt_deadline(datetime.fromisoformat(deadline)) if deadline else "без срока"
+    dl_h = _fmt_deadline(datetime.fromisoformat(deadline)) if deadline else "Хугацаагүй"
     if item["kind"] == "task_assigned":
-        text = (f"📌 Тебе поставили задачу #{tid}:\n«{title}»\nДедлайн: {dl_h}")
+        text = (f"📌 Танд #{tid} даалгавар оноолоо:\n«{title}»\nХугацаа: {dl_h}")
         return text, (task_actions_kb(tid) if tid else None)
     if item["kind"] == "task_overdue":
-        text = (f"🔴 Задача просрочена: #{tid} {title}\n"
-                f"Отметь /done {tid} или перенеси /snooze {tid} <время>.")
+        text = (f"🔴 #{tid} даалгаврын хугацаа хэтэрлээ: {title}\n"
+                f"/done {tid} гэж дуусгах эсвэл /snooze {tid} <цаг> гэж хугацааг хойшлуулна уу.")
         return text, (task_actions_kb(tid) if tid else None)
-    return p.get("text", "🔔 Уведомление"), None
+    return p.get("text", "🔔 Мэдэгдэл"), None
