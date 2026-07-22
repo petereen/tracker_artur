@@ -29,18 +29,29 @@ async def transcribe(audio: bytes, filename: str = "voice.ogg") -> tuple[Optiona
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         return None, "OpenAI API түлхүүр тохируулагдаагүй байна."
-    model = os.getenv("OPENAI_WHISPER_MODEL", "whisper-1")
+    model = os.getenv("OPENAI_WHISPER_MODEL", "gpt-4o-mini-transcribe")
     try:
-        form = aiohttp.FormData()
-        form.add_field("model", model)
         # Do not force Russian: Whisper can auto-detect Mongolian, English,
         # Russian, and other supported languages from the recording.
         language = os.getenv("OPENAI_TRANSCRIBE_LANGUAGE", "").strip()
+        mongolian_hint = language.lower() in {"mn", "mon"}
         # Whisper rejects the `mn` hint, while it can still auto-detect spoken
         # Mongolian when the language field is omitted.
-        if language.lower() in {"mn", "mon"}:
+        if mongolian_hint:
             log.info("Ignoring unsupported Whisper language hint: %s", language)
             language = ""
+            # Mongolian is not a quality-guaranteed Whisper language. Prefer
+            # the newer transcription model unless an operator explicitly
+            # chooses a different Mongolian model.
+            if model == "whisper-1":
+                model = os.getenv("OPENAI_MONGOLIAN_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+        form = aiohttp.FormData()
+        form.add_field("model", model)
+        if mongolian_hint:
+            form.add_field(
+                "prompt",
+                "The audio is spoken in Mongolian. Transcribe it in Mongolian Cyrillic.",
+            )
         if language:
             form.add_field("language", language)
         form.add_field("file", audio, filename=filename, content_type="audio/ogg")

@@ -75,7 +75,9 @@ ADMIN_PASSWORD=your-admin-password
 
 # Optional: enable voice task creation and AI task drafting
 OPENAI_API_KEY=your-openai-api-key
-OPENAI_WHISPER_MODEL=whisper-1
+OPENAI_WHISPER_MODEL=gpt-4o-mini-transcribe
+# Used when OPENAI_TRANSCRIBE_LANGUAGE was previously set to mn/mon.
+OPENAI_MONGOLIAN_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 OPENAI_TASK_MODEL=gpt-4o-mini
 # Leave empty for Mongolian: Whisper detects it automatically.
 OPENAI_TRANSCRIBE_LANGUAGE=
