@@ -36,6 +36,11 @@ async def transcribe(audio: bytes, filename: str = "voice.ogg") -> tuple[Optiona
         # Do not force Russian: Whisper can auto-detect Mongolian, English,
         # Russian, and other supported languages from the recording.
         language = os.getenv("OPENAI_TRANSCRIBE_LANGUAGE", "").strip()
+        # Whisper rejects the `mn` hint, while it can still auto-detect spoken
+        # Mongolian when the language field is omitted.
+        if language.lower() in {"mn", "mon"}:
+            log.info("Ignoring unsupported Whisper language hint: %s", language)
+            language = ""
         if language:
             form.add_field("language", language)
         form.add_field("file", audio, filename=filename, content_type="audio/ogg")

@@ -77,7 +77,8 @@ ADMIN_PASSWORD=your-admin-password
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_WHISPER_MODEL=whisper-1
 OPENAI_TASK_MODEL=gpt-4o-mini
-OPENAI_TRANSCRIBE_LANGUAGE=mn
+# Leave empty for Mongolian: Whisper detects it automatically.
+OPENAI_TRANSCRIBE_LANGUAGE=
 ```
 
 Сгенерировать надёжный `SECRET_KEY`:
