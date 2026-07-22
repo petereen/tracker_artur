@@ -10,6 +10,36 @@ export function useLogin() {
   })
 }
 
+// --- Admin access ---
+export interface AdminUser {
+  id: number
+  email: string
+  created_at: string | null
+}
+export function useAdminUsers() {
+  return useQuery<AdminUser[]>({ queryKey: ['admin-users'], queryFn: () => api.get('/auth/admin-users').then((r) => r.data) })
+}
+export function useCreateAdminUser() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { email: string; password: string }) => api.post('/auth/admin-users', data).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-users'] }); toast.success('Админ эрх нэмэгдлээ') },
+  })
+}
+export function useDeleteAdminUser() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/auth/admin-users/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-users'] }); toast.success('Админ эрх цуцлагдлаа') },
+  })
+}
+export function useChangeOwnPassword() {
+  return useMutation({
+    mutationFn: (data: { current_password: string; new_password: string }) => api.put('/auth/me/password', data),
+    onSuccess: () => toast.success('Нууц үг солигдлоо'),
+  })
+}
+
 // --- Employees ---
 export function useEmployees() {
   return useQuery({ queryKey: ['employees'], queryFn: () => api.get('/employees').then((r) => r.data) })

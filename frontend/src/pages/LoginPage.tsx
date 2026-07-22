@@ -4,7 +4,7 @@ import { useLogin } from '../api/hooks'
 import toast from 'react-hot-toast'
 
 export function LoginPage() {
-  const [email, setEmail] = useState('admin@company.ru')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const setToken = useAuthStore((s) => s.setToken)
   const login = useLogin()
