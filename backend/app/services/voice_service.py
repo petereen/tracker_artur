@@ -25,7 +25,11 @@ async def transcribe(audio: bytes, filename: str = "voice.oga") -> Optional[str]
     try:
         form = aiohttp.FormData()
         form.add_field("model", model)
-        form.add_field("language", "ru")
+        # Do not force Russian: Whisper can auto-detect Mongolian, English,
+        # Russian, and other supported languages from the recording.
+        language = os.getenv("OPENAI_TRANSCRIBE_LANGUAGE", "").strip()
+        if language:
+            form.add_field("language", language)
         form.add_field("file", audio, filename=filename, content_type="audio/ogg")
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
