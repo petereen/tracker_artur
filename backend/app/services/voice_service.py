@@ -16,11 +16,11 @@ def transcription_enabled() -> bool:
     return bool(os.getenv("OPENAI_API_KEY", "").strip())
 
 
-async def transcribe(audio: bytes, filename: str = "voice.oga") -> Optional[str]:
-    """Возвращает распознанный текст или None (нет ключа / ошибка / пусто)."""
+async def transcribe(audio: bytes, filename: str = "voice.oga") -> tuple[Optional[str], Optional[str]]:
+    """Возвращает распознанный текст и безопасное для пользователя описание ошибки."""
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
-        return None
+        return None, "OpenAI API түлхүүр тохируулагдаагүй байна."
     model = os.getenv("OPENAI_WHISPER_MODEL", "whisper-1")
     try:
         form = aiohttp.FormData()
@@ -40,10 +40,16 @@ async def transcribe(audio: bytes, filename: str = "voice.oga") -> Optional[str]
             ) as resp:
                 if resp.status != 200:
                     log.warning("Whisper API %s: %s", resp.status, (await resp.text())[:300])
-                    return None
+                    if resp.status == 401:
+                        return None, "OpenAI API түлхүүр хүчингүй, хугацаа нь дууссан эсвэл хүчингүй болгогдсон байна."
+                    if resp.status == 429:
+                        return None, "OpenAI-ийн quota/лимит хүрсэн байна. Billing болон usage-аа шалгана уу."
+                    if resp.status == 400:
+                        return None, "Аудио эсвэл Whisper-ийн тохиргоог OpenAI хүлээж авсангүй."
+                    return None, "Дуу хоолой таних үйлчилгээ түр алдаатай байна. Дахин оролдоно уу."
                 data = await resp.json()
                 text = (data.get("text") or "").strip()
-                return text or None
+                return text or None, None
     except Exception:  # noqa: BLE001 — фолбэк на текстовый ввод
         log.exception("Ошибка транскрипции голосового")
-        return None
+        return None, "OpenAI-ийн дуу хоолой таних үйлчилгээтэй холбогдож чадсангүй."
