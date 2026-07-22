@@ -36,7 +36,8 @@ services:
       CHIMEGE_API_TOKEN: ${CHIMEGE_API_TOKEN:-}
       CHIMEGE_PUNCTUATE: ${CHIMEGE_PUNCTUATE:-true}
     ports:
-      - "8010:8000"
+      # Keep the API private; the frontend proxies /api/ to it on the Docker network.
+      - "127.0.0.1:8010:8000"
 
   bot:
     build: ./backend
@@ -67,7 +68,8 @@ services:
     depends_on:
       - backend
     ports:
-      - "3010:80"
+      # The host Nginx vhost for artur.oyuns.mn is the only public entry point.
+      - "127.0.0.1:3010:80"
 
 volumes:
   pgdata:
