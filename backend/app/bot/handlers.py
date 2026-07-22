@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery, WebAppInfo
 
 from sqlalchemy import func, select
 
@@ -15,6 +15,7 @@ from app.bot.db import (
     get_questions, get_session, get_streak, get_yesterday_summary,
     mark_employee_onboarded, save_answer,
 )
+from app.core.config import settings
 from app.models.models import Answer, Employee, Question, Streak, SurveySession
 from app.services.survey_service import build_checkin_summary
 
@@ -24,6 +25,16 @@ router = Router()
 
 class Survey(StatesGroup):
     answering = State()
+
+
+def mini_app_keyboard() -> InlineKeyboardMarkup | None:
+    """Return the launch button only when a public Mini App URL is configured."""
+    url = settings.MINI_APP_URL.strip()
+    if not url:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📋 Самбар нээх", web_app=WebAppInfo(url=url)),
+    ]])
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
@@ -75,7 +86,21 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
         f"🏆 /leaderboard — багийн чансаа\n"
         f"❓ /help — тусламж"
     )
-    await message.answer(onboarding_text)
+    await message.answer(onboarding_text, reply_markup=mini_app_keyboard())
+
+
+@router.message(Command("app"))
+async def cmd_app(message: Message, employee=None, is_manager: bool = False):
+    """Open the Telegram Mini App from the command menu or a typed /app."""
+    if not employee and not is_manager:
+        await message.answer("❌ Та системд бүртгэгдээгүй байна. Удирдлагадаа хандана уу.")
+        return
+    keyboard = mini_app_keyboard()
+    if not keyboard:
+        await message.answer("⚠️ Mini App холбоос тохируулагдаагүй байна. Админ MINI_APP_URL-г HTTPS хаягаар тохируулна уу.")
+        return
+    title = "👔 Удирдлагын самбар" if is_manager else "📋 Миний даалгаврын самбар"
+    await message.answer(f"{title}\nДоорх товчоор Telegram дотор нээнэ үү.", reply_markup=keyboard)
 
 
 # ─── /today (опрос) ───────────────────────────────────────────────────────────
@@ -246,6 +271,7 @@ async def cmd_help(message: Message, is_manager: bool = False):
         "/mytasks — миний даалгаврууд\n"
         "/assigned — миний өгсөн даалгаврууд\n"
         "/dashboard — хянах самбар\n"
+        "/app — Telegram доторх самбар\n"
         "/done &lt;id&gt; — дууссанд тэмдэглэх\n"
         "/snooze &lt;id&gt; &lt;цаг&gt; — хугацаа хойшлуулах\n"
         "/myid — миний Telegram ID\n"

@@ -43,7 +43,7 @@ async def main():
 
     scheduler.start()
     rebuild_jobs()
-    await setup_bot_menus(bot, settings.MANAGER_TG_ID)
+    await setup_bot_menus(bot, settings.MANAGER_TG_ID, settings.MINI_APP_URL)
     log.info("Scheduler started, bot polling...")
 
     await dp.start_polling(bot)

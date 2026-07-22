@@ -69,6 +69,8 @@ SYNC_DATABASE_URL=postgresql+psycopg2://tracker:your-strong-db-password@db:5432/
 SECRET_KEY=your-random-key-min-32-chars
 BOT_TOKEN=your-telegram-bot-token
 MANAGER_TG_ID=your-telegram-id
+# Public HTTPS URL of the Mini App. The bot will show it as the “Самбар” button.
+MINI_APP_URL=https://your-domain/tg
 
 ADMIN_EMAIL=admin@company.ru
 ADMIN_PASSWORD=your-admin-password
@@ -152,6 +154,7 @@ sales-tracker/
 
 - **Задачи** (`tasks`/`task_comments`) дополняют опросы: статусы `open/in_progress/done/overdue/cancelled`, приоритет, дедлайн, исполнитель/постановщик, комментарии.
 - **Веб-канбан** `/tasks` (админ, JWT) и **Telegram Mini App** `/tg` (вертикальный канбан, авторизация по Telegram `initData`).
+- **Открытие из бота:** после задания `MINI_APP_URL` бот добавляет постоянную кнопку **«Самбар»** и команду `/app`; руководитель видит все области задач в Mini App. Адрес должен быть доступен по HTTPS.
 - **Политика уведомлений (enterprise):**
   - Тихие часы / рабочее окно (по умолч. **09:00–20:00, Пн–Пт**) — рутинные пуши вне окна **откладываются** на ближайшее начало рабочего дня (DST-safe).
   - **Дайджесты** (батчинг вместо спама): сотруднику — утро (на сегодня + просрочка) и вечер (остаток/закрытое); руководителю — утренний обзор по команде + эскалация. Пустые не отправляются.

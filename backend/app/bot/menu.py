@@ -2,11 +2,19 @@
 import logging
 
 from aiogram import Bot
-from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+    MenuButtonCommands,
+    MenuButtonWebApp,
+    WebAppInfo,
+)
 
 log = logging.getLogger(__name__)
 
 EMPLOYEE_COMMANDS: list[BotCommand] = [
+    BotCommand(command="app",     description="Даалгаврын самбар нээх"),
     BotCommand(command="today",   description="Өнөөдрийн чек-ин бөглөх"),
     BotCommand(command="mytasks", description="Миний идэвхтэй даалгаврууд"),
     BotCommand(command="done",    description="Даалгаврыг дууссанд тэмдэглэх"),
@@ -16,6 +24,7 @@ EMPLOYEE_COMMANDS: list[BotCommand] = [
 ]
 
 MANAGER_COMMANDS: list[BotCommand] = [
+    BotCommand(command="app",       description="Удирдлагын самбар нээх"),
     BotCommand(command="today",     description="Өнөөдрийн чек-ин бөглөх"),
     BotCommand(command="mytasks",   description="Миний идэвхтэй даалгаврууд"),
     BotCommand(command="done",      description="Даалгаврыг дууссанд тэмдэглэх"),
@@ -31,7 +40,9 @@ MANAGER_COMMANDS: list[BotCommand] = [
 ]
 
 
-async def setup_bot_menus(bot: Bot, manager_tg: str | int | None = None) -> None:
+async def setup_bot_menus(
+    bot: Bot, manager_tg: str | int | None = None, mini_app_url: str = ""
+) -> None:
     """Регистрирует команды в Telegram.
 
     - Default scope (все пользователи) → EMPLOYEE_COMMANDS.
@@ -57,3 +68,21 @@ async def setup_bot_menus(bot: Bot, manager_tg: str | int | None = None) -> None
             )
         except Exception:
             log.exception("Не удалось установить меню руководителя (manager_tg=%r)", manager_tg)
+
+    # The persistent Telegram menu button gives every registered employee a
+    # one-tap entry to /tg. Telegram accepts Web Apps only over HTTPS.
+    url = mini_app_url.strip()
+    if url:
+        try:
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(text="Самбар", web_app=WebAppInfo(url=url))
+            )
+            log.info("Mini App button configured: %s", url)
+        except Exception:
+            log.exception("Не удалось установить кнопку Mini App (url=%r)", url)
+    else:
+        # Avoid leaving a stale Web App button after the environment setting is removed.
+        try:
+            await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        except Exception:
+            log.exception("Не удалось сбросить кнопку меню")
