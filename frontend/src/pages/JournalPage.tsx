@@ -23,7 +23,7 @@ export function JournalPage() {
         </a>
       </PageHeader>
 
-      <Card className="!p-0 overflow-hidden">
+      <Card className="admin-table-card !p-0 overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border flex gap-3 flex-wrap items-center">
           <select value={empFilter} onChange={(e) => setEmpFilter(e.target.value)}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">

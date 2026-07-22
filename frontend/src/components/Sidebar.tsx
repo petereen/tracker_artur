@@ -15,7 +15,7 @@ export function Sidebar({ active, onNav }: { active: string; onNav: (id: string)
   const logout = useAuthStore((s) => s.logout)
 
   return (
-    <div className="w-[220px] bg-surface border-r border-border flex flex-col flex-shrink-0 h-screen sticky top-0">
+    <div className="admin-sidebar w-[220px] bg-surface border-r border-border flex flex-col flex-shrink-0 h-screen sticky top-0">
       <div className="px-5 pt-5 pb-4">
         <img
           src="/oyuns-aio-logo.png"

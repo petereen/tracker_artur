@@ -80,7 +80,7 @@ export function EmployeesPage() {
         <Btn variant="primary" onClick={openCreate}>+ Нэмэх</Btn>
       </PageHeader>
 
-      <Card className="p-0 overflow-hidden">
+      <Card className="admin-table-card p-0 overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
           <input value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Нэр эсвэл @username-аар хайх…"

@@ -15,6 +15,8 @@ import { PrivacyPage, TermsPage } from './pages/LegalPages'
 
 // Check if this is the Telegram Mini App route
 const isTgRoute = () => window.location.pathname === '/tg'
+const telegramWebApp = () => (window as any).Telegram?.WebApp
+const isTelegramWebApp = () => Boolean(telegramWebApp()?.initData)
 
 const PAGES: Record<string, JSX.Element> = {
   dashboard:  <DashboardPage />,
@@ -40,6 +42,22 @@ export default function App() {
     return unsub
   }, [])
 
+  useEffect(() => {
+    // Telegram supplies a viewport that can change as its chrome expands/collapses.
+    // Keep this isolated to the authenticated panel; /tg has its own layout.
+    const tg = telegramWebApp()
+    if (!tg || isTgRoute()) return
+
+    const setViewportHeight = () => {
+      document.documentElement.style.setProperty('--telegram-viewport-height', `${tg.viewportStableHeight || tg.viewportHeight || window.innerHeight}px`)
+    }
+    tg.ready()
+    tg.expand()
+    setViewportHeight()
+    tg.onEvent('viewportChanged', setViewportHeight)
+    return () => tg.offEvent('viewportChanged', setViewportHeight)
+  }, [])
+
   // Public routes (no auth required)
   if (isTgRoute()) {
     return <TgMiniAppPage />
@@ -57,10 +75,12 @@ export default function App() {
 
   if (!token) return <LoginPage />
 
+  const telegramAdmin = isTelegramWebApp()
+
   return (
-    <div className="flex min-h-screen">
+    <div className={`flex min-h-screen ${telegramAdmin ? 'telegram-admin' : ''}`}>
       <Sidebar active={page} onNav={setPage} />
-      <main className="flex-1 overflow-y-auto px-9 py-8 min-w-0">
+      <main className="admin-main flex-1 overflow-y-auto px-9 py-8 min-w-0">
         {PAGES[page]}
       </main>
     </div>
