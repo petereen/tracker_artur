@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from app.core.config import settings
 from app.services import task_service
@@ -110,7 +111,7 @@ def _manager_tg() -> str | None:
 def _fmt_deadline(dt: datetime | None) -> str:
     if not dt:
         return "Хугацаагүй"
-    return dt.astimezone(timezone.utc).strftime("%d.%m %H:%M UTC")
+    return dt.astimezone(ZoneInfo(DEFAULT_TZ)).strftime("%d.%m %H:%M УБ")
 
 
 async def send_task_reminder(task_id: int, minutes_before: int) -> None:
