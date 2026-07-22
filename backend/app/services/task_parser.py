@@ -14,9 +14,39 @@ PRIORITY_URGENT = 1
 PRIORITY_NORMAL = 2
 PRIORITY_LOW = 3
 
-_URGENT_RE = re.compile(r"\b(срочно|asap|очень важно|немедленно|сегодня же)\b", re.IGNORECASE)
-_LOW_RE = re.compile(r"\b(не срочно|низкий приоритет|когда будет время|по возможности)\b", re.IGNORECASE)
+_URGENT_RE = re.compile(
+    r"\b(срочно|asap|очень важно|немедленно|сегодня же|яаралтай|нэн яаралтай|маш чухал|нэн даруй|өнөөдөртөө)\b",
+    re.IGNORECASE,
+)
+_LOW_RE = re.compile(
+    r"\b(не срочно|низкий приоритет|когда будет время|по возможности|яаралгүй|бага ач холбогдолтой|завтай үедээ|боломжтой бол)\b",
+    re.IGNORECASE,
+)
 _USERNAME_RE = re.compile(r"@([A-Za-z0-9_]{3,})")
+
+_MONGOLIAN_DAYS = {
+    "даваа": "понедельник", "мягмар": "вторник", "лхагва": "среда",
+    "пүрэв": "четверг", "баасан": "пятница", "бямба": "суббота", "ням": "воскресенье",
+}
+
+
+def _normalize_mongolian_dates(text: str) -> str:
+    """Converts common Mongolian time phrases into dateparser's Russian forms.
+
+    dateparser 1.2 does not provide a Mongolian locale, so this keeps the
+    deterministic fallback usable without relying on the optional LLM path.
+    """
+    normalized = text
+    replacements = {"нөгөөдөр": "послезавтра", "маргааш": "завтра", "өнөөдөр": "сегодня"}
+    for source, target in replacements.items():
+        normalized = re.sub(rf"\b{source}\b", target, normalized, flags=re.IGNORECASE)
+    for source, target in _MONGOLIAN_DAYS.items():
+        normalized = re.sub(rf"\bдараагийн\s+{source}\b", f"следующий {target}", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(rf"\b{source}\b", target, normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\b(\d+)\s*(?:минут(?:ын)?|мин)\s+дараа\b", r"через \1 минут", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\b(\d+)\s*цаг(?:ийн)?\s+дараа\b", r"через \1 часов", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\b(\d+)\s*хоног(?:ийн)?\s+дараа\b", r"через \1 дней", normalized, flags=re.IGNORECASE)
+    return normalized
 
 
 @dataclass
@@ -41,7 +71,7 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> P
 
     now — таймзоно-осведомлённое «сейчас» в tz пользователя (база для относительных дат).
     """
-    raw = (text or "").strip()
+    raw = _normalize_mongolian_dates((text or "").strip())
 
     # @username исполнителя
     assignee_username = None
@@ -62,7 +92,7 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> P
         "DATE_ORDER": "DMY",
     }
     try:
-        found = search_dates(raw, languages=["ru"], settings=settings)
+        found = search_dates(raw, languages=["ru", "en"], settings=settings)
     except Exception:
         found = None
     if found:
@@ -89,7 +119,7 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> P
 
 def parse_when(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> Optional[datetime]:
     """Разбор отдельной фразы времени для /snooze (например «+1 день», «завтра 10:00»)."""
-    raw = (text or "").strip()
+    raw = _normalize_mongolian_dates((text or "").strip())
     settings = {
         "PREFER_DATES_FROM": "future",
         "RELATIVE_BASE": now.replace(tzinfo=None),
@@ -98,6 +128,6 @@ def parse_when(text: str, *, now: datetime, tz: str = "Europe/Moscow") -> Option
         "DATE_ORDER": "DMY",
     }
     try:
-        return dateparser.parse(raw, languages=["ru"], settings=settings)
+        return dateparser.parse(raw, languages=["ru", "en"], settings=settings)
     except Exception:
         return None

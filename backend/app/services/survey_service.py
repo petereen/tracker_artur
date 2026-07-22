@@ -11,7 +11,7 @@ def build_checkin_summary(session_id: int) -> str:
         answers = list(
             s.execute(select(Answer).where(Answer.session_id == session_id)).scalars()
         )
-        lines = ["✅ <b>Чек-ин заполнен!</b> Сегодня ты:"]
+        lines = ["✅ <b>Чек-ин бөглөгдлөө!</b> Өнөөдөр та:"]
         for a in answers:
             q = s.get(Question, a.question_id)
             if q and a.value_numeric is not None:
@@ -25,6 +25,6 @@ def build_checkin_summary(session_id: int) -> str:
                 select(Streak).where(Streak.employee_id == sess.employee_id)
             ).scalar_one_or_none()
             if streak and streak.current_streak > 1:
-                lines.append(f"\n🔥 Серия: {streak.current_streak} дней подряд!")
+                lines.append(f"\n🔥 Цуврал: {streak.current_streak} өдөр дараалан!")
 
     return "\n".join(lines)

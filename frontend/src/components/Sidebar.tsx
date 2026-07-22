@@ -1,14 +1,14 @@
 import { useAuthStore } from '../store/auth'
 
 const NAV = [
-  { id: 'dashboard',  label: 'Дашборд',       icon: '▦' },
-  { id: 'employees',  label: 'Сотрудники',    icon: '◉' },
-  { id: 'tasks',      label: 'Задачи',        icon: '✓' },
-  { id: 'questions',  label: 'Вопросы',       icon: '≡' },
-  { id: 'schedule',   label: 'Расписание',    icon: '◷' },
-  { id: 'journal',    label: 'Журнал',        icon: '☰' },
-  { id: 'manager',    label: 'Руководитель',  icon: '◎' },
-  { id: 'onboarding', label: 'Онбординг',     icon: '▷' },
+  { id: 'dashboard',  label: 'Хянах самбар',  icon: '▦' },
+  { id: 'employees',  label: 'Ажилтнууд',     icon: '◉' },
+  { id: 'tasks',      label: 'Даалгаврууд',   icon: '✓' },
+  { id: 'questions',  label: 'Асуултууд',     icon: '≡' },
+  { id: 'schedule',   label: 'Хуваарь',       icon: '◷' },
+  { id: 'journal',    label: 'Бүртгэл',       icon: '☰' },
+  { id: 'manager',    label: 'Удирдлага',     icon: '◎' },
+  { id: 'onboarding', label: 'Танилцуулга',   icon: '▷' },
 ]
 
 export function Sidebar({ active, onNav }: { active: string; onNav: (id: string) => void }) {
@@ -20,8 +20,8 @@ export function Sidebar({ active, onNav }: { active: string; onNav: (id: string)
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-base font-bold text-white">T</div>
           <div>
-            <div className="text-sm font-semibold leading-tight">Трекер задач</div>
-            <div className="text-[11px] text-muted">и постановщик</div>
+            <div className="text-sm font-semibold leading-tight">Даалгавар</div>
+            <div className="text-[11px] text-muted">хянах систем</div>
           </div>
         </div>
       </div>
@@ -41,7 +41,7 @@ export function Sidebar({ active, onNav }: { active: string; onNav: (id: string)
           <div className="w-[30px] h-[30px] rounded-full bg-surface3 flex items-center justify-center text-[13px] font-semibold text-muted flex-shrink-0">А</div>
           <div className="flex-1 min-w-0">
             <div className="text-[13px] font-medium truncate">Администратор</div>
-            <button onClick={logout} className="text-[11px] text-muted hover:text-red cursor-pointer bg-transparent border-none">Выйти</button>
+            <button onClick={logout} className="text-[11px] text-muted hover:text-red cursor-pointer bg-transparent border-none">Гарах</button>
           </div>
         </div>
       </div>

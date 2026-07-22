@@ -162,7 +162,10 @@ async def _show_draft(message: Message, draft: dict) -> None:
     )
 
 
-_SELF_RE = re.compile(r"\b(мне|себе|мной|меня|самому|самой|self)\b", re.IGNORECASE)
+_SELF_RE = re.compile(
+    r"\b(мне|себе|мной|меня|самому|самой|self|надад|өөртөө|намайг|би өөрөө)\b",
+    re.IGNORECASE,
+)
 
 
 async def _ai_intake(message: Message, state: FSMContext, text: str, *, employee, is_manager: bool, tg_id):

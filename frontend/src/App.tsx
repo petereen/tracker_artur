@@ -50,7 +50,7 @@ export default function App() {
   if (!hydrated) {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center">
-        <div className="text-muted text-sm">Загрузка...</div>
+        <div className="text-muted text-sm">Ачаалж байна...</div>
       </div>
     )
   }

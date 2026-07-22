@@ -123,7 +123,7 @@ async def send_survey(employee_id: int):
                 return
             telegram_id = emp.telegram_id
         create_session(employee_id)
-        await bot.send_message(telegram_id, "⏰ Время для вечернего чек-ина!\nНапиши /today чтобы начать.")
+        await bot.send_message(telegram_id, "⏰ Оройн чек-иний цаг боллоо!\nЭхлэхийн тулд /today гэж бичнэ үү.")
     finally:
         await bot.session.close()
 
@@ -149,7 +149,7 @@ async def send_reminder(employee_id: int, num: int):
             ).scalar_one_or_none()
             telegram_id = emp.telegram_id
         if sess:
-            await bot.send_message(telegram_id, f"⚠️ Напоминание #{num}: не забудь заполнить чек-ин! /today")
+            await bot.send_message(telegram_id, f"⚠️ Сануулга #{num}: чек-инээ бөглөхөө бүү мартаарай! /today")
     finally:
         await bot.session.close()
 
@@ -169,7 +169,7 @@ async def mark_missed_job(employee_id: int):
             emp = s.get(Employee, employee_id)
             emp_name = emp.name if emp else None
         if emp_name:
-            await bot.send_message(ms.telegram_id, f"🚨 {emp_name} не заполнил чек-ин сегодня.")
+            await bot.send_message(ms.telegram_id, f"🚨 {emp_name} өнөөдөр чек-ин бөглөөгүй байна.")
     finally:
         await bot.session.close()
 

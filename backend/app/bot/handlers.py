@@ -33,12 +33,12 @@ def _numeric_keyboard(question_text: str) -> InlineKeyboardMarkup:
     rows = []
     for row_start in range(0, 16, 5):
         rows.append([InlineKeyboardButton(text=str(i), callback_data=f"ans:{i}") for i in range(row_start, min(row_start + 5, 16))])
-    rows.append([InlineKeyboardButton(text="Другое число ✏️", callback_data="ans:custom")])
+    rows.append([InlineKeyboardButton(text="Өөр тоо ✏️", callback_data="ans:custom")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _ask_question(message_or_cb, question, state: FSMContext, session_id: int, q_index: int, questions: list):
-    text = f"❓ Вопрос {q_index + 1}/{len(questions)}:\n\n<b>{question.text}</b>"
+    text = f"❓ Асуулт {q_index + 1}/{len(questions)}:\n\n<b>{question.text}</b>"
 
     if question.answer_type in ("integer", "decimal"):
         kb = _numeric_keyboard(question.text)
@@ -61,19 +61,19 @@ async def _ask_question(message_or_cb, question, state: FSMContext, session_id: 
 async def cmd_start(message: Message, state: FSMContext, employee=None):
     emp = employee
     if not emp:
-        await message.answer("❌ Вы не зарегистрированы в системе. Обратитесь к руководителю.")
+        await message.answer("❌ Та системд бүртгэгдээгүй байна. Удирдлагадаа хандана уу.")
         return
 
     mark_employee_onboarded(emp.id)
     ms = get_manager_settings()
     onboarding_text = (
-        f"👋 Привет, {emp.name.split()[0]}!\n\n"
-        f"Я — бот «Трекер и постановщик задач».\n\n"
-        f"Каждый день я буду присылать тебе короткий опрос из нескольких вопросов.\n\n"
-        f"📊 /my_stats — твоя статистика\n"
-        f"📋 /today — заполнить чек-ин\n"
-        f"🏆 /leaderboard — рейтинг команды\n"
-        f"❓ /help — помощь"
+        f"👋 Сайн байна уу, {emp.name.split()[0]}!\n\n"
+        f"Би «Даалгавар хянагч» бот байна.\n\n"
+        f"Би танд өдөр бүр богино асуулга илгээнэ.\n\n"
+        f"📊 /my_stats — таны статистик\n"
+        f"📋 /today — чек-ин бөглөх\n"
+        f"🏆 /leaderboard — багийн чансаа\n"
+        f"❓ /help — тусламж"
     )
     await message.answer(onboarding_text)
 
@@ -84,12 +84,12 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
 async def cmd_today(message: Message, state: FSMContext, employee=None):
     emp = employee
     if not emp:
-        await message.answer("❌ Вы не зарегистрированы.")
+        await message.answer("❌ Та бүртгэгдээгүй байна.")
         return
 
     questions = get_questions()
     if not questions:
-        await message.answer("⚠️ Вопросы ещё не настроены.")
+        await message.answer("⚠️ Асуултууд тохируулагдаагүй байна.")
         return
 
     sess = create_session(emp.id)
@@ -108,7 +108,7 @@ async def cb_answer(cb: CallbackQuery, state: FSMContext):
     question_ids = data["questions"]
 
     if value_raw == "custom":
-        await cb.message.answer("Введи число вручную:")
+        await cb.message.answer("Тоог гараар оруулна уу:")
         await state.update_data(waiting_custom=True)
         await cb.answer()
         return
@@ -138,7 +138,7 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
         try:
             value_numeric = float(value.replace(",", "."))
         except ValueError:
-            await message.answer("Введи число, например: 12")
+            await message.answer("Тоог оруулна уу. Жишээ нь: 12")
             return
     else:
         value_text = value.strip()
@@ -164,7 +164,7 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
 async def cmd_stats(message: Message, employee=None):
     emp = employee
     if not emp:
-        await message.answer("❌ Вы не зарегистрированы.")
+        await message.answer("❌ Та бүртгэгдээгүй байна.")
         return
 
     streak = get_streak(emp.id)
@@ -183,14 +183,14 @@ async def cmd_stats(message: Message, employee=None):
         ).scalar()
 
     text = (
-        f"📊 <b>Статистика {emp.name.split()[0]}</b>\n\n"
-        f"📅 Заполнено за неделю: <b>{week_sessions}</b>\n"
-        f"📅 Заполнено за месяц: <b>{month_sessions}</b>\n"
-        f"📋 Всего сессий: <b>{total_sessions}</b>\n"
+        f"📊 <b>{emp.name.split()[0]}-ийн статистик</b>\n\n"
+        f"📅 7 хоногт бөглөсөн: <b>{week_sessions}</b>\n"
+        f"📅 Сард бөглөсөн: <b>{month_sessions}</b>\n"
+        f"📋 Нийт сесс: <b>{total_sessions}</b>\n"
     )
     if streak:
-        text += f"\n🔥 Текущая серия: <b>{streak.current_streak} дн.</b>\n"
-        text += f"🏆 Рекорд серии: <b>{streak.longest_streak} дн.</b>"
+        text += f"\n🔥 Одоогийн цуврал: <b>{streak.current_streak} өдөр</b>\n"
+        text += f"🏆 Хамгийн урт цуврал: <b>{streak.longest_streak} өдөр</b>"
 
     await message.answer(text, parse_mode="HTML")
 
@@ -201,7 +201,7 @@ async def cmd_stats(message: Message, employee=None):
 async def cmd_leaderboard(message: Message):
     ms = get_manager_settings()
     if ms and not ms.gamification_enabled:
-        await message.answer("🏆 Рейтинг временно отключён администратором.")
+        await message.answer("🏆 Чансааг администратор түр хаасан байна.")
         return
 
     with get_session() as s:
@@ -214,10 +214,10 @@ async def cmd_leaderboard(message: Message):
         ).all())
 
     medals = ["🥇", "🥈", "🥉"]
-    lines = ["🏆 <b>Топ-3 команды (серия дней)</b>\n"]
+    lines = ["🏆 <b>Багийн топ-3 (өдрийн цуврал)</b>\n"]
     for i, (emp, streak) in enumerate(rows):
         cur = streak.current_streak if streak else 0
-        lines.append(f"{medals[i]} {emp.name} — {cur} дн.")
+        lines.append(f"{medals[i]} {emp.name} — {cur} өдөр")
 
     await message.answer("\n".join(lines), parse_mode="HTML")
 
@@ -229,11 +229,11 @@ async def cmd_myid(message: Message, employee=None):
     u = message.from_user
     uname = f"@{u.username}" if u.username else "—"
     if employee:
-        reg = f"\n✅ Ты зарегистрирован: <b>{employee.name}</b>"
+        reg = f"\n✅ Та бүртгэгдсэн: <b>{employee.name}</b>"
     else:
-        reg = "\n❗️Ты пока не зарегистрирован. Передай этот ID руководителю — он добавит тебя."
+        reg = "\n❗️Та бүртгэгдээгүй байна. Энэ ID-г удирдлагадаа өгнө үү."
     await message.answer(
-        f"🆔 Твой Telegram ID: <code>{u.id}</code>\nUsername: {uname}{reg}",
+        f"🆔 Таны Telegram ID: <code>{u.id}</code>\nUsername: {uname}{reg}",
         parse_mode="HTML",
     )
 

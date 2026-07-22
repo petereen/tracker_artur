@@ -7,27 +7,27 @@ from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefaul
 log = logging.getLogger(__name__)
 
 EMPLOYEE_COMMANDS: list[BotCommand] = [
-    BotCommand(command="today",   description="Заполнить ежедневный чек-ин"),
-    BotCommand(command="mytasks", description="Мои активные задачи"),
-    BotCommand(command="done",    description="Отметить задачу выполненной"),
-    BotCommand(command="snooze",  description="Перенести срок задачи"),
-    BotCommand(command="myid",    description="Мой Telegram ID"),
-    BotCommand(command="help",    description="Справка по командам"),
+    BotCommand(command="today",   description="Өнөөдрийн чек-ин бөглөх"),
+    BotCommand(command="mytasks", description="Миний идэвхтэй даалгаврууд"),
+    BotCommand(command="done",    description="Даалгаврыг дууссанд тэмдэглэх"),
+    BotCommand(command="snooze",  description="Даалгаврын хугацааг хойшлуулах"),
+    BotCommand(command="myid",    description="Миний Telegram ID"),
+    BotCommand(command="help",    description="Командын тусламж"),
 ]
 
 MANAGER_COMMANDS: list[BotCommand] = [
-    BotCommand(command="today",     description="Заполнить ежедневный чек-ин"),
-    BotCommand(command="mytasks",   description="Мои активные задачи"),
-    BotCommand(command="done",      description="Отметить задачу выполненной"),
-    BotCommand(command="snooze",    description="Перенести срок задачи"),
-    BotCommand(command="myid",      description="Мой Telegram ID"),
-    BotCommand(command="help",      description="Справка по командам"),
-    BotCommand(command="task",      description="Поставить задачу"),
-    BotCommand(command="assigned",  description="Задачи, поставленные мной"),
-    BotCommand(command="dashboard", description="Сводный дашборд задач"),
-    BotCommand(command="summary",   description="Сводка опросов за вчера"),
-    BotCommand(command="week",      description="Статистика опросов за 7 дней"),
-    BotCommand(command="blockers",  description="Топ блокеров за месяц"),
+    BotCommand(command="today",     description="Өнөөдрийн чек-ин бөглөх"),
+    BotCommand(command="mytasks",   description="Миний идэвхтэй даалгаврууд"),
+    BotCommand(command="done",      description="Даалгаврыг дууссанд тэмдэглэх"),
+    BotCommand(command="snooze",    description="Даалгаврын хугацааг хойшлуулах"),
+    BotCommand(command="myid",      description="Миний Telegram ID"),
+    BotCommand(command="help",      description="Командын тусламж"),
+    BotCommand(command="task",      description="Даалгавар үүсгэх"),
+    BotCommand(command="assigned",  description="Миний өгсөн даалгаврууд"),
+    BotCommand(command="dashboard", description="Даалгаврын хянах самбар"),
+    BotCommand(command="summary",   description="Өчигдрийн асуулгын хураангуй"),
+    BotCommand(command="week",      description="7 хоногийн асуулгын статистик"),
+    BotCommand(command="blockers",  description="Сарын гол саад бэрхшээлүүд"),
 ]
 
 
