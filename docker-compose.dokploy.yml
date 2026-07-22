@@ -1,0 +1,65 @@
+# Dokploy deployment: configure the public domain in Dokploy's Domains tab
+# and select the `frontend` service on port 80.
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sales_tracker
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker -d sales_tracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: &app_environment
+      DATABASE_URL: ${DATABASE_URL}
+      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      MANAGER_TG_ID: ${MANAGER_TG_ID}
+      MINI_APP_URL: ${MINI_APP_URL}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_WHISPER_MODEL: ${OPENAI_WHISPER_MODEL:-gpt-4o-mini-transcribe}
+      OPENAI_MONGOLIAN_TRANSCRIBE_MODEL: ${OPENAI_MONGOLIAN_TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
+      OPENAI_TASK_MODEL: ${OPENAI_TASK_MODEL:-gpt-4o-mini}
+      OPENAI_TRANSCRIBE_LANGUAGE: ${OPENAI_TRANSCRIBE_LANGUAGE:-}
+      CHIMEGE_API_TOKEN: ${CHIMEGE_API_TOKEN:-}
+      CHIMEGE_PUNCTUATE: ${CHIMEGE_PUNCTUATE:-true}
+    expose:
+      - "8000"
+
+  bot:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *app_environment
+    command: python -m app.bot.main
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+
+volumes:
+  pgdata:
