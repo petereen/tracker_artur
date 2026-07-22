@@ -1,6 +1,7 @@
 """aiogram handlers задач: /task /mytasks /assigned /done /snooze /dashboard."""
 import logging
 import re
+from html import escape
 from datetime import datetime, timezone
 
 import pytz
@@ -240,7 +241,7 @@ async def cmd_voice_task(message: Message, state: FSMContext, employee=None, is_
     text, error = await voice_service.transcribe(audio)
     if not text:
         detail = error or "Дуу хоолойг ойлгосонгүй. Илүү тодорхой, богино бичлэгээр дахин оролдоно уу."
-        await message.answer(f"❌ {detail} Даалгавраа текстээр бичнэ үү: <code>/task …</code>", parse_mode="HTML")
+        await message.answer(f"❌ {escape(detail)} Даалгавраа текстээр бичнэ үү: <code>/task …</code>", parse_mode="HTML")
         return
     await message.answer(f"📝 Танигдсан текст: «{text}»")
     await _ai_intake(message, state, text, employee=employee, is_manager=is_manager, tg_id=tg_id)
