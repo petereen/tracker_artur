@@ -37,6 +37,13 @@ def _fmt_deadline(dt: datetime | None) -> str:
     return dt.astimezone(timezone.utc).strftime("%d.%m %H:%M UTC")
 
 
+def _fmt_ub_deadline(dt: datetime | None) -> str:
+    """Format a deadline for the task-draft confirmation in Ulaanbaatar time."""
+    if not dt:
+        return "Хугацаагүй"
+    return dt.astimezone(pytz.timezone("Asia/Ulaanbaatar")).strftime("%d.%m %H:%M УБ")
+
+
 def _fmt_task_line(t: dict, *, with_assignee: bool = False) -> str:
     em = _PRIORITY_EMOJI.get(t["priority"], "🟡")
     who = f" → {t['assignee_name']}" if with_assignee and t.get("assignee_name") else ""
@@ -157,7 +164,7 @@ async def _show_draft(message: Message, draft: dict) -> None:
         f"<b>{draft['title']}</b>{desc}\n"
         f"👤 Гүйцэтгэгч: <b>{draft.get('assignee_name') or '—'}</b>\n"
         f"{_PRIORITY_EMOJI.get(draft.get('priority', 2), '🟡')} Тэргүүлэх зэрэг: {draft.get('priority', 2)}\n"
-        f"🕒 Хугацаа: <b>{_fmt_deadline(draft.get('deadline_at'))}</b>\n\n"
+        f"🕒 Хугацаа: <b>{_fmt_ub_deadline(draft.get('deadline_at'))}</b>\n\n"
         f"Даалгаврыг үүсгэх үү?",
         parse_mode="HTML", reply_markup=_draft_kb(),
     )
