@@ -73,14 +73,15 @@ services:
       # The host Nginx vhost for artur.oyuns.mn is the only public entry point.
       - "127.0.0.1:3010:80"
     networks:
-      - default
-      # Lets the existing oyunswebapp Nginx edge proxy reach this container.
-      - oyunswebapp_proxy
+      default: {}
+      # Lets the shared Nginx edge proxy reach this container.
+      web-edge:
+        aliases:
+          - oyuns-agent-frontend
 
 volumes:
   pgdata:
 
 networks:
-  oyunswebapp_proxy:
+  web-edge:
     external: true
-    name: oyunswebapp_default
