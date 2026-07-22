@@ -11,10 +11,41 @@ import aiohttp
 log = logging.getLogger(__name__)
 
 OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions"
+CHIMEGE_TRANSCRIBE_URL = "https://api.chimege.com/v1.2/transcribe"
 
 
 def transcription_enabled() -> bool:
-    return bool(os.getenv("OPENAI_API_KEY", "").strip())
+    return bool(
+        os.getenv("CHIMEGE_API_TOKEN", "").strip()
+        or os.getenv("OPENAI_API_KEY", "").strip()
+    )
+
+
+async def _transcribe_chimege(audio: bytes, token: str) -> tuple[Optional[str], Optional[str]]:
+    """Transcribe Mongolian speech through Chimege's synchronous STT endpoint."""
+    headers = {
+        "Content-Type": "application/octet-stream",
+        "Punctuate": os.getenv("CHIMEGE_PUNCTUATE", "true"),
+        "Token": token,
+    }
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(CHIMEGE_TRANSCRIBE_URL, headers=headers, data=audio) as resp:
+                body = (await resp.text()).strip()
+                if resp.status == 200:
+                    return body or None, None
+                log.warning("Chimege STT API %s: %s", resp.status, body[:300])
+                if resp.status == 403:
+                    return None, "Chimege API token хүчингүй эсвэл идэвхгүй байна."
+                if resp.status == 400:
+                    return None, f"Chimege аудиог хүлээж авсангүй: {body[:240] or 'аудио формат эсвэл бичлэгийг шалгана уу'}"
+                if resp.status == 503:
+                    return None, "Chimege үйлчилгээ ачаалалтай байна. Дахин оролдоно уу."
+                return None, "Chimege дуу хоолой таних үйлчилгээ түр алдаатай байна."
+    except Exception:  # noqa: BLE001 — allow text task entry as a fallback
+        log.exception("Chimege transcription failed")
+        return None, "Chimege дуу хоолой таних үйлчилгээтэй холбогдож чадсангүй."
 
 
 def _api_error_message(body: str) -> str:
@@ -26,6 +57,10 @@ def _api_error_message(body: str) -> str:
 
 async def transcribe(audio: bytes, filename: str = "voice.ogg") -> tuple[Optional[str], Optional[str]]:
     """Возвращает распознанный текст и безопасное для пользователя описание ошибки."""
+    chimege_token = os.getenv("CHIMEGE_API_TOKEN", "").strip()
+    if chimege_token:
+        return await _transcribe_chimege(audio, chimege_token)
+
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         return None, "OpenAI API түлхүүр тохируулагдаагүй байна."

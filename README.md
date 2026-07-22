@@ -81,6 +81,11 @@ OPENAI_MONGOLIAN_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 OPENAI_TASK_MODEL=gpt-4o-mini
 # Leave empty for Mongolian: Whisper detects it automatically.
 OPENAI_TRANSCRIBE_LANGUAGE=
+
+# Preferred provider for Mongolian voice tasks (optional).
+# Obtain the token from console.chimege.com after activating the service.
+CHIMEGE_API_TOKEN=your-chimege-api-token
+CHIMEGE_PUNCTUATE=true
 ```
 
 Сгенерировать надёжный `SECRET_KEY`:
