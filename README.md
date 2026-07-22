@@ -72,6 +72,12 @@ MANAGER_TG_ID=your-telegram-id
 
 ADMIN_EMAIL=admin@company.ru
 ADMIN_PASSWORD=your-admin-password
+
+# Optional: enable voice task creation and AI task drafting
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_WHISPER_MODEL=whisper-1
+OPENAI_TASK_MODEL=gpt-4o-mini
+OPENAI_TRANSCRIBE_LANGUAGE=mn
 ```
 
 Сгенерировать надёжный `SECRET_KEY`:
