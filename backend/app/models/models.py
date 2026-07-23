@@ -144,6 +144,10 @@ class CompanyKnowledge(Base):
     title = Column(Text, nullable=False)
     category = Column(Text)
     content = Column(Text, nullable=False)
+    attachment_filename = Column(Text)
+    attachment_stored_name = Column(Text)
+    attachment_content_type = Column(Text)
+    attachment_size = Column(Integer)
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(

@@ -162,6 +162,9 @@ export interface KnowledgeEntry {
   title: string
   category: string | null
   content: string
+  attachment_filename: string | null
+  attachment_content_type: string | null
+  attachment_size: number | null
   is_active: boolean
   created_at: string
   updated_at: string
@@ -193,6 +196,26 @@ export function useCreateKnowledge() {
   })
 }
 
+export function useCreateKnowledgeWithAttachment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ data, file }: { data: KnowledgeInput; file: File }) => {
+      const body = new FormData()
+      body.append('title', data.title)
+      body.append('category', data.category || '')
+      body.append('content', data.content)
+      body.append('is_active', String(data.is_active))
+      body.append('file', file)
+      return api.post('/knowledge/upload', body).then((r) => r.data)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge'] })
+      toast.success('Файлтай мэдлэгийн мэдээлэл нэмэгдлээ')
+    },
+    onError: () => toast.error('Файл хавсаргах үед алдаа гарлаа'),
+  })
+}
+
 export function useUpdateKnowledge() {
   const qc = useQueryClient()
   return useMutation({
@@ -215,6 +238,34 @@ export function useDeleteKnowledge() {
       toast.success('Мэдээлэл устгагдлаа')
     },
     onError: () => toast.error('Мэдээлэл устгахад алдаа гарлаа'),
+  })
+}
+
+export function useReplaceKnowledgeAttachment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, file }: { id: number; file: File }) => {
+      const body = new FormData()
+      body.append('file', file)
+      return api.post(`/knowledge/${id}/attachment`, body).then((r) => r.data)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge'] })
+      toast.success('Файл хавсрагдлаа')
+    },
+    onError: () => toast.error('Файл хавсаргах үед алдаа гарлаа'),
+  })
+}
+
+export function useDeleteKnowledgeAttachment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/knowledge/${id}/attachment`).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge'] })
+      toast.success('Хавсралт устгагдлаа')
+    },
+    onError: () => toast.error('Хавсралт устгахад алдаа гарлаа'),
   })
 }
 

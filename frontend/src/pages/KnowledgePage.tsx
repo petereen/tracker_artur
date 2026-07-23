@@ -1,13 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Toggle } from '../components/ui'
 import {
   KnowledgeEntry,
   KnowledgeInput,
   useCreateKnowledge,
+  useCreateKnowledgeWithAttachment,
   useDeleteKnowledge,
+  useDeleteKnowledgeAttachment,
   useKnowledge,
+  useReplaceKnowledgeAttachment,
   useUpdateKnowledge,
 } from '../api/hooks'
+import { api } from '../api/client'
 
 const EMPTY_FORM: KnowledgeInput = {
   title: '',
@@ -19,12 +23,18 @@ const EMPTY_FORM: KnowledgeInput = {
 export function KnowledgePage() {
   const { data: entries = [], isLoading } = useKnowledge()
   const create = useCreateKnowledge()
+  const createWithAttachment = useCreateKnowledgeWithAttachment()
   const update = useUpdateKnowledge()
   const remove = useDeleteKnowledge()
+  const replaceAttachment = useReplaceKnowledgeAttachment()
+  const removeAttachment = useDeleteKnowledgeAttachment()
   const [query, setQuery] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<KnowledgeInput>(EMPTY_FORM)
   const [showModal, setShowModal] = useState(false)
+  const [attachment, setAttachment] = useState<File | null>(null)
+  const [removeExistingAttachment, setRemoveExistingAttachment] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const filtered = useMemo(() => {
     const term = query.trim().toLocaleLowerCase()
@@ -38,6 +48,8 @@ export function KnowledgePage() {
   const openCreate = () => {
     setEditingId(null)
     setForm(EMPTY_FORM)
+    setAttachment(null)
+    setRemoveExistingAttachment(false)
     setShowModal(true)
   }
 
@@ -49,6 +61,8 @@ export function KnowledgePage() {
       content: entry.content,
       is_active: entry.is_active,
     })
+    setAttachment(null)
+    setRemoveExistingAttachment(false)
     setShowModal(true)
   }
 
@@ -57,15 +71,38 @@ export function KnowledgePage() {
       ...form,
       title: form.title.trim(),
       category: form.category?.trim() || null,
-      content: form.content.trim(),
+      content: form.content.trim() || (attachment ? `Хавсаргасан файл: ${attachment.name}` : ''),
     }
     if (editingId) {
       await update.mutateAsync({ id: editingId, ...payload })
+      if (attachment) await replaceAttachment.mutateAsync({ id: editingId, file: attachment })
+      if (removeExistingAttachment && !attachment) await removeAttachment.mutateAsync(editingId)
+    } else if (attachment) {
+      await createWithAttachment.mutateAsync({ data: payload, file: attachment })
     } else {
       await create.mutateAsync(payload)
     }
     setShowModal(false)
   }
+
+  const selectAttachment = (file: File | null) => {
+    setAttachment(file)
+    if (file && !form.title.trim()) {
+      setForm((current) => ({ ...current, title: file.name.replace(/\.[^.]+$/, '') }))
+    }
+  }
+
+  const downloadAttachment = async (entry: KnowledgeEntry) => {
+    const response = await api.get(`/knowledge/${entry.id}/attachment`, { responseType: 'blob' })
+    const url = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = entry.attachment_filename || 'attachment'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const selectedEntry = editingId ? entries.find((entry) => entry.id === editingId) : undefined
 
   const toggleActive = (entry: KnowledgeEntry, is_active: boolean) => {
     update.mutate({
@@ -123,6 +160,16 @@ export function KnowledgePage() {
                 <p className="text-[13px] text-muted leading-relaxed whitespace-pre-wrap line-clamp-4">
                   {entry.content}
                 </p>
+                {entry.attachment_filename && (
+                  <button
+                    onClick={() => downloadAttachment(entry)}
+                    className="mt-3 text-xs text-accent hover:underline"
+                  >
+                    📎 {entry.attachment_filename}
+                    {entry.attachment_size ? ` · ${(entry.attachment_size / 1024 / 1024).toFixed(1)} MB` : ''}
+                    {' · Татах'}
+                  </button>
+                )}
                 <div className="text-[11px] text-muted mt-3">
                   Шинэчилсэн: {new Date(entry.updated_at).toLocaleString()}
                 </div>
@@ -169,6 +216,29 @@ export function KnowledgePage() {
               />
               <div className="text-[11px] text-muted text-right">{form.content.length}/20000</div>
             </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-xs text-muted font-medium">Файл хавсаргах</label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.rtf,.odt,.xls,.xlsx,.ods,.ppt,.pptx,.odp,.txt,.md,.csv,.png,.jpg,.jpeg,.webp,.svg"
+                onChange={(event) => selectAttachment(event.target.files?.[0] || null)}
+                className="block w-full text-xs text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-surface3 file:px-3 file:py-2 file:text-xs file:font-medium file:text-text hover:file:bg-border"
+              />
+              <div className="text-[11px] text-muted">PDF, Office баримт, TXT/CSV, зураг болон SVG · 20 MB хүртэл</div>
+              {attachment && <div className="text-xs text-accent">Шинэ хавсралт: {attachment.name}</div>}
+              {selectedEntry?.attachment_filename && !attachment && (
+                <div className="flex items-center gap-2 text-xs text-muted">
+                  Одоогийн хавсралт: {selectedEntry.attachment_filename}
+                  <button
+                    onClick={() => setRemoveExistingAttachment((value) => !value)}
+                    className="text-red hover:underline"
+                  >
+                    {removeExistingAttachment ? 'Устгахыг буцаах' : 'Устгах'}
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="flex items-center justify-between rounded-lg bg-surface2 px-3 py-2">
               <div>
                 <div className="text-[13px] font-medium">Туслахад ашиглуулах</div>
@@ -184,7 +254,15 @@ export function KnowledgePage() {
               <Btn
                 variant="primary"
                 onClick={save}
-                disabled={!form.title.trim() || !form.content.trim() || create.isPending || update.isPending}
+                disabled={
+                  !form.title.trim()
+                  || (!form.content.trim() && !attachment)
+                  || create.isPending
+                  || createWithAttachment.isPending
+                  || update.isPending
+                  || replaceAttachment.isPending
+                  || removeAttachment.isPending
+                }
               >
                 Хадгалах
               </Btn>

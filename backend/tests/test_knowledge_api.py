@@ -1,7 +1,9 @@
 import pytest
 from pydantic import ValidationError
 
-from app.routers.knowledge import KnowledgeCreate, KnowledgeUpdate
+from fastapi import HTTPException
+
+from app.routers.knowledge import KnowledgeCreate, KnowledgeUpdate, _safe_attachment_filename
 
 
 def test_knowledge_create_strips_fields():
@@ -32,3 +34,15 @@ def test_knowledge_rejects_invalid_content(payload):
 def test_knowledge_put_requires_complete_representation():
     with pytest.raises(ValidationError):
         KnowledgeUpdate.model_validate({"is_active": False})
+
+
+def test_knowledge_attachment_filename_is_sanitized_and_allowed():
+    filename, extension = _safe_attachment_filename("../brand/logo.svg")
+    assert filename == "logo.svg"
+    assert extension == ".svg"
+
+
+def test_knowledge_attachment_rejects_unsupported_file_type():
+    with pytest.raises(HTTPException) as exc:
+        _safe_attachment_filename("unsafe.exe")
+    assert exc.value.status_code == 415

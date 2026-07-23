@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str = "admin@company.ru"
     ADMIN_PASSWORD: str = "admin123"
     ACCESS_TOKEN_EXPIRE_HOURS: int = 24
+    KNOWLEDGE_UPLOAD_DIR: str = "/app/uploads/knowledge"
 
     class Config:
         env_file = ".env"
