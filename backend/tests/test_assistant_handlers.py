@@ -5,6 +5,7 @@ from io import BytesIO
 from types import SimpleNamespace
 
 from app.bot import assistant_handlers
+from app.bot.tasks_handlers import _targets_all_workers
 from app.services.assistant_ai import (
     AssistantIntent,
     AssistantLanguage,
@@ -185,3 +186,9 @@ def test_worker_directory_is_read_only_and_deterministic(monkeypatch):
 
     assert "Alex" in message.answers[-1][0]
     assert "@alex" in message.answers[-1][0]
+
+
+def test_all_worker_assignment_requests_are_recognized():
+    assert _targets_all_workers("Assign the company meeting to all workers")
+    assert _targets_all_workers("Бүх ажилтанд арга хэмжээний даалгавар өг")
+    assert _targets_all_workers("Назначь встречу всем сотрудникам")

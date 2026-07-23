@@ -81,6 +81,42 @@ def create_task(
         return _to_dict(s, task)
 
 
+def create_tasks_for_assignees(
+    *,
+    title: str,
+    assignee_ids: list[int],
+    created_by_id: Optional[int],
+    created_by_tg: Optional[str],
+    deadline_at: Optional[datetime] = None,
+    priority: int = 2,
+    description: Optional[str] = None,
+    reminder_intervals_min: Optional[list[int]] = None,
+) -> list[dict]:
+    """Create one identical task per unique worker in a single transaction."""
+    unique_ids = list(dict.fromkeys(int(employee_id) for employee_id in assignee_ids))
+    if not unique_ids:
+        return []
+    with get_session() as s:
+        tasks = [
+            Task(
+                title=title,
+                description=description,
+                assignee_id=employee_id,
+                created_by_id=created_by_id,
+                created_by_tg=created_by_tg,
+                deadline_at=deadline_at,
+                priority=priority,
+                reminder_intervals_min=list(reminder_intervals_min or DEFAULT_REMINDER_INTERVALS_MIN),
+            )
+            for employee_id in unique_ids
+        ]
+        s.add_all(tasks)
+        s.commit()
+        for task in tasks:
+            s.refresh(task)
+        return [_to_dict(s, task) for task in tasks]
+
+
 def get_task(task_id: int) -> Optional[dict]:
     with get_session() as s:
         task = s.get(Task, task_id)

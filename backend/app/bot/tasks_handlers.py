@@ -173,6 +173,19 @@ _SELF_RE = re.compile(
     r"\b(мне|себе|мной|меня|самому|самой|self|надад|өөртөө|намайг|би өөрөө)\b",
     re.IGNORECASE,
 )
+_ALL_WORKERS_RE = re.compile(
+    r"(?:\ball\s+(?:workers?|employees?|staff|team|everyone|everybody)\b|"
+    r"\b(?:everyone|everybody)\b|"
+    r"бүх\s+(?:ажилт(?:ан|нууд)|ажилч(?:ин|ид)|баг(?:ийн\s+гишүүд)?)|"
+    r"(?:бүгдэд|бүгд\s+нь)|"
+    r"(?:всем|все(?:м)?\s+(?:сотрудник(?:ам|и)?|работник(?:ам|и)?|команд(?:е|ы))))",
+    re.IGNORECASE,
+)
+
+
+def _targets_all_workers(text: str) -> bool:
+    """Detect an explicit all-active-worker assignment in supported languages."""
+    return bool(_ALL_WORKERS_RE.search(text or ""))
 
 
 async def begin_task_draft(
@@ -197,6 +210,7 @@ async def begin_task_draft(
     tz = (self_emp.get("timezone") if self_emp else None) or "Asia/Ulaanbaatar"
 
     roster = _roster()
+    all_active_assignee_ids = [row["id"] for row in roster]
     if self_emp and not any(r["id"] == self_emp["id"] for r in roster):
         roster.append({"id": self_emp["id"], "name": f"{self_emp['name']} (та өөрөө)", "username": self_emp.get("telegram_username")})
 
@@ -210,14 +224,21 @@ async def begin_task_draft(
             t = task_service.resolve_employee_by_username(parsed.assignee_username)
             a_id = t.id if t else None
         structured = {"title": parsed.title, "description": None, "assignee_id": a_id,
-                      "deadline_at": parsed.deadline_at, "priority": parsed.priority}
+                      "assign_to_all": False, "deadline_at": parsed.deadline_at, "priority": parsed.priority}
 
     assignee_id = structured.get("assignee_id")
+    assign_to_all = is_manager and (
+        bool(structured.get("assign_to_all")) or _targets_all_workers(text)
+    )
     # Самоназначение: рядовой сотрудник всегда себе; явное «мне/себе» — себе у любого.
     if self_emp and (not is_manager or (not assignee_id and _SELF_RE.search(text or ""))):
         assignee_id = self_emp["id"]
 
-    if not assignee_id:
+    if assign_to_all and not all_active_assignee_ids:
+        await message.answer("👥 Идэвхтэй ажилтан алга байна. Эхлээд админ самбараас ажилтан нэмнэ үү.")
+        return
+
+    if not assign_to_all and not assignee_id:
         others = [r for r in roster if not self_emp or r["id"] != self_emp["id"]]
         if not others:
             await message.answer("👥 Одоогоор даалгавар өгөх өөр хүн алга. «Надад даалгавар өг» гэж бичих эсвэл админ самбараас ажилтан нэмнэ үү.")
@@ -230,7 +251,9 @@ async def begin_task_draft(
         name = name.replace(" (та өөрөө)", "")
     draft = {
         "title": structured["title"], "description": structured.get("description"),
-        "assignee_id": assignee_id, "assignee_name": name,
+        "assignee_id": assignee_id, "assignee_ids": all_active_assignee_ids if assign_to_all else [assignee_id],
+        "assign_to_all": assign_to_all,
+        "assignee_name": f"Бүх идэвхтэй ажилтан ({len(all_active_assignee_ids)})" if assign_to_all else name,
         "deadline_at": structured.get("deadline_at"), "priority": structured.get("priority", 2),
         "created_by_id": self_emp["id"] if self_emp else None, "created_by_tg": tg_id,
     }
@@ -246,20 +269,28 @@ async def cb_draft_confirm(cb: CallbackQuery, state: FSMContext, tg_id: str | No
     if not d:
         await cb.answer("Ноорогийн хугацаа дууссан", show_alert=True)
         return
-    task = task_service.create_task(
-        title=d["title"], assignee_id=d["assignee_id"],
+    tasks = task_service.create_tasks_for_assignees(
+        title=d["title"], assignee_ids=d.get("assignee_ids") or [d["assignee_id"]],
         created_by_id=d["created_by_id"], created_by_tg=d["created_by_tg"],
         deadline_at=d["deadline_at"], priority=d["priority"], description=d.get("description"),
     )
-    try:
-        reminder_service.schedule_task_reminders(task)
-    except Exception:  # noqa: BLE001
-        log.exception("draft: не удалось запланировать напоминания task=%s", task["id"])
-    _enqueue_assignment_bot(task, tg_id)
-    await cb.message.answer(
-        f"✅ <b>#{task['id']}</b> даалгавар үүслээ: «{task['title']}» → {d.get('assignee_name') or '—'}",
-        parse_mode="HTML", reply_markup=task_actions_kb(task["id"]),
-    )
+    for task in tasks:
+        try:
+            reminder_service.schedule_task_reminders(task)
+        except Exception:  # noqa: BLE001
+            log.exception("draft: не удалось запланировать напоминания task=%s", task["id"])
+        _enqueue_assignment_bot(task, tg_id)
+    if d.get("assign_to_all"):
+        await cb.message.answer(
+            f"✅ <b>{len(tasks)}</b> ажилтанд «{d['title']}» даалгавар үүслээ.",
+            parse_mode="HTML",
+        )
+    else:
+        task = tasks[0]
+        await cb.message.answer(
+            f"✅ <b>#{task['id']}</b> даалгавар үүслээ: «{task['title']}» → {d.get('assignee_name') or '—'}",
+            parse_mode="HTML", reply_markup=task_actions_kb(task["id"]),
+        )
     await cb.answer("Боллоо ✅")
 
 

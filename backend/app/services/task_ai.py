@@ -35,6 +35,7 @@ _USER_TEMPLATE = """\
 - "title": string (80 тэмдэгтээс уртгүй товч гарчиг)
 - "description": string эсвэл null (дэлгэрэнгүй мэдээлэл байвал)
 - "assignee_id": integer эсвэл null (ЗӨВХӨН жагсаалт дахь ажилтны id; тодорхойгүй бол null)
+- "assign_to_all": boolean (true ЗӨВХӨН хэрэглэгч бүх идэвхтэй ажилтанд өгөхийг тодорхой хүссэн үед)
 - "deadline_iso": string эсвэл null (цагийн бүсийг харгалзсан, зөвхөн ирээдүйн ISO 8601 хугацаа)
 - "priority": 1, 2 эсвэл 3 (1=яаралтай, 2=ердийн, 3=бага)
 - "needs_clarification": boolean (тодруулга шаардлагатай эсэх)
@@ -48,6 +49,7 @@ _TASK_RESPONSE_SCHEMA = {
         "title": {"type": "string"},
         "description": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         "assignee_id": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+        "assign_to_all": {"type": "boolean"},
         "deadline_iso": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         "priority": {"type": "integer", "enum": [1, 2, 3]},
         "needs_clarification": {"type": "boolean"},
@@ -57,6 +59,7 @@ _TASK_RESPONSE_SCHEMA = {
         "title",
         "description",
         "assignee_id",
+        "assign_to_all",
         "deadline_iso",
         "priority",
         "needs_clarification",
@@ -127,6 +130,10 @@ def parse_llm_json(raw: str, roster_ids: set[int]) -> Optional[dict]:
         priority = 2
     priority = max(1, min(3, priority))
 
+    # Only an actual JSON boolean enables bulk assignment. Permission is still
+    # enforced by the task-draft handler.
+    assign_to_all = data.get("assign_to_all") is True
+
     # --- needs_clarification ---
     needs_clarification = bool(data.get("needs_clarification", False))
 
@@ -141,6 +148,7 @@ def parse_llm_json(raw: str, roster_ids: set[int]) -> Optional[dict]:
         "title": title,
         "description": description,
         "assignee_id": assignee_id,
+        "assign_to_all": assign_to_all,
         "deadline_at": deadline_at,
         "priority": priority,
         "needs_clarification": needs_clarification,
@@ -190,7 +198,7 @@ async def structure_task(
         tz      — строка часового пояса (например "Asia/Almaty").
 
     Возвращает dict с ключами:
-        title, description, assignee_id, deadline_at (datetime|None),
+        title, description, assignee_id, assign_to_all, deadline_at (datetime|None),
         priority, needs_clarification, clarification.
     Возвращает None при отсутствии ключа, ошибке сети или таймауте.
     """

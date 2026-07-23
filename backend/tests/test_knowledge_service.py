@@ -36,6 +36,19 @@ def test_rank_knowledge_returns_only_relevant_entries():
     assert [entry["id"] for entry in result] == [2]
 
 
+def test_rank_knowledge_handles_mongolian_word_suffixes():
+    entries = [
+        {
+            "id": 4,
+            "title": "Амралт",
+            "category": "HR",
+            "content": "Жилийн амралтын журам.",
+            "is_active": True,
+        }
+    ]
+    assert [entry["id"] for entry in rank_knowledge(entries, ["амралтын"])] == [4]
+
+
 def test_rank_knowledge_respects_context_budget():
     entries = [
         {

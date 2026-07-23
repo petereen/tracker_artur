@@ -18,6 +18,7 @@ _VALID_PAYLOAD = {
     "title": "Подготовить отчёт",
     "description": "За прошлую неделю",
     "assignee_id": 2,
+    "assign_to_all": False,
     "deadline_iso": "2030-06-01T12:00:00+05:00",
     "priority": 1,
     "needs_clarification": False,
@@ -65,6 +66,14 @@ class TestParseValidJson:
     def test_assignee_id_valid(self):
         result = parse_llm_json(_raw({"assignee_id": 3}), VALID_ROSTER_IDS)
         assert result["assignee_id"] == 3
+
+    def test_explicit_all_workers_flag_is_preserved(self):
+        result = parse_llm_json(_raw({"assign_to_all": True}), VALID_ROSTER_IDS)
+        assert result["assign_to_all"] is True
+
+    def test_non_boolean_all_workers_flag_is_rejected(self):
+        result = parse_llm_json(_raw({"assign_to_all": "true"}), VALID_ROSTER_IDS)
+        assert result["assign_to_all"] is False
 
     def test_needs_clarification_false(self):
         result = parse_llm_json(_raw(), VALID_ROSTER_IDS)

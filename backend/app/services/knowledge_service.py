@@ -38,6 +38,21 @@ def tokenize_search_terms(values: Iterable[str]) -> list[str]:
     return tokens[:24]
 
 
+def _match_count(token: str, value: str) -> int:
+    """Count exact matches, then safely handle common word inflections.
+
+    The curated library is multilingual. Russian and Mongolian suffixes often
+    make an otherwise relevant article invisible to a plain substring search.
+    A five-character prefix is deliberately only a low-weight fallback.
+    """
+    lowered = (value or "").casefold()
+    exact = lowered.count(token)
+    if exact or len(token) < 5:
+        return exact
+    stem = token[:5]
+    return sum(1 for word in _WORD_RE.findall(lowered) if word.startswith(stem))
+
+
 def rank_knowledge(
     entries: list[dict],
     terms: Iterable[str],
@@ -57,12 +72,14 @@ def rank_knowledge(
         title = (entry.get("title") or "").casefold()
         category = (entry.get("category") or "").casefold()
         content = (entry.get("content") or "").casefold()
-        score = sum(
-            (8 if token in title else 0)
-            + (4 if token in category else 0)
-            + min(content.count(token), 3)
-            for token in tokens
-        )
+        score = 0
+        for token in tokens:
+            title_matches = _match_count(token, title)
+            category_matches = _match_count(token, category)
+            content_matches = _match_count(token, content)
+            score += (8 if token in title else 5 if title_matches else 0)
+            score += (4 if token in category else 2 if category_matches else 0)
+            score += min(content_matches, 3)
         if score:
             ranked.append((score, int(entry.get("id") or 0), entry))
 

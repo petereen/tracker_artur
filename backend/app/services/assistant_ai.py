@@ -479,10 +479,12 @@ async def generate_general_reply(
     ]
     prompt = f"""\
 Answer the user in language "{language.value}". Use task and knowledge reference
-data when relevant. If the references do not establish a requested company fact,
-say that the knowledge base does not contain it. For drafting requests, produce
-the requested draft without pretending it was sent. used_knowledge_ids must
-contain only IDs actually used in the answer.
+data when relevant. When company knowledge directly answers the user's company
+question, ground the answer in that reference data and include every used article
+ID in used_knowledge_ids. If the references do not establish a requested company
+fact, say that the knowledge base does not contain it. For drafting requests,
+produce the requested draft without pretending it was sent. used_knowledge_ids
+must contain only IDs actually used in the answer.
 {"Use no table and at most six short sentences because this came from voice." if voice_mode else ""}
 
 <user_message>

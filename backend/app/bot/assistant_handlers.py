@@ -489,6 +489,12 @@ async def route_and_respond(
         decision.knowledge_terms or [text],
         limit=5,
     )
+    log.info(
+        "assistant.knowledge_context intent=%s article_count=%d channel=%s",
+        decision.intent.value,
+        len(knowledge),
+        "voice" if voice_mode else "text",
+    )
     reply = await assistant_ai.generate_general_reply(
         user_text=text,
         language=decision.language,
