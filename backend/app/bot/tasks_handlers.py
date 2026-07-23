@@ -245,7 +245,7 @@ def _structure_from_tool_arguments(
         priority = 2
 
     deadline_at = None
-    deadline_iso = arguments.get("deadline_iso")
+    deadline_iso = arguments.get("due_date", arguments.get("deadline_iso"))
     if isinstance(deadline_iso, str) and deadline_iso.strip():
         try:
             deadline_at = datetime.fromisoformat(deadline_iso.strip().replace("Z", "+00:00"))
@@ -255,10 +255,13 @@ def _structure_from_tool_arguments(
             deadline_at = None
 
     assignee_id = None
+    assign_to_self = False
     assignee = arguments.get("assignee")
     if isinstance(assignee, str) and assignee.strip():
         assignee_value = assignee.strip()
-        if assignee_value.startswith("@"):
+        if assignee_value.casefold() == "self":
+            assign_to_self = True
+        elif assignee_value.startswith("@"):
             target = task_service.resolve_employee_by_username(assignee_value[1:])
             assignee_id = target.id if target else None
         else:
@@ -274,6 +277,7 @@ def _structure_from_tool_arguments(
         "title": title.strip()[:200],
         "description": description,
         "assignee_id": assignee_id,
+        "assign_to_self": assign_to_self,
         "assign_to_all": arguments.get("assign_to_all") is True,
         "deadline_at": deadline_at,
         "priority": priority,
@@ -289,7 +293,18 @@ async def begin_task_draft(
     is_manager: bool,
     tg_id,
     tool_arguments: dict | None = None,
-):
+    show_preview: bool = True,
+) -> dict:
+    """Prepare task-draft state and return privacy-safe raw data for ReAct.
+
+    Command/FSM callers keep the traditional preview. The assistant tool path
+    suppresses it so OpenAI can synthesize the user-facing confirmation.
+    """
+    async def fail(code: str, user_message: str, **details) -> dict:
+        if show_preview:
+            await message.answer(user_message, parse_mode=None)
+        return {"ok": False, "error": code, **details}
+
     # Себя гарантируем как Employee — руководитель тоже может быть исполнителем.
     if employee:
         self_emp = {"id": employee.id, "name": employee.name, "timezone": employee.timezone}
@@ -337,30 +352,43 @@ async def begin_task_draft(
         ambiguous_names = _ambiguous_roster_names(text, roster)
         if ambiguous_names:
             options = "\n".join(f"• {name}" for name in ambiguous_names)
-            await message.answer(
+            return await fail(
+                "ambiguous_assignee",
                 f"🤔 Ижил нэртэй хэд хэдэн ажилтан байна:\n{options}\n"
                 "Аль ажилтныг сонгохоо бүтэн нэрээр бичнэ үү.",
-                parse_mode=None,
+                candidates=ambiguous_names,
             )
-            return
     assign_to_all = is_manager and (
         bool(structured.get("assign_to_all")) or _targets_all_workers(text)
     )
     # Самоназначение: рядовой сотрудник всегда себе; явное «мне/себе» — себе у любого.
-    if self_emp and (not is_manager or (not assignee_id and _SELF_RE.search(text or ""))):
+    if self_emp and (
+        not is_manager
+        or structured.get("assign_to_self")
+        or (not assignee_id and _SELF_RE.search(text or ""))
+    ):
         assignee_id = self_emp["id"]
 
     if assign_to_all and not all_active_assignee_ids:
-        await message.answer("👥 Идэвхтэй ажилтан алга байна. Эхлээд админ самбараас ажилтан нэмнэ үү.")
-        return
+        return await fail("no_active_workers", "👥 Идэвхтэй ажилтан алга байна.")
 
     if not assign_to_all and not assignee_id:
         others = [r for r in roster if not self_emp or r["id"] != self_emp["id"]]
         if not others:
-            await message.answer("👥 Одоогоор даалгавар өгөх өөр хүн алга. «Надад даалгавар өг» гэж бичих эсвэл админ самбараас ажилтан нэмнэ үү.")
+            user_message = (
+                "👥 Одоогоор даалгавар өгөх өөр хүн алга. "
+                "«Надад даалгавар өг» гэж бичнэ үү."
+            )
         else:
-            await message.answer("🤔 Хэнд даалгавар өгөхийг ойлгосонгүй. Гүйцэтгэгчийн @username эсвэл нэрийг бичнэ үү.")
-        return
+            user_message = (
+                "🤔 Хэнд даалгавар өгөхийг ойлгосонгүй. "
+                "Гүйцэтгэгчийн @username эсвэл нэрийг бичнэ үү."
+            )
+        return await fail(
+            "assignee_not_resolved",
+            user_message,
+            available_assignees=[row["name"] for row in others[:50]],
+        )
 
     name = next((e["name"] for e in roster if e["id"] == assignee_id), None)
     if name:
@@ -375,7 +403,29 @@ async def begin_task_draft(
     }
     await state.set_state(TaskDraft.confirming)
     await state.update_data(draft=draft)
-    await _show_draft(message, draft)
+    if show_preview:
+        await _show_draft(message, draft)
+    deadline = draft.get("deadline_at")
+    try:
+        due_date = deadline.astimezone(pytz.timezone(tz)).isoformat() if deadline else None
+    except pytz.UnknownTimeZoneError:
+        due_date = _iso(deadline)
+    return {
+        "ok": True,
+        "draft": {
+            "title": draft["title"],
+            "description": draft.get("description"),
+            "assignee": draft.get("assignee_name"),
+            "due_date": due_date,
+            "priority": draft.get("priority", 2),
+            "requires_confirmation": True,
+        },
+    }
+
+
+def task_draft_keyboard() -> InlineKeyboardMarkup:
+    """Confirmation controls used after the model synthesizes a draft."""
+    return _draft_kb()
 
 
 @router.callback_query(F.data == "taskdraft:confirm", TaskDraft.confirming)

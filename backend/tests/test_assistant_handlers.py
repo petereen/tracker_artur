@@ -64,6 +64,7 @@ EMPLOYEE = SimpleNamespace(
 
 @pytest.fixture(autouse=True)
 def _empty_worker_directory(monkeypatch):
+    assistant_handlers._conversation_history.clear()
     monkeypatch.setattr(
         assistant_handlers.employee_directory_service,
         "list_workers",
@@ -90,6 +91,22 @@ def _decision(intent: AssistantIntent) -> RouteDecision:
         time_budget_minutes=None,
         knowledge_terms=[],
         clarification=None,
+    )
+
+
+def _react_decision(intent: AssistantIntent, tool: AssistantToolName, arguments: dict):
+    return _decision(intent).model_copy(
+        update={
+            "selected_tool": tool,
+            "tool_arguments": arguments,
+            "react_messages": [{"role": "user", "content": "request"}],
+            "assistant_tool_message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "call_1", "type": "function"}],
+            },
+            "tool_call_id": "call_1",
+        }
     )
 
 
@@ -133,24 +150,34 @@ def test_delegate_route_enters_existing_draft_without_direct_creation(monkeypatc
     tool_arguments = {
         "assignee": "@alex",
         "title": "Review landing page",
-        "description": None,
         "priority": 2,
-        "deadline_iso": None,
-        "assign_to_all": False,
+        "due_date": None,
     }
 
     async def classify(*_args, **_kwargs):
-        return _decision(AssistantIntent.DELEGATE_TASK).model_copy(
-            update={
-                "selected_tool": AssistantToolName.CREATE_TASK,
-                "tool_arguments": tool_arguments,
-            }
+        return _react_decision(
+            AssistantIntent.DELEGATE_TASK,
+            AssistantToolName.CREATE_TASK_DRAFT,
+            tool_arguments,
         )
 
     async def begin(message, state, text, **kwargs):
         drafted.update({"message": message, "state": state, "text": text, **kwargs})
+        return {
+            "ok": True,
+            "draft": {
+                "title": "Review landing page",
+                "assignee": "Alex",
+                "requires_confirmation": True,
+            },
+        }
+
+    async def synthesize(**kwargs):
+        drafted["raw_result"] = kwargs["raw_result"]
+        return "Draft ready for Alex. Confirm?"
 
     monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "synthesize_tool_result", synthesize)
     monkeypatch.setattr(assistant_handlers, "begin_task_draft", begin)
 
     message = FakeMessage("Assign review to @alex")
@@ -170,19 +197,32 @@ def test_delegate_route_enters_existing_draft_without_direct_creation(monkeypatc
     assert drafted["text"] == "Assign review to @alex"
     assert drafted["is_manager"] is True
     assert drafted["tool_arguments"] == tool_arguments
+    assert drafted["show_preview"] is False
+    assert drafted["raw_result"]["draft"]["requires_confirmation"] is True
+    assert message.answers[-1][0] == "Draft ready for Alex. Confirm?"
+    assert message.answers[-1][1]["reply_markup"] is not None
 
 
 def test_task_query_is_scoped_to_current_actor(monkeypatch):
     captured = {}
 
     async def classify(*_args, **_kwargs):
-        return _decision(AssistantIntent.QUERY_MY_TASKS)
+        return _react_decision(
+            AssistantIntent.QUERY_MY_TASKS,
+            AssistantToolName.GET_USER_TASKS,
+            {"timeframe": "all"},
+        )
 
     def list_for_actor(**kwargs):
         captured.update(kwargs)
-        return []
+        return [{"title": "Review", "status": "open", "priority": 1}]
+
+    async def synthesize(**kwargs):
+        captured["raw_result"] = kwargs["raw_result"]
+        return "Your highest priority is Review."
 
     monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "synthesize_tool_result", synthesize)
     monkeypatch.setattr(assistant_handlers.task_service, "list_for_actor", list_for_actor)
 
     message = FakeMessage("What are my tasks?")
@@ -200,21 +240,18 @@ def test_task_query_is_scoped_to_current_actor(monkeypatch):
 
     assert captured["employee_id"] == EMPLOYEE.id
     assert captured["tg_id"] == "77"
-    assert captured["scope"] == "both"
+    assert captured["scope"] == "assigned"
+    assert captured["raw_result"]["tasks"][0]["title"] == "Review"
+    assert message.answers[-1][0] == "Your highest priority is Review."
 
 
-def test_worker_directory_is_read_only_and_deterministic(monkeypatch):
-    async def classify(*_args, **_kwargs):
+def test_worker_directory_is_supplied_as_context_for_direct_answer(monkeypatch):
+    captured = {}
+
+    async def classify(*_args, **kwargs):
+        captured["workers"] = kwargs["workers"]
         return _decision(AssistantIntent.GENERAL_PRODUCTIVITY).model_copy(
-            update={
-                "router_intent": RouterIntent.COMPANY_INFO,
-                "selected_tool": AssistantToolName.GET_COMPANY_INFO,
-                "tool_arguments": {
-                    "topic": "worker directory",
-                    "kind": "worker_directory",
-                    "search_terms": ["workers"],
-                },
-            }
+            update={"direct_answer": "Alex (@alex) is active."}
         )
 
     monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
@@ -247,89 +284,46 @@ def test_worker_directory_is_read_only_and_deterministic(monkeypatch):
 
     assert "Alex" in message.answers[-1][0]
     assert "@alex" in message.answers[-1][0]
+    assert captured["workers"][0]["name"] == "Alex"
+
+
+def test_previous_turn_is_passed_to_context_first_router(monkeypatch):
+    histories = []
+
+    async def classify(*_args, **kwargs):
+        histories.append(kwargs["chat_history"])
+        return _decision(AssistantIntent.GENERAL_PRODUCTIVITY).model_copy(
+            update={"direct_answer": "Understood."}
+        )
+
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+
+    first = FakeMessage("Tomorrow I have a meeting.")
+    second = FakeMessage("What time was it?")
+    for message in (first, second):
+        asyncio.run(
+            assistant_handlers.route_and_respond(
+                message,
+                object(),
+                message.text,
+                employee=EMPLOYEE,
+                is_manager=False,
+                tg_id="77",
+                voice_mode=False,
+            )
+        )
+
+    assert histories[0] == []
+    assert histories[1] == [
+        {"role": "user", "content": "Tomorrow I have a meeting."},
+        {"role": "assistant", "content": "Understood."},
+    ]
 
 
 def test_all_worker_assignment_requests_are_recognized():
     assert _targets_all_workers("Assign the company meeting to all workers")
     assert _targets_all_workers("Бүх ажилтанд арга хэмжээний даалгавар өг")
     assert _targets_all_workers("Назначь встречу всем сотрудникам")
-
-
-def test_worker_directory_normalizes_stored_at_username():
-    text = assistant_handlers._format_worker_directory(
-        [
-            {
-                "name": "Анужин",
-                "telegram_username": "@anujin4x",
-                "is_active": True,
-                "is_manager": False,
-            }
-        ],
-        AssistantLanguage.MN,
-        voice_mode=False,
-    )
-    assert "@anujin4x" in text
-    assert "@@anujin4x" not in text
-
-
-def test_deterministic_task_query_overrides_wrong_llm_delegation(monkeypatch):
-    async def classify(*_args, **_kwargs):
-        return _decision(AssistantIntent.DELEGATE_TASK)
-
-    captured = {}
-
-    def list_for_actor(**kwargs):
-        captured.update(kwargs)
-        return []
-
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    monkeypatch.setattr(assistant_handlers.task_service, "list_for_actor", list_for_actor)
-
-    message = FakeMessage("Бүх ажилтны даалгавруудыг харуул")
-    asyncio.run(
-        assistant_handlers.route_and_respond(
-            message,
-            object(),
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=True,
-            tg_id="77",
-            voice_mode=False,
-        )
-    )
-
-    assert captured["scope"] == "team"
-
-
-def test_scheduled_meeting_overrides_wrong_llm_unknown(monkeypatch):
-    async def classify(*_args, **_kwargs):
-        return _decision(AssistantIntent.GENERAL_PRODUCTIVITY)
-
-    drafted = {}
-
-    async def begin(message, state, text, **kwargs):
-        drafted.update({"text": text, **kwargs})
-
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    monkeypatch.setattr(assistant_handlers.knowledge_service, "search_knowledge", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(assistant_handlers, "begin_task_draft", begin)
-
-    message = FakeMessage("Маргааш би 15 цагаас хуралтай")
-    asyncio.run(
-        assistant_handlers.route_and_respond(
-            message,
-            object(),
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=True,
-            tg_id="77",
-            voice_mode=False,
-        )
-    )
-
-    assert drafted["text"] == message.text
-    assert drafted["employee"] is EMPLOYEE
-    assert not message.answers
 
 
 def test_full_employee_name_resolves_ambiguous_first_name():
@@ -368,7 +362,7 @@ def test_task_draft_prefers_deterministic_mongolian_local_time(monkeypatch):
     monkeypatch.setattr(tasks_handlers.task_ai, "ai_enabled", lambda: True)
     monkeypatch.setattr(tasks_handlers.task_ai, "structure_task", structure)
 
-    message = FakeMessage("Маргааш би 15 цагаас хуралтай")
+    message = FakeMessage("Маргааш 15 цагаас хуралтай")
     state = FakeState()
     asyncio.run(
         tasks_handlers.begin_task_draft(
@@ -413,12 +407,10 @@ def test_native_task_arguments_skip_legacy_task_extraction_call(monkeypatch):
             is_manager=True,
             tg_id="77",
             tool_arguments={
-                "assignee": None,
+                "assignee": "self",
                 "title": "Маргаашийн хурал",
-                "description": None,
                 "priority": 2,
-                "deadline_iso": "2026-06-02T07:00:00+08:00",
-                "assign_to_all": False,
+                "due_date": "2026-06-02T07:00:00+08:00",
             },
         )
     )
@@ -428,22 +420,23 @@ def test_native_task_arguments_skip_legacy_task_extraction_call(monkeypatch):
 
 
 def test_company_tool_retrieves_postgres_knowledge(monkeypatch):
+    captured = {}
+
     async def classify(*_args, **_kwargs):
-        return _decision(AssistantIntent.GENERAL_PRODUCTIVITY).model_copy(
-            update={
-                "router_intent": RouterIntent.COMPANY_INFO,
-                "language": AssistantLanguage.MN,
-                "selected_tool": AssistantToolName.GET_COMPANY_INFO,
-                "tool_arguments": {
-                    "topic": "Чөлөө авах журам",
-                    "kind": "knowledge",
-                    "search_terms": ["чөлөө", "журам"],
-                },
-                "knowledge_terms": ["чөлөө", "журам"],
-            }
+        return _react_decision(
+            AssistantIntent.GENERAL_PRODUCTIVITY,
+            AssistantToolName.SEARCH_COMPANY_KNOWLEDGE,
+            {"query": "Чөлөө авах журам"},
+        ).model_copy(
+            update={"router_intent": RouterIntent.COMPANY_INFO, "language": AssistantLanguage.MN}
         )
 
+    async def synthesize(**kwargs):
+        captured["raw_result"] = kwargs["raw_result"]
+        return "Чөлөө авахын тулд Анужин менежерт өмнөх өдөр мэдэгдэнэ."
+
     monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "synthesize_tool_result", synthesize)
     monkeypatch.setattr(
         assistant_handlers.knowledge_service,
         "search_knowledge",
@@ -472,7 +465,8 @@ def test_company_tool_retrieves_postgres_knowledge(monkeypatch):
 
     answer = message.answers[-1][0]
     assert "Анужин" in answer
-    assert "Чөлөө авах журам" in answer
+    assert captured["raw_result"]["documents"][0]["title"] == "Чөлөө авах журам"
+    assert "id" not in captured["raw_result"]["documents"][0]
 
 
 def test_unknown_request_is_stored_without_task_draft(monkeypatch):

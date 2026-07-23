@@ -174,6 +174,11 @@ def _tool_message(name: str, arguments: dict) -> dict:
 
 
 def test_native_tool_schemas_are_strict():
+    assert [tool["function"]["name"] for tool in native_tool_specs()] == [
+        "create_task_draft",
+        "get_user_tasks",
+        "search_company_knowledge",
+    ]
     for tool in native_tool_specs():
         function = tool["function"]
         parameters = function["parameters"]
@@ -185,14 +190,12 @@ def test_native_tool_schemas_are_strict():
 def test_native_create_task_call_is_validated():
     selection = parse_native_tool_message(
         _tool_message(
-            "create_task",
+            "create_task_draft",
             {
                 "assignee": "Анужин менежер",
                 "title": "Хуралд оролцох",
-                "description": None,
                 "priority": 2,
-                "deadline_iso": "2026-07-24T15:00:00+08:00",
-                "assign_to_all": False,
+                "due_date": "2026-07-24T15:00:00+08:00",
             },
         )
     )
@@ -205,14 +208,24 @@ def test_native_tool_call_rejects_extra_or_invalid_arguments():
     assert (
         parse_native_tool_message(
             _tool_message(
-                "get_my_tasks",
+                "get_user_tasks",
                 {
                     "timeframe": "tomorrow",
-                    "scope": "assigned",
-                    "include_completed": False,
-                    "purpose": "view",
-                    "time_budget_minutes": None,
                     "unexpected": True,
+                },
+            )
+        )
+        is None
+    )
+    assert (
+        parse_native_tool_message(
+            _tool_message(
+                "create_task_draft",
+                {
+                    "assignee": "self",
+                    "title": "Хурал",
+                    "due_date": "2026-07-24T15:00:00",
+                    "priority": 2,
                 },
             )
         )
@@ -229,18 +242,33 @@ def test_native_direct_answer_is_preserved():
     assert selection.direct_answer.startswith("OYUNS")
 
 
-def test_native_get_my_tasks_maps_to_planning(monkeypatch):
+def test_capability_question_can_use_direct_model_answer(monkeypatch):
+    async def native(**_kwargs):
+        return parse_native_tool_message(
+            {"content": "OYUNS can retrieve tasks, prepare drafts, and search policy."}
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr("app.services.assistant_ai._call_native_router", native)
+    decision = asyncio.run(
+        classify_intent(
+            "What can you do?",
+            now=datetime.now(timezone.utc),
+            timezone_name="Asia/Ulaanbaatar",
+            is_manager=False,
+            workers=[],
+        )
+    )
+    assert decision.selected_tool is None
+    assert decision.direct_answer is not None
+
+
+def test_native_get_user_tasks_maps_to_planning(monkeypatch):
     async def native(**_kwargs):
         return parse_native_tool_message(
             _tool_message(
-                "get_my_tasks",
-                {
-                    "timeframe": "today",
-                    "scope": "assigned",
-                    "include_completed": False,
-                    "purpose": "plan",
-                    "time_budget_minutes": 180,
-                },
+                "get_user_tasks",
+                {"timeframe": "today"},
             )
         )
 
@@ -248,7 +276,7 @@ def test_native_get_my_tasks_maps_to_planning(monkeypatch):
     monkeypatch.setattr("app.services.assistant_ai._call_native_router", native)
     decision = asyncio.run(
         classify_intent(
-            "I have three hours. Help me plan my tasks.",
+            "I have 3 hours. Help me plan my tasks.",
             now=datetime.now(timezone.utc),
             timezone_name="Asia/Ulaanbaatar",
             is_manager=False,

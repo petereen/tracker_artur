@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from collections import defaultdict, deque
+from datetime import datetime
 
 import pytz
 from aiogram import F, Router
@@ -12,7 +13,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from app.bot.tasks_handlers import begin_task_draft
+from app.bot.tasks_handlers import begin_task_draft, task_draft_keyboard
 from app.services import (
     assistant_ai,
     employee_directory_service,
@@ -24,6 +25,18 @@ from app.services import (
 
 log = logging.getLogger(__name__)
 router = Router()
+_conversation_history: dict[str, deque[dict]] = defaultdict(lambda: deque(maxlen=12))
+
+
+def _history_key(message: Message, tg_id: str | None) -> str:
+    chat = getattr(message, "chat", None)
+    return str(tg_id or getattr(chat, "id", "anonymous"))
+
+
+def _remember(history_key: str, user_text: str, assistant_text: str) -> None:
+    history = _conversation_history[history_key]
+    history.append({"role": "user", "content": user_text})
+    history.append({"role": "assistant", "content": assistant_text})
 
 
 def _actor(employee, *, message: Message, is_manager: bool, tg_id: str | None) -> dict | None:
@@ -54,7 +67,7 @@ def _now_in_timezone(timezone_name: str) -> datetime:
     return datetime.now(zone)
 
 
-async def _answer(message: Message, text: str) -> None:
+async def _answer(message: Message, text: str, *, reply_markup=None) -> None:
     """Send plain text in Telegram-sized chunks so model output cannot become HTML."""
     remaining = text.strip()
     while remaining:
@@ -65,28 +78,130 @@ async def _answer(message: Message, text: str) -> None:
             if split_at < 1:
                 split_at = 3_900
             chunk, remaining = remaining[:split_at], remaining[split_at:].lstrip()
-        await message.answer(chunk, parse_mode=None)
+        await message.answer(
+            chunk,
+            parse_mode=None,
+            reply_markup=reply_markup if not remaining else None,
+        )
 
 
-def _answer_with_knowledge_sources(
-    answer: str,
+async def _synthesize(
+    decision: assistant_ai.RouteDecision,
     *,
-    used_ids: list[int],
-    knowledge: list[dict],
-    language: assistant_ai.AssistantLanguage,
+    raw_result,
     voice_mode: bool,
-) -> str:
-    if voice_mode or not used_ids:
-        return answer
-    titles = [entry["title"] for entry in knowledge if entry["id"] in used_ids]
-    if not titles:
-        return answer
-    source_label = {
-        assistant_ai.AssistantLanguage.EN: "Sources",
-        assistant_ai.AssistantLanguage.RU: "Источники",
-        assistant_ai.AssistantLanguage.MN: "Эх сурвалж",
-    }[language]
-    return answer + f"\n\n{source_label}: " + "; ".join(titles)
+) -> str | None:
+    if not (
+        decision.react_messages
+        and decision.assistant_tool_message
+        and decision.tool_call_id
+    ):
+        return None
+    return await assistant_ai.synthesize_tool_result(
+        request_messages=decision.react_messages,
+        assistant_message=decision.assistant_tool_message,
+        tool_call_id=decision.tool_call_id,
+        raw_result=raw_result,
+        voice_mode=voice_mode,
+    )
+
+
+def _task_raw_data(tasks: list[dict], *, timezone_name: str) -> dict:
+    """Return only useful, privacy-safe records for the synthesis model."""
+    try:
+        zone = pytz.timezone(timezone_name)
+    except Exception:
+        zone = pytz.timezone("Asia/Ulaanbaatar")
+    records = []
+    for task in tasks[:50]:
+        deadline = task.get("deadline_at")
+        records.append(
+            {
+                "title": task.get("title"),
+                "description": task.get("description"),
+                "status": task.get("status"),
+                "priority": task.get("priority"),
+                "assignee_name": task.get("assignee_name"),
+                "deadline_local": (
+                    deadline.astimezone(zone).isoformat()
+                    if getattr(deadline, "astimezone", None)
+                    else None
+                ),
+            }
+        )
+    return {"count": len(tasks), "tasks": records, "timezone": zone.zone}
+
+
+def _knowledge_raw_data(entries: list[dict], *, query: str) -> dict:
+    return {
+        "query": query,
+        "count": len(entries),
+        "documents": [
+            {
+                "title": entry.get("title"),
+                "category": entry.get("category"),
+                "content": entry.get("content"),
+            }
+            for entry in entries
+        ],
+    }
+
+
+async def execute_tool(
+    tool_name: assistant_ai.AssistantToolName,
+    arguments: dict,
+    *,
+    message: Message,
+    state: FSMContext,
+    text: str,
+    employee,
+    actor: dict,
+    is_manager: bool,
+    tg_id: str | None,
+    timezone_name: str,
+) -> tuple[dict, object | None]:
+    """Execute one validated assistant function and return raw data + UI controls."""
+    if tool_name == assistant_ai.AssistantToolName.CREATE_TASK_DRAFT:
+        result = await begin_task_draft(
+            message,
+            state,
+            text,
+            employee=employee,
+            is_manager=is_manager,
+            tg_id=tg_id,
+            tool_arguments=arguments,
+            show_preview=False,
+        )
+        keyboard = task_draft_keyboard() if result.get("ok") else None
+        return result, keyboard
+
+    if tool_name == assistant_ai.AssistantToolName.GET_USER_TASKS:
+        date_range = {
+            "today": "today",
+            "this_week": "this_week",
+            "all": "none",
+        }[arguments["timeframe"]]
+        start_at, end_at, include_overdue = task_service.local_date_bounds(
+            date_range,
+            tz=timezone_name,
+        )
+        tasks = task_service.list_for_actor(
+            employee_id=actor["id"],
+            tg_id=tg_id,
+            scope="assigned",
+            include_completed=False,
+            start_at=start_at,
+            end_at=end_at,
+            include_overdue_before_start=include_overdue,
+        )
+        return _task_raw_data(tasks, timezone_name=timezone_name), None
+
+    if tool_name == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE:
+        query = arguments["query"]
+        entries = knowledge_service.search_knowledge([query], limit=5)
+        return _knowledge_raw_data(entries, query=query), None
+
+    raise ValueError(f"Unsupported assistant tool: {tool_name}")
 
 
 def _unknown_response(language: assistant_ai.AssistantLanguage) -> str:
@@ -103,298 +218,12 @@ def _unknown_response(language: assistant_ai.AssistantLanguage) -> str:
     }[language]
 
 
-def _company_info_not_found(language: assistant_ai.AssistantLanguage) -> str:
+def _generation_unavailable(language: assistant_ai.AssistantLanguage) -> str:
+    """Single operational fallback; tool records are never rendered here."""
     return {
-        assistant_ai.AssistantLanguage.EN: (
-            "I could not find that information in the active company knowledge base."
-        ),
-        assistant_ai.AssistantLanguage.RU: (
-            "Я не нашёл эту информацию в активной базе знаний компании."
-        ),
-        assistant_ai.AssistantLanguage.MN: (
-            "Компанийн идэвхтэй мэдлэгийн сангаас энэ мэдээллийг олсонгүй."
-        ),
-    }[language]
-
-
-def _capabilities(
-    language: assistant_ai.AssistantLanguage,
-    *,
-    is_manager: bool,
-) -> str:
-    ai_on = assistant_ai.assistant_enabled()
-    voice_on = voice_service.transcription_enabled()
-    knowledge_on = knowledge_service.active_knowledge_count() > 0
-    if language == assistant_ai.AssistantLanguage.EN:
-        items = [
-            "• Show and prioritize your assigned or created tasks.",
-            "• Build a daily plan or break complex work into steps.",
-            "• Create a confirmed task draft for you or a teammate.",
-            "• Show the worker directory and active status.",
-        ]
-        if knowledge_on:
-            items.append("• Answer questions from admin-managed company knowledge.")
-        if ai_on:
-            items.append("• Draft updates, summaries, and other workplace content.")
-        if voice_on:
-            items.append("• Understand voice messages and reply with concise text.")
-        if is_manager:
-            items.append("• Summarize team workload when you explicitly ask for it.")
-        return "OYUNS Agent\n\n" + "\n".join(items)
-    if language == assistant_ai.AssistantLanguage.RU:
-        items = [
-            "• Показывать и расставлять приоритеты ваших задач.",
-            "• Составлять план дня и разбивать сложную работу на шаги.",
-            "• Готовить подтверждаемый черновик задачи для вас или коллеги.",
-            "• Показывать справочник сотрудников и их активность.",
-        ]
-        if knowledge_on:
-            items.append("• Отвечать по базе знаний, которую ведёт администратор.")
-        if ai_on:
-            items.append("• Готовить обновления статуса, резюме и рабочие тексты.")
-        if voice_on:
-            items.append("• Понимать голосовые сообщения и отвечать кратким текстом.")
-        if is_manager:
-            items.append("• Сводить нагрузку команды по явному запросу руководителя.")
-        return "OYUNS Agent\n\n" + "\n".join(items)
-
-    items = [
-        "• Танд оноосон болон таны үүсгэсэн даалгаврыг эрэмбэлж харуулна.",
-        "• Өдрийн төлөвлөгөө гаргаж, төвөгтэй ажлыг алхам болгон задална.",
-        "• Өөртөө эсвэл багийн гишүүнд баталгаажуулах ноорог даалгавар үүсгэнэ.",
-        "• Ажилтны жагсаалт болон идэвхтэй эсэхийг харуулна.",
-    ]
-    if knowledge_on:
-        items.append("• Админы оруулсан компанийн мэдлэгээс асуултад хариулна.")
-    if ai_on:
-        items.append("• Ажлын мэдээ, хураангуй болон бусад бичвэр бэлдэнэ.")
-    if voice_on:
-        items.append("• Дуут мессежийг ойлгож, товч текстээр хариулна.")
-    if is_manager:
-        items.append("• Удирдлагын тодорхой хүсэлтээр багийн ачааллыг нэгтгэнэ.")
-    return "OYUNS Agent\n\n" + "\n".join(items)
-
-
-def _task_relation(
-    task: dict,
-    actor_id: int,
-    language: assistant_ai.AssistantLanguage,
-) -> str:
-    assigned = task.get("assignee_id") == actor_id
-    created = task.get("created_by_id") == actor_id
-    labels = {
-        assistant_ai.AssistantLanguage.EN: ("assigned", "created", "assigned + created", "related"),
-        assistant_ai.AssistantLanguage.RU: ("назначено мне", "создано мной", "моё", "связано"),
-        assistant_ai.AssistantLanguage.MN: ("надад оноосон", "миний үүсгэсэн", "миний", "холбоотой"),
-    }[language]
-    if assigned and created:
-        return labels[2]
-    if assigned:
-        return labels[0]
-    if created:
-        return labels[1]
-    return labels[3]
-
-
-def _format_deadline(
-    value,
-    timezone_name: str,
-    language: assistant_ai.AssistantLanguage,
-) -> str:
-    if not value:
-        return {
-            assistant_ai.AssistantLanguage.EN: "no due date",
-            assistant_ai.AssistantLanguage.RU: "без срока",
-            assistant_ai.AssistantLanguage.MN: "хугацаагүй",
-        }[language]
-    try:
-        return value.astimezone(pytz.timezone(timezone_name)).strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-
-def _format_task_query(
-    tasks: list[dict],
-    *,
-    actor_id: int,
-    timezone_name: str,
-    language: assistant_ai.AssistantLanguage,
-) -> str:
-    if not tasks:
-        return {
-            assistant_ai.AssistantLanguage.EN: "You have no matching tasks.",
-            assistant_ai.AssistantLanguage.RU: "Подходящих задач нет.",
-            assistant_ai.AssistantLanguage.MN: "Тохирох даалгавар алга.",
-        }[language]
-
-    headings = {
-        assistant_ai.AssistantLanguage.EN: f"Your tasks ({len(tasks)}):",
-        assistant_ai.AssistantLanguage.RU: f"Ваши задачи ({len(tasks)}):",
-        assistant_ai.AssistantLanguage.MN: f"Таны даалгаврууд ({len(tasks)}):",
-    }
-    lines = [headings[language]]
-    now_utc = datetime.now(timezone.utc)
-    overdue_label = {
-        assistant_ai.AssistantLanguage.EN: "OVERDUE · ",
-        assistant_ai.AssistantLanguage.RU: "ПРОСРОЧЕНО · ",
-        assistant_ai.AssistantLanguage.MN: "ХУГАЦАА ХЭТЭРСЭН · ",
-    }[language]
-    for task in tasks[:30]:
-        overdue = bool(
-            task.get("status") == "overdue"
-            or (
-                task.get("deadline_at")
-                and task["deadline_at"] < now_utc
-                and task.get("status") not in {"done", "cancelled"}
-            )
-        )
-        marker = overdue_label if overdue else ""
-        lines.append(
-            f"{marker}P{task.get('priority', 2)} · #{task['id']} · "
-            f"{task['title']} · "
-            f"{_format_deadline(task.get('deadline_at'), timezone_name, language)} "
-            f"· {_task_relation(task, actor_id, language)}"
-        )
-    if len(tasks) > 30:
-        lines.append(f"… +{len(tasks) - 30}")
-    return "\n".join(lines)
-
-
-def _format_worker_directory(
-    workers: list[dict],
-    language: assistant_ai.AssistantLanguage,
-    *,
-    voice_mode: bool,
-) -> str:
-    if not workers:
-        return {
-            assistant_ai.AssistantLanguage.EN: "No workers are registered yet.",
-            assistant_ai.AssistantLanguage.RU: "Зарегистрированных сотрудников пока нет.",
-            assistant_ai.AssistantLanguage.MN: "Бүртгэлтэй ажилтан одоогоор алга.",
-        }[language]
-    heading = {
-        assistant_ai.AssistantLanguage.EN: f"Workers ({len(workers)}):",
-        assistant_ai.AssistantLanguage.RU: f"Сотрудники ({len(workers)}):",
-        assistant_ai.AssistantLanguage.MN: f"Ажилтнууд ({len(workers)}):",
-    }[language]
-    labels = {
-        assistant_ai.AssistantLanguage.EN: ("active", "inactive", "manager"),
-        assistant_ai.AssistantLanguage.RU: ("активен", "неактивен", "руководитель"),
-        assistant_ai.AssistantLanguage.MN: ("идэвхтэй", "идэвхгүй", "удирдлага"),
-    }[language]
-    lines = [heading]
-    for worker in workers[:10 if voice_mode else 50]:
-        username_value = str(worker.get("telegram_username") or "").lstrip("@")
-        username = f" · @{username_value}" if username_value else ""
-        status = labels[0] if worker.get("is_active") else labels[1]
-        role = f" · {labels[2]}" if worker.get("is_manager") else ""
-        lines.append(f"• {worker['name']}{username} · {status}{role}")
-    if len(workers) > (10 if voice_mode else 50):
-        lines.append(f"… +{len(workers) - (10 if voice_mode else 50)}")
-    return "\n".join(lines)
-
-
-def _format_plan(
-    plan: assistant_ai.WorkPlan,
-    language: assistant_ai.AssistantLanguage,
-) -> str:
-    minute_label, next_label = {
-        assistant_ai.AssistantLanguage.EN: ("min", "Next"),
-        assistant_ai.AssistantLanguage.RU: ("мин", "Сейчас"),
-        assistant_ai.AssistantLanguage.MN: ("мин", "Одоо"),
-    }[language]
-    lines = [plan.summary]
-    for index, block in enumerate(plan.blocks, start=1):
-        task = f" · #{block.task_id}" if block.task_id else ""
-        lines.append(
-            f"{index}. {block.label}{task} · {block.minutes} {minute_label}\n{block.action}"
-        )
-    lines.append(f"{next_label}: {plan.next_action}")
-    return "\n\n".join(lines)
-
-
-def _fallback_plan(
-    tasks: list[dict],
-    *,
-    budget_minutes: int,
-    language: assistant_ai.AssistantLanguage,
-) -> str:
-    intro = {
-        assistant_ai.AssistantLanguage.EN: "Practical fallback plan:",
-        assistant_ai.AssistantLanguage.RU: "Практичный резервный план:",
-        assistant_ai.AssistantLanguage.MN: "Хэрэгжүүлэх энгийн төлөвлөгөө:",
-    }[language]
-    next_label = {
-        assistant_ai.AssistantLanguage.EN: "Next",
-        assistant_ai.AssistantLanguage.RU: "Сейчас",
-        assistant_ai.AssistantLanguage.MN: "Одоо",
-    }[language]
-    if not tasks:
-        focus = max(15, budget_minutes - 15)
-        empty_steps = {
-            assistant_ai.AssistantLanguage.EN: (
-                f"1. Define the result · 15 min\n2. Focused execution · {focus} min\n"
-                f"{next_label}: write the first concrete deliverable."
-            ),
-            assistant_ai.AssistantLanguage.RU: (
-                f"1. Определить результат · 15 мин\n2. Сфокусированная работа · {focus} мин\n"
-                f"{next_label}: сформулируйте первый конкретный результат."
-            ),
-            assistant_ai.AssistantLanguage.MN: (
-                f"1. Үр дүнгээ тодорхойлох · 15 мин\n2. Төвлөрч гүйцэтгэх · {focus} мин\n"
-                f"{next_label}: эхний бодит үр дүнгээ нэг өгүүлбэрээр бич."
-            ),
-        }
-        return f"{intro}\n{empty_steps[language]}"
-
-    remaining = budget_minutes
-    lines = [intro]
-    minute_label = "min" if language == assistant_ai.AssistantLanguage.EN else "мин"
-    for index, task in enumerate(tasks[:6], start=1):
-        if remaining < 15:
-            break
-        minutes = min(60, remaining)
-        lines.append(f"{index}. #{task['id']} {task['title']} · {minutes} {minute_label}")
-        remaining -= minutes
-    next_text = {
-        assistant_ai.AssistantLanguage.EN: f"start #{tasks[0]['id']} now.",
-        assistant_ai.AssistantLanguage.RU: f"начните задачу #{tasks[0]['id']}.",
-        assistant_ai.AssistantLanguage.MN: f"#{tasks[0]['id']} даалгаврыг эхлүүл.",
-    }[language]
-    lines.append(f"{next_label}: {next_text}")
-    return "\n".join(lines)
-
-
-def _general_fallback(
-    tasks: list[dict],
-    knowledge: list[dict],
-    language: assistant_ai.AssistantLanguage,
-    *,
-    actor_id: int,
-    timezone_name: str,
-) -> str:
-    if knowledge:
-        heading = {
-            assistant_ai.AssistantLanguage.EN: "Relevant company knowledge:",
-            assistant_ai.AssistantLanguage.RU: "Подходящие материалы компании:",
-            assistant_ai.AssistantLanguage.MN: "Холбогдох компанийн мэдээлэл:",
-        }[language]
-        lines = [heading]
-        for entry in knowledge:
-            excerpt = " ".join(entry["content"].split())[:350]
-            lines.append(f"• {entry['title']}: {excerpt}")
-        return "\n".join(lines)
-    if tasks:
-        return _format_task_query(
-            tasks,
-            actor_id=actor_id,
-            timezone_name=timezone_name,
-            language=language,
-        )
-    return {
-        assistant_ai.AssistantLanguage.EN: "I cannot generate that response right now. Please try again shortly.",
-        assistant_ai.AssistantLanguage.RU: "Сейчас не удалось подготовить ответ. Попробуйте ещё раз чуть позже.",
-        assistant_ai.AssistantLanguage.MN: "Одоогоор хариулт бэлдэж чадсангүй. Түр хүлээгээд дахин оролдоно уу.",
+        assistant_ai.AssistantLanguage.EN: "I could not generate the response right now. Please try again shortly.",
+        assistant_ai.AssistantLanguage.RU: "Сейчас не удалось сформировать ответ. Попробуйте ещё раз чуть позже.",
+        assistant_ai.AssistantLanguage.MN: "Одоогоор хариулт боловсруулж чадсангүй. Түр хүлээгээд дахин оролдоно уу.",
     }[language]
 
 
@@ -422,6 +251,7 @@ async def route_and_respond(
 
     timezone_name = actor.get("timezone") or "Asia/Ulaanbaatar"
     workers = employee_directory_service.list_workers()
+    history_key = _history_key(message, tg_id)
     decision = await assistant_ai.classify_intent(
         text,
         now=_now_in_timezone(timezone_name),
@@ -429,19 +259,8 @@ async def route_and_respond(
         is_manager=is_manager,
         workers=workers,
         voice_mode=voice_mode,
+        chat_history=list(_conversation_history[history_key]),
     )
-    # Deterministic retrieval and scheduled-event wording take precedence over
-    # model output so neither can be stored as UNKNOWN or routed incorrectly.
-    if assistant_ai.is_task_query(text) and decision.intent not in {
-        assistant_ai.AssistantIntent.QUERY_MY_TASKS,
-        assistant_ai.AssistantIntent.PLAN_WORK,
-    }:
-        decision = assistant_ai.fallback_route(text, is_manager=is_manager)
-    elif (
-        assistant_ai.is_scheduled_task(text)
-        and decision.intent != assistant_ai.AssistantIntent.DELEGATE_TASK
-    ):
-        decision = assistant_ai.fallback_route(text, is_manager=is_manager)
     log.info(
         "assistant.route intent=%s router_intent=%s tool=%s confidence=%.2f "
         "language=%s channel=%s latency_ms=%d",
@@ -458,73 +277,32 @@ async def route_and_respond(
         await _answer(message, decision.clarification)
         return
 
-    company_tool_args = (
-        decision.tool_arguments
-        if decision.selected_tool == assistant_ai.AssistantToolName.GET_COMPANY_INFO
-        else {}
-    )
-    if (
-        assistant_ai.is_worker_directory_query(text)
-        or company_tool_args.get("kind") == "worker_directory"
-    ):
-        await _answer(
-            message,
-            _format_worker_directory(
-                workers,
-                decision.language,
-                voice_mode=voice_mode,
-            ),
+    # True two-pass ReAct path: execute the selected function, append its raw
+    # JSON to the original OpenAI message chain, and let pass two write the
+    # only user-facing prose.
+    if decision.selected_tool:
+        raw_result, reply_markup = await execute_tool(
+            decision.selected_tool,
+            decision.tool_arguments,
+            message=message,
+            state=state,
+            text=text,
+            employee=employee,
+            actor=actor,
+            is_manager=is_manager,
+            tg_id=tg_id,
+            timezone_name=timezone_name,
         )
-        log.info(
-            "assistant.directory channel=%s worker_count=%d latency_ms=%d",
-            "voice" if voice_mode else "text",
-            len(workers),
-            int((time.monotonic() - started) * 1_000),
+        answer = await _synthesize(
+            decision,
+            raw_result=raw_result,
+            voice_mode=voice_mode,
         )
+        if not answer:
+            answer = _generation_unavailable(decision.language)
+        await _answer(message, answer, reply_markup=reply_markup)
+        _remember(history_key, text, answer)
         return
-
-    if decision.router_intent == assistant_ai.RouterIntent.COMPANY_INFO:
-        knowledge = knowledge_service.search_knowledge(
-            [text, *decision.knowledge_terms],
-            limit=5,
-        )
-        log.info(
-            "assistant.company_info article_count=%d channel=%s",
-            len(knowledge),
-            "voice" if voice_mode else "text",
-        )
-        await _answer(
-            message,
-            (
-                _general_fallback(
-                    [],
-                    knowledge,
-                    decision.language,
-                    actor_id=actor["id"],
-                    timezone_name=timezone_name,
-                )
-                if knowledge
-                else _company_info_not_found(decision.language)
-            ),
-        )
-        return
-
-    # If a relevant article exists, it is authoritative even if the model
-    # incorrectly attempted a direct answer instead of calling the company tool.
-    if decision.intent == assistant_ai.AssistantIntent.GENERAL_PRODUCTIVITY:
-        direct_knowledge = knowledge_service.search_knowledge([text], limit=5)
-        if direct_knowledge and assistant_ai.is_information_question(text):
-            await _answer(
-                message,
-                _general_fallback(
-                    [],
-                    direct_knowledge,
-                    decision.language,
-                    actor_id=actor["id"],
-                    timezone_name=timezone_name,
-                ),
-            )
-            return
 
     if decision.direct_answer:
         deterministic = assistant_ai.fallback_route(text, is_manager=is_manager)
@@ -539,6 +317,7 @@ async def route_and_respond(
                 "voice" if voice_mode else "text",
             )
         await _answer(message, decision.direct_answer)
+        _remember(history_key, text, decision.direct_answer)
         return
 
     if (
@@ -554,6 +333,9 @@ async def route_and_respond(
         await _answer(message, _unknown_response(decision.language))
         return
 
+    # The deterministic router is only an availability/safety fallback. It may
+    # still prepare a confirmation draft, but it never renders DB or knowledge
+    # records as static strings.
     if decision.intent == assistant_ai.AssistantIntent.DELEGATE_TASK:
         await begin_task_draft(
             message,
@@ -566,109 +348,9 @@ async def route_and_respond(
         )
         return
 
-    if decision.intent == assistant_ai.AssistantIntent.DISCOVER_CAPABILITIES:
-        await _answer(
-            message,
-            _capabilities(decision.language, is_manager=is_manager),
-        )
-        return
-
-    if decision.intent == assistant_ai.AssistantIntent.QUERY_MY_TASKS:
-        start_at, end_at, include_overdue = task_service.local_date_bounds(
-            decision.date_range.value,
-            tz=timezone_name,
-            start_date=decision.start_date,
-            end_date=decision.end_date,
-        )
-        scope = decision.task_scope.value
-        if scope == "team" and not is_manager:
-            scope = "both"
-        tasks = task_service.list_for_actor(
-            employee_id=actor["id"],
-            tg_id=tg_id,
-            scope=scope,
-            include_completed=decision.include_completed,
-            start_at=start_at,
-            end_at=end_at,
-            include_overdue_before_start=include_overdue,
-        )
-        await _answer(
-            message,
-            _format_task_query(
-                tasks,
-                actor_id=actor["id"],
-                timezone_name=timezone_name,
-                language=decision.language,
-            ),
-        )
-        return
-
-    if decision.intent == assistant_ai.AssistantIntent.PLAN_WORK:
-        tasks = task_service.list_for_actor(
-            employee_id=actor["id"],
-            tg_id=tg_id,
-            scope="assigned",
-        )
-        budget = decision.time_budget_minutes or 480
-        plan = await assistant_ai.generate_work_plan(
-            user_text=text,
-            language=decision.language,
-            tasks=tasks,
-            budget_minutes=budget,
-            voice_mode=voice_mode,
-        )
-        await _answer(
-            message,
-            _format_plan(plan, decision.language)
-            if plan
-            else _fallback_plan(tasks, budget_minutes=budget, language=decision.language),
-        )
-        return
-
-    scope = decision.task_scope.value
-    if scope == "team" and not is_manager:
-        scope = "both"
-    tasks = task_service.list_for_actor(
-        employee_id=actor["id"],
-        tg_id=tg_id,
-        scope=scope,
-        include_completed=decision.include_completed,
-    )
-    knowledge = knowledge_service.search_knowledge(
-        decision.knowledge_terms or [text],
-        limit=5,
-    )
-    log.info(
-        "assistant.knowledge_context intent=%s article_count=%d channel=%s",
-        decision.intent.value,
-        len(knowledge),
-        "voice" if voice_mode else "text",
-    )
-    reply = await assistant_ai.generate_general_reply(
-        user_text=text,
-        language=decision.language,
-        tasks=tasks,
-        knowledge=knowledge,
-        workers=[],
-        voice_mode=voice_mode,
-    )
-    if reply:
-        answer = _answer_with_knowledge_sources(
-            reply.answer,
-            used_ids=reply.used_knowledge_ids,
-            knowledge=knowledge,
-            language=decision.language,
-            voice_mode=voice_mode,
-        )
-    else:
-        answer = _general_fallback(
-            tasks,
-            knowledge,
-            decision.language,
-            actor_id=actor["id"],
-            timezone_name=timezone_name,
-        )
+    answer = _generation_unavailable(decision.language)
     await _answer(message, answer)
+    _remember(history_key, text, answer)
 
 
 @router.message(StateFilter(None), F.voice)
