@@ -219,7 +219,19 @@ def _unknown_response(language: assistant_ai.AssistantLanguage) -> str:
 
 
 def _generation_unavailable(language: assistant_ai.AssistantLanguage) -> str:
-    """Single operational fallback; tool records are never rendered here."""
+    """Explain an unavailable AI path without rendering static tool records."""
+    if not assistant_ai.assistant_enabled():
+        return {
+            assistant_ai.AssistantLanguage.EN: (
+                "OYUNS AI is not configured yet. Please ask an administrator to set OPENAI_API_KEY."
+            ),
+            assistant_ai.AssistantLanguage.RU: (
+                "OYUNS AI пока не настроен. Попросите администратора задать OPENAI_API_KEY."
+            ),
+            assistant_ai.AssistantLanguage.MN: (
+                "OYUNS AI одоогоор тохируулагдаагүй байна. Админаас OPENAI_API_KEY тохируулж өгөхийг хүснэ үү."
+            ),
+        }[language]
     return {
         assistant_ai.AssistantLanguage.EN: "I could not generate the response right now. Please try again shortly.",
         assistant_ai.AssistantLanguage.RU: "Сейчас не удалось сформировать ответ. Попробуйте ещё раз чуть позже.",
