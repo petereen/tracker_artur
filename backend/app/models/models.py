@@ -154,6 +154,28 @@ class CompanyKnowledge(Base):
     )
 
 
+class UnknownAssistantRequest(Base):
+    """Deduplicated queue of requests that the public router cannot classify."""
+
+    __tablename__ = "unknown_assistant_requests"
+
+    id = Column(Integer, primary_key=True)
+    text = Column(Text, nullable=False)
+    text_hash = Column(String(64), nullable=False, unique=True, index=True)
+    language = Column(String(8), nullable=False)
+    channel = Column(String(16), nullable=False)
+    occurrence_count = Column(Integer, nullable=False, server_default="1", default=1)
+    status = Column(
+        Text,
+        CheckConstraint("status IN ('pending','reviewed','dismissed')"),
+        nullable=False,
+        server_default="pending",
+        default="pending",
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class Streak(Base):
     __tablename__ = "streaks"
 

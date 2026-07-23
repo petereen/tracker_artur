@@ -11,8 +11,10 @@ from app.services.assistant_ai import (
     AssistantLanguage,
     AssistantReply,
     DateRangeKind,
+    IntentClassification,
     PlanBlock,
     RouteDecision,
+    RouterIntent,
     TaskScope,
     WorkPlan,
     detect_language,
@@ -117,9 +119,21 @@ def test_assigned_to_me_question_is_assigned_task_query():
     assert decision.task_scope == TaskScope.ASSIGNED
 
 
-def test_ambiguous_manager_action_preserves_legacy_task_default():
+def test_ambiguous_manager_action_is_unknown_not_task_creation():
     decision = fallback_route("Prepare the weekly sales report", is_manager=True)
-    assert decision.intent == AssistantIntent.DELEGATE_TASK
+    assert decision.intent == AssistantIntent.GENERAL_PRODUCTIVITY
+    assert decision.router_intent == RouterIntent.UNKNOWN
+
+
+def test_public_router_contract_accepts_only_requested_fields():
+    result = IntentClassification.model_validate(
+        {"intent": "COMPANY_INFO", "confidence": 0.91}
+    )
+    assert result.intent == RouterIntent.COMPANY_INFO
+    with pytest.raises(ValidationError):
+        IntentClassification.model_validate(
+            {"intent": "COMPANY_INFO", "confidence": 0.91, "language": "mn"}
+        )
 
 
 def test_custom_range_requires_both_dates():

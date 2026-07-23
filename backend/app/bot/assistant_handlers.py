@@ -18,6 +18,7 @@ from app.services import (
     employee_directory_service,
     knowledge_service,
     task_service,
+    unknown_request_service,
     voice_service,
 )
 
@@ -86,6 +87,20 @@ def _answer_with_knowledge_sources(
         assistant_ai.AssistantLanguage.MN: "Эх сурвалж",
     }[language]
     return answer + f"\n\n{source_label}: " + "; ".join(titles)
+
+
+def _unknown_response(language: assistant_ai.AssistantLanguage) -> str:
+    return {
+        assistant_ai.AssistantLanguage.EN: (
+            "I could not classify that request yet. I saved it for review so OYUNS can be improved."
+        ),
+        assistant_ai.AssistantLanguage.RU: (
+            "Я пока не смог классифицировать этот запрос. Я сохранил его для проверки, чтобы улучшить OYUNS."
+        ),
+        assistant_ai.AssistantLanguage.MN: (
+            "Энэ хүсэлтийг одоогоор ангилж чадсангүй. OYUNS-ийг сайжруулахын тулд хяналтанд хадгаллаа."
+        ),
+    }[language]
 
 
 def _capabilities(
@@ -463,8 +478,9 @@ async def route_and_respond(
     if assistant_ai.is_task_query(text):
         decision = assistant_ai.fallback_route(text, is_manager=is_manager)
     log.info(
-        "assistant.route intent=%s confidence=%.2f language=%s channel=%s latency_ms=%d",
+        "assistant.route intent=%s router_intent=%s confidence=%.2f language=%s channel=%s latency_ms=%d",
         decision.intent.value,
+        decision.router_intent.value,
         decision.confidence,
         decision.language.value,
         "voice" if voice_mode else "text",
@@ -473,6 +489,19 @@ async def route_and_respond(
 
     if decision.confidence < 0.55 and decision.clarification:
         await _answer(message, decision.clarification)
+        return
+
+    if (
+        decision.router_intent == assistant_ai.RouterIntent.UNKNOWN
+        and decision.intent != assistant_ai.AssistantIntent.PLAN_WORK
+    ):
+        unknown_request_service.record_unknown_request(
+            text=text,
+            language=decision.language.value,
+            channel="voice" if voice_mode else "text",
+        )
+        log.info("assistant.unknown_request_stored channel=%s", "voice" if voice_mode else "text")
+        await _answer(message, _unknown_response(decision.language))
         return
 
     if decision.intent == assistant_ai.AssistantIntent.DELEGATE_TASK:

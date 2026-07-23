@@ -12,6 +12,7 @@ from app.services.assistant_ai import (
     AssistantLanguage,
     DateRangeKind,
     RouteDecision,
+    RouterIntent,
     TaskScope,
 )
 
@@ -42,8 +43,14 @@ EMPLOYEE = SimpleNamespace(
 
 
 def _decision(intent: AssistantIntent) -> RouteDecision:
+    router_intent = {
+        AssistantIntent.DELEGATE_TASK: RouterIntent.CREATE_TASK,
+        AssistantIntent.QUERY_MY_TASKS: RouterIntent.VIEW_MY_TASKS,
+        AssistantIntent.DISCOVER_CAPABILITIES: RouterIntent.AGENT_CAPABILITIES,
+    }.get(intent, RouterIntent.UNKNOWN)
     return RouteDecision(
         intent=intent,
+        router_intent=router_intent,
         language=AssistantLanguage.EN,
         confidence=0.95,
         task_scope=TaskScope.BOTH,
@@ -283,3 +290,34 @@ def test_matched_company_knowledge_precedes_capability_routing(monkeypatch):
     answer = message.answers[-1][0]
     assert "Анужин" in answer
     assert "Чөлөө авах журам" in answer
+
+
+def test_unknown_request_is_stored_without_task_draft(monkeypatch):
+    async def classify(*_args, **_kwargs):
+        return _decision(AssistantIntent.GENERAL_PRODUCTIVITY)
+
+    captured = {}
+
+    def record(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    monkeypatch.setattr(assistant_handlers.knowledge_service, "search_knowledge", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(assistant_handlers.unknown_request_service, "record_unknown_request", record)
+
+    message = FakeMessage("Do something unexpected")
+    asyncio.run(
+        assistant_handlers.route_and_respond(
+            message,
+            object(),
+            message.text,
+            employee=EMPLOYEE,
+            is_manager=True,
+            tg_id="77",
+            voice_mode=False,
+        )
+    )
+
+    assert captured["text"] == message.text
+    assert captured["channel"] == "text"
+    assert "saved" in message.answers[-1][0].lower()

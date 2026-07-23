@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
 from app.models.models import AdminUser, ManagerSettings
-from app.routers import auth, dashboard, employees, journal, knowledge, manager, onboarding, questions, schedules, tasks
+from app.routers import assistant_learning, auth, dashboard, employees, journal, knowledge, manager, onboarding, questions, schedules, tasks
 from sqlalchemy import select
 
 
@@ -54,6 +54,7 @@ app.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
 app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 app.include_router(tasks.miniapp_router, prefix="/miniapp", tags=["miniapp"])
 app.include_router(knowledge.router, prefix="/knowledge", tags=["knowledge"])
+app.include_router(assistant_learning.router, prefix="/assistant-learning", tags=["assistant-learning"])
 
 
 @app.get("/health")

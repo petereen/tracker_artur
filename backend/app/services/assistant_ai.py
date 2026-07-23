@@ -40,6 +40,16 @@ class AssistantIntent(str, Enum):
     GENERAL_PRODUCTIVITY = "GENERAL_PRODUCTIVITY"
 
 
+class RouterIntent(str, Enum):
+    """Public OYUNS intent contract used by the intent-router model."""
+
+    CREATE_TASK = "CREATE_TASK"
+    VIEW_MY_TASKS = "VIEW_MY_TASKS"
+    COMPANY_INFO = "COMPANY_INFO"
+    AGENT_CAPABILITIES = "AGENT_CAPABILITIES"
+    UNKNOWN = "UNKNOWN"
+
+
 class AssistantLanguage(str, Enum):
     MN = "mn"
     EN = "en"
@@ -64,6 +74,7 @@ class RouteDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     intent: AssistantIntent
+    router_intent: RouterIntent = RouterIntent.UNKNOWN
     language: AssistantLanguage
     confidence: float = Field(ge=0, le=1)
     task_scope: TaskScope
@@ -86,6 +97,15 @@ class RouteDecision(BaseModel):
             self.start_date = None
             self.end_date = None
         return self
+
+
+class IntentClassification(BaseModel):
+    """Strict, minimal output contract for the public intent router."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intent: RouterIntent
+    confidence: float = Field(ge=0, le=1)
 
 
 class AssistantReply(BaseModel):
@@ -232,6 +252,12 @@ _GENERAL_RE = re.compile(
     r"\b(?:policy|procedure|журам|бодлого|политик|регламент)\b)",
     re.IGNORECASE,
 )
+_COMPANY_INFO_RE = re.compile(
+    r"(?:\b(?:company|office|policy|procedure|values?|internal)\b|"
+    r"(?:компани|оффис|журам|бодлого|үнэт\s+зүйл|дотоод)\b|"
+    r"(?:компани|офис|политик|регламент|ценност))",
+    re.IGNORECASE,
+)
 _TODAY_RE = re.compile(r"\b(today|өнөөдөр|сегодня)\b", re.IGNORECASE)
 _WEEK_RE = re.compile(
     r"(this week|weekly|энэ (?:7 хоног|долоо хоног)|на этой неделе|на неделю)",
@@ -288,6 +314,32 @@ def is_task_query(text: str) -> bool:
     return bool(_QUERY_RE.search(text or ""))
 
 
+def _router_intent_for_fallback(intent: AssistantIntent, text: str) -> RouterIntent:
+    if intent == AssistantIntent.DELEGATE_TASK:
+        return RouterIntent.CREATE_TASK
+    if intent == AssistantIntent.QUERY_MY_TASKS:
+        return RouterIntent.VIEW_MY_TASKS
+    if intent == AssistantIntent.DISCOVER_CAPABILITIES:
+        return RouterIntent.AGENT_CAPABILITIES
+    if _COMPANY_INFO_RE.search(text or ""):
+        return RouterIntent.COMPANY_INFO
+    return RouterIntent.UNKNOWN
+
+
+def _internal_intent(router_intent: RouterIntent, fallback: AssistantIntent) -> AssistantIntent:
+    if router_intent == RouterIntent.CREATE_TASK:
+        return AssistantIntent.DELEGATE_TASK
+    if router_intent == RouterIntent.VIEW_MY_TASKS:
+        return AssistantIntent.QUERY_MY_TASKS
+    if router_intent == RouterIntent.AGENT_CAPABILITIES:
+        return AssistantIntent.DISCOVER_CAPABILITIES
+    if router_intent == RouterIntent.COMPANY_INFO:
+        return AssistantIntent.GENERAL_PRODUCTIVITY
+    # Personal planning remains an internal deterministic extension. All other
+    # unknown messages are held for review by the handler.
+    return fallback if fallback == AssistantIntent.PLAN_WORK else AssistantIntent.GENERAL_PRODUCTIVITY
+
+
 def is_information_question(text: str) -> bool:
     """Identify a question that can be answered by matched company knowledge."""
     return bool(_INFORMATION_QUESTION_RE.search(text or ""))
@@ -339,16 +391,13 @@ def fallback_route(text: str, *, is_manager: bool = False) -> RouteDecision:
     elif _GENERAL_RE.search(text or ""):
         intent = AssistantIntent.GENERAL_PRODUCTIVITY
         confidence = 0.78
-    elif is_manager:
-        # Preserve the legacy behavior for ambiguous manager free text.
-        intent = AssistantIntent.DELEGATE_TASK
-        confidence = 0.51
     else:
         intent = AssistantIntent.GENERAL_PRODUCTIVITY
-        confidence = 0.55
+        confidence = 0.5
 
     return RouteDecision(
         intent=intent,
+        router_intent=_router_intent_for_fallback(intent, text),
         language=language,
         confidence=confidence,
         task_scope=(
@@ -380,30 +429,30 @@ async def classify_intent(
         return fallback
 
     prompt = f"""\
-Classify the user's message for the OYUNS application.
-Current local datetime: {now.isoformat()}
-Timezone: {timezone_name}
-Actor is manager: {is_manager}
+You are the Intent Router for OYUNS All-In-One Corporate AI Agent.
+Analyze the user input (in Mongolian, Russian, or English) and classify it into
+EXACTLY ONE intent:
 
-Intent rules:
-- DELEGATE_TASK: create or assign a concrete task, including a task for oneself.
-- QUERY_MY_TASKS: retrieve existing tasks, priorities, workload, or task history.
-  “Бүх ажилтны даалгавруудыг харуул” and “Надад оногдсон даалгавар байна уу”
-  are queries, never task creation.
-- PLAN_WORK: organize time, produce a schedule, or break work into execution steps.
-- DISCOVER_CAPABILITIES: ask what OYUNS can do or how to use OYUNS itself.
-   Never use this for a company policy or process question.
-- GENERAL_PRODUCTIVITY: drafting, status summaries, company questions, or other work help.
+CREATE_TASK: The user explicitly wants to assign a task to another worker or
+team member. Examples: "Тэмүүлэнд тайлан бэлтгэх даалгавар өг",
+"@bold-од дизайн гаргах даалгавар үүсгэ".
 
-task_scope is assigned, created, both, or team. Choose team only for an explicit
-team request by a manager. Resolve relative date requests using the supplied
-local datetime. For today/this_week, use the matching date_range and null custom
-dates. For custom, return inclusive ISO dates. include_completed is true only
-when explicitly requested. Extract an available time budget when stated.
-knowledge_terms should contain concise retrieval terms, including useful
-Mongolian/English/Russian equivalents when a company-knowledge lookup may help.
-If delegation versus personal planning is genuinely ambiguous, set confidence
-below 0.55 and provide a short clarification in the user's language.
+VIEW_MY_TASKS: The user asks about their assigned tasks or workload. Examples:
+"Надад оногдсон даалгавар байна уу", "Миний даалгаврууд",
+"Өнөөдрийн хийх зүйлс". A manager asking to show all workers' tasks is also
+VIEW_MY_TASKS, not CREATE_TASK.
+
+COMPANY_INFO: The user asks for company information, values, policies, or
+internal documents. Examples: "Компаний тухай мэдээлэл",
+"Компаний үнэт зүйлс", "Оффисын дүрэм юу вэ".
+
+AGENT_CAPABILITIES: The user asks what OYUNS can do or how to use OYUNS.
+Examples: "Чи юу хийж чадах вэ?", "Танилцуулга", "Ямар боломжууд байгаа вэ".
+
+UNKNOWN: Anything else that does not fit the above. Do not classify a request
+as CREATE_TASK unless the user explicitly asks to assign or create a task.
+
+Output only the supplied strict JSON schema. Do not add fields.
 
 USER MESSAGE:
 <user_message>
@@ -411,16 +460,27 @@ USER MESSAGE:
 </user_message>
 """
     result = await _call_structured(
-        RouteDecision,
+        IntentClassification,
         schema_name="oyuns_intent_route",
         system=OYUNS_SYSTEM_PROMPT,
         user=prompt,
     )
     if result is None:
         return fallback
-    if result.task_scope == TaskScope.TEAM and not is_manager:
-        result.task_scope = TaskScope.BOTH
-    return result
+    updates = {
+        "intent": _internal_intent(result.intent, fallback.intent),
+        "router_intent": result.intent,
+        "confidence": result.confidence,
+    }
+    if result.intent == RouterIntent.VIEW_MY_TASKS:
+        # The public contract defines this as the user's assigned workload.
+        # An explicit manager team query remains team-scoped.
+        updates["task_scope"] = (
+            TaskScope.TEAM
+            if is_manager and fallback.task_scope == TaskScope.TEAM
+            else TaskScope.ASSIGNED
+        )
+    return fallback.model_copy(update=updates)
 
 
 def normalize_work_plan(plan: WorkPlan, budget_minutes: int) -> WorkPlan:
