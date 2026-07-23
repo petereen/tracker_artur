@@ -12,8 +12,10 @@ from app.bot import assistant_handlers, tasks_handlers
 from app.bot.tasks_handlers import (
     _ambiguous_roster_names,
     _resolve_roster_name,
+    _resolve_roster_names,
     _structure_from_tool_arguments,
     _targets_all_workers,
+    apply_task_draft_edit,
     task_draft_text,
 )
 from app.services.assistant_ai import (
@@ -381,6 +383,150 @@ def test_replied_message_is_added_to_openai_context(monkeypatch):
     ]
 
 
+def test_reply_to_task_draft_is_routed_as_an_edit(monkeypatch):
+    captured = {}
+    revised_arguments = {
+        "assignee": "self",
+        "title": "Тайлан бэлдэх",
+        "priority": 1,
+        "due_date": "2026-07-24T17:00:00+08:00",
+    }
+
+    async def classify(*_args, **kwargs):
+        captured["history"] = kwargs["chat_history"]
+        return _react_decision(
+            AssistantIntent.DELEGATE_TASK,
+            AssistantToolName.CREATE_TASK_DRAFT,
+            revised_arguments,
+        )
+
+    async def begin(message, state, text, **kwargs):
+        captured.update({"message": message, "state": state, "text": text, **kwargs})
+        return {"ok": True, "_presentation": "🤖 <b>Даалгаврын ноорог</b>"}
+
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    monkeypatch.setattr(assistant_handlers, "begin_task_draft", begin)
+
+    message = FakeMessage("Хугацааг маргааш 17:00 болгож, яаралтай болго.")
+    message.reply_to_message = SimpleNamespace(
+        text="🤖 Даалгаврын ноорог\n\nТайлан бэлдэх",
+        caption=None,
+        from_user=SimpleNamespace(is_bot=True),
+    )
+    state = FakeState()
+    state.state = tasks_handlers.TaskDraft.confirming
+    asyncio.run(
+        assistant_handlers.msg_assistant_text(
+            message,
+            state,
+            employee=EMPLOYEE,
+            is_manager=False,
+            tg_id="77",
+        )
+    )
+
+    assert captured["tool_arguments"] == revised_arguments
+    assert captured["history"] == [
+        {
+            "role": "assistant",
+            "content": "<task draft being edited>\n🤖 Даалгаврын ноорог\n\nТайлан бэлдэх\n</task draft being edited>",
+        }
+    ]
+    assert message.answers[-1][0] == "🤖 <b>Даалгаврын ноорог</b>"
+
+
+def test_task_draft_reply_preserves_fields_and_applies_explicit_changes(monkeypatch):
+    zone = pytz.timezone("Asia/Ulaanbaatar")
+    original_deadline = zone.localize(datetime(2026, 6, 1, 12, 0))
+    monkeypatch.setattr(tasks_handlers, "_now_tz", lambda _tz: zone.localize(datetime(2026, 6, 1, 10, 0)))
+
+    state = FakeState()
+    state.data["draft"] = {
+        "title": "Тайлан бэлдэх",
+        "description": "Эхний хувилбар",
+        "assignee_id": EMPLOYEE.id,
+        "assignee_ids": [EMPLOYEE.id],
+        "assignee_name": EMPLOYEE.name,
+        "assign_to_all": False,
+        "deadline_at": original_deadline,
+        "priority": 2,
+    }
+    message = FakeMessage("Хугацааг маргааш 17 цагт болгож, яаралтай болго.")
+
+    edited = asyncio.run(
+        apply_task_draft_edit(
+            message,
+            state,
+            message.text,
+            employee=EMPLOYEE,
+            is_manager=False,
+        )
+    )
+
+    draft = state.data["draft"]
+    assert edited is True
+    assert draft["title"] == "Тайлан бэлдэх"
+    assert draft["description"] == "Эхний хувилбар"
+    assert draft["deadline_at"] == zone.localize(datetime(2026, 6, 2, 17, 0))
+    assert draft["priority"] == 1
+    assert "02.06 17:00 УБ" in message.answers[-1][0]
+    assert "🔴 Тэргүүлэх зэрэг: 1" in message.answers[-1][0]
+
+
+def test_task_draft_reply_accepts_numeric_priority(monkeypatch):
+    zone = pytz.timezone("Asia/Ulaanbaatar")
+    monkeypatch.setattr(tasks_handlers, "_now_tz", lambda _tz: zone.localize(datetime(2026, 6, 1, 10, 0)))
+    state = FakeState()
+    state.data["draft"] = {
+        "title": "Тайлан бэлдэх",
+        "assignee_id": EMPLOYEE.id,
+        "assignee_ids": [EMPLOYEE.id],
+        "assignee_name": EMPLOYEE.name,
+        "assign_to_all": False,
+        "deadline_at": None,
+        "priority": 2,
+    }
+
+    asyncio.run(
+        apply_task_draft_edit(
+            FakeMessage("Тэргүүлэх зэрэг: 3"),
+            state,
+            "Тэргүүлэх зэрэг: 3",
+            employee=EMPLOYEE,
+            is_manager=False,
+        )
+    )
+
+    assert state.data["draft"]["priority"] == 3
+
+
+def test_task_draft_reply_accepts_mongolian_title_edit(monkeypatch):
+    zone = pytz.timezone("Asia/Ulaanbaatar")
+    monkeypatch.setattr(tasks_handlers, "_now_tz", lambda _tz: zone.localize(datetime(2026, 6, 1, 10, 0)))
+    state = FakeState()
+    state.data["draft"] = {
+        "title": "Хуучин гарчиг",
+        "assignee_id": EMPLOYEE.id,
+        "assignee_ids": [EMPLOYEE.id],
+        "assignee_name": EMPLOYEE.name,
+        "assign_to_all": False,
+        "deadline_at": None,
+        "priority": 2,
+    }
+
+    asyncio.run(
+        apply_task_draft_edit(
+            FakeMessage("Гарчгийг Шинэ тайлан бэлдэх болго"),
+            state,
+            "Гарчгийг Шинэ тайлан бэлдэх болго",
+            employee=EMPLOYEE,
+            is_manager=False,
+        )
+    )
+
+    assert state.data["draft"]["title"] == "Шинэ тайлан бэлдэх"
+
+
 def test_all_worker_assignment_requests_are_recognized():
     assert _targets_all_workers("Assign the company meeting to all workers")
     assert _targets_all_workers("Бүх ажилтанд арга хэмжээний даалгавар өг")
@@ -451,6 +597,34 @@ def test_full_employee_name_resolves_ambiguous_first_name():
         "Анужин юрист",
         "Анужин менежер",
     ]
+
+
+def test_multiple_explicit_employee_names_become_multiple_draft_assignees(monkeypatch):
+    roster = [
+        {"id": 1, "name": "Анужин менежер", "username": "anujin"},
+        {"id": 2, "name": "Тэмүүлэн", "username": "temuulen"},
+    ]
+    text = "Анужин менежер, Тэмүүлэн хоёрт Маргааш офис дээр 13 цагт уулзах даалгавар өг"
+    monkeypatch.setattr(tasks_handlers, "_roster", lambda: roster)
+
+    message = FakeMessage(text)
+    state = FakeState()
+    asyncio.run(
+        tasks_handlers.begin_task_draft(
+            message,
+            state,
+            text,
+            employee=EMPLOYEE,
+            is_manager=True,
+            tg_id="77",
+            allow_ai_structuring=False,
+        )
+    )
+
+    assert _resolve_roster_names(text, roster) == [1, 2]
+    assert state.data["draft"]["assignee_ids"] == [1, 2]
+    assert state.data["draft"]["assignee_name"] == "Анужин менежер, Тэмүүлэн"
+    assert "Гүйцэтгэгчид: <b>Анужин менежер, Тэмүүлэн</b>" in message.answers[-1][0]
 
 
 def test_task_draft_prefers_deterministic_mongolian_local_time(monkeypatch):

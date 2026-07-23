@@ -13,7 +13,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from app.bot.tasks_handlers import begin_task_draft, task_draft_keyboard, task_draft_text
+from app.bot.tasks_handlers import TaskDraft, begin_task_draft, task_draft_keyboard, task_draft_text
 from app.services import (
     assistant_ai,
     employee_directory_service,
@@ -49,7 +49,10 @@ def _replied_message_context(message: Message) -> dict | None:
         return None
     sender = getattr(replied, "from_user", None)
     role = "assistant" if bool(getattr(sender, "is_bot", False)) else "user"
-    label = "previous assistant reply" if role == "assistant" else "replied user message"
+    if role == "assistant" and "Даалгаврын ноорог" in content:
+        label = "task draft being edited"
+    else:
+        label = "previous assistant reply" if role == "assistant" else "replied user message"
     return {
         "role": role,
         "content": f"<{label}>\n{content[:4_000]}\n</{label}>",
@@ -400,7 +403,7 @@ async def route_and_respond(
     _remember(history_key, text, answer)
 
 
-@router.message(StateFilter(None), F.voice)
+@router.message(StateFilter(None, TaskDraft.confirming), F.voice)
 async def msg_assistant_voice(
     message: Message,
     state: FSMContext,
@@ -440,7 +443,7 @@ async def msg_assistant_voice(
     )
 
 
-@router.message(StateFilter(None), F.text & ~F.text.startswith("/"))
+@router.message(StateFilter(None, TaskDraft.confirming), F.text & ~F.text.startswith("/"))
 async def msg_assistant_text(
     message: Message,
     state: FSMContext,

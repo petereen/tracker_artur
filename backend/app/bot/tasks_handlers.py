@@ -21,6 +21,28 @@ log = logging.getLogger(__name__)
 router = Router()
 
 _PRIORITY_EMOJI = {1: "🔴", 2: "🟡", 3: "🟢"}
+_EXPLICIT_PRIORITY_RE = re.compile(
+    r"\b(?:яаралтай|нэн яаралтай|маш чухал|asap|urgent|high priority|"
+    r"бага ач холбогдолтой|яаралгүй|low priority|"
+    r"(?:тэргүүлэх\s+зэрэг|priority)\s*[:=]?\s*[123])\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PRIORITY_NUMBER_RE = re.compile(
+    r"(?:тэргүүлэх\s+зэрэг|priority)\s*[:=]?\s*(?P<priority>[123])\b",
+    re.IGNORECASE,
+)
+_TITLE_EDIT_RE = re.compile(
+    r"(?:\b(?:title|name|название)\b|гарчиг(?:ийг|ийгээ|ийг\s+нь)?|гарчгийг(?:ээ)?|нэр(?:ийг|ийгээ|ийг\s+нь)?)\s*"
+    r"(?:to|as|на)?\s*[:=]?\s*"
+    r"(?P<title>.+?)(?:\s+болго(?:орой|но|ё)?|$)",
+    re.IGNORECASE,
+)
+_DESCRIPTION_EDIT_RE = re.compile(
+    r"(?:\b(?:description|note|описание)\b|(?:тайлбар|тэмдэглэл)(?:ыг|ийг|ийгээ|ыг\s+нь|ийг\s+нь)?)\s*"
+    r"(?:to|as|на)?\s*[:=]?\s*"
+    r"(?P<description>.+?)(?:\s+болго(?:орой|но|ё)?|$)",
+    re.IGNORECASE,
+)
 
 
 def _now_tz(tz: str | None) -> datetime:
@@ -165,15 +187,92 @@ async def _show_draft(message: Message, draft: dict) -> None:
     )
 
 
+def _explicit_edit_value(pattern: re.Pattern, text: str) -> str | None:
+    match = pattern.search(text or "")
+    if not match:
+        return None
+    value = match.groupdict().get("title") or match.groupdict().get("description")
+    return value.strip(" .,:;–—-")[:2_000] if value else None
+
+
+async def apply_task_draft_edit(
+    message: Message,
+    state: FSMContext,
+    text: str,
+    *,
+    employee,
+    is_manager: bool,
+) -> bool:
+    """Apply a reply's explicit changes to the active confirmation draft."""
+    draft = (await state.get_data()).get("draft")
+    if not draft:
+        return False
+
+    updated = dict(draft)
+    timezone_name = getattr(employee, "timezone", None) or "Asia/Ulaanbaatar"
+    parsed = parse_task_text(text, now=_now_tz(timezone_name), tz=timezone_name)
+
+    if parsed.deadline_at is not None:
+        updated["deadline_at"] = parsed.deadline_at
+    if _EXPLICIT_PRIORITY_RE.search(text or ""):
+        numeric_priority = _EXPLICIT_PRIORITY_NUMBER_RE.search(text or "")
+        if numeric_priority:
+            updated["priority"] = int(numeric_priority.group("priority"))
+        else:
+            updated["priority"] = parsed.priority
+
+    title = _explicit_edit_value(_TITLE_EDIT_RE, text)
+    if title:
+        updated["title"] = title[:200]
+    description = _explicit_edit_value(_DESCRIPTION_EDIT_RE, text)
+    if description:
+        updated["description"] = description
+
+    if is_manager:
+        roster = _roster()
+        if _targets_all_workers(text):
+            assignee_ids = [row["id"] for row in roster]
+            updated.update(
+                assignee_ids=assignee_ids,
+                assign_to_all=True,
+                assignee_name=f"Бүх идэвхтэй ажилтан ({len(assignee_ids)})",
+            )
+        else:
+            assignee_id = None
+            if parsed.assignee_username:
+                target = task_service.resolve_employee_by_username(parsed.assignee_username)
+                assignee_id = target.id if target else None
+            if assignee_id is None:
+                assignee_id = _resolve_roster_name(text, roster)
+            if assignee_id is not None:
+                assignee = next((row for row in roster if row["id"] == assignee_id), None)
+                if assignee:
+                    updated.update(
+                        assignee_id=assignee_id,
+                        assignee_ids=[assignee_id],
+                        assign_to_all=False,
+                        assignee_name=assignee["name"],
+                    )
+
+    await state.update_data(draft=updated)
+    await _show_draft(message, updated)
+    return True
+
+
 def task_draft_text(draft: dict) -> str:
     """Render the confirmation draft consistently, without model paraphrasing."""
     desc = f"\n📝 {escape(str(draft['description']))}" if draft.get("description") else ""
     title = escape(str(draft.get("title") or "—"))
     assignee = escape(str(draft.get("assignee_name") or "—"))
+    assignee_label = (
+        "Гүйцэтгэгчид"
+        if draft.get("assign_to_all") or len(draft.get("assignee_ids") or []) > 1
+        else "Гүйцэтгэгч"
+    )
     return (
         f"🤖 <b>Даалгаврын ноорог</b>\n\n"
         f"<b>{title}</b>{desc}\n"
-        f"👤 Гүйцэтгэгч: <b>{assignee}</b>\n"
+        f"👤 {assignee_label}: <b>{assignee}</b>\n"
         f"{_PRIORITY_EMOJI.get(draft.get('priority', 2), '🟡')} Тэргүүлэх зэрэг: {draft.get('priority', 2)}\n"
         f"🕒 Хугацаа: <b>{_fmt_ub_deadline(draft.get('deadline_at'))}</b>"
     )
@@ -200,20 +299,32 @@ def _targets_all_workers(text: str) -> bool:
 
 
 def _resolve_roster_name(text: str, roster: list[dict]) -> int | None:
-    """Resolve an explicitly written full employee name, preferring the longest match."""
+    """Resolve one explicitly written full employee name, preferring the longest match."""
+    employee_ids = _resolve_roster_names(text, roster)
+    return employee_ids[0] if len(employee_ids) == 1 else None
+
+
+def _resolve_roster_names(text: str, roster: list[dict]) -> list[int]:
+    """Resolve every explicitly named employee, without double-counting name prefixes."""
     normalized_text = re.sub(r"\s+", " ", text or "").casefold()
-    matches: list[tuple[int, int]] = []
+    candidates: list[tuple[str, int]] = []
     for row in roster:
         name = re.sub(r"\s+", " ", str(row.get("name") or "")).strip().casefold()
-        if not name:
-            continue
-        if re.search(rf"(?<!\w){re.escape(name)}(?:д|т)?(?!\w)", normalized_text):
-            matches.append((len(name), int(row["id"])))
-    if not matches:
-        return None
-    longest = max(length for length, _employee_id in matches)
-    employee_ids = {employee_id for length, employee_id in matches if length == longest}
-    return employee_ids.pop() if len(employee_ids) == 1 else None
+        if name:
+            candidates.append((name, int(row["id"])))
+
+    selected: list[tuple[int, int]] = []
+    occupied_ranges: list[tuple[int, int]] = []
+    for name, employee_id in sorted(candidates, key=lambda item: len(item[0]), reverse=True):
+        pattern = rf"(?<!\w){re.escape(name)}(?:д|т)?(?!\w)"
+        for match in re.finditer(pattern, normalized_text):
+            start, end = match.span()
+            if any(start < occupied_end and end > occupied_start for occupied_start, occupied_end in occupied_ranges):
+                continue
+            selected.append((start, employee_id))
+            occupied_ranges.append((start, end))
+
+    return [employee_id for _start, employee_id in sorted(selected)]
 
 
 def _ambiguous_roster_names(text: str, roster: list[dict]) -> list[str]:
@@ -364,10 +475,11 @@ async def begin_task_draft(
         structured["description"] = (text or "").strip()[:2_000] or None
 
     assignee_id = structured.get("assignee_id")
-    exact_name_id = _resolve_roster_name(text, roster)
-    if exact_name_id is not None:
-        # An exact stored full name is more reliable than a model selection.
-        assignee_id = exact_name_id
+    exact_name_ids = _resolve_roster_names(text, roster)
+    if exact_name_ids:
+        # Explicit stored names are more reliable than a model selection and
+        # can intentionally name more than one recipient.
+        assignee_id = exact_name_ids[0]
     elif is_manager:
         ambiguous_names = _ambiguous_roster_names(text, roster)
         if ambiguous_names:
@@ -388,11 +500,17 @@ async def begin_task_draft(
         or (not assignee_id and _SELF_RE.search(text or ""))
     ):
         assignee_id = self_emp["id"]
+        exact_name_ids = [assignee_id]
 
     if assign_to_all and not all_active_assignee_ids:
         return await fail("no_active_workers", "👥 Идэвхтэй ажилтан алга байна.")
 
-    if not assign_to_all and not assignee_id:
+    assignee_ids = (
+        all_active_assignee_ids
+        if assign_to_all
+        else exact_name_ids or ([assignee_id] if assignee_id else [])
+    )
+    if not assign_to_all and not assignee_ids:
         others = [r for r in roster if not self_emp or r["id"] != self_emp["id"]]
         if not others:
             user_message = (
@@ -410,14 +528,24 @@ async def begin_task_draft(
             available_assignees=[row["name"] for row in others[:50]],
         )
 
-    name = next((e["name"] for e in roster if e["id"] == assignee_id), None)
-    if name:
-        name = name.replace(" (та өөрөө)", "")
+    names_by_id = {
+        row["id"]: str(row["name"]).replace(" (та өөрөө)", "")
+        for row in roster
+    }
+    assignee_names = [
+        names_by_id[employee_id]
+        for employee_id in assignee_ids
+        if employee_id in names_by_id
+    ]
     draft = {
         "title": structured["title"], "description": structured.get("description"),
-        "assignee_id": assignee_id, "assignee_ids": all_active_assignee_ids if assign_to_all else [assignee_id],
+        "assignee_id": assignee_id, "assignee_ids": assignee_ids,
         "assign_to_all": assign_to_all,
-        "assignee_name": f"Бүх идэвхтэй ажилтан ({len(all_active_assignee_ids)})" if assign_to_all else name,
+        "assignee_name": (
+            f"Бүх идэвхтэй ажилтан ({len(all_active_assignee_ids)})"
+            if assign_to_all
+            else ", ".join(assignee_names)
+        ),
         "deadline_at": structured.get("deadline_at"), "priority": structured.get("priority", 2),
         "created_by_id": self_emp["id"] if self_emp else None, "created_by_tg": tg_id,
     }
@@ -467,7 +595,7 @@ async def cb_draft_confirm(cb: CallbackQuery, state: FSMContext, tg_id: str | No
         except Exception:  # noqa: BLE001
             log.exception("draft: не удалось запланировать напоминания task=%s", task["id"])
         _enqueue_assignment_bot(task, tg_id)
-    if d.get("assign_to_all"):
+    if d.get("assign_to_all") or len(tasks) > 1:
         await cb.message.answer(
             f"✅ <b>{len(tasks)}</b> ажилтанд «{d['title']}» даалгавар үүслээ.",
             parse_mode="HTML",
@@ -483,8 +611,7 @@ async def cb_draft_confirm(cb: CallbackQuery, state: FSMContext, tg_id: str | No
 
 @router.callback_query(F.data == "taskdraft:edit", TaskDraft.confirming)
 async def cb_draft_edit(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await cb.message.answer("✏️ За, даалгавраа текст эсвэл дуу хоолойгоор дахин илгээнэ үү.")
+    await cb.message.answer("✏️ Ноорог дээр reply хийж засвараа текст эсвэл дуу хоолойгоор илгээнэ үү.")
     await cb.answer()
 
 
@@ -493,6 +620,29 @@ async def cb_draft_cancel(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.message.answer("❌ Цуцлагдлаа.")
     await cb.answer()
+
+
+@router.message(
+    TaskDraft.confirming,
+    F.reply_to_message.from_user.is_bot == True,
+    F.reply_to_message.text.contains("Даалгаврын ноорог"),
+    F.text & ~F.text.startswith("/"),
+)
+async def msg_draft_reply_edit(
+    message: Message,
+    state: FSMContext,
+    employee=None,
+    is_manager: bool = False,
+):
+    """Update the active draft when the user replies directly to its preview."""
+    if not await apply_task_draft_edit(
+        message,
+        state,
+        message.text or "",
+        employee=employee,
+        is_manager=is_manager,
+    ):
+        await message.answer("⚠️ Засах ноорог олдсонгүй. Шинэ даалгавраа дахин илгээнэ үү.")
 
 
 # ─── /mytasks ───────────────────────────────────────────────────────────────────
