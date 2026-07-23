@@ -12,6 +12,7 @@ from app.bot import assistant_handlers, tasks_handlers
 from app.bot.tasks_handlers import (
     _ambiguous_roster_names,
     _resolve_roster_name,
+    _structure_from_tool_arguments,
     _targets_all_workers,
     task_draft_text,
 )
@@ -72,6 +73,7 @@ def _empty_worker_directory(monkeypatch):
         "list_workers",
         lambda: [],
     )
+    monkeypatch.setattr(assistant_handlers.unknown_request_service, "active_context_examples", lambda: [])
 
 
 def _decision(intent: AssistantIntent) -> RouteDecision:
@@ -383,6 +385,58 @@ def test_all_worker_assignment_requests_are_recognized():
     assert _targets_all_workers("Assign the company meeting to all workers")
     assert _targets_all_workers("Бүх ажилтанд арга хэмжээний даалгавар өг")
     assert _targets_all_workers("Назначь встречу всем сотрудникам")
+    assert _targets_all_workers("Хоёр цагийн дараа бүгд офис дээр цуглаарай")
+    assert _targets_all_workers("Офис дээр бүгдээрээ 2 цагийн дараа цугламаар байна")
+
+
+def test_native_all_assignee_becomes_all_worker_draft():
+    structured = _structure_from_tool_arguments(
+        {
+            "assignee": "all",
+            "title": "Офисын уулзалт",
+            "priority": 2,
+            "due_date": "2026-07-24T15:00:00+08:00",
+        },
+        roster=[],
+        timezone_name="Asia/Ulaanbaatar",
+    )
+    assert structured is not None
+    assert structured["assign_to_all"] is True
+
+
+def test_all_hands_fallback_drafts_without_legacy_second_ai_call(monkeypatch):
+    zone = pytz.timezone("Asia/Ulaanbaatar")
+
+    async def structure(*_args, **_kwargs):
+        raise AssertionError("assistant fallback must not invoke the legacy task AI")
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(tasks_handlers, "_now_tz", lambda _tz: zone.localize(datetime(2026, 6, 1, 10, 0)))
+    monkeypatch.setattr(
+        tasks_handlers,
+        "_roster",
+        lambda: [{"id": EMPLOYEE.id, "name": EMPLOYEE.name, "username": "tester"}],
+    )
+    monkeypatch.setattr(tasks_handlers.task_ai, "ai_enabled", lambda: True)
+    monkeypatch.setattr(tasks_handlers.task_ai, "structure_task", structure)
+
+    message = FakeMessage("Хоёр цагийн дараа бүгд офис дээр цуглаарай")
+    state = FakeState()
+    asyncio.run(
+        assistant_handlers.route_and_respond(
+            message,
+            state,
+            message.text,
+            employee=EMPLOYEE,
+            is_manager=True,
+            tg_id="77",
+            voice_mode=False,
+        )
+    )
+
+    assert state.data["draft"]["assign_to_all"] is True
+    assert state.data["draft"]["deadline_at"] == zone.localize(datetime(2026, 6, 1, 12, 0))
+    assert "Даалгаврын ноорог" in message.answers[-1][0]
 
 
 def test_full_employee_name_resolves_ambiguous_first_name():
@@ -556,4 +610,5 @@ def test_unknown_request_is_stored_without_task_draft(monkeypatch):
 
     assert captured["text"] == message.text
     assert captured["channel"] == "text"
+    assert captured["reason"] == "no_confident_route"
     assert "saved" in message.answers[-1][0].lower()

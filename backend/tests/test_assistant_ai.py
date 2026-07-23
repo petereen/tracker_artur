@@ -142,6 +142,22 @@ def test_mongolian_scheduled_meeting_is_a_task_draft(text):
     assert decision.router_intent == RouterIntent.CREATE_TASK
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Хоёр цагийн дараа бүгд офис дээр цуглаарай",
+        "Хоёр цагийн дараа бүгд офис дээр цугламаар байна",
+        "Офис дээр бүгдээрээ 2 цагийн дараа цугламаар байна",
+    ],
+)
+def test_all_hands_relative_gathering_is_a_task_draft(text):
+    assert detect_language(text) == AssistantLanguage.MN
+    assert is_scheduled_task(text)
+    decision = fallback_route(text, is_manager=True)
+    assert decision.intent == AssistantIntent.DELEGATE_TASK
+    assert decision.router_intent == RouterIntent.CREATE_TASK
+
+
 def test_ambiguous_manager_action_is_unknown_not_task_creation():
     decision = fallback_route("Prepare the weekly sales report", is_manager=True)
     assert decision.intent == AssistantIntent.GENERAL_PRODUCTIVITY
@@ -224,6 +240,22 @@ def test_native_create_task_call_is_validated():
     assert selection.arguments["assignee"] == "Анужин менежер"
 
 
+def test_native_create_task_all_assignee_is_validated():
+    selection = parse_native_tool_message(
+        _tool_message(
+            "create_task_draft",
+            {
+                "assignee": "all",
+                "title": "Офисын уулзалт",
+                "priority": 2,
+                "due_date": "2026-07-24T15:00:00+08:00",
+            },
+        )
+    )
+    assert selection is not None
+    assert selection.arguments["assignee"] == "all"
+
+
 def test_native_tool_call_rejects_extra_or_invalid_arguments():
     assert (
         parse_native_tool_message(
@@ -281,6 +313,34 @@ def test_capability_question_can_use_direct_model_answer(monkeypatch):
     )
     assert decision.selected_tool is None
     assert decision.direct_answer is not None
+
+
+def test_learned_context_examples_are_sent_to_native_router(monkeypatch):
+    captured = {}
+
+    async def native(**kwargs):
+        captured["contexts"] = kwargs["learned_contexts"]
+        return parse_native_tool_message({"content": "Ойлголоо."})
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr("app.services.assistant_ai._call_native_router", native)
+    asyncio.run(
+        classify_intent(
+            "цугламаар байна",
+            now=datetime.now(timezone.utc),
+            timezone_name="Asia/Ulaanbaatar",
+            is_manager=True,
+            workers=[],
+            learned_contexts=[
+                {
+                    "phrase": "бүгдээрээ цугламаар байна",
+                    "intent": "create_task_draft",
+                    "meaning": "Бүх ажилтанд уулзалтын даалгаврын ноорог бэлтгэ.",
+                }
+            ],
+        )
+    )
+    assert captured["contexts"][0]["intent"] == "create_task_draft"
 
 
 def test_native_get_user_tasks_maps_to_planning(monkeypatch):

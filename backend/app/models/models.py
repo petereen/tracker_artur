@@ -164,6 +164,8 @@ class UnknownAssistantRequest(Base):
     text_hash = Column(String(64), nullable=False, unique=True, index=True)
     language = Column(String(8), nullable=False)
     channel = Column(String(16), nullable=False)
+    terms = Column(ARRAY(Text), nullable=False, server_default=sa_text("'{}'"), default=list)
+    reason = Column(String(80), nullable=False, server_default="unclassified", default="unclassified")
     occurrence_count = Column(Integer, nullable=False, server_default="1", default=1)
     status = Column(
         Text,
@@ -174,6 +176,32 @@ class UnknownAssistantRequest(Base):
     )
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_seen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AssistantContextExample(Base):
+    """Administrator-approved wording that teaches the intent router local context."""
+
+    __tablename__ = "assistant_context_examples"
+
+    id = Column(Integer, primary_key=True)
+    phrase = Column(Text, nullable=False)
+    phrase_hash = Column(String(64), nullable=False, unique=True, index=True)
+    intent = Column(
+        String(40),
+        CheckConstraint(
+            "intent IN ('create_task_draft','get_user_tasks','search_company_knowledge')"
+        ),
+        nullable=False,
+    )
+    meaning = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 
 class Streak(Base):

@@ -33,6 +33,22 @@ _MONGOLIAN_RELATIVE_TIME_RE = re.compile(
     r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*цаг(?:аас|т)?\b",
     re.IGNORECASE,
 )
+_MONGOLIAN_NUMBER_WORDS = {
+    "нэг": "1",
+    "хоёр": "2",
+    "гурван": "3",
+    "дөрвөн": "4",
+    "таван": "5",
+    "зургаан": "6",
+    "долоон": "7",
+    "найман": "8",
+    "есөн": "9",
+    "арван": "10",
+}
+_MONGOLIAN_HOURS_AFTER_RE = re.compile(
+    r"\b(?P<count>\d+|" + "|".join(_MONGOLIAN_NUMBER_WORDS) + r")\s*цаг(?:ийн)?\s+дараа\b",
+    re.IGNORECASE,
+)
 
 
 def _explicit_mongolian_deadline(
@@ -80,7 +96,12 @@ def _normalize_mongolian_dates(text: str) -> str:
         normalized = re.sub(rf"\bэнэ\s+{day}\b", target, normalized, flags=re.IGNORECASE)
         normalized = re.sub(rf"\b{day}\b", target, normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\b(\d+)\s*(?:минут(?:ын)?|мин)\s+дараа\b", r"через \1 минут", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\b(\d+)\s*цаг(?:ийн)?\s+дараа\b", r"через \1 часов", normalized, flags=re.IGNORECASE)
+
+    def _replace_mongolian_hours(match: re.Match[str]) -> str:
+        count = match.group("count")
+        return f"через {_MONGOLIAN_NUMBER_WORDS.get(count.casefold(), count)} часов"
+
+    normalized = _MONGOLIAN_HOURS_AFTER_RE.sub(_replace_mongolian_hours, normalized)
     normalized = re.sub(r"\b(\d+)\s*(?:хоног(?:ийн)?|өдөр(?:ийн)?|өдрийн)\s+дараа\b", r"через \1 дней", normalized, flags=re.IGNORECASE)
     # "маргааш 10 цагт" and "баасан гарагт 15 цаг" are common in task text.
     normalized = re.sub(r"\b(\d{1,2}):(\d{2})\s+цаг(?:аас|т)?\b", r"\1:\2", normalized, flags=re.IGNORECASE)

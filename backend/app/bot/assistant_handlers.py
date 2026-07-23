@@ -188,6 +188,7 @@ async def execute_tool(
             tg_id=tg_id,
             tool_arguments=arguments,
             show_preview=False,
+            allow_ai_structuring=False,
         )
         keyboard = task_draft_keyboard() if result.get("ok") else None
         presentation = result.pop("_presentation", None)
@@ -286,6 +287,7 @@ async def route_and_respond(
     chat_history = list(_conversation_history[history_key])
     if reply_context:
         chat_history.append(reply_context)
+    learned_contexts = unknown_request_service.active_context_examples()
     decision = await assistant_ai.classify_intent(
         text,
         now=_now_in_timezone(timezone_name),
@@ -294,6 +296,7 @@ async def route_and_respond(
         workers=workers,
         voice_mode=voice_mode,
         chat_history=chat_history,
+        learned_contexts=learned_contexts,
     )
     log.info(
         "assistant.route intent=%s router_intent=%s tool=%s confidence=%.2f "
@@ -352,6 +355,7 @@ async def route_and_respond(
                 text=text,
                 language=decision.language.value,
                 channel="voice" if voice_mode else "text",
+                reason="model_direct_answer_without_confident_fallback",
             )
             log.info(
                 "assistant.unknown_direct_response_stored channel=%s",
@@ -369,6 +373,7 @@ async def route_and_respond(
             text=text,
             language=decision.language.value,
             channel="voice" if voice_mode else "text",
+            reason="no_confident_route",
         )
         log.info("assistant.unknown_request_stored channel=%s", "voice" if voice_mode else "text")
         await _answer(message, _unknown_response(decision.language))
@@ -386,6 +391,7 @@ async def route_and_respond(
             is_manager=is_manager,
             tg_id=tg_id,
             tool_arguments=decision.tool_arguments,
+            allow_ai_structuring=False,
         )
         return
 

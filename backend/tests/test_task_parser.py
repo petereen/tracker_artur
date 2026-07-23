@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import pytz
+import pytest
 
 from app.services.task_parser import (
     PRIORITY_LOW,
@@ -108,3 +109,10 @@ def test_parses_mongolian_today_and_day_genitive_forms():
     assert today.date() == MONGOLIAN_NOW.date()
     assert in_two_days is not None
     assert in_two_days.date() == MONGOLIAN_NOW.date().replace(day=3)
+
+
+@pytest.mark.parametrize("text", ["Хоёр цагийн дараа", "2 цагийн дараа"])
+def test_parses_mongolian_relative_hours_written_as_word_or_number(text):
+    deadline = parse_when(text, now=MONGOLIAN_NOW, tz="Asia/Ulaanbaatar")
+    assert deadline is not None
+    assert deadline == MONGOLIAN_NOW.replace(hour=12)

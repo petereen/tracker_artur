@@ -188,7 +188,7 @@ _ALL_WORKERS_RE = re.compile(
     r"(?:\ball\s+(?:workers?|employees?|staff|team|everyone|everybody)\b|"
     r"\b(?:everyone|everybody)\b|"
     r"бүх\s+(?:ажилт(?:ан|нууд)|ажилч(?:ин|ид)|баг(?:ийн\s+гишүүд)?)|"
-    r"(?:бүгдэд|бүгд\s+нь)|"
+    r"(?:бүгд(?:ээрээ|эд)?|бүгд\s+нь)|"
     r"(?:всем|все(?:м)?\s+(?:сотрудник(?:ам|и)?|работник(?:ам|и)?|команд(?:е|ы))))",
     re.IGNORECASE,
 )
@@ -266,11 +266,14 @@ def _structure_from_tool_arguments(
 
     assignee_id = None
     assign_to_self = False
+    assign_to_all = False
     assignee = arguments.get("assignee")
     if isinstance(assignee, str) and assignee.strip():
         assignee_value = assignee.strip()
         if assignee_value.casefold() == "self":
             assign_to_self = True
+        elif assignee_value.casefold() == "all":
+            assign_to_all = True
         elif assignee_value.startswith("@"):
             target = task_service.resolve_employee_by_username(assignee_value[1:])
             assignee_id = target.id if target else None
@@ -288,7 +291,7 @@ def _structure_from_tool_arguments(
         "description": description,
         "assignee_id": assignee_id,
         "assign_to_self": assign_to_self,
-        "assign_to_all": arguments.get("assign_to_all") is True,
+        "assign_to_all": assign_to_all,
         "deadline_at": deadline_at,
         "priority": priority,
     }
@@ -304,6 +307,7 @@ async def begin_task_draft(
     tg_id,
     tool_arguments: dict | None = None,
     show_preview: bool = True,
+    allow_ai_structuring: bool = True,
 ) -> dict:
     """Prepare task-draft state and return privacy-safe raw data for ReAct.
 
@@ -339,7 +343,7 @@ async def begin_task_draft(
         roster=roster,
         timezone_name=tz,
     )
-    if structured is None and task_ai.ai_enabled():
+    if structured is None and allow_ai_structuring and task_ai.ai_enabled():
         structured = await task_ai.structure_task(text, roster=roster, now=now, tz=tz)
     if structured is None:  # fallback на детерминированный парсер
         a_id = None
