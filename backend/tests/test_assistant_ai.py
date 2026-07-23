@@ -18,6 +18,7 @@ from app.services.assistant_ai import (
     detect_language,
     generate_general_reply,
     fallback_route,
+    is_task_query,
     is_worker_directory_query,
     is_information_question,
     normalize_work_plan,
@@ -98,6 +99,22 @@ def test_company_worker_list_is_detected_as_mongolian():
 
 def test_mongolian_company_question_is_recognized():
     assert is_information_question("Чөлөө хэрхэн авах вэ?")
+
+
+def test_manager_team_task_query_never_becomes_delegation():
+    text = "Бүх ажилтны даалгавруудыг харуул"
+    assert is_task_query(text)
+    decision = fallback_route(text, is_manager=True)
+    assert decision.intent == AssistantIntent.QUERY_MY_TASKS
+    assert decision.task_scope == TaskScope.TEAM
+
+
+def test_assigned_to_me_question_is_assigned_task_query():
+    text = "Надад оногдсон даалгавар байна уу"
+    assert is_task_query(text)
+    decision = fallback_route(text, is_manager=True)
+    assert decision.intent == AssistantIntent.QUERY_MY_TASKS
+    assert decision.task_scope == TaskScope.ASSIGNED
 
 
 def test_ambiguous_manager_action_preserves_legacy_task_default():

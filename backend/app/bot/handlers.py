@@ -144,7 +144,7 @@ async def cb_answer(cb: CallbackQuery, state: FSMContext):
     await _process_answer(cb.message, state, session_id, q_index, question_ids, value_raw)
 
 
-@router.message(Survey.answering)
+@router.message(Survey.answering, F.text & ~F.text.startswith("/"))
 async def msg_answer(message: Message, state: FSMContext):
     data = await state.get_data()
     session_id = data["session_id"]

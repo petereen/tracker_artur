@@ -458,6 +458,10 @@ async def route_and_respond(
         timezone_name=timezone_name,
         is_manager=is_manager,
     )
+    # Deterministic retrieval wording takes precedence over model output and
+    # the manager-only legacy delegation fallback.
+    if assistant_ai.is_task_query(text):
+        decision = assistant_ai.fallback_route(text, is_manager=is_manager)
     log.info(
         "assistant.route intent=%s confidence=%.2f language=%s channel=%s latency_ms=%d",
         decision.intent.value,

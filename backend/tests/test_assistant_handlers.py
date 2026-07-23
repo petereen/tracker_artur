@@ -212,6 +212,35 @@ def test_worker_directory_normalizes_stored_at_username():
     assert "@@anujin4x" not in text
 
 
+def test_deterministic_task_query_overrides_wrong_llm_delegation(monkeypatch):
+    async def classify(*_args, **_kwargs):
+        return _decision(AssistantIntent.DELEGATE_TASK)
+
+    captured = {}
+
+    def list_for_actor(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    monkeypatch.setattr(assistant_handlers.task_service, "list_for_actor", list_for_actor)
+
+    message = FakeMessage("Бүх ажилтны даалгавруудыг харуул")
+    asyncio.run(
+        assistant_handlers.route_and_respond(
+            message,
+            object(),
+            message.text,
+            employee=EMPLOYEE,
+            is_manager=True,
+            tg_id="77",
+            voice_mode=False,
+        )
+    )
+
+    assert captured["scope"] == "team"
+
+
 def test_matched_company_knowledge_precedes_capability_routing(monkeypatch):
     async def classify(*_args, **_kwargs):
         raise AssertionError("matched knowledge should be answered before classification")

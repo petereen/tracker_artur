@@ -208,6 +208,9 @@ _CAPABILITY_RE = re.compile(
 _QUERY_RE = re.compile(
     r"(my (?:tasks|priorities|workload)|tasks? (?:today|this week)|"
     r"what.*(?:tasks|priorities)|миний (?:даалгавар|ажил)|өнөөдрийн.*(?:ажил|даалгавар)|"
+    r"надад\s+(?:оноосон|өгсөн|хуваарилсан).*?(?:даалгавар|ажил)|"
+    r"(?:бүх\s+)?(?:ажилт(?:ан|ны|нууд(?:ын)?)|ажилч(?:ин|ид|дын)?).*?"
+    r"(?:даалгавар|ажил).*?(?:харуул|үз|жагсаалт|байна)|"
     r"(?:задачи|приоритеты|нагрузка).*(?:сегодня|недел)|мои (?:задачи|приоритеты))",
     re.IGNORECASE,
 )
@@ -238,7 +241,16 @@ _COMPLETED_RE = re.compile(
     r"(completed|done|finished|дууссан|гүйцэтгэсэн|завершенн|выполненн)",
     re.IGNORECASE,
 )
-_TEAM_RE = re.compile(r"(team|багийн|баг|команд[аы]|сотрудник)", re.IGNORECASE)
+_TEAM_RE = re.compile(
+    r"(team|багийн|баг|ажилт(?:ан|ны|нууд(?:ын)?)|ажилч(?:ин|ид|дын)?|команд[аы]|сотрудник)",
+    re.IGNORECASE,
+)
+_ASSIGNED_TO_ME_RE = re.compile(
+    r"(?:my\s+(?:assigned\s+)?tasks?|assigned\s+to\s+me|"
+    r"надад\s+(?:оноосон|өгсөн|хуваарилсан)|"
+    r"мне\s+(?:назначенн|поставленн)|назначенные\s+мне)",
+    re.IGNORECASE,
+)
 _WORKER_DIRECTORY_RE = re.compile(
     r"(?:\b(?:workers?|employees?|staff|people)\b.*\b(?:list|directory|work|active)\b|"
     r"\b(?:list|show|who are)\b.*\b(?:workers?|employees?|staff)\b|"
@@ -269,6 +281,11 @@ def detect_language(text: str) -> AssistantLanguage:
 def is_worker_directory_query(text: str) -> bool:
     """Recognize common directory requests without relying on the LLM."""
     return bool(_WORKER_DIRECTORY_RE.search(text or ""))
+
+
+def is_task_query(text: str) -> bool:
+    """Recognize task retrieval wording that must never create a draft."""
+    return bool(_QUERY_RE.search(text or ""))
 
 
 def is_information_question(text: str) -> bool:
@@ -334,7 +351,13 @@ def fallback_route(text: str, *, is_manager: bool = False) -> RouteDecision:
         intent=intent,
         language=language,
         confidence=confidence,
-        task_scope=TaskScope.TEAM if is_manager and _TEAM_RE.search(text or "") else TaskScope.BOTH,
+        task_scope=(
+            TaskScope.TEAM
+            if is_manager and _TEAM_RE.search(text or "")
+            else TaskScope.ASSIGNED
+            if _ASSIGNED_TO_ME_RE.search(text or "")
+            else TaskScope.BOTH
+        ),
         date_range=date_range,
         start_date=None,
         end_date=None,
@@ -365,6 +388,8 @@ Actor is manager: {is_manager}
 Intent rules:
 - DELEGATE_TASK: create or assign a concrete task, including a task for oneself.
 - QUERY_MY_TASKS: retrieve existing tasks, priorities, workload, or task history.
+  “Бүх ажилтны даалгавруудыг харуул” and “Надад оногдсон даалгавар байна уу”
+  are queries, never task creation.
 - PLAN_WORK: organize time, produce a schedule, or break work into execution steps.
 - DISCOVER_CAPABILITIES: ask what OYUNS can do or how to use OYUNS itself.
    Never use this for a company policy or process question.
