@@ -255,7 +255,8 @@ def _format_worker_directory(
     }[language]
     lines = [heading]
     for worker in workers[:10 if voice_mode else 50]:
-        username = f" · @{worker['telegram_username']}" if worker.get("telegram_username") else ""
+        username_value = str(worker.get("telegram_username") or "").lstrip("@")
+        username = f" · @{username_value}" if username_value else ""
         status = labels[0] if worker.get("is_active") else labels[1]
         role = f" · {labels[2]}" if worker.get("is_manager") else ""
         lines.append(f"• {worker['name']}{username} · {status}{role}")

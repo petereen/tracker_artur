@@ -195,6 +195,23 @@ def test_all_worker_assignment_requests_are_recognized():
     assert _targets_all_workers("Назначь встречу всем сотрудникам")
 
 
+def test_worker_directory_normalizes_stored_at_username():
+    text = assistant_handlers._format_worker_directory(
+        [
+            {
+                "name": "Анужин",
+                "telegram_username": "@anujin4x",
+                "is_active": True,
+                "is_manager": False,
+            }
+        ],
+        AssistantLanguage.MN,
+        voice_mode=False,
+    )
+    assert "@anujin4x" in text
+    assert "@@anujin4x" not in text
+
+
 def test_matched_company_knowledge_precedes_capability_routing(monkeypatch):
     async def classify(*_args, **_kwargs):
         raise AssertionError("matched knowledge should be answered before classification")

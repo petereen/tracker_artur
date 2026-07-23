@@ -83,12 +83,17 @@ def test_manager_company_question_does_not_become_task():
     "text",
     [
         "Show me the worker list",
+        "Компаний ажилтны жагсаалт өг",
         "Ажилтнуудын жагсаалт харуул",
         "Покажи список сотрудников",
     ],
 )
 def test_worker_directory_requests_are_recognized(text):
     assert is_worker_directory_query(text)
+
+
+def test_company_worker_list_is_detected_as_mongolian():
+    assert detect_language("Компаний ажилтнуудын жагсаалт") == AssistantLanguage.MN
 
 
 def test_mongolian_company_question_is_recognized():
