@@ -13,7 +13,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from app.bot.tasks_handlers import begin_task_draft
-from app.services import assistant_ai, knowledge_service, task_service, voice_service
+from app.services import (
+    assistant_ai,
+    employee_directory_service,
+    knowledge_service,
+    task_service,
+    voice_service,
+)
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -74,6 +80,7 @@ def _capabilities(
             "• Show and prioritize your assigned or created tasks.",
             "• Build a daily plan or break complex work into steps.",
             "• Create a confirmed task draft for you or a teammate.",
+            "• Show the worker directory and active status.",
         ]
         if knowledge_on:
             items.append("• Answer questions from admin-managed company knowledge.")
@@ -89,6 +96,7 @@ def _capabilities(
             "• Показывать и расставлять приоритеты ваших задач.",
             "• Составлять план дня и разбивать сложную работу на шаги.",
             "• Готовить подтверждаемый черновик задачи для вас или коллеги.",
+            "• Показывать справочник сотрудников и их активность.",
         ]
         if knowledge_on:
             items.append("• Отвечать по базе знаний, которую ведёт администратор.")
@@ -104,6 +112,7 @@ def _capabilities(
         "• Танд оноосон болон таны үүсгэсэн даалгаврыг эрэмбэлж харуулна.",
         "• Өдрийн төлөвлөгөө гаргаж, төвөгтэй ажлыг алхам болгон задална.",
         "• Өөртөө эсвэл багийн гишүүнд баталгаажуулах ноорог даалгавар үүсгэнэ.",
+        "• Ажилтны жагсаалт болон идэвхтэй эсэхийг харуулна.",
     ]
     if knowledge_on:
         items.append("• Админы оруулсан компанийн мэдлэгээс асуултад хариулна.")
@@ -198,6 +207,39 @@ def _format_task_query(
         )
     if len(tasks) > 30:
         lines.append(f"… +{len(tasks) - 30}")
+    return "\n".join(lines)
+
+
+def _format_worker_directory(
+    workers: list[dict],
+    language: assistant_ai.AssistantLanguage,
+    *,
+    voice_mode: bool,
+) -> str:
+    if not workers:
+        return {
+            assistant_ai.AssistantLanguage.EN: "No workers are registered yet.",
+            assistant_ai.AssistantLanguage.RU: "Зарегистрированных сотрудников пока нет.",
+            assistant_ai.AssistantLanguage.MN: "Бүртгэлтэй ажилтан одоогоор алга.",
+        }[language]
+    heading = {
+        assistant_ai.AssistantLanguage.EN: f"Workers ({len(workers)}):",
+        assistant_ai.AssistantLanguage.RU: f"Сотрудники ({len(workers)}):",
+        assistant_ai.AssistantLanguage.MN: f"Ажилтнууд ({len(workers)}):",
+    }[language]
+    labels = {
+        assistant_ai.AssistantLanguage.EN: ("active", "inactive", "manager"),
+        assistant_ai.AssistantLanguage.RU: ("активен", "неактивен", "руководитель"),
+        assistant_ai.AssistantLanguage.MN: ("идэвхтэй", "идэвхгүй", "удирдлага"),
+    }[language]
+    lines = [heading]
+    for worker in workers[:10 if voice_mode else 50]:
+        username = f" · @{worker['telegram_username']}" if worker.get("telegram_username") else ""
+        status = labels[0] if worker.get("is_active") else labels[1]
+        role = f" · {labels[2]}" if worker.get("is_manager") else ""
+        lines.append(f"• {worker['name']}{username} · {status}{role}")
+    if len(workers) > (10 if voice_mode else 50):
+        lines.append(f"… +{len(workers) - (10 if voice_mode else 50)}")
     return "\n".join(lines)
 
 
@@ -327,6 +369,23 @@ async def route_and_respond(
         await _answer(message, denial)
         return
 
+    # The directory is resolved before intent classification so it continues to
+    # work when the LLM is disabled and is never confused with a task request.
+    if assistant_ai.is_worker_directory_query(text):
+        language = assistant_ai.detect_language(text)
+        workers = employee_directory_service.list_workers()
+        await _answer(
+            message,
+            _format_worker_directory(workers, language, voice_mode=voice_mode),
+        )
+        log.info(
+            "assistant.directory channel=%s worker_count=%d latency_ms=%d",
+            "voice" if voice_mode else "text",
+            len(workers),
+            int((time.monotonic() - started) * 1_000),
+        )
+        return
+
     timezone_name = actor.get("timezone") or "Asia/Ulaanbaatar"
     decision = await assistant_ai.classify_intent(
         text,
@@ -435,6 +494,7 @@ async def route_and_respond(
         language=decision.language,
         tasks=tasks,
         knowledge=knowledge,
+        workers=[],
         voice_mode=voice_mode,
     )
     if reply:

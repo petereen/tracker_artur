@@ -15,6 +15,7 @@ from app.services.assistant_ai import (
     WorkPlan,
     detect_language,
     fallback_route,
+    is_worker_directory_query,
     normalize_work_plan,
 )
 
@@ -72,6 +73,18 @@ def test_manager_team_scope_is_inferred():
 def test_manager_company_question_does_not_become_task():
     decision = fallback_route("What is our annual leave policy?", is_manager=True)
     assert decision.intent == AssistantIntent.GENERAL_PRODUCTIVITY
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Show me the worker list",
+        "Ажилтнуудын жагсаалт харуул",
+        "Покажи список сотрудников",
+    ],
+)
+def test_worker_directory_requests_are_recognized(text):
+    assert is_worker_directory_query(text)
 
 
 def test_ambiguous_manager_action_preserves_legacy_task_default():

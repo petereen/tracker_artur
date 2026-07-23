@@ -149,3 +149,39 @@ def test_task_query_is_scoped_to_current_actor(monkeypatch):
     assert captured["employee_id"] == EMPLOYEE.id
     assert captured["tg_id"] == "77"
     assert captured["scope"] == "both"
+
+
+def test_worker_directory_is_read_only_and_deterministic(monkeypatch):
+    async def classify(*_args, **_kwargs):  # Must not be called for a directory request.
+        raise AssertionError("directory query should not require LLM classification")
+
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    monkeypatch.setattr(
+        assistant_handlers.employee_directory_service,
+        "list_workers",
+        lambda: [
+            {
+                "id": 7,
+                "name": "Alex",
+                "telegram_username": "alex",
+                "is_active": True,
+                "is_manager": False,
+            }
+        ],
+    )
+
+    message = FakeMessage("Show me the worker list")
+    asyncio.run(
+        assistant_handlers.route_and_respond(
+            message,
+            object(),
+            message.text,
+            employee=EMPLOYEE,
+            is_manager=False,
+            tg_id="77",
+            voice_mode=False,
+        )
+    )
+
+    assert "Alex" in message.answers[-1][0]
+    assert "@alex" in message.answers[-1][0]
