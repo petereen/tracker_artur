@@ -1,6 +1,6 @@
 # OYUNS Agent
 
-Корпоративный AI-ассистент для личной продуктивности, постановки и контроля задач, ответов по управляемой базе знаний и ежедневных опросов метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://tracker.adarasoft.com** (Azure Container Apps). Документы: [Политика конфиденциальности](https://tracker.adarasoft.com/privacy) · [Условия использования](https://tracker.adarasoft.com/terms).
+Корпоративный AI-ассистент для личной продуктивности, постановки и контроля задач, ответов по управляемой базе знаний и ежедневных опросов метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://tracker.adarasoft.com** (Dokploy на VPS). Документы: [Политика конфиденциальности](https://tracker.adarasoft.com/privacy) · [Условия использования](https://tracker.adarasoft.com/terms).
 
 ## Стек
 
@@ -10,12 +10,12 @@
 | Auth | JWT (python-jose) + bcrypt; Telegram `initData` (HMAC) для Mini App |
 | Telegram-бот | aiogram 3.x, FSM (опросы + черновики задач), ролевое меню |
 | Планировщик | APScheduler 3.x + SQLAlchemyJobStore (напоминания, дайджесты, эскалация) |
-| AI | Chimege/OpenAI STT + строгие structured outputs для intent routing, планов и ответов, `dateparser` |
+| AI | Chimege/OpenAI STT + native function tools для routing + строгие structured outputs для планов и ответов, `dateparser` |
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS v3 |
 | State | Zustand v5 (persist), TanStack Query v5 |
 | Mini App | Telegram WebApp (`/tg`) поверх того же SPA |
 | Observability | Sentry (api + bot + frontend) |
-| Хостинг | **Azure Container Apps** (web/api/bot) + PG Flexible; локально — Docker Compose |
+| Хостинг | **Dokploy на VPS** (frontend/api/bot/PostgreSQL); локально — Docker Compose |
 
 ## Архитектура
 
@@ -45,7 +45,7 @@ tracker.vitamarine.kz
 │
 └── bot     → Telegram @Sales_tracker56318_bot
               ├── команды, FSM-опросы и черновики задач
-              └── свободный текст/голос → intent router → обработчик
+              └── свободный текст/голос → OpenAI tools → безопасный обработчик
 ```
 
 ## Быстрый старт
@@ -154,18 +154,19 @@ sales-tracker/
 
 ## OYUNS: свободный текст и голос
 
-Текстовые и голосовые сообщения проходят через единый intent router:
+Текстовые и голосовые сообщения проходят через единый OpenAI native tool router.
+Модель выбирает не более одного строгого function tool (`parallel_tool_calls=false`):
 
-- `DELEGATE_TASK` — подтверждаемый черновик задачи; сотрудник ставит себе, руководитель — любому.
-- `QUERY_MY_TASKS` — задачи, назначенные пользователю или созданные им, с фильтрами «сегодня», «эта неделя» и произвольным периодом.
-- `PLAN_WORK` — план дня, time-boxing и разбиение сложной работы на шаги.
-- `DISCOVER_CAPABILITIES` — динамическая справка по доступным функциям.
-- `GENERAL_PRODUCTIVITY` — рабочие черновики, сводки и ответы по задачам и базе знаний компании.
+- `create_task` — извлекает исполнителя, заголовок, приоритет и срок, после чего открывает существующий подтверждаемый черновик. Сам tool никогда не пишет задачу в БД.
+- `get_my_tasks` — читает разрешённый workload текущего пользователя; с `purpose=plan` запускает планирование по этим задачам.
+- `get_company_info` — читает активную базу знаний PostgreSQL или актуальный справочник сотрудников.
+- Прямой текстовый ответ — только справка о возможностях, общая корпоративная помощь или мягкий отказ для запроса вне scope.
 
-Внешний контракт intent router использует пять понятных категорий: `CREATE_TASK`,
-`VIEW_MY_TASKS`, `COMPANY_INFO`, `AGENT_CAPABILITIES` и `UNKNOWN`. Неясные
-запросы не создают задачу: они сохраняются в защищённую очередь проверки без
-привязки к сотруднику. Администратор может просмотреть `GET /assistant-learning/unknown`,
+Внутренние обработчики по-прежнему используют безопасные категории `CREATE_TASK`,
+`VIEW_MY_TASKS`, `COMPANY_INFO`, `AGENT_CAPABILITIES` и `UNKNOWN`. Строгие схемы
+запрещают дополнительные аргументы; scope команды проверяется сервером, а не
+моделью. Неясные запросы не создают задачу: они сохраняются в защищённую очередь
+проверки без привязки к сотруднику. Администратор может просмотреть `GET /assistant-learning/unknown`,
 отметить запись как проверенную или превратить подтверждённый ответ в активную
 статью базы знаний через `POST /assistant-learning/unknown/{id}/promote`.
 

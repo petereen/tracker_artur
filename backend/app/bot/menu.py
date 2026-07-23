@@ -21,6 +21,8 @@ EMPLOYEE_COMMANDS: list[BotCommand] = [
     BotCommand(command="snooze",  description="Даалгаврын хугацааг хойшлуулах"),
     BotCommand(command="myid",    description="Миний Telegram ID"),
     BotCommand(command="help",    description="Командын тусламж"),
+    BotCommand(command="my_stats", description="Миний статистик"),
+    BotCommand(command="leaderboard", description="Багийн чансаа"),
 ]
 
 MANAGER_COMMANDS: list[BotCommand] = [

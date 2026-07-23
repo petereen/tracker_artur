@@ -170,7 +170,8 @@ async def _show_draft(message: Message, draft: dict) -> None:
 
 
 _SELF_RE = re.compile(
-    r"\b(мне|себе|мной|меня|самому|самой|self|надад|өөртөө|намайг|би өөрөө)\b",
+    r"\b(я|мне|себе|мной|меня|самому|самой|i|me|myself|self|"
+    r"надад|өөртөө|намайг|би(?: өөрөө)?)\b",
     re.IGNORECASE,
 )
 _ALL_WORKERS_RE = re.compile(
@@ -188,6 +189,97 @@ def _targets_all_workers(text: str) -> bool:
     return bool(_ALL_WORKERS_RE.search(text or ""))
 
 
+def _resolve_roster_name(text: str, roster: list[dict]) -> int | None:
+    """Resolve an explicitly written full employee name, preferring the longest match."""
+    normalized_text = re.sub(r"\s+", " ", text or "").casefold()
+    matches: list[tuple[int, int]] = []
+    for row in roster:
+        name = re.sub(r"\s+", " ", str(row.get("name") or "")).strip().casefold()
+        if not name:
+            continue
+        if re.search(rf"(?<!\w){re.escape(name)}(?:д|т)?(?!\w)", normalized_text):
+            matches.append((len(name), int(row["id"])))
+    if not matches:
+        return None
+    longest = max(length for length, _employee_id in matches)
+    employee_ids = {employee_id for length, employee_id in matches if length == longest}
+    return employee_ids.pop() if len(employee_ids) == 1 else None
+
+
+def _ambiguous_roster_names(text: str, roster: list[dict]) -> list[str]:
+    """Return duplicate first-name matches so the model cannot pick one arbitrarily."""
+    groups: dict[str, list[str]] = {}
+    for row in roster:
+        display_name = re.sub(r"\s+", " ", str(row.get("name") or "")).strip()
+        if not display_name:
+            continue
+        first_name = display_name.split(" ", 1)[0].casefold()
+        groups.setdefault(first_name, []).append(display_name)
+
+    normalized_text = re.sub(r"\s+", " ", text or "").casefold()
+    for first_name, display_names in groups.items():
+        if len(display_names) < 2:
+            continue
+        # Common Mongolian dative endings cover forms such as "Анужинд".
+        pattern = rf"(?<!\w){re.escape(first_name)}(?:д|т)?(?!\w)"
+        if re.search(pattern, normalized_text):
+            return display_names
+    return []
+
+
+def _structure_from_tool_arguments(
+    arguments: dict | None,
+    *,
+    roster: list[dict],
+    timezone_name: str,
+) -> dict | None:
+    """Convert validated native create_task arguments into the legacy draft shape."""
+    if not arguments:
+        return None
+    title = arguments.get("title")
+    if not isinstance(title, str) or not title.strip():
+        return None
+
+    priority = arguments.get("priority", 2)
+    if priority not in {1, 2, 3}:
+        priority = 2
+
+    deadline_at = None
+    deadline_iso = arguments.get("deadline_iso")
+    if isinstance(deadline_iso, str) and deadline_iso.strip():
+        try:
+            deadline_at = datetime.fromisoformat(deadline_iso.strip().replace("Z", "+00:00"))
+            if deadline_at.tzinfo is None:
+                deadline_at = pytz.timezone(timezone_name).localize(deadline_at)
+        except (ValueError, pytz.UnknownTimeZoneError):
+            deadline_at = None
+
+    assignee_id = None
+    assignee = arguments.get("assignee")
+    if isinstance(assignee, str) and assignee.strip():
+        assignee_value = assignee.strip()
+        if assignee_value.startswith("@"):
+            target = task_service.resolve_employee_by_username(assignee_value[1:])
+            assignee_id = target.id if target else None
+        else:
+            assignee_id = _resolve_roster_name(assignee_value, roster)
+
+    description = arguments.get("description")
+    if not isinstance(description, str) or not description.strip():
+        description = None
+    else:
+        description = description.strip()
+
+    return {
+        "title": title.strip()[:200],
+        "description": description,
+        "assignee_id": assignee_id,
+        "assign_to_all": arguments.get("assign_to_all") is True,
+        "deadline_at": deadline_at,
+        "priority": priority,
+    }
+
+
 async def begin_task_draft(
     message: Message,
     state: FSMContext,
@@ -196,6 +288,7 @@ async def begin_task_draft(
     employee,
     is_manager: bool,
     tg_id,
+    tool_arguments: dict | None = None,
 ):
     # Себя гарантируем как Employee — руководитель тоже может быть исполнителем.
     if employee:
@@ -214,19 +307,42 @@ async def begin_task_draft(
     if self_emp and not any(r["id"] == self_emp["id"] for r in roster):
         roster.append({"id": self_emp["id"], "name": f"{self_emp['name']} (та өөрөө)", "username": self_emp.get("telegram_username")})
 
-    structured = None
-    if task_ai.ai_enabled():
-        structured = await task_ai.structure_task(text, roster=roster, now=_now_tz(tz), tz=tz)
+    now = _now_tz(tz)
+    parsed = parse_task_text(text, now=now, tz=tz)
+    structured = _structure_from_tool_arguments(
+        tool_arguments,
+        roster=roster,
+        timezone_name=tz,
+    )
+    if structured is None and task_ai.ai_enabled():
+        structured = await task_ai.structure_task(text, roster=roster, now=now, tz=tz)
     if structured is None:  # fallback на детерминированный парсер
-        parsed = parse_task_text(text, now=_now_tz(tz), tz=tz)
         a_id = None
         if parsed.assignee_username:
             t = task_service.resolve_employee_by_username(parsed.assignee_username)
             a_id = t.id if t else None
         structured = {"title": parsed.title, "description": None, "assignee_id": a_id,
                       "assign_to_all": False, "deadline_at": parsed.deadline_at, "priority": parsed.priority}
+    elif parsed.deadline_at is not None:
+        # Mongolian relative dates/times are deterministic and timezone-aware;
+        # prefer them over a model-generated ISO value that may assume UTC.
+        structured["deadline_at"] = parsed.deadline_at
 
     assignee_id = structured.get("assignee_id")
+    exact_name_id = _resolve_roster_name(text, roster)
+    if exact_name_id is not None:
+        # An exact stored full name is more reliable than a model selection.
+        assignee_id = exact_name_id
+    elif is_manager:
+        ambiguous_names = _ambiguous_roster_names(text, roster)
+        if ambiguous_names:
+            options = "\n".join(f"• {name}" for name in ambiguous_names)
+            await message.answer(
+                f"🤔 Ижил нэртэй хэд хэдэн ажилтан байна:\n{options}\n"
+                "Аль ажилтныг сонгохоо бүтэн нэрээр бичнэ үү.",
+                parse_mode=None,
+            )
+            return
     assign_to_all = is_manager and (
         bool(structured.get("assign_to_all")) or _targets_all_workers(text)
     )

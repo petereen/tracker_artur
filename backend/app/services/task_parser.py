@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import dateparser
 from dateparser.search import search_dates
@@ -27,6 +28,32 @@ _MONGOLIAN_DAYS = {
     "даваа": "понедельник", "мягмар": "вторник", "лхагва": "среда",
     "пүрэв": "четверг", "баасан": "пятница", "бямба": "суббота", "ням": "воскресенье",
 }
+_MONGOLIAN_RELATIVE_TIME_RE = re.compile(
+    r"\b(өнөөдөр(?:төө)?|маргааш|нөгөөдөр)(?:ын|ийн)?\b.*?"
+    r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*цаг(?:аас|т)?\b",
+    re.IGNORECASE,
+)
+
+
+def _explicit_mongolian_deadline(
+    text_value: str,
+    *,
+    now: datetime,
+    timezone_name: str,
+) -> Optional[datetime]:
+    """Parse relative Mongolian day/time without relying on dateparser heuristics."""
+    match = _MONGOLIAN_RELATIVE_TIME_RE.search(text_value or "")
+    if not match:
+        return None
+    day_word = match.group(1).casefold()
+    days_ahead = 0 if day_word.startswith("өнөөдөр") else 1 if day_word == "маргааш" else 2
+    target_date = (now + timedelta(days=days_ahead)).date()
+    target_time = time(hour=int(match.group(2)), minute=int(match.group(3) or 0))
+    try:
+        zone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        zone = now.tzinfo
+    return datetime.combine(target_date, target_time, tzinfo=zone)
 
 
 def _normalize_mongolian_dates(text: str) -> str:
@@ -56,8 +83,8 @@ def _normalize_mongolian_dates(text: str) -> str:
     normalized = re.sub(r"\b(\d+)\s*цаг(?:ийн)?\s+дараа\b", r"через \1 часов", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\b(\d+)\s*(?:хоног(?:ийн)?|өдөр(?:ийн)?|өдрийн)\s+дараа\b", r"через \1 дней", normalized, flags=re.IGNORECASE)
     # "маргааш 10 цагт" and "баасан гарагт 15 цаг" are common in task text.
-    normalized = re.sub(r"\b(\d{1,2}):(\d{2})\s+цаг(?:т)?\b", r"\1:\2", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\b(\d{1,2})\s+цаг(?:т)?\b", r"\1:00", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\b(\d{1,2}):(\d{2})\s+цаг(?:аас|т)?\b", r"\1:\2", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\b(\d{1,2})\s+цаг(?:аас|т)?\b", r"\1:00", normalized, flags=re.IGNORECASE)
     # Mongolian postpositions often follow a numeric time: "15:00-д".
     normalized = re.sub(r"\b(\d{1,2}:\d{2})(?:-?[дт])(?=\s|$|[,.])", r"\1", normalized, flags=re.IGNORECASE)
     return normalized
@@ -85,7 +112,8 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Asia/Ulaanbaatar") -
 
     ``now`` нь хэрэглэгчийн цагийн бүсэд байгаа timezone-aware утга байна.
     """
-    raw = _normalize_mongolian_dates((text or "").strip())
+    original = (text or "").strip()
+    raw = _normalize_mongolian_dates(original)
 
     # @username гүйцэтгэгч
     assignee_username = None
@@ -96,7 +124,7 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Asia/Ulaanbaatar") -
     priority = _detect_priority(raw)
 
     # Өгүүлбэр доторх огноо, цагийг хайна.
-    deadline_at: Optional[datetime] = None
+    deadline_at = _explicit_mongolian_deadline(original, now=now, timezone_name=tz)
     matched_phrase: Optional[str] = None
     settings = {
         "PREFER_DATES_FROM": "future",
@@ -111,7 +139,9 @@ def parse_task_text(text: str, *, now: datetime, tz: str = "Asia/Ulaanbaatar") -
         found = None
     if found:
         # Ихэвчлэн хугацаа өгүүлбэрийн төгсгөлд байдаг тул сүүлийнхийг авна.
-        matched_phrase, deadline_at = found[-1]
+        matched_phrase, searched_deadline = found[-1]
+        if deadline_at is None:
+            deadline_at = searched_deadline
 
     # Гарчгаас @username болон танигдсан хугацааг авна.
     title = raw

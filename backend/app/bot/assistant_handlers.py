@@ -103,6 +103,20 @@ def _unknown_response(language: assistant_ai.AssistantLanguage) -> str:
     }[language]
 
 
+def _company_info_not_found(language: assistant_ai.AssistantLanguage) -> str:
+    return {
+        assistant_ai.AssistantLanguage.EN: (
+            "I could not find that information in the active company knowledge base."
+        ),
+        assistant_ai.AssistantLanguage.RU: (
+            "Я не нашёл эту информацию в активной базе знаний компании."
+        ),
+        assistant_ai.AssistantLanguage.MN: (
+            "Компанийн идэвхтэй мэдлэгийн сангаас энэ мэдээллийг олсонгүй."
+        ),
+    }[language]
+
+
 def _capabilities(
     language: assistant_ai.AssistantLanguage,
     *,
@@ -406,14 +420,60 @@ async def route_and_respond(
         await _answer(message, denial)
         return
 
-    # The directory is resolved before intent classification so it continues to
-    # work when the LLM is disabled and is never confused with a task request.
-    if assistant_ai.is_worker_directory_query(text):
-        language = assistant_ai.detect_language(text)
-        workers = employee_directory_service.list_workers()
+    timezone_name = actor.get("timezone") or "Asia/Ulaanbaatar"
+    workers = employee_directory_service.list_workers()
+    decision = await assistant_ai.classify_intent(
+        text,
+        now=_now_in_timezone(timezone_name),
+        timezone_name=timezone_name,
+        is_manager=is_manager,
+        workers=workers,
+        voice_mode=voice_mode,
+    )
+    # Deterministic retrieval and scheduled-event wording take precedence over
+    # model output so neither can be stored as UNKNOWN or routed incorrectly.
+    if assistant_ai.is_task_query(text) and decision.intent not in {
+        assistant_ai.AssistantIntent.QUERY_MY_TASKS,
+        assistant_ai.AssistantIntent.PLAN_WORK,
+    }:
+        decision = assistant_ai.fallback_route(text, is_manager=is_manager)
+    elif (
+        assistant_ai.is_scheduled_task(text)
+        and decision.intent != assistant_ai.AssistantIntent.DELEGATE_TASK
+    ):
+        decision = assistant_ai.fallback_route(text, is_manager=is_manager)
+    log.info(
+        "assistant.route intent=%s router_intent=%s tool=%s confidence=%.2f "
+        "language=%s channel=%s latency_ms=%d",
+        decision.intent.value,
+        decision.router_intent.value,
+        decision.selected_tool.value if decision.selected_tool else "direct_or_fallback",
+        decision.confidence,
+        decision.language.value,
+        "voice" if voice_mode else "text",
+        int((time.monotonic() - started) * 1_000),
+    )
+
+    if decision.confidence < 0.55 and decision.clarification:
+        await _answer(message, decision.clarification)
+        return
+
+    company_tool_args = (
+        decision.tool_arguments
+        if decision.selected_tool == assistant_ai.AssistantToolName.GET_COMPANY_INFO
+        else {}
+    )
+    if (
+        assistant_ai.is_worker_directory_query(text)
+        or company_tool_args.get("kind") == "worker_directory"
+    ):
         await _answer(
             message,
-            _format_worker_directory(workers, language, voice_mode=voice_mode),
+            _format_worker_directory(
+                workers,
+                decision.language,
+                voice_mode=voice_mode,
+            ),
         )
         log.info(
             "assistant.directory channel=%s worker_count=%d latency_ms=%d",
@@ -423,72 +483,62 @@ async def route_and_respond(
         )
         return
 
-    # A relevant active article wins over broad capability classification. This
-    # prevents questions such as "Чөлөө хэрхэн авах вэ?" from being answered
-    # with the generic OYUNS feature list.
-    direct_knowledge = knowledge_service.search_knowledge([text], limit=5)
-    if direct_knowledge and assistant_ai.is_information_question(text):
-        language = assistant_ai.detect_language(text)
-        reply = await assistant_ai.generate_general_reply(
-            user_text=text,
-            language=language,
-            tasks=[],
-            knowledge=direct_knowledge,
-            workers=[],
-            voice_mode=voice_mode,
-        )
-        # A direct knowledge answer must identify its source. If the model does
-        # not return a validated source ID, use the deterministic article
-        # excerpt instead of risking a generic or ungrounded response.
-        answer = (
-            _answer_with_knowledge_sources(
-                reply.answer,
-                used_ids=reply.used_knowledge_ids,
-                knowledge=direct_knowledge,
-                language=language,
-                voice_mode=voice_mode,
-            )
-            if reply and reply.used_knowledge_ids
-            else _general_fallback(
-                [],
-                direct_knowledge,
-                language,
-                actor_id=actor["id"],
-                timezone_name=actor.get("timezone") or "Asia/Ulaanbaatar",
-            )
+    if decision.router_intent == assistant_ai.RouterIntent.COMPANY_INFO:
+        knowledge = knowledge_service.search_knowledge(
+            [text, *decision.knowledge_terms],
+            limit=5,
         )
         log.info(
-            "assistant.knowledge_direct article_count=%d channel=%s latency_ms=%d",
-            len(direct_knowledge),
+            "assistant.company_info article_count=%d channel=%s",
+            len(knowledge),
             "voice" if voice_mode else "text",
-            int((time.monotonic() - started) * 1_000),
         )
-        await _answer(message, answer)
+        await _answer(
+            message,
+            (
+                _general_fallback(
+                    [],
+                    knowledge,
+                    decision.language,
+                    actor_id=actor["id"],
+                    timezone_name=timezone_name,
+                )
+                if knowledge
+                else _company_info_not_found(decision.language)
+            ),
+        )
         return
 
-    timezone_name = actor.get("timezone") or "Asia/Ulaanbaatar"
-    decision = await assistant_ai.classify_intent(
-        text,
-        now=_now_in_timezone(timezone_name),
-        timezone_name=timezone_name,
-        is_manager=is_manager,
-    )
-    # Deterministic retrieval wording takes precedence over model output and
-    # the manager-only legacy delegation fallback.
-    if assistant_ai.is_task_query(text):
-        decision = assistant_ai.fallback_route(text, is_manager=is_manager)
-    log.info(
-        "assistant.route intent=%s router_intent=%s confidence=%.2f language=%s channel=%s latency_ms=%d",
-        decision.intent.value,
-        decision.router_intent.value,
-        decision.confidence,
-        decision.language.value,
-        "voice" if voice_mode else "text",
-        int((time.monotonic() - started) * 1_000),
-    )
+    # If a relevant article exists, it is authoritative even if the model
+    # incorrectly attempted a direct answer instead of calling the company tool.
+    if decision.intent == assistant_ai.AssistantIntent.GENERAL_PRODUCTIVITY:
+        direct_knowledge = knowledge_service.search_knowledge([text], limit=5)
+        if direct_knowledge and assistant_ai.is_information_question(text):
+            await _answer(
+                message,
+                _general_fallback(
+                    [],
+                    direct_knowledge,
+                    decision.language,
+                    actor_id=actor["id"],
+                    timezone_name=timezone_name,
+                ),
+            )
+            return
 
-    if decision.confidence < 0.55 and decision.clarification:
-        await _answer(message, decision.clarification)
+    if decision.direct_answer:
+        deterministic = assistant_ai.fallback_route(text, is_manager=is_manager)
+        if deterministic.confidence <= 0.5:
+            unknown_request_service.record_unknown_request(
+                text=text,
+                language=decision.language.value,
+                channel="voice" if voice_mode else "text",
+            )
+            log.info(
+                "assistant.unknown_direct_response_stored channel=%s",
+                "voice" if voice_mode else "text",
+            )
+        await _answer(message, decision.direct_answer)
         return
 
     if (
@@ -512,6 +562,7 @@ async def route_and_respond(
             employee=employee,
             is_manager=is_manager,
             tg_id=tg_id,
+            tool_arguments=decision.tool_arguments,
         )
         return
 

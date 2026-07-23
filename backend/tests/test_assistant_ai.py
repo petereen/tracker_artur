@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+import json
+from datetime import date, datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -10,6 +11,7 @@ from app.services.assistant_ai import (
     AssistantIntent,
     AssistantLanguage,
     AssistantReply,
+    AssistantToolName,
     DateRangeKind,
     IntentClassification,
     PlanBlock,
@@ -17,13 +19,17 @@ from app.services.assistant_ai import (
     RouterIntent,
     TaskScope,
     WorkPlan,
+    classify_intent,
     detect_language,
     generate_general_reply,
     fallback_route,
+    is_scheduled_task,
     is_task_query,
     is_worker_directory_query,
     is_information_question,
+    native_tool_specs,
     normalize_work_plan,
+    parse_native_tool_message,
 )
 
 
@@ -119,6 +125,22 @@ def test_assigned_to_me_question_is_assigned_task_query():
     assert decision.task_scope == TaskScope.ASSIGNED
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Надад даалгавар маргааш 15 цагт хуралтай",
+        "Маргааш би 15 цагаас хуралтай",
+        "Маргааш анужин менежер 15 цагт хуралтай",
+    ],
+)
+def test_mongolian_scheduled_meeting_is_a_task_draft(text):
+    assert detect_language(text) == AssistantLanguage.MN
+    assert is_scheduled_task(text)
+    decision = fallback_route(text, is_manager=True)
+    assert decision.intent == AssistantIntent.DELEGATE_TASK
+    assert decision.router_intent == RouterIntent.CREATE_TASK
+
+
 def test_ambiguous_manager_action_is_unknown_not_task_creation():
     decision = fallback_route("Prepare the weekly sales report", is_manager=True)
     assert decision.intent == AssistantIntent.GENERAL_PRODUCTIVITY
@@ -134,6 +156,109 @@ def test_public_router_contract_accepts_only_requested_fields():
         IntentClassification.model_validate(
             {"intent": "COMPANY_INFO", "confidence": 0.91, "language": "mn"}
         )
+
+
+def _tool_message(name: str, arguments: dict) -> dict:
+    return {
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            }
+        ]
+    }
+
+
+def test_native_tool_schemas_are_strict():
+    for tool in native_tool_specs():
+        function = tool["function"]
+        parameters = function["parameters"]
+        assert function["strict"] is True
+        assert parameters["additionalProperties"] is False
+        assert set(parameters["required"]) == set(parameters["properties"])
+
+
+def test_native_create_task_call_is_validated():
+    selection = parse_native_tool_message(
+        _tool_message(
+            "create_task",
+            {
+                "assignee": "Анужин менежер",
+                "title": "Хуралд оролцох",
+                "description": None,
+                "priority": 2,
+                "deadline_iso": "2026-07-24T15:00:00+08:00",
+                "assign_to_all": False,
+            },
+        )
+    )
+    assert selection is not None
+    assert selection.tool_name == AssistantToolName.CREATE_TASK
+    assert selection.arguments["assignee"] == "Анужин менежер"
+
+
+def test_native_tool_call_rejects_extra_or_invalid_arguments():
+    assert (
+        parse_native_tool_message(
+            _tool_message(
+                "get_my_tasks",
+                {
+                    "timeframe": "tomorrow",
+                    "scope": "assigned",
+                    "include_completed": False,
+                    "purpose": "view",
+                    "time_budget_minutes": None,
+                    "unexpected": True,
+                },
+            )
+        )
+        is None
+    )
+
+
+def test_native_direct_answer_is_preserved():
+    selection = parse_native_tool_message(
+        {"content": "OYUNS can help organize corporate work."}
+    )
+    assert selection is not None
+    assert selection.tool_name is None
+    assert selection.direct_answer.startswith("OYUNS")
+
+
+def test_native_get_my_tasks_maps_to_planning(monkeypatch):
+    async def native(**_kwargs):
+        return parse_native_tool_message(
+            _tool_message(
+                "get_my_tasks",
+                {
+                    "timeframe": "today",
+                    "scope": "assigned",
+                    "include_completed": False,
+                    "purpose": "plan",
+                    "time_budget_minutes": 180,
+                },
+            )
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr("app.services.assistant_ai._call_native_router", native)
+    decision = asyncio.run(
+        classify_intent(
+            "I have three hours. Help me plan my tasks.",
+            now=datetime.now(timezone.utc),
+            timezone_name="Asia/Ulaanbaatar",
+            is_manager=False,
+            workers=[],
+        )
+    )
+    assert decision.intent == AssistantIntent.PLAN_WORK
+    assert decision.selected_tool == AssistantToolName.GET_MY_TASKS
+    assert decision.time_budget_minutes == 180
+    assert decision.date_range == DateRangeKind.TODAY
 
 
 def test_custom_range_requires_both_dates():

@@ -84,6 +84,18 @@ def test_parses_mongolian_time_postposition_and_cleans_title():
     assert p.title == "тайланг илгээ"
 
 
+def test_parses_mongolian_time_from_postposition_as_local_hour():
+    p = parse_task_text(
+        "Маргааш би 15 цагаас хуралтай",
+        now=MONGOLIAN_NOW,
+        tz="Asia/Ulaanbaatar",
+    )
+    assert p.deadline_at is not None
+    assert p.deadline_at.date() == MONGOLIAN_NOW.date().replace(day=2)
+    assert p.deadline_at.hour == 15
+    assert p.deadline_at.utcoffset() == MONGOLIAN_NOW.utcoffset()
+
+
 def test_recognizes_mongolian_low_priority():
     p = parse_task_text("танилцуулгыг завтай үедээ бэлд", now=MONGOLIAN_NOW, tz="Asia/Ulaanbaatar")
     assert p.priority == PRIORITY_LOW
