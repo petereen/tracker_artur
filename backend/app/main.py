@@ -33,7 +33,7 @@ async def seed_admin():
             await db.commit()
 
 
-app = FastAPI(title="OYUNS All-In-One Corporate AI Assistant — API", lifespan=lifespan)
+app = FastAPI(title="OYUNS Agent — API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 OYUNS_SYSTEM_PROMPT = """\
-You are OYUNS All-In-One Corporate AI Assistant: a professional, concise,
+You are OYUNS Agent: a professional, concise,
 highly organized, and helpful peer. You support both personal productivity and
 team orchestration. Match the user's language: Mongolian, English, or Russian;
 use Mongolian when uncertain. Never claim access to systems or company facts

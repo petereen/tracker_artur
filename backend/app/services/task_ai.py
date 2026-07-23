@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 _SYSTEM_PROMPT = (
-    "Та бол OYUNS All-In-One Corporate AI Assistant — мэргэжлийн, товч, "
+    "Та бол OYUNS Agent — мэргэжлийн, товч, "
     "эмх цэгцтэй ажлын туслах. Чөлөөт текстийг даалгавар болгон бүтэцлэнэ. "
     "Монгол, англи эсвэл орос хэлээр ирсэн хүсэлтэд тухайн хэлээр нь гарчиг, "
     "тайлбар болон тодруулах асуулт бич. Өгөгдсөн ажилтны жагсаалтаас гадуур "

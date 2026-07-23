@@ -1,7 +1,7 @@
 // Олон нийтэд нээлттэй эрх зүйн хуудсууд. Нийтлэхийн өмнө хуульчаар хянуулна.
 
 const UPDATED = '2026 оны 5 сарын 31'
-const OPERATOR = '«OYUNS All-In-One Corporate AI Assistant» үйлчилгээний оператор'
+const OPERATOR = '«OYUNS Agent» үйлчилгээний оператор'
 const CONTACT = 'admin@adarasoft.com'
 const DOMAIN = 'tracker.adarasoft.com'
 
@@ -73,7 +73,7 @@ export function PrivacyPage() {
 export function TermsPage() {
   return (
     <LegalShell title="Үйлчилгээний нөхцөл">
-      <p>Telegram бот болон <b>{DOMAIN}</b> дээрх вэб апп-аар ашиглах «OYUNS All-In-One Corporate AI Assistant» үйлчилгээг (цаашид «Үйлчилгээ» гэх) ашигласнаар та энэхүү нөхцөлийг зөвшөөрнө.</p>
+      <p>Telegram бот болон <b>{DOMAIN}</b> дээрх вэб апп-аар ашиглах «OYUNS Agent» үйлчилгээг (цаашид «Үйлчилгээ» гэх) ашигласнаар та энэхүү нөхцөлийг зөвшөөрнө.</p>
 
       <h2>1. Зориулалт</h2>
       <p>Үйлчилгээ нь байгууллага доторх даалгавар үүсгэх, хянах, ажлын үзүүлэлт цуглуулахад зориулагдсан. Байгууллагын ажилтан болон удирдлагад хандах эрх олгоно.</p>

@@ -79,7 +79,7 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
     ms = get_manager_settings()
     onboarding_text = (
         f"👋 Сайн байна уу, {emp.name.split()[0]}!\n\n"
-        f"Би OYUNS All-In-One Corporate AI Assistant байна.\n\n"
+        f"Би OYUNS Agent байна.\n\n"
         f"Даалгавар, өдрийн төлөвлөгөө, компанийн мэдээлэл эсвэл ажлын "
         f"бичвэрийн талаар энгийнээр бичиж, дуу хоолойгоор асууж болно.\n\n"
         f"Мөн би танд өдөр бүр богино асуулга илгээнэ.\n\n"

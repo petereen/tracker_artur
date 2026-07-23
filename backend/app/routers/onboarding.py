@@ -11,7 +11,7 @@ router = APIRouter()
 
 DEFAULT_TEMPLATE = """Сайн байна уу, {нэр}! 👋
 
-Би OYUNS All-In-One Corporate AI Assistant байна.
+Би OYUNS Agent байна.
 
 Өдөр бүр {цаг}-т танд 5 асуулттай богино асуулга илгээнэ. Бөглөхөд ердөө 2–3 минут зарцуулна.
 

@@ -1,4 +1,4 @@
-# CLAUDE.md — OYUNS All-In-One Corporate AI Assistant
+# CLAUDE.md — OYUNS Agent
 
 Инструкции для Claude Code по работе с этим проектом.
 

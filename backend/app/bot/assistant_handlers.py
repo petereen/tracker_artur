@@ -83,7 +83,7 @@ def _capabilities(
             items.append("• Understand voice messages and reply with concise text.")
         if is_manager:
             items.append("• Summarize team workload when you explicitly ask for it.")
-        return "OYUNS All-In-One Corporate AI Assistant\n\n" + "\n".join(items)
+        return "OYUNS Agent\n\n" + "\n".join(items)
     if language == assistant_ai.AssistantLanguage.RU:
         items = [
             "• Показывать и расставлять приоритеты ваших задач.",
@@ -98,7 +98,7 @@ def _capabilities(
             items.append("• Понимать голосовые сообщения и отвечать кратким текстом.")
         if is_manager:
             items.append("• Сводить нагрузку команды по явному запросу руководителя.")
-        return "OYUNS All-In-One Corporate AI Assistant\n\n" + "\n".join(items)
+        return "OYUNS Agent\n\n" + "\n".join(items)
 
     items = [
         "• Танд оноосон болон таны үүсгэсэн даалгаврыг эрэмбэлж харуулна.",
@@ -113,7 +113,7 @@ def _capabilities(
         items.append("• Дуут мессежийг ойлгож, товч текстээр хариулна.")
     if is_manager:
         items.append("• Удирдлагын тодорхой хүсэлтээр багийн ачааллыг нэгтгэнэ.")
-    return "OYUNS All-In-One Corporate AI Assistant\n\n" + "\n".join(items)
+    return "OYUNS Agent\n\n" + "\n".join(items)
 
 
 def _task_relation(
