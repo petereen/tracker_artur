@@ -50,18 +50,13 @@ def _numeric_keyboard(question_text: str) -> InlineKeyboardMarkup:
 
 async def _ask_question(message_or_cb, question, state: FSMContext, session_id: int, q_index: int, questions: list):
     text = f"❓ Асуулт {q_index + 1}/{len(questions)}:\n\n<b>{question.text}</b>"
+    target_message = message_or_cb.message if isinstance(message_or_cb, CallbackQuery) else message_or_cb
 
     if question.answer_type in ("integer", "decimal"):
         kb = _numeric_keyboard(question.text)
-        if hasattr(message_or_cb, "answer"):
-            await message_or_cb.message.answer(text, reply_markup=kb, parse_mode="HTML")
-        else:
-            await message_or_cb.answer(text, reply_markup=kb, parse_mode="HTML")
+        await target_message.answer(text, reply_markup=kb, parse_mode="HTML")
     else:
-        if hasattr(message_or_cb, "answer"):
-            await message_or_cb.message.answer(text, parse_mode="HTML")
-        else:
-            await message_or_cb.answer(text, parse_mode="HTML")
+        await target_message.answer(text, parse_mode="HTML")
 
     await state.update_data(session_id=session_id, q_index=q_index, questions=[q.id for q in questions])
 

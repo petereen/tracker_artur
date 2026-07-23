@@ -101,9 +101,9 @@ def build_employee_evening(emp_id: int, tz: str | None) -> str | None:
         return None
     lines = ["🌆 <b>Өдрийн дүн</b>"]
     if done_today:
-        lines.append(f"\n✅ Өнөөдөр дуусгасан: {done_today}")
+        lines.append(f"\n✅ Өнөөдөр дуусгасан даалгаврын тоо: {done_today}")
     if active:
-        lines.append(f"\n📋 Нээлттэй үлдсэн ({len(active)}):")
+        lines.append(f"\n📋 Үлдсэн даалгавар ({len(active)}):")
         lines += [f"  {_line(t)}" for t in active[:10]]
         if len(active) > 10:
             lines.append(f"  …мөн {len(active) - 10}")

@@ -218,6 +218,116 @@ export function useDeleteKnowledge() {
   })
 }
 
+// --- OYUNS developer learning ---
+export type AssistantContextIntent = 'create_task_draft' | 'get_user_tasks' | 'search_company_knowledge'
+
+export interface UnknownAssistantRequest {
+  id: number
+  text: string
+  language: string
+  channel: string
+  terms: string[]
+  reason: string
+  occurrence_count: number
+  status: 'pending' | 'reviewed' | 'dismissed'
+  created_at: string
+  last_seen_at: string
+}
+
+export interface AssistantContextExample {
+  id: number
+  phrase: string
+  intent: AssistantContextIntent
+  meaning: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface AssistantContextInput {
+  phrase: string
+  intent: AssistantContextIntent
+  meaning: string
+  is_active: boolean
+}
+
+export function useUnknownAssistantRequests() {
+  return useQuery<UnknownAssistantRequest[]>({
+    queryKey: ['assistant-learning', 'unknown'],
+    queryFn: () => api.get('/assistant-learning/unknown').then((r) => r.data),
+  })
+}
+
+export function useAssistantContextExamples() {
+  return useQuery<AssistantContextExample[]>({
+    queryKey: ['assistant-learning', 'contexts'],
+    queryFn: () => api.get('/assistant-learning/contexts').then((r) => r.data),
+  })
+}
+
+export function useUpdateUnknownAssistantRequest() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, status }: { id: number; status: UnknownAssistantRequest['status'] }) =>
+      api.put(`/assistant-learning/unknown/${id}`, { status }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['assistant-learning', 'unknown'] })
+      toast.success('Хүсэлтийн төлөв шинэчлэгдлээ')
+    },
+    onError: () => toast.error('Төлөв шинэчлэхэд алдаа гарлаа'),
+  })
+}
+
+export function usePromoteUnknownAssistantRequest() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...data }: AssistantContextInput & { id: number }) =>
+      api.post(`/assistant-learning/unknown/${id}/promote-context`, data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['assistant-learning'] })
+      toast.success('Контекстийн толь бичигт нэмэгдлээ')
+    },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Контекст нэмэхэд алдаа гарлаа'),
+  })
+}
+
+export function useCreateAssistantContextExample() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: AssistantContextInput) => api.post('/assistant-learning/contexts', data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['assistant-learning', 'contexts'] })
+      toast.success('Контекст нэмэгдлээ')
+    },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Контекст нэмэхэд алдаа гарлаа'),
+  })
+}
+
+export function useUpdateAssistantContextExample() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...data }: AssistantContextInput & { id: number }) =>
+      api.put(`/assistant-learning/contexts/${id}`, data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['assistant-learning', 'contexts'] })
+      toast.success('Контекст хадгалагдлаа')
+    },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Контекст хадгалахад алдаа гарлаа'),
+  })
+}
+
+export function useDeleteAssistantContextExample() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/assistant-learning/contexts/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['assistant-learning', 'contexts'] })
+      toast.success('Контекст устгагдлаа')
+    },
+    onError: () => toast.error('Контекст устгахад алдаа гарлаа'),
+  })
+}
+
 // --- Tasks ---
 export interface TaskOut {
   id: number

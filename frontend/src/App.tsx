@@ -13,6 +13,7 @@ import { TasksPage } from './pages/TasksPage'
 import { TgMiniAppPage } from './pages/TgMiniAppPage'
 import { PrivacyPage, TermsPage } from './pages/LegalPages'
 import { KnowledgePage } from './pages/KnowledgePage'
+import { DeveloperPage } from './pages/DeveloperPage'
 
 // Check if this is the Telegram Mini App route
 const isTgRoute = () => window.location.pathname === '/tg'
@@ -29,6 +30,7 @@ const PAGES: Record<string, JSX.Element> = {
   manager:    <ManagerSettingsPage />,
   onboarding: <OnboardingPage />,
   knowledge:  <KnowledgePage />,
+  developer:  <DeveloperPage />,
 }
 
 export default function App() {
