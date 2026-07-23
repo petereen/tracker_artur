@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import pytest
@@ -8,12 +9,14 @@ from pydantic import ValidationError
 from app.services.assistant_ai import (
     AssistantIntent,
     AssistantLanguage,
+    AssistantReply,
     DateRangeKind,
     PlanBlock,
     RouteDecision,
     TaskScope,
     WorkPlan,
     detect_language,
+    generate_general_reply,
     fallback_route,
     is_worker_directory_query,
     is_information_question,
@@ -162,3 +165,25 @@ def test_route_schema_forbids_unknown_fields():
     }
     with pytest.raises(ValidationError):
         RouteDecision.model_validate(payload)
+
+
+def test_general_reply_rejects_wrong_output_language(monkeypatch):
+    async def structured(*_args, **_kwargs):
+        return AssistantReply(
+            language=AssistantLanguage.RU,
+            answer="Ответ на русском языке.",
+            used_knowledge_ids=[],
+        )
+
+    monkeypatch.setattr("app.services.assistant_ai._call_structured", structured)
+    result = asyncio.run(
+        generate_general_reply(
+            user_text="Чөлөө хэрхэн авах вэ?",
+            language=AssistantLanguage.MN,
+            tasks=[],
+            knowledge=[],
+            workers=[],
+            voice_mode=False,
+        )
+    )
+    assert result is None

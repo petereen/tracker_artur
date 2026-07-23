@@ -91,6 +91,7 @@ class RouteDecision(BaseModel):
 class AssistantReply(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    language: AssistantLanguage
     answer: str = Field(min_length=1, max_length=6_000)
     used_knowledge_ids: list[int] = Field(max_length=5)
 
@@ -271,6 +272,14 @@ def is_worker_directory_query(text: str) -> bool:
 def is_information_question(text: str) -> bool:
     """Identify a question that can be answered by matched company knowledge."""
     return bool(_INFORMATION_QUESTION_RE.search(text or ""))
+
+
+def answer_matches_language(text: str, language: AssistantLanguage) -> bool:
+    """Reject a structured reply that visibly uses a different language."""
+    if not re.search(r"[A-Za-zА-Яа-яЁёӨөҮү]", text or ""):
+        return True
+    detected = detect_language(text)
+    return detected == language
 
 
 def _extract_budget(text: str) -> Optional[int]:
@@ -490,13 +499,16 @@ async def generate_general_reply(
         for worker in workers[:100]
     ]
     prompt = f"""\
-Answer the user in language "{language.value}". Use task and knowledge reference
-data when relevant. When company knowledge directly answers the user's company
-question, ground the answer in that reference data and include every used article
-ID in used_knowledge_ids. If the references do not establish a requested company
-fact, say that the knowledge base does not contain it. For drafting requests,
-produce the requested draft without pretending it was sent. used_knowledge_ids
-must contain only IDs actually used in the answer.
+Answer the user in language "{language.value}". Set language to exactly
+"{language.value}" and write answer in that same language; never substitute
+Russian, English, or Mongolian based on the reference-data language. Use task
+and knowledge reference data when relevant. When company knowledge directly
+answers the user's company question, ground the answer in that reference data
+and include every used article ID in used_knowledge_ids. If the references do
+not establish a requested company fact, say that the knowledge base does not
+contain it. For drafting requests, produce the requested draft without
+pretending it was sent. used_knowledge_ids must contain only IDs actually used
+in the answer.
 {"Use no table and at most six short sentences because this came from voice." if voice_mode else ""}
 
 <user_message>
@@ -519,6 +531,13 @@ must contain only IDs actually used in the answer.
         user=prompt,
     )
     if not result:
+        return None
+    if result.language != language or not answer_matches_language(result.answer, language):
+        log.warning(
+            "assistant.reply_language_mismatch expected=%s returned=%s",
+            language.value,
+            result.language.value,
+        )
         return None
     allowed_ids = {entry["id"] for entry in knowledge}
     result.used_knowledge_ids = list(

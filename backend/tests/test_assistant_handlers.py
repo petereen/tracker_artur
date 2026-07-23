@@ -200,7 +200,11 @@ def test_matched_company_knowledge_precedes_capability_routing(monkeypatch):
         raise AssertionError("matched knowledge should be answered before classification")
 
     async def general_reply(**_kwargs):
-        return AssistantReply(answer="Анужин менежерт өмнөх өдөр мэдэгдэнэ.", used_knowledge_ids=[11])
+        return AssistantReply(
+            language=AssistantLanguage.MN,
+            answer="Анужин менежерт өмнөх өдөр мэдэгдэнэ.",
+            used_knowledge_ids=[11],
+        )
 
     monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
     monkeypatch.setattr(
