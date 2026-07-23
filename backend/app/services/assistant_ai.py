@@ -245,6 +245,12 @@ _WORKER_DIRECTORY_RE = re.compile(
     r"(?:список|кто).*(?:сотрудник(?:и|ов)?|работник(?:и|ов)?))",
     re.IGNORECASE,
 )
+_INFORMATION_QUESTION_RE = re.compile(
+    r"(?:\?|\b(?:how|what|where|when|why|who)\b|"
+    r"(?:хэрхэн|яаж|юу|ямар|хаана|хэзээ|яагаад|хэн)\b|"
+    r"(?:как|что|где|когда|почему|кто)\b)",
+    re.IGNORECASE,
+)
 
 
 def detect_language(text: str) -> AssistantLanguage:
@@ -260,6 +266,11 @@ def detect_language(text: str) -> AssistantLanguage:
 def is_worker_directory_query(text: str) -> bool:
     """Recognize common directory requests without relying on the LLM."""
     return bool(_WORKER_DIRECTORY_RE.search(text or ""))
+
+
+def is_information_question(text: str) -> bool:
+    """Identify a question that can be answered by matched company knowledge."""
+    return bool(_INFORMATION_QUESTION_RE.search(text or ""))
 
 
 def _extract_budget(text: str) -> Optional[int]:
@@ -344,7 +355,8 @@ Intent rules:
 - DELEGATE_TASK: create or assign a concrete task, including a task for oneself.
 - QUERY_MY_TASKS: retrieve existing tasks, priorities, workload, or task history.
 - PLAN_WORK: organize time, produce a schedule, or break work into execution steps.
-- DISCOVER_CAPABILITIES: ask what OYUNS can do or how to use it.
+- DISCOVER_CAPABILITIES: ask what OYUNS can do or how to use OYUNS itself.
+   Never use this for a company policy or process question.
 - GENERAL_PRODUCTIVITY: drafting, status summaries, company questions, or other work help.
 
 task_scope is assigned, created, both, or team. Choose team only for an explicit

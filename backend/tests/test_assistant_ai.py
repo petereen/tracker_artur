@@ -16,6 +16,7 @@ from app.services.assistant_ai import (
     detect_language,
     fallback_route,
     is_worker_directory_query,
+    is_information_question,
     normalize_work_plan,
 )
 
@@ -85,6 +86,10 @@ def test_manager_company_question_does_not_become_task():
 )
 def test_worker_directory_requests_are_recognized(text):
     assert is_worker_directory_query(text)
+
+
+def test_mongolian_company_question_is_recognized():
+    assert is_information_question("Чөлөө хэрхэн авах вэ?")
 
 
 def test_ambiguous_manager_action_preserves_legacy_task_default():

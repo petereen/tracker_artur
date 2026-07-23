@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from app.bot import assistant_handlers
 from app.bot.tasks_handlers import _targets_all_workers
 from app.services.assistant_ai import (
+    AssistantReply,
     AssistantIntent,
     AssistantLanguage,
     DateRangeKind,
@@ -192,3 +193,43 @@ def test_all_worker_assignment_requests_are_recognized():
     assert _targets_all_workers("Assign the company meeting to all workers")
     assert _targets_all_workers("Бүх ажилтанд арга хэмжээний даалгавар өг")
     assert _targets_all_workers("Назначь встречу всем сотрудникам")
+
+
+def test_matched_company_knowledge_precedes_capability_routing(monkeypatch):
+    async def classify(*_args, **_kwargs):
+        raise AssertionError("matched knowledge should be answered before classification")
+
+    async def general_reply(**_kwargs):
+        return AssistantReply(answer="Анужин менежерт өмнөх өдөр мэдэгдэнэ.", used_knowledge_ids=[11])
+
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    monkeypatch.setattr(
+        assistant_handlers.knowledge_service,
+        "search_knowledge",
+        lambda *_args, **_kwargs: [
+            {
+                "id": 11,
+                "title": "Чөлөө авах журам",
+                "category": "Хүний нөөц",
+                "content": "Чөлөө авахын тулд Анужин менежерт өмнөх өдөр мэдэгдэнэ.",
+            }
+        ],
+    )
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "generate_general_reply", general_reply)
+
+    message = FakeMessage("Чөлөө хэрхэн авах вэ?")
+    asyncio.run(
+        assistant_handlers.route_and_respond(
+            message,
+            object(),
+            message.text,
+            employee=EMPLOYEE,
+            is_manager=True,
+            tg_id="77",
+            voice_mode=False,
+        )
+    )
+
+    answer = message.answers[-1][0]
+    assert "Анужин" in answer
+    assert "Чөлөө авах журам" in answer

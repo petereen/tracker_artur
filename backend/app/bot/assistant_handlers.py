@@ -67,6 +67,27 @@ async def _answer(message: Message, text: str) -> None:
         await message.answer(chunk, parse_mode=None)
 
 
+def _answer_with_knowledge_sources(
+    answer: str,
+    *,
+    used_ids: list[int],
+    knowledge: list[dict],
+    language: assistant_ai.AssistantLanguage,
+    voice_mode: bool,
+) -> str:
+    if voice_mode or not used_ids:
+        return answer
+    titles = [entry["title"] for entry in knowledge if entry["id"] in used_ids]
+    if not titles:
+        return answer
+    source_label = {
+        assistant_ai.AssistantLanguage.EN: "Sources",
+        assistant_ai.AssistantLanguage.RU: "Источники",
+        assistant_ai.AssistantLanguage.MN: "Эх сурвалж",
+    }[language]
+    return answer + f"\n\n{source_label}: " + "; ".join(titles)
+
+
 def _capabilities(
     language: assistant_ai.AssistantLanguage,
     *,
@@ -386,6 +407,49 @@ async def route_and_respond(
         )
         return
 
+    # A relevant active article wins over broad capability classification. This
+    # prevents questions such as "Чөлөө хэрхэн авах вэ?" from being answered
+    # with the generic OYUNS feature list.
+    direct_knowledge = knowledge_service.search_knowledge([text], limit=5)
+    if direct_knowledge and assistant_ai.is_information_question(text):
+        language = assistant_ai.detect_language(text)
+        reply = await assistant_ai.generate_general_reply(
+            user_text=text,
+            language=language,
+            tasks=[],
+            knowledge=direct_knowledge,
+            workers=[],
+            voice_mode=voice_mode,
+        )
+        # A direct knowledge answer must identify its source. If the model does
+        # not return a validated source ID, use the deterministic article
+        # excerpt instead of risking a generic or ungrounded response.
+        answer = (
+            _answer_with_knowledge_sources(
+                reply.answer,
+                used_ids=reply.used_knowledge_ids,
+                knowledge=direct_knowledge,
+                language=language,
+                voice_mode=voice_mode,
+            )
+            if reply and reply.used_knowledge_ids
+            else _general_fallback(
+                [],
+                direct_knowledge,
+                language,
+                actor_id=actor["id"],
+                timezone_name=actor.get("timezone") or "Asia/Ulaanbaatar",
+            )
+        )
+        log.info(
+            "assistant.knowledge_direct article_count=%d channel=%s latency_ms=%d",
+            len(direct_knowledge),
+            "voice" if voice_mode else "text",
+            int((time.monotonic() - started) * 1_000),
+        )
+        await _answer(message, answer)
+        return
+
     timezone_name = actor.get("timezone") or "Asia/Ulaanbaatar"
     decision = await assistant_ai.classify_intent(
         text,
@@ -504,20 +568,13 @@ async def route_and_respond(
         voice_mode=voice_mode,
     )
     if reply:
-        answer = reply.answer
-        if reply.used_knowledge_ids and not voice_mode:
-            titles = [
-                entry["title"]
-                for entry in knowledge
-                if entry["id"] in reply.used_knowledge_ids
-            ]
-            if titles:
-                source_label = {
-                    assistant_ai.AssistantLanguage.EN: "Sources",
-                    assistant_ai.AssistantLanguage.RU: "Источники",
-                    assistant_ai.AssistantLanguage.MN: "Эх сурвалж",
-                }[decision.language]
-                answer += f"\n\n{source_label}: " + "; ".join(titles)
+        answer = _answer_with_knowledge_sources(
+            reply.answer,
+            used_ids=reply.used_knowledge_ids,
+            knowledge=knowledge,
+            language=decision.language,
+            voice_mode=voice_mode,
+        )
     else:
         answer = _general_fallback(
             tasks,
