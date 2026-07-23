@@ -156,6 +156,68 @@ export function useUpdateOnboardingTemplate() {
   })
 }
 
+// --- Company Knowledge ---
+export interface KnowledgeEntry {
+  id: number
+  title: string
+  category: string | null
+  content: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface KnowledgeInput {
+  title: string
+  category?: string | null
+  content: string
+  is_active: boolean
+}
+
+export function useKnowledge() {
+  return useQuery<KnowledgeEntry[]>({
+    queryKey: ['knowledge'],
+    queryFn: () => api.get('/knowledge').then((r) => r.data),
+  })
+}
+
+export function useCreateKnowledge() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: KnowledgeInput) => api.post('/knowledge', data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge'] })
+      toast.success('Мэдлэгийн мэдээлэл нэмэгдлээ')
+    },
+    onError: () => toast.error('Мэдээлэл нэмэхэд алдаа гарлаа'),
+  })
+}
+
+export function useUpdateKnowledge() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...data }: KnowledgeInput & { id: number }) =>
+      api.put(`/knowledge/${id}`, data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge'] })
+      toast.success('Мэдээлэл хадгалагдлаа')
+    },
+    onError: () => toast.error('Мэдээлэл хадгалахад алдаа гарлаа'),
+  })
+}
+
+export function useDeleteKnowledge() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/knowledge/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge'] })
+      toast.success('Мэдээлэл устгагдлаа')
+    },
+    onError: () => toast.error('Мэдээлэл устгахад алдаа гарлаа'),
+  })
+}
+
 // --- Tasks ---
 export interface TaskOut {
   id: number

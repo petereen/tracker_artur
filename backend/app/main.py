@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
 from app.models.models import AdminUser, ManagerSettings
-from app.routers import auth, dashboard, employees, journal, manager, onboarding, questions, schedules, tasks
+from app.routers import auth, dashboard, employees, journal, knowledge, manager, onboarding, questions, schedules, tasks
 from sqlalchemy import select
 
 
@@ -33,7 +33,7 @@ async def seed_admin():
             await db.commit()
 
 
-app = FastAPI(title="Даалгавар хянагч — API", lifespan=lifespan)
+app = FastAPI(title="OYUNS All-In-One Corporate AI Assistant — API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,6 +53,7 @@ app.include_router(manager.router, prefix="/manager-settings", tags=["manager"])
 app.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
 app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 app.include_router(tasks.miniapp_router, prefix="/miniapp", tags=["miniapp"])
+app.include_router(knowledge.router, prefix="/knowledge", tags=["knowledge"])
 
 
 @app.get("/health")

@@ -1,10 +1,11 @@
 """Бизнес-логика задач (sync — используется ботом). Источник правды по задачам."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import or_, select
+import pytz
+from sqlalchemy import case, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.db import get_session
@@ -109,6 +110,118 @@ def list_created_by(*, employee_id: Optional[int], tg_id: Optional[str], only_ac
             q = q.where(Task.status.in_(ACTIVE_STATUSES))
         q = q.order_by(Task.deadline_at.asc().nullslast(), Task.priority.asc())
         return [_to_dict(s, t) for t in s.execute(q).scalars()]
+
+
+def local_date_bounds(
+    kind: str,
+    *,
+    tz: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    now: Optional[datetime] = None,
+) -> tuple[Optional[datetime], Optional[datetime], bool]:
+    """Convert an inclusive local-date request into half-open UTC boundaries."""
+    try:
+        zone = pytz.timezone(tz or "Asia/Ulaanbaatar")
+    except Exception:
+        zone = pytz.timezone("Asia/Ulaanbaatar")
+    local_now = now.astimezone(zone) if now else datetime.now(zone)
+
+    include_overdue = kind in {"today", "this_week"}
+    if kind == "today":
+        first = local_now.date()
+        last = first
+    elif kind == "this_week":
+        first = local_now.date() - timedelta(days=local_now.weekday())
+        last = first + timedelta(days=6 - first.weekday())
+    elif kind == "custom" and start_date and end_date:
+        first, last = start_date, end_date
+    else:
+        return None, None, False
+
+    start_local = zone.localize(datetime.combine(first, time.min))
+    end_local = zone.localize(datetime.combine(last + timedelta(days=1), time.min))
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc), include_overdue
+
+
+def list_for_actor(
+    *,
+    employee_id: Optional[int],
+    tg_id: Optional[str],
+    scope: str = "both",
+    include_completed: bool = False,
+    start_at: Optional[datetime] = None,
+    end_at: Optional[datetime] = None,
+    include_overdue_before_start: bool = False,
+) -> list[dict]:
+    """Return one deduplicated, permission-scoped task list for assistant use."""
+    with get_session() as s:
+        q = select(Task)
+        actor_conds = []
+        creator_conds = []
+        if employee_id is not None:
+            creator_conds.append(Task.created_by_id == employee_id)
+        if tg_id is not None:
+            creator_conds.append(Task.created_by_tg == str(tg_id))
+
+        if scope == "team":
+            pass  # Caller must enforce manager authorization.
+        elif scope == "assigned":
+            if employee_id is None:
+                return []
+            actor_conds.append(Task.assignee_id == employee_id)
+        elif scope == "created":
+            actor_conds.extend(creator_conds)
+        else:
+            if employee_id is not None:
+                actor_conds.append(Task.assignee_id == employee_id)
+            actor_conds.extend(creator_conds)
+
+        if scope != "team":
+            if not actor_conds:
+                return []
+            q = q.where(or_(*actor_conds))
+
+        statuses = list(ACTIVE_STATUSES)
+        if include_completed:
+            statuses.append("done")
+        q = q.where(Task.status.in_(statuses))
+
+        if start_at is not None and end_at is not None:
+            in_range = (
+                (Task.deadline_at.isnot(None))
+                & (Task.deadline_at >= start_at)
+                & (Task.deadline_at < end_at)
+            )
+            if include_overdue_before_start:
+                outstanding_overdue = (
+                    (Task.deadline_at.isnot(None))
+                    & (Task.deadline_at < start_at)
+                    & (Task.status.in_(ACTIVE_STATUSES))
+                )
+                q = q.where(or_(outstanding_overdue, in_range))
+            else:
+                q = q.where(in_range)
+
+        now_utc = datetime.now(timezone.utc)
+        q = q.order_by(
+            case(
+                (
+                    (Task.status == "overdue")
+                    | (
+                        Task.deadline_at.isnot(None)
+                        & (Task.deadline_at < now_utc)
+                        & (Task.status.in_(ACTIVE_STATUSES))
+                    ),
+                    0,
+                ),
+                else_=1,
+            ),
+            Task.priority.asc(),
+            Task.deadline_at.asc().nullslast(),
+            Task.id.desc(),
+        )
+        return [_to_dict(s, task) for task in s.execute(q).scalars()]
 
 
 def list_active_with_deadline() -> list[dict]:

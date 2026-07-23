@@ -9,6 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import ErrorEvent
 
+from app.bot.assistant_handlers import router as assistant_router
 from app.bot.handlers import router
 from app.bot.middlewares import EmployeeMiddleware
 from app.bot.scheduler import rebuild_jobs, scheduler
@@ -40,6 +41,7 @@ async def main():
     dp.callback_query.middleware(EmployeeMiddleware())
     dp.include_router(tasks_router)
     dp.include_router(router)
+    dp.include_router(assistant_router)
 
     scheduler.start()
     rebuild_jobs()

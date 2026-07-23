@@ -79,8 +79,10 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
     ms = get_manager_settings()
     onboarding_text = (
         f"👋 Сайн байна уу, {emp.name.split()[0]}!\n\n"
-        f"Би «Даалгавар хянагч» бот байна.\n\n"
-        f"Би танд өдөр бүр богино асуулга илгээнэ.\n\n"
+        f"Би OYUNS All-In-One Corporate AI Assistant байна.\n\n"
+        f"Даалгавар, өдрийн төлөвлөгөө, компанийн мэдээлэл эсвэл ажлын "
+        f"бичвэрийн талаар энгийнээр бичиж, дуу хоолойгоор асууж болно.\n\n"
+        f"Мөн би танд өдөр бүр богино асуулга илгээнэ.\n\n"
         f"📊 /my_stats — таны статистик\n"
         f"📋 /today — чек-ин бөглөх\n"
         f"🏆 /leaderboard — багийн чансаа\n"
@@ -266,7 +268,10 @@ async def cmd_myid(message: Message, employee=None):
 @router.message(Command("help"))
 async def cmd_help(message: Message, is_manager: bool = False):
     tasks_block = (
-        "\n📝 <b>Даалгавар</b>\n"
+        "\n🤖 <b>OYUNS туслах</b>\n"
+        "Энгийн текст эсвэл дуу хоолойгоор даалгавар, төлөвлөгөө, "
+        "компанийн мэдээлэл болон ажлын бичвэр хүсэж болно.\n\n"
+        "📝 <b>Даалгавар</b>\n"
         "/task [@гүйцэтгэгч] юу хийх [хэзээ] — даалгавар үүсгэх\n"
         "/mytasks — миний даалгаврууд\n"
         "/assigned — миний өгсөн даалгаврууд\n"

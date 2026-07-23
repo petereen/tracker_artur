@@ -4,9 +4,11 @@ import { useOnboardingTemplate, useUpdateOnboardingTemplate } from '../api/hooks
 
 const DEFAULT = `Сайн байна уу, {нэр}! 👋
 
-Би компанийн «Даалгавар хянагч» бот байна.
+Би OYUNS All-In-One Corporate AI Assistant байна.
 
 Өдөр бүр {цаг}-т танд 5 асуулттай богино асуулга илгээнэ. Бөглөхөд ердөө 2–3 минут зарцуулна.
+
+Та надаас даалгавар, өдрийн төлөвлөгөө, компанийн мэдээлэл болон ажлын бичвэрийн талаар энгийнээр асууж болно.
 
 Танд боломжтой зүйлс:
 📊 Өөрийн статистикаа харах — /my_stats
@@ -58,7 +60,7 @@ export function OnboardingPage() {
             <div className="flex items-center gap-2.5 mb-4">
               <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-lg">🤖</div>
               <div>
-                <div className="font-semibold text-white text-[13px]">Даалгавар хянагч</div>
+                <div className="font-semibold text-white text-[13px]">OYUNS All-In-One</div>
                 <div className="text-[11px]" style={{ color: '#8899A6' }}>бот</div>
               </div>
             </div>

@@ -1,19 +1,18 @@
 """aiogram handlers задач: /task /mytasks /assigned /done /snooze /dashboard."""
 import logging
 import re
-from html import escape
 from datetime import datetime, timezone
 
 import pytz
 from aiogram import F, Router
-from aiogram.filters import Command, CommandObject, StateFilter
+from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.bot.db import get_all_active_employees, get_manager_settings
 from app.bot.keyboards import task_actions_kb
-from app.services import reminder_service, task_ai, task_service, voice_service
+from app.services import reminder_service, task_ai, task_service
 from app.services.notification_policy import load_policy, next_allowed
 from app.services.task_parser import parse_task_text, parse_when
 
@@ -176,7 +175,15 @@ _SELF_RE = re.compile(
 )
 
 
-async def _ai_intake(message: Message, state: FSMContext, text: str, *, employee, is_manager: bool, tg_id):
+async def begin_task_draft(
+    message: Message,
+    state: FSMContext,
+    text: str,
+    *,
+    employee,
+    is_manager: bool,
+    tg_id,
+):
     # Себя гарантируем как Employee — руководитель тоже может быть исполнителем.
     if employee:
         self_emp = {"id": employee.id, "name": employee.name, "timezone": employee.timezone}
@@ -230,36 +237,6 @@ async def _ai_intake(message: Message, state: FSMContext, text: str, *, employee
     await state.set_state(TaskDraft.confirming)
     await state.update_data(draft=draft)
     await _show_draft(message, draft)
-
-
-@router.message(F.voice)
-async def cmd_voice_task(message: Message, state: FSMContext, employee=None, is_manager: bool = False, tg_id: str | None = None):
-    if not voice_service.transcription_enabled():
-        await message.answer("🎙 Дуу хоолойгоор даалгавар үүсгэх боломж идэвхгүй байна. Текстээр бичнэ үү: <code>/task …</code>", parse_mode="HTML")
-        return
-    await message.answer("🎙 Дуу хоолойг таньж байна…")
-    try:
-        buf = await message.bot.download(message.voice)
-        audio = buf.read()
-    except Exception:  # noqa: BLE001
-        log.exception("Не удалось скачать голосовое")
-        await message.answer("❌ Аудиог авч чадсангүй. Даалгавраа текстээр бичнэ үү: <code>/task …</code>", parse_mode="HTML")
-        return
-    text, error = await voice_service.transcribe(audio)
-    if not text:
-        detail = error or "Дуу хоолойг ойлгосонгүй. Илүү тодорхой, богино бичлэгээр дахин оролдоно уу."
-        await message.answer(f"❌ {escape(detail)} Даалгавраа текстээр бичнэ үү: <code>/task …</code>", parse_mode="HTML")
-        return
-    await message.answer(f"📝 Танигдсан текст: «{text}»")
-    await _ai_intake(message, state, text, employee=employee, is_manager=is_manager, tg_id=tg_id)
-
-
-@router.message(StateFilter(None), F.text & ~F.text.startswith("/"))
-async def msg_ai_text(message: Message, state: FSMContext, employee=None, is_manager: bool = False, tg_id: str | None = None):
-    # Свободный текст в чате как постановка задачи — только для руководителя.
-    if not is_manager:
-        return
-    await _ai_intake(message, state, message.text or "", employee=employee, is_manager=is_manager, tg_id=tg_id)
 
 
 @router.callback_query(F.data == "taskdraft:confirm", TaskDraft.confirming)

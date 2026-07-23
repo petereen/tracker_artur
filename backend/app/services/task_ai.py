@@ -15,10 +15,11 @@ log = logging.getLogger(__name__)
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
 _SYSTEM_PROMPT = (
-    "Та бол даалгавар боловсруулах туслах. "
-    "Чөлөөт текстийг даалгавар болгон бүтэцлэнэ. "
-    "Гарчиг, тайлбар болон тодруулах асуултыг монгол кириллээр бич. "
-    "Зөвхөн Markdown болон тайлбаргүй, хүчинтэй JSON объект хариул."
+    "Та бол OYUNS All-In-One Corporate AI Assistant — мэргэжлийн, товч, "
+    "эмх цэгцтэй ажлын туслах. Чөлөөт текстийг даалгавар болгон бүтэцлэнэ. "
+    "Монгол, англи эсвэл орос хэлээр ирсэн хүсэлтэд тухайн хэлээр нь гарчиг, "
+    "тайлбар болон тодруулах асуулт бич. Өгөгдсөн ажилтны жагсаалтаас гадуур "
+    "гүйцэтгэгч зохиож болохгүй."
 )
 
 _USER_TEMPLATE = """\
@@ -30,7 +31,7 @@ _USER_TEMPLATE = """\
 Даалгаврын текст:
 {text}
 
-Дараах түлхүүртэй JSON объект буцаана уу:
+Дараах бүтэцтэй үр дүн буцаана уу:
 - "title": string (80 тэмдэгтээс уртгүй товч гарчиг)
 - "description": string эсвэл null (дэлгэрэнгүй мэдээлэл байвал)
 - "assignee_id": integer эсвэл null (ЗӨВХӨН жагсаалт дахь ажилтны id; тодорхойгүй бол null)
@@ -39,6 +40,29 @@ _USER_TEMPLATE = """\
 - "needs_clarification": boolean (тодруулга шаардлагатай эсэх)
 - "clarification": string эсвэл null (needs_clarification=true бол асуух асуулт)
 """
+
+_TASK_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "title": {"type": "string"},
+        "description": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "assignee_id": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+        "deadline_iso": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "priority": {"type": "integer", "enum": [1, 2, 3]},
+        "needs_clarification": {"type": "boolean"},
+        "clarification": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+    },
+    "required": [
+        "title",
+        "description",
+        "assignee_id",
+        "deadline_iso",
+        "priority",
+        "needs_clarification",
+        "clarification",
+    ],
+}
 
 
 def ai_enabled() -> bool:
@@ -189,7 +213,14 @@ async def structure_task(
 
     payload = {
         "model": model,
-        "response_format": {"type": "json_object"},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "oyuns_task_draft",
+                "strict": True,
+                "schema": _TASK_RESPONSE_SCHEMA,
+            },
+        },
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_message},

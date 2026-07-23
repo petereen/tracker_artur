@@ -1,6 +1,6 @@
-# Трекер и постановщик задач
+# OYUNS All-In-One Corporate AI Assistant
 
-Корпоративный сервис для всей компании: постановка и контроль задач **и** ежедневные опросы метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://tracker.adarasoft.com** (Azure Container Apps). Документы: [Политика конфиденциальности](https://tracker.adarasoft.com/privacy) · [Условия использования](https://tracker.adarasoft.com/terms).
+Корпоративный AI-ассистент для личной продуктивности, постановки и контроля задач, ответов по управляемой базе знаний и ежедневных опросов метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://tracker.adarasoft.com** (Azure Container Apps). Документы: [Политика конфиденциальности](https://tracker.adarasoft.com/privacy) · [Условия использования](https://tracker.adarasoft.com/terms).
 
 ## Стек
 
@@ -10,7 +10,7 @@
 | Auth | JWT (python-jose) + bcrypt; Telegram `initData` (HMAC) для Mini App |
 | Telegram-бот | aiogram 3.x, FSM (опросы + черновики задач), ролевое меню |
 | Планировщик | APScheduler 3.x + SQLAlchemyJobStore (напоминания, дайджесты, эскалация) |
-| AI | OpenAI Whisper (голос→текст) + gpt-4o-mini (структуризация задач), `dateparser` |
+| AI | Chimege/OpenAI STT + строгие structured outputs для intent routing, планов и ответов, `dateparser` |
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS v3 |
 | State | Zustand v5 (persist), TanStack Query v5 |
 | Mini App | Telegram WebApp (`/tg`) поверх того же SPA |
@@ -30,7 +30,8 @@ tracker.vitamarine.kz
 │             ├── /manager-settings
 │             ├── /dashboard/summary
 │             ├── /answers + /answers/export
-│             └── /onboarding/template
+│             ├── /onboarding/template
+│             └── /knowledge
 │
 ├── /       → React SPA (порт 3010)
 │             ├── Dashboard   — KPI, графики, топ сотрудников
@@ -39,11 +40,12 @@ tracker.vitamarine.kz
 │             ├── Schedule    — расписание опросов
 │             ├── Journal     — история ответов + экспорт CSV/Excel
 │             ├── Manager     — настройки Telegram-интеграции
+│             ├── Knowledge   — управляемая база знаний OYUNS
 │             └── Onboarding  — шаблон приветствия
 │
 └── bot     → Telegram @Sales_tracker56318_bot
-              ├── /start, /today, /my_stats, /leaderboard
-              └── FSM-опрос → inline-кнопки → сводка
+              ├── команды, FSM-опросы и черновики задач
+              └── свободный текст/голос → intent router → обработчик
 ```
 
 ## Быстрый старт
@@ -75,12 +77,14 @@ MINI_APP_URL=https://your-domain/tg
 ADMIN_EMAIL=admin@company.ru
 ADMIN_PASSWORD=your-admin-password
 
-# Optional: enable voice task creation and AI task drafting
+# Optional: enable voice input and AI assistance
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_WHISPER_MODEL=gpt-4o-mini-transcribe
 # Used when OPENAI_TRANSCRIBE_LANGUAGE was previously set to mn/mon.
 OPENAI_MONGOLIAN_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 OPENAI_TASK_MODEL=gpt-4o-mini
+# Optional; falls back to OPENAI_TASK_MODEL.
+OPENAI_ASSISTANT_MODEL=
 # Leave empty for Mongolian: Whisper detects it automatically.
 OPENAI_TRANSCRIBE_LANGUAGE=
 
@@ -129,7 +133,7 @@ sales-tracker/
 │   └── src/
 │       ├── api/          # axios client + React Query hooks
 │       ├── components/   # UI-компоненты (Card, Btn, Input, ...)
-│       ├── pages/        # 7 страниц
+│       ├── pages/        # админ-панель, задачи, база знаний и Mini App
 │       └── store/        # Zustand auth store
 └── docker-compose.yml
 ```
@@ -148,7 +152,24 @@ sales-tracker/
 | `/assigned`, `/dashboard` | руководитель | что я поставил / сводный дашборд |
 | `/summary`, `/week`, `/blockers` | руководитель | сводки по опросам |
 
-**AI-постановка задач:** руководитель пишет задачу **свободным текстом** или **голосовым** прямо в чат → бот распознаёт (Whisper) и формулирует через LLM → показывает **черновик** (заголовок/описание/исполнитель/срок/приоритет) с кнопками **✅ Поставить / ✏️ Изменить / ❌ Отмена**. «Поставь задачу мне» — назначает на себя. Без `OPENAI_API_KEY` — fallback на детерминированный парсер.
+## OYUNS: свободный текст и голос
+
+Текстовые и голосовые сообщения проходят через единый intent router:
+
+- `DELEGATE_TASK` — подтверждаемый черновик задачи; сотрудник ставит себе, руководитель — любому.
+- `QUERY_MY_TASKS` — задачи, назначенные пользователю или созданные им, с фильтрами «сегодня», «эта неделя» и произвольным периодом.
+- `PLAN_WORK` — план дня, time-boxing и разбиение сложной работы на шаги.
+- `DISCOVER_CAPABILITIES` — динамическая справка по доступным функциям.
+- `GENERAL_PRODUCTIVITY` — рабочие черновики, сводки и ответы по задачам и базе знаний компании.
+
+Ответ соответствует языку пользователя (монгольский, английский или русский; fallback — монгольский). Голос распознаётся в текст, а ответ остаётся коротким Telegram-текстом. Без `OPENAI_API_KEY` запросы задач, справка, детерминированная постановка и базовый план остаются доступны.
+
+## База знаний компании
+
+- Администратор управляет короткими статьями (заголовок, категория, содержание, активность) в разделе **«Компанийн мэдлэг»**.
+- Бот получает не более пяти релевантных активных статей и ограничивает их общий объём перед LLM-вызовом.
+- Неактивные статьи не передаются боту. В текстовом ответе показываются названия использованных источников.
+- Внешние документы, URL, векторный поиск и долговременная история диалога не используются.
 
 ## Задачи, уведомления и Mini App
 
@@ -167,3 +188,4 @@ sales-tracker/
 
 - **Админ (JWT):** `GET/POST /api/tasks`, `GET/PATCH /api/tasks/{id}`, `GET/POST /api/tasks/{id}/comments`.
 - **Mini App (`X-Telegram-Init-Data`):** `GET /api/miniapp/me`, `GET /api/miniapp/tasks?scope=&include_done=`, `POST /api/miniapp/tasks`, `PATCH /api/miniapp/tasks/{id}`.
+- **База знаний (admin JWT):** `GET/POST /api/knowledge`, `PUT/DELETE /api/knowledge/{id}`.

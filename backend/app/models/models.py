@@ -135,6 +135,25 @@ class ManagerSettings(Base):
     notifications_enabled = Column(Boolean, default=True)     # глобальный рубильник рутинных пушей
 
 
+class CompanyKnowledge(Base):
+    """Curated company reference material available to the OYUNS assistant."""
+
+    __tablename__ = "company_knowledge"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(Text, nullable=False)
+    category = Column(Text)
+    content = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class Streak(Base):
     __tablename__ = "streaks"
 
