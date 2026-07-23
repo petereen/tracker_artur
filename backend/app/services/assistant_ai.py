@@ -229,6 +229,25 @@ def assistant_model() -> str:
     return os.getenv("OPENAI_ASSISTANT_MODEL", "").strip() or "gpt-4o"
 
 
+def _chat_completion_payload(
+    *,
+    messages: list[dict],
+    temperature: float,
+    **extra: object,
+) -> dict:
+    """Build a Chat Completions request compatible with GPT-4o and GPT-5.
+
+    GPT-5 reasoning models reject non-default sampling parameters on some API
+    snapshots. Omitting temperature lets those models use their supported
+    default, while GPT-4o retains the requested two-pass temperatures.
+    """
+    model = assistant_model()
+    payload = {"model": model, "messages": messages, **extra}
+    if not model.casefold().startswith("gpt-5"):
+        payload["temperature"] = temperature
+    return payload
+
+
 def _response_format(model_type: type[BaseModel], name: str) -> dict:
     return {
         "type": "json_schema",
@@ -429,14 +448,13 @@ This interaction came from: {"voice transcript" if voice_mode else "text"}
         *(chat_history or [])[-12:],
         {"role": "user", "content": text},
     ]
-    payload = {
-        "model": assistant_model(),
-        "messages": messages,
-        "tools": native_tool_specs(),
-        "tool_choice": "auto",
-        "parallel_tool_calls": False,
-        "temperature": 0.2,
-    }
+    payload = _chat_completion_payload(
+        messages=messages,
+        temperature=0.2,
+        tools=native_tool_specs(),
+        tool_choice="auto",
+        parallel_tool_calls=False,
+    )
     try:
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -501,11 +519,7 @@ async def synthesize_tool_result(
             "content": json.dumps(raw_result, ensure_ascii=False, default=_json_default),
         },
     ]
-    payload = {
-        "model": assistant_model(),
-        "messages": messages,
-        "temperature": 0.5,
-    }
+    payload = _chat_completion_payload(messages=messages, temperature=0.5)
     try:
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -551,15 +565,14 @@ async def _call_structured(
     if not api_key:
         return None
 
-    payload = {
-        "model": assistant_model(),
-        "messages": [
+    payload = _chat_completion_payload(
+        messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "response_format": _response_format(model_type, schema_name),
-        "temperature": 0.2,
-    }
+        temperature=0.2,
+        response_format=_response_format(model_type, schema_name),
+    )
     try:
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         async with aiohttp.ClientSession(timeout=timeout) as session:

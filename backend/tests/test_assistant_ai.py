@@ -19,6 +19,7 @@ from app.services.assistant_ai import (
     RouterIntent,
     TaskScope,
     WorkPlan,
+    _chat_completion_payload,
     classify_intent,
     detect_language,
     generate_general_reply,
@@ -185,6 +186,25 @@ def test_native_tool_schemas_are_strict():
         assert function["strict"] is True
         assert parameters["additionalProperties"] is False
         assert set(parameters["required"]) == set(parameters["properties"])
+
+
+def test_gpt5_omits_unsupported_sampling_parameter(monkeypatch):
+    monkeypatch.setenv("OPENAI_ASSISTANT_MODEL", "gpt-5-mini")
+    payload = _chat_completion_payload(
+        messages=[{"role": "user", "content": "hello"}],
+        temperature=0.2,
+    )
+    assert payload["model"] == "gpt-5-mini"
+    assert "temperature" not in payload
+
+
+def test_gpt4o_keeps_requested_temperature(monkeypatch):
+    monkeypatch.setenv("OPENAI_ASSISTANT_MODEL", "gpt-4o")
+    payload = _chat_completion_payload(
+        messages=[{"role": "user", "content": "hello"}],
+        temperature=0.5,
+    )
+    assert payload["temperature"] == 0.5
 
 
 def test_native_create_task_call_is_validated():
