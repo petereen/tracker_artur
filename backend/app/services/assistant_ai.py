@@ -229,6 +229,13 @@ def assistant_model() -> str:
     return os.getenv("OPENAI_ASSISTANT_MODEL", "").strip() or "gpt-4o"
 
 
+def assistant_timeout_seconds() -> int:
+    try:
+        return max(5, min(30, int(os.getenv("OPENAI_ASSISTANT_TIMEOUT_SECONDS", "20"))))
+    except ValueError:
+        return 20
+
+
 def _chat_completion_payload(
     *,
     messages: list[dict],
@@ -454,9 +461,10 @@ This interaction came from: {"voice transcript" if voice_mode else "text"}
         tools=native_tool_specs(),
         tool_choice="auto",
         parallel_tool_calls=False,
+        max_completion_tokens=300,
     )
     try:
-        timeout = aiohttp.ClientTimeout(total=30)
+        timeout = aiohttp.ClientTimeout(total=assistant_timeout_seconds())
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
                 OPENAI_CHAT_URL,
@@ -519,9 +527,13 @@ async def synthesize_tool_result(
             "content": json.dumps(raw_result, ensure_ascii=False, default=_json_default),
         },
     ]
-    payload = _chat_completion_payload(messages=messages, temperature=0.5)
+    payload = _chat_completion_payload(
+        messages=messages,
+        temperature=0.5,
+        max_completion_tokens=500,
+    )
     try:
-        timeout = aiohttp.ClientTimeout(total=30)
+        timeout = aiohttp.ClientTimeout(total=assistant_timeout_seconds())
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
                 OPENAI_CHAT_URL,

@@ -13,6 +13,7 @@ from app.bot.tasks_handlers import (
     _ambiguous_roster_names,
     _resolve_roster_name,
     _targets_all_workers,
+    task_draft_text,
 )
 from app.services.assistant_ai import (
     AssistantIntent,
@@ -36,6 +37,7 @@ class FakeMessage:
         self.voice = object()
         self.bot = FakeBot()
         self.from_user = SimpleNamespace(full_name="Tester", username="tester")
+        self.reply_to_message = None
         self.answers = []
 
     async def answer(self, text, **kwargs):
@@ -165,6 +167,7 @@ def test_delegate_route_enters_existing_draft_without_direct_creation(monkeypatc
         drafted.update({"message": message, "state": state, "text": text, **kwargs})
         return {
             "ok": True,
+            "_presentation": "🤖 <b>Даалгаврын ноорог</b>",
             "draft": {
                 "title": "Review landing page",
                 "assignee": "Alex",
@@ -173,8 +176,7 @@ def test_delegate_route_enters_existing_draft_without_direct_creation(monkeypatc
         }
 
     async def synthesize(**kwargs):
-        drafted["raw_result"] = kwargs["raw_result"]
-        return "Draft ready for Alex. Confirm?"
+        raise AssertionError("A task draft should not need a second model request")
 
     monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
     monkeypatch.setattr(assistant_handlers.assistant_ai, "synthesize_tool_result", synthesize)
@@ -198,9 +200,30 @@ def test_delegate_route_enters_existing_draft_without_direct_creation(monkeypatc
     assert drafted["is_manager"] is True
     assert drafted["tool_arguments"] == tool_arguments
     assert drafted["show_preview"] is False
-    assert drafted["raw_result"]["draft"]["requires_confirmation"] is True
-    assert message.answers[-1][0] == "Draft ready for Alex. Confirm?"
+    assert message.answers[-1][0] == "🤖 <b>Даалгаврын ноорог</b>"
+    assert message.answers[-1][1]["parse_mode"] == "HTML"
     assert message.answers[-1][1]["reply_markup"] is not None
+
+
+def test_task_draft_uses_the_required_mongolian_format():
+    zone = pytz.timezone("Asia/Ulaanbaatar")
+    text = task_draft_text(
+        {
+            "title": "Оюукаад хуралтай тухай мэдээлэл",
+            "description": "Оюукаад маргааш 18 цагаас хуралтай гэж хэлэх.",
+            "assignee_name": "Оюукаа",
+            "priority": 2,
+            "deadline_at": zone.localize(datetime(2026, 7, 24, 18, 0)),
+        }
+    )
+    assert text == (
+        "🤖 <b>Даалгаврын ноорог</b>\n\n"
+        "<b>Оюукаад хуралтай тухай мэдээлэл</b>\n"
+        "📝 Оюукаад маргааш 18 цагаас хуралтай гэж хэлэх.\n"
+        "👤 Гүйцэтгэгч: <b>Оюукаа</b>\n"
+        "🟡 Тэргүүлэх зэрэг: 2\n"
+        "🕒 Хугацаа: <b>24.07 18:00 УБ</b>"
+    )
 
 
 def test_task_query_is_scoped_to_current_actor(monkeypatch):
@@ -317,6 +340,42 @@ def test_previous_turn_is_passed_to_context_first_router(monkeypatch):
     assert histories[1] == [
         {"role": "user", "content": "Tomorrow I have a meeting."},
         {"role": "assistant", "content": "Understood."},
+    ]
+
+
+def test_replied_message_is_added_to_openai_context(monkeypatch):
+    captured = {}
+
+    async def classify(*_args, **kwargs):
+        captured["history"] = kwargs["chat_history"]
+        return _decision(AssistantIntent.GENERAL_PRODUCTIVITY).model_copy(
+            update={"direct_answer": "Understood."}
+        )
+
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    message = FakeMessage("Тэгвэл үүнийг зас.")
+    message.reply_to_message = SimpleNamespace(
+        text="Өмнөх даалгаврын ноорог",
+        caption=None,
+        from_user=SimpleNamespace(is_bot=True),
+    )
+    asyncio.run(
+        assistant_handlers.route_and_respond(
+            message,
+            object(),
+            message.text,
+            employee=EMPLOYEE,
+            is_manager=False,
+            tg_id="77",
+            voice_mode=False,
+        )
+    )
+
+    assert captured["history"] == [
+        {
+            "role": "assistant",
+            "content": "<previous assistant reply>\nӨмнөх даалгаврын ноорог\n</previous assistant reply>",
+        }
     ]
 
 

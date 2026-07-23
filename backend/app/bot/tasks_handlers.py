@@ -2,6 +2,7 @@
 import logging
 import re
 from datetime import datetime, timezone
+from html import escape
 
 import pytz
 from aiogram import F, Router
@@ -157,15 +158,24 @@ def _draft_kb() -> InlineKeyboardMarkup:
 
 
 async def _show_draft(message: Message, draft: dict) -> None:
-    desc = f"\n📝 {draft['description']}" if draft.get("description") else ""
     await message.answer(
+        task_draft_text(draft),
+        parse_mode="HTML",
+        reply_markup=_draft_kb(),
+    )
+
+
+def task_draft_text(draft: dict) -> str:
+    """Render the confirmation draft consistently, without model paraphrasing."""
+    desc = f"\n📝 {escape(str(draft['description']))}" if draft.get("description") else ""
+    title = escape(str(draft.get("title") or "—"))
+    assignee = escape(str(draft.get("assignee_name") or "—"))
+    return (
         f"🤖 <b>Даалгаврын ноорог</b>\n\n"
-        f"<b>{draft['title']}</b>{desc}\n"
-        f"👤 Гүйцэтгэгч: <b>{draft.get('assignee_name') or '—'}</b>\n"
+        f"<b>{title}</b>{desc}\n"
+        f"👤 Гүйцэтгэгч: <b>{assignee}</b>\n"
         f"{_PRIORITY_EMOJI.get(draft.get('priority', 2), '🟡')} Тэргүүлэх зэрэг: {draft.get('priority', 2)}\n"
-        f"🕒 Хугацаа: <b>{_fmt_ub_deadline(draft.get('deadline_at'))}</b>\n\n"
-        f"Даалгаврыг үүсгэх үү?",
-        parse_mode="HTML", reply_markup=_draft_kb(),
+        f"🕒 Хугацаа: <b>{_fmt_ub_deadline(draft.get('deadline_at'))}</b>"
     )
 
 
@@ -343,6 +353,12 @@ async def begin_task_draft(
         # prefer them over a model-generated ISO value that may assume UTC.
         structured["deadline_at"] = parsed.deadline_at
 
+    # The compact native tool schema intentionally keeps only assignment
+    # fields. Preserve the user's own wording as a useful draft note instead
+    # of asking a second model pass to invent it.
+    if tool_arguments and not structured.get("description"):
+        structured["description"] = (text or "").strip()[:2_000] or None
+
     assignee_id = structured.get("assignee_id")
     exact_name_id = _resolve_roster_name(text, roster)
     if exact_name_id is not None:
@@ -412,6 +428,7 @@ async def begin_task_draft(
         due_date = _iso(deadline)
     return {
         "ok": True,
+        "_presentation": task_draft_text(draft),
         "draft": {
             "title": draft["title"],
             "description": draft.get("description"),

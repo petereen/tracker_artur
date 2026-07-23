@@ -13,7 +13,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from app.bot.tasks_handlers import begin_task_draft, task_draft_keyboard
+from app.bot.tasks_handlers import begin_task_draft, task_draft_keyboard, task_draft_text
 from app.services import (
     assistant_ai,
     employee_directory_service,
@@ -37,6 +37,23 @@ def _remember(history_key: str, user_text: str, assistant_text: str) -> None:
     history = _conversation_history[history_key]
     history.append({"role": "user", "content": user_text})
     history.append({"role": "assistant", "content": assistant_text})
+
+
+def _replied_message_context(message: Message) -> dict | None:
+    """Turn Telegram's replied-to message into safe conversational context."""
+    replied = getattr(message, "reply_to_message", None)
+    if not replied:
+        return None
+    content = (getattr(replied, "text", None) or getattr(replied, "caption", None) or "").strip()
+    if not content:
+        return None
+    sender = getattr(replied, "from_user", None)
+    role = "assistant" if bool(getattr(sender, "is_bot", False)) else "user"
+    label = "previous assistant reply" if role == "assistant" else "replied user message"
+    return {
+        "role": role,
+        "content": f"<{label}>\n{content[:4_000]}\n</{label}>",
+    }
 
 
 def _actor(employee, *, message: Message, is_manager: bool, tg_id: str | None) -> dict | None:
@@ -67,8 +84,8 @@ def _now_in_timezone(timezone_name: str) -> datetime:
     return datetime.now(zone)
 
 
-async def _answer(message: Message, text: str, *, reply_markup=None) -> None:
-    """Send plain text in Telegram-sized chunks so model output cannot become HTML."""
+async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=None) -> None:
+    """Send Telegram-sized chunks; model output remains plain text by default."""
     remaining = text.strip()
     while remaining:
         if len(remaining) <= 3_900:
@@ -80,7 +97,7 @@ async def _answer(message: Message, text: str, *, reply_markup=None) -> None:
             chunk, remaining = remaining[:split_at], remaining[split_at:].lstrip()
         await message.answer(
             chunk,
-            parse_mode=None,
+            parse_mode=parse_mode,
             reply_markup=reply_markup if not remaining else None,
         )
 
@@ -159,7 +176,7 @@ async def execute_tool(
     is_manager: bool,
     tg_id: str | None,
     timezone_name: str,
-) -> tuple[dict, object | None]:
+) -> tuple[dict, object | None, str | None]:
     """Execute one validated assistant function and return raw data + UI controls."""
     if tool_name == assistant_ai.AssistantToolName.CREATE_TASK_DRAFT:
         result = await begin_task_draft(
@@ -173,7 +190,8 @@ async def execute_tool(
             show_preview=False,
         )
         keyboard = task_draft_keyboard() if result.get("ok") else None
-        return result, keyboard
+        presentation = result.pop("_presentation", None)
+        return result, keyboard, presentation
 
     if tool_name == assistant_ai.AssistantToolName.GET_USER_TASKS:
         date_range = {
@@ -194,12 +212,12 @@ async def execute_tool(
             end_at=end_at,
             include_overdue_before_start=include_overdue,
         )
-        return _task_raw_data(tasks, timezone_name=timezone_name), None
+        return _task_raw_data(tasks, timezone_name=timezone_name), None, None
 
     if tool_name == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE:
         query = arguments["query"]
         entries = knowledge_service.search_knowledge([query], limit=5)
-        return _knowledge_raw_data(entries, query=query), None
+        return _knowledge_raw_data(entries, query=query), None, None
 
     raise ValueError(f"Unsupported assistant tool: {tool_name}")
 
@@ -264,6 +282,10 @@ async def route_and_respond(
     timezone_name = actor.get("timezone") or "Asia/Ulaanbaatar"
     workers = employee_directory_service.list_workers()
     history_key = _history_key(message, tg_id)
+    reply_context = _replied_message_context(message)
+    chat_history = list(_conversation_history[history_key])
+    if reply_context:
+        chat_history.append(reply_context)
     decision = await assistant_ai.classify_intent(
         text,
         now=_now_in_timezone(timezone_name),
@@ -271,7 +293,7 @@ async def route_and_respond(
         is_manager=is_manager,
         workers=workers,
         voice_mode=voice_mode,
-        chat_history=list(_conversation_history[history_key]),
+        chat_history=chat_history,
     )
     log.info(
         "assistant.route intent=%s router_intent=%s tool=%s confidence=%.2f "
@@ -293,7 +315,7 @@ async def route_and_respond(
     # JSON to the original OpenAI message chain, and let pass two write the
     # only user-facing prose.
     if decision.selected_tool:
-        raw_result, reply_markup = await execute_tool(
+        raw_result, reply_markup, presentation = await execute_tool(
             decision.selected_tool,
             decision.tool_arguments,
             message=message,
@@ -305,14 +327,21 @@ async def route_and_respond(
             tg_id=tg_id,
             timezone_name=timezone_name,
         )
-        answer = await _synthesize(
-            decision,
-            raw_result=raw_result,
-            voice_mode=voice_mode,
-        )
-        if not answer:
-            answer = _generation_unavailable(decision.language)
-        await _answer(message, answer, reply_markup=reply_markup)
+        if presentation:
+            # A task draft has a known, confirmation-oriented layout. Rendering
+            # it locally avoids an unnecessary second model round trip and
+            # prevents translation drift such as “Тасалын төсөл”.
+            answer = presentation
+            await _answer(message, answer, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            answer = await _synthesize(
+                decision,
+                raw_result=raw_result,
+                voice_mode=voice_mode,
+            )
+            if not answer:
+                answer = _generation_unavailable(decision.language)
+            await _answer(message, answer, reply_markup=reply_markup)
         _remember(history_key, text, answer)
         return
 
