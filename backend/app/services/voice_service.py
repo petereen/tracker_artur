@@ -60,7 +60,9 @@ def _merge_wav_segments(segments: list[bytes]) -> bytes:
         frames = [first.readframes(first.getnframes())]
     for segment in segments[1:]:
         with wave.open(BytesIO(segment), "rb") as current:
-            if current.getparams()[:4] != params[:4]:
+            # Frame counts are expected to differ between chunks; compare
+            # only channel count, sample width, and sample rate.
+            if current.getparams()[:3] != params[:3]:
                 raise ValueError("Chimege returned incompatible WAV segments")
             frames.append(current.readframes(current.getnframes()))
     with wave.open(output, "wb") as merged:
