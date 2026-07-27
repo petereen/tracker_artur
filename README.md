@@ -88,9 +88,10 @@ OPENAI_ASSISTANT_MODEL=
 # Leave empty for Mongolian: Whisper detects it automatically.
 OPENAI_TRANSCRIBE_LANGUAGE=
 
-# Preferred provider for Mongolian voice tasks (optional).
-# Obtain the token from console.chimege.com after activating the service.
-CHIMEGE_API_TOKEN=your-chimege-api-token
+# Optional separate Chimege credentials for voice input and spoken answers.
+# Obtain each token from console.chimege.com after activating the service.
+CHIMEGE_API_TOKEN=your-chimege-stt-token
+CHIMEGE_TTS_API_TOKEN=your-chimege-tts-token
 CHIMEGE_PUNCTUATE=true
 ```
 

@@ -24,12 +24,12 @@ def transcription_enabled() -> bool:
 
 def synthesis_enabled() -> bool:
     """Whether outgoing Chimege text-to-speech is configured."""
-    return bool(os.getenv("CHIMEGE_API_TOKEN", "").strip())
+    return bool(os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip())
 
 
 async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
     """Convert text to Mongolian speech through Chimege's synchronous TTS API."""
-    token = os.getenv("CHIMEGE_API_TOKEN", "").strip()
+    token = os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip()
     if not token:
         return None, "Chimege TTS token тохируулагдаагүй байна."
     text = text.strip()
