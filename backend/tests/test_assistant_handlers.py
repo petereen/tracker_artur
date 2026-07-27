@@ -9,6 +9,7 @@ import pytz
 import pytest
 
 from app.bot import assistant_handlers, tasks_handlers
+from app.services import voice_service
 from app.bot.tasks_handlers import (
     _ambiguous_roster_names,
     _resolve_roster_name,
@@ -128,6 +129,10 @@ def test_question_answers_use_voice_but_task_drafts_do_not():
 
     assert assistant_handlers._should_answer_in_voice(question, text="What are my tasks?") is True
     assert assistant_handlers._should_answer_in_voice(task, text="Prepare a report") is False
+
+
+def test_chimege_tts_text_normalizes_uppercase_runs():
+    assert voice_service._prepare_synthesis_text("OYUNS AI: АСУУЛТ байна уу?") == "oyuns ai: асуулт байна уу?"
 
 
 def test_question_answer_falls_back_to_text_when_tts_fails(monkeypatch):

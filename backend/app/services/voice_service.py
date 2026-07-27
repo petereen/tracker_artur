@@ -27,12 +27,17 @@ def synthesis_enabled() -> bool:
     return bool(os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip())
 
 
+def _prepare_synthesis_text(text: str) -> str:
+    """Avoid Chimege's rejection of consecutive uppercase letters."""
+    return " ".join(text.strip().lower().split())
+
+
 async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
     """Convert text to Mongolian speech through Chimege's synchronous TTS API."""
     token = os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip()
     if not token:
         return None, "Chimege TTS token тохируулагдаагүй байна."
-    text = text.strip()
+    text = _prepare_synthesis_text(text)
     if not text:
         return None, "Хоосон хариултыг дуу болгон хөрвүүлэх боломжгүй."
 
