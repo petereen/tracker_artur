@@ -28,6 +28,7 @@ class ManagerSettingsOut(BaseModel):
     alerts_enabled: bool
     gamification_enabled: bool
     soft_mode_weeks: int
+    tts_answers_enabled: bool
 
     model_config = {"from_attributes": True}
 
@@ -50,6 +51,11 @@ class ManagerSettingsOut(BaseModel):
     def _default_soft_mode_weeks(cls, v):
         return 1 if v is None else v
 
+    @field_validator("tts_answers_enabled", mode="before")
+    @classmethod
+    def _default_tts_answers_enabled(cls, v):
+        return True if v is None else v
+
 
 class ManagerSettingsUpdate(BaseModel):
     telegram_id: Optional[str] = None
@@ -60,6 +66,7 @@ class ManagerSettingsUpdate(BaseModel):
     alerts_enabled: Optional[bool] = None
     gamification_enabled: Optional[bool] = None
     soft_mode_weeks: Optional[int] = None
+    tts_answers_enabled: Optional[bool] = None
 
 
 @router.get("", response_model=ManagerSettingsOut)
@@ -80,6 +87,7 @@ async def get_settings(db: AsyncSession = Depends(get_db), _=Depends(get_current
         alerts_enabled=s.alerts_enabled,
         gamification_enabled=s.gamification_enabled,
         soft_mode_weeks=s.soft_mode_weeks,
+        tts_answers_enabled=s.tts_answers_enabled,
     )
 
 
@@ -110,4 +118,5 @@ async def update_settings(data: ManagerSettingsUpdate, db: AsyncSession = Depend
         alerts_enabled=s.alerts_enabled,
         gamification_enabled=s.gamification_enabled,
         soft_mode_weeks=s.soft_mode_weeks,
+        tts_answers_enabled=s.tts_answers_enabled,
     )

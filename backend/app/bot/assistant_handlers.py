@@ -135,7 +135,11 @@ async def _answer_question(
     reply_markup=None,
 ) -> None:
     """Send a question answer as Chimege audio, with a text fallback."""
-    if not _should_answer_in_voice(decision, text=text) or not voice_service.synthesis_enabled():
+    if (
+        not _should_answer_in_voice(decision, text=text)
+        or not voice_service.tts_answers_enabled()
+        or not voice_service.synthesis_enabled()
+    ):
         await _answer(message, text, reply_markup=reply_markup)
         return
     audio, error = await voice_service.synthesize(text)

@@ -81,6 +81,7 @@ def _empty_worker_directory(monkeypatch):
         lambda: [],
     )
     monkeypatch.setattr(assistant_handlers.unknown_request_service, "active_context_examples", lambda: [])
+    monkeypatch.setattr(assistant_handlers.voice_service, "tts_answers_enabled", lambda: True)
 
 
 def _decision(intent: AssistantIntent) -> RouteDecision:
@@ -187,6 +188,30 @@ def test_question_answer_sends_matching_text_and_audio(monkeypatch):
 
     assert message.answers[0][0] == decision.direct_answer
     assert message.audios[0][1]["title"] == "OYUNS хариулт"
+
+
+def test_question_answer_switch_can_disable_audio(monkeypatch):
+    decision = _decision(AssistantIntent.DISCOVER_CAPABILITIES).model_copy(
+        update={"direct_answer": "Текстэн хариулт."}
+    )
+    monkeypatch.setattr(assistant_handlers.voice_service, "tts_answers_enabled", lambda: False)
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
+
+    async def synthesize(_text):
+        raise AssertionError("TTS must not be called while the admin switch is off")
+
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
+    message = FakeMessage("Юу хийж чадах вэ?")
+    asyncio.run(
+        assistant_handlers._answer_question(
+            message,
+            decision.direct_answer,
+            decision=decision,
+        )
+    )
+
+    assert message.answers[0][0] == decision.direct_answer
+    assert message.audios == []
 
 
 def test_voice_transcript_uses_shared_router(monkeypatch):

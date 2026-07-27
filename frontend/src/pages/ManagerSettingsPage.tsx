@@ -25,6 +25,7 @@ export function ManagerSettingsPage() {
     telegram_id: '', telegram_username: '',
     summary_time: '09:00', weekly_summary_time: '17:00', weekly_summary_day: '5',
     alerts_enabled: true, gamification_enabled: true, soft_mode_weeks: 1,
+    tts_answers_enabled: true,
   })
 
   useEffect(() => {
@@ -37,6 +38,7 @@ export function ManagerSettingsPage() {
       alerts_enabled: data.alerts_enabled,
       gamification_enabled: data.gamification_enabled,
       soft_mode_weeks: data.soft_mode_weeks,
+      tts_answers_enabled: data.tts_answers_enabled ?? true,
     })
   }, [data])
 
@@ -71,6 +73,7 @@ export function ManagerSettingsPage() {
   const OPTIONS = [
     { key: 'alerts_enabled',        label: 'Алгасалтын анхааруулга', desc: 'Ажилтан хугацаа дууссаны дараа бөглөөгүй бол удирдлагад мэдэгдэх' },
     { key: 'gamification_enabled',  label: 'Урамшууллын систем', desc: 'Ажилтнуудад чансаа болон бөглөлтийн цувралыг харуулах' },
+    { key: 'tts_answers_enabled',   label: 'Туслахын дуу хариулт', desc: 'Асуултад хариулахдаа текстийн хамт Chimege-ээр үүсгэсэн аудио илгээх' },
   ]
 
   return (

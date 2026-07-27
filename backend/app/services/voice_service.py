@@ -31,6 +31,18 @@ def synthesis_enabled() -> bool:
     return bool(os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip())
 
 
+def tts_answers_enabled() -> bool:
+    """Read the admin-controlled TTS switch from the shared database."""
+    try:
+        from app.bot.db import get_manager_settings
+
+        manager_settings = get_manager_settings()
+        return manager_settings is None or manager_settings.tts_answers_enabled is not False
+    except Exception:  # noqa: BLE001 — do not block text answers on a settings read
+        log.exception("assistant.tts_setting_read_failed")
+        return True
+
+
 def _prepare_synthesis_text(text: str) -> str:
     """Keep only the Cyrillic and punctuation characters accepted by Chimege."""
     normalized = text.strip().lower()

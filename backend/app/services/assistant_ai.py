@@ -226,7 +226,7 @@ def assistant_enabled() -> bool:
 
 
 def assistant_model() -> str:
-    return os.getenv("OPENAI_ASSISTANT_MODEL", "").strip() or "gpt-4o"
+    return os.getenv("OPENAI_ASSISTANT_MODEL", "").strip() or "gpt-5-mini"
 
 
 def assistant_timeout_seconds() -> int:
@@ -248,13 +248,21 @@ def _chat_completion_payload(
     """Build a Chat Completions request compatible with GPT-4o and GPT-5.
 
     GPT-5 reasoning models reject non-default sampling parameters on some API
-    snapshots. Omitting temperature lets those models use their supported
-    default, while GPT-4o retains the requested two-pass temperatures.
+    snapshots and spend completion budget on reasoning before emitting a tool
+    call or final answer. Omit temperature and reserve enough completion budget
+    for reasoning plus the structured result. GPT-4o retains the existing
+    two-pass temperatures and budgets.
     """
     model = assistant_model()
     payload = {"model": model, "messages": messages, **extra}
-    if not model.casefold().startswith("gpt-5"):
+    is_reasoning_model = model.casefold().startswith(("gpt-5", "o1", "o3"))
+    if not is_reasoning_model:
         payload["temperature"] = temperature
+    elif "max_completion_tokens" in payload:
+        payload["max_completion_tokens"] = max(
+            int(payload["max_completion_tokens"]),
+            1_200,
+        )
     return payload
 
 
@@ -596,6 +604,7 @@ async def _call_structured(
         ],
         temperature=0.2,
         response_format=_response_format(model_type, schema_name),
+        max_completion_tokens=1_200,
     )
     try:
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)

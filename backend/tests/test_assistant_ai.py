@@ -214,6 +214,16 @@ def test_gpt5_omits_unsupported_sampling_parameter(monkeypatch):
     assert "temperature" not in payload
 
 
+def test_gpt5_reserves_reasoning_completion_budget(monkeypatch):
+    monkeypatch.setenv("OPENAI_ASSISTANT_MODEL", "gpt-5-mini")
+    payload = _chat_completion_payload(
+        messages=[{"role": "user", "content": "route this"}],
+        temperature=0.2,
+        max_completion_tokens=300,
+    )
+    assert payload["max_completion_tokens"] == 1_200
+
+
 def test_gpt4o_keeps_requested_temperature(monkeypatch):
     monkeypatch.setenv("OPENAI_ASSISTANT_MODEL", "gpt-4o")
     payload = _chat_completion_payload(
