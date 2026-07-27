@@ -95,6 +95,7 @@ async def _enqueue_assignment(db: AsyncSession, task: Task, actor_tg: Optional[s
     nb = next_allowed(datetime.now(timezone.utc), assignee.timezone or "Asia/Ulaanbaatar", policy)
     payload = {
         "title": task.title,
+        "description": task.description,
         "deadline_iso": task.deadline_at.astimezone(timezone.utc).isoformat() if task.deadline_at else None,
     }
     stmt = (

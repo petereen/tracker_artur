@@ -67,6 +67,8 @@ def test_acceptance_routes_capabilities():
         ("Please plan my work", AssistantLanguage.EN),
         ("Мои задачи на сегодня", AssistantLanguage.RU),
         ("Миний өнөөдрийн даалгавар", AssistantLanguage.MN),
+        ("minii daalgavar yu baina", AssistantLanguage.MN),
+        ("margaash hural", AssistantLanguage.MN),
     ],
 )
 def test_language_detection(text, expected):

@@ -207,11 +207,16 @@ def _render_outbox(item: dict):
     p = item.get("payload") or {}
     tid = item["task_id"]
     title = p.get("title", "")
+    description = p.get("description")
     deadline = p.get("deadline_iso")
     dl_h = _fmt_deadline(datetime.fromisoformat(deadline)) if deadline else "Хугацаагүй"
     if item["kind"] == "task_assigned":
         text = (f"📌 Танд #{tid} даалгавар оноолоо:\n«{title}»\nХугацаа: {dl_h}")
-        return text, (task_actions_kb(tid) if tid else None)
+        deadline_dt = datetime.fromisoformat(deadline) if deadline else None
+        return text, (
+            task_actions_kb(tid, title=title, deadline=deadline_dt, description=description)
+            if tid else None
+        )
     if item["kind"] == "task_overdue":
         text = (f"🔴 #{tid} даалгаврын хугацаа хэтэрлээ: {title}\n"
                 f"/done {tid} гэж дуусгах эсвэл /snooze {tid} <цаг> гэж хугацааг хойшлуулна уу.")

@@ -139,7 +139,11 @@ def _enqueue_assignment_bot(task: dict, actor_tg: str | None) -> None:
     nb = next_allowed(datetime.now(timezone.utc), task.get("assignee_tz") or "Asia/Ulaanbaatar", policy)
     task_service.enqueue_notification(
         task_id=task["id"], recipient_tg=task["assignee_tg"], kind="task_assigned",
-        payload={"title": task["title"], "deadline_iso": _iso(task["deadline_at"])},
+        payload={
+            "title": task["title"],
+            "description": task.get("description"),
+            "deadline_iso": _iso(task["deadline_at"]),
+        },
         not_before=nb, dedup_key=f"task_assigned:{task['id']}",
     )
 
