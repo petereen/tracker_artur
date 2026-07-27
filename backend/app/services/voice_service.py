@@ -1,4 +1,4 @@
-"""Транскрипция голосовых (OpenAI Whisper). No-op без ключа — graceful fallback."""
+"""Incoming transcription and optional outgoing Chimege speech."""
 from __future__ import annotations
 
 import logging
@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 
 OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions"
 CHIMEGE_TRANSCRIBE_URL = "https://api.chimege.com/v1.2/transcribe"
+CHIMEGE_SYNTHESIZE_URL = "https://api.chimege.com/v1.2/synthesize"
 
 
 def transcription_enabled() -> bool:
@@ -19,6 +20,49 @@ def transcription_enabled() -> bool:
         os.getenv("CHIMEGE_API_TOKEN", "").strip()
         or os.getenv("OPENAI_API_KEY", "").strip()
     )
+
+
+def synthesis_enabled() -> bool:
+    """Whether outgoing Chimege text-to-speech is configured."""
+    return bool(os.getenv("CHIMEGE_API_TOKEN", "").strip())
+
+
+async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
+    """Convert text to Mongolian speech through Chimege's synchronous TTS API."""
+    token = os.getenv("CHIMEGE_API_TOKEN", "").strip()
+    if not token:
+        return None, "Chimege TTS token тохируулагдаагүй байна."
+    text = text.strip()
+    if not text:
+        return None, "Хоосон хариултыг дуу болгон хөрвүүлэх боломжгүй."
+
+    headers = {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Token": token,
+    }
+    try:
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                CHIMEGE_SYNTHESIZE_URL,
+                headers=headers,
+                data=text.encode("utf-8"),
+            ) as resp:
+                body = await resp.read()
+                if resp.status == 200:
+                    return body or None, None
+                detail = body.decode("utf-8", errors="replace").strip()
+                log.warning("Chimege TTS API %s: %s", resp.status, detail[:300])
+                if resp.status == 403:
+                    return None, "Chimege API token хүчингүй эсвэл идэвхгүй байна."
+                if resp.status == 400:
+                    return None, "Chimege хөрвүүлэх текстийг хүлээж авсангүй."
+                if resp.status == 503:
+                    return None, "Chimege үйлчилгээ ачаалалтай байна. Дахин оролдоно уу."
+                return None, "Chimege дуу үүсгэх үйлчилгээ түр алдаатай байна."
+    except Exception:  # noqa: BLE001 — retain the text answer as a fallback
+        log.exception("Chimege synthesis failed")
+        return None, "Chimege дуу үүсгэх үйлчилгээтэй холбогдож чадсангүй."
 
 
 async def _transcribe_chimege(audio: bytes, token: str) -> tuple[Optional[str], Optional[str]]:

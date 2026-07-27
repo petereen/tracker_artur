@@ -11,7 +11,7 @@ import pytz
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
 
 from app.bot.tasks_handlers import TaskDraft, begin_task_draft, task_draft_keyboard, task_draft_text
 from app.services import (
@@ -103,6 +103,52 @@ async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=
             parse_mode=parse_mode,
             reply_markup=reply_markup if not remaining else None,
         )
+
+
+def _should_answer_in_voice(
+    decision: assistant_ai.RouteDecision,
+    *,
+    text: str,
+) -> bool:
+    """Voice is for questions/answers, never for task creation or editing."""
+    if decision.selected_tool == assistant_ai.AssistantToolName.CREATE_TASK_DRAFT:
+        return False
+    if decision.selected_tool in {
+        assistant_ai.AssistantToolName.GET_USER_TASKS,
+        assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE,
+    }:
+        return True
+    if decision.router_intent in {
+        assistant_ai.RouterIntent.VIEW_MY_TASKS,
+        assistant_ai.RouterIntent.COMPANY_INFO,
+        assistant_ai.RouterIntent.AGENT_CAPABILITIES,
+    }:
+        return True
+    return bool(decision.direct_answer and assistant_ai.is_information_question(text))
+
+
+async def _answer_question(
+    message: Message,
+    text: str,
+    *,
+    decision: assistant_ai.RouteDecision,
+    reply_markup=None,
+) -> None:
+    """Send a question answer as Chimege audio, with a text fallback."""
+    if not _should_answer_in_voice(decision, text=text) or not voice_service.synthesis_enabled():
+        await _answer(message, text, reply_markup=reply_markup)
+        return
+    audio, error = await voice_service.synthesize(text)
+    if audio:
+        await message.answer_audio(
+            BufferedInputFile(audio, filename="oyuns-answer.wav"),
+            reply_markup=reply_markup,
+            title="OYUNS хариулт",
+            performer="OYUNS",
+        )
+        return
+    log.warning("assistant.answer_tts_failed: %s", error)
+    await _answer(message, text, reply_markup=reply_markup)
 
 
 async def _synthesize(
@@ -347,7 +393,12 @@ async def route_and_respond(
             )
             if not answer:
                 answer = _generation_unavailable(decision.language)
-            await _answer(message, answer, reply_markup=reply_markup)
+            await _answer_question(
+                message,
+                answer,
+                decision=decision,
+                reply_markup=reply_markup,
+            )
         _remember(history_key, text, answer)
         return
 
@@ -364,7 +415,7 @@ async def route_and_respond(
                 "assistant.unknown_direct_response_stored channel=%s",
                 "voice" if voice_mode else "text",
             )
-        await _answer(message, decision.direct_answer)
+        await _answer_question(message, decision.direct_answer, decision=decision)
         _remember(history_key, text, decision.direct_answer)
         return
 

@@ -116,6 +116,47 @@ def _react_decision(intent: AssistantIntent, tool: AssistantToolName, arguments:
     )
 
 
+def test_question_answers_use_voice_but_task_drafts_do_not():
+    question = _decision(AssistantIntent.QUERY_MY_TASKS).model_copy(
+        update={"direct_answer": "You have one active task."}
+    )
+    task = _react_decision(
+        AssistantIntent.DELEGATE_TASK,
+        AssistantToolName.CREATE_TASK_DRAFT,
+        {"assignee": "self", "title": "Prepare report", "priority": 2, "due_date": None},
+    )
+
+    assert assistant_handlers._should_answer_in_voice(question, text="What are my tasks?") is True
+    assert assistant_handlers._should_answer_in_voice(task, text="Prepare a report") is False
+
+
+def test_question_answer_falls_back_to_text_when_tts_fails(monkeypatch):
+    decision = _decision(AssistantIntent.DISCOVER_CAPABILITIES).model_copy(
+        update={"direct_answer": "I can help with company questions."}
+    )
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
+
+    async def synthesize(_text):
+        return None, "unavailable"
+
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
+    message = FakeMessage("What can you do?")
+    asyncio.run(
+        assistant_handlers._answer_question(
+            message,
+            decision.direct_answer,
+            decision=decision,
+        )
+    )
+
+    assert message.answers == [
+        (
+            "I can help with company questions.",
+            {"parse_mode": None, "reply_markup": None},
+        )
+    ]
+
+
 def test_voice_transcript_uses_shared_router(monkeypatch):
     captured = {}
 
