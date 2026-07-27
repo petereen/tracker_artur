@@ -132,7 +132,7 @@ def test_question_answers_use_voice_but_task_drafts_do_not():
 
 
 def test_chimege_tts_text_normalizes_uppercase_runs():
-    assert voice_service._prepare_synthesis_text("OYUNS AI: АСУУЛТ байна уу?") == "oyuns ai: асуулт байна уу?"
+    assert voice_service._prepare_synthesis_text("OYUNS AI: АСУУЛТ байна уу? ✅") == ": асуулт байна уу?"
 
 
 def test_question_answer_falls_back_to_text_when_tts_fails(monkeypatch):

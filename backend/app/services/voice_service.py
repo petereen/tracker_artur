@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 
 OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions"
 CHIMEGE_TRANSCRIBE_URL = "https://api.chimege.com/v1.2/transcribe"
+CHIMEGE_NORMALIZE_TEXT_URL = "https://api.chimege.com/v1.2/normalize-text"
 CHIMEGE_SYNTHESIZE_URL = "https://api.chimege.com/v1.2/synthesize"
 
 
@@ -28,8 +29,12 @@ def synthesis_enabled() -> bool:
 
 
 def _prepare_synthesis_text(text: str) -> str:
-    """Avoid Chimege's rejection of consecutive uppercase letters."""
-    return " ".join(text.strip().lower().split())
+    """Keep only the Cyrillic and punctuation characters accepted by Chimege."""
+    normalized = text.strip().lower()
+    # Chimege accepts Cyrillic letters, whitespace, and only these marks:
+    # ?, !, dots, hyphen, apostrophe, quote, colon, and comma.
+    normalized = re.sub(r"[^\u0400-\u04ff\s?!.,:'\"-]", " ", normalized)
+    return " ".join(normalized.split())
 
 
 async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
@@ -37,10 +42,6 @@ async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
     token = os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip()
     if not token:
         return None, "Chimege TTS token тохируулагдаагүй байна."
-    text = _prepare_synthesis_text(text)
-    if not text:
-        return None, "Хоосон хариултыг дуу болгон хөрвүүлэх боломжгүй."
-
     headers = {
         "Content-Type": "text/plain; charset=utf-8",
         "Token": token,
@@ -48,6 +49,25 @@ async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
     try:
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            # Let Chimege expand numbers/abbreviations and remove unsupported
+            # symbols before calling TTS. Keep a local fallback for outages.
+            async with session.post(
+                CHIMEGE_NORMALIZE_TEXT_URL,
+                headers=headers,
+                data=text.encode("utf-8"),
+            ) as normalize_resp:
+                normalized_body = await normalize_resp.read()
+                if normalize_resp.status == 200 and normalized_body.strip():
+                    text = normalized_body.decode("utf-8", errors="replace")
+                else:
+                    log.warning(
+                        "Chimege normalize-text API %s: %s",
+                        normalize_resp.status,
+                        normalized_body.decode("utf-8", errors="replace")[:300],
+                    )
+                text = _prepare_synthesis_text(text)
+            if not text:
+                return None, "Хоосон хариултыг дуу болгон хөрвүүлэх боломжгүй."
             async with session.post(
                 CHIMEGE_SYNTHESIZE_URL,
                 headers=headers,
