@@ -40,8 +40,8 @@ def _prepare_synthesis_text(text: str) -> str:
     return " ".join(normalized.split())
 
 
-def _split_synthesis_text(text: str, width: int = 220) -> list[str]:
-    """Split before normalization so Chimege's 300-char limit is respected."""
+def _split_synthesis_text(text: str, width: int = 290) -> list[str]:
+    """Split normalized text below Chimege's 300-character TTS limit."""
     return textwrap.wrap(
         text.strip(),
         width=width,
@@ -71,14 +71,13 @@ def _merge_wav_segments(segments: list[bytes]) -> bytes:
     return output.getvalue()
 
 
-async def _synthesize_chunk(
+async def _normalize_synthesis_text(
     session: aiohttp.ClientSession,
     raw_text: str,
     *,
     headers: dict[str, str],
-    depth: int = 0,
-) -> tuple[list[bytes], Optional[str]]:
-    """Normalize and synthesize one chunk, splitting again when expansion is large."""
+) -> str:
+    """Use Chimege's normalizer once for the complete answer."""
     async with session.post(
         CHIMEGE_NORMALIZE_TEXT_URL,
         headers=headers,
@@ -94,27 +93,16 @@ async def _synthesize_chunk(
                 normalized_body.decode("utf-8", errors="replace")[:300],
             )
             text = raw_text
-    text = _prepare_synthesis_text(text)
+    return _prepare_synthesis_text(text)
 
-    if len(text) > 300 and depth < 6:
-        pieces = _split_synthesis_text(raw_text, max(40, len(raw_text) // 2))
-        if len(pieces) > 1:
-            result: list[bytes] = []
-            for piece in pieces:
-                audio, error = await _synthesize_chunk(
-                    session,
-                    piece,
-                    headers=headers,
-                    depth=depth + 1,
-                )
-                if error:
-                    return [], error
-                result.extend(audio)
-            return result, None
 
-    if not text:
-        return [], "Хоосон хариултыг дуу болгон хөрвүүлэх боломжгүй."
-
+async def _synthesize_chunk(
+    session: aiohttp.ClientSession,
+    text: str,
+    *,
+    headers: dict[str, str],
+) -> tuple[Optional[bytes], Optional[str]]:
+    """Synthesize one already-normalized chunk within Chimege's 300-char limit."""
     async with session.post(
         CHIMEGE_SYNTHESIZE_URL,
         headers=headers,
@@ -122,31 +110,16 @@ async def _synthesize_chunk(
     ) as resp:
         body = await resp.read()
         if resp.status == 200:
-            return ([body], None) if body else ([], "Chimege хоосон аудио буцаалаа.")
+            return (body, None) if body else (None, "Chimege хоосон аудио буцаалаа.")
         detail = body.decode("utf-8", errors="replace").strip()
         log.warning("Chimege TTS API %s: %s", resp.status, detail[:300])
-        if resp.status == 400 and depth < 6:
-            pieces = _split_synthesis_text(raw_text, max(40, len(raw_text) // 2))
-            if len(pieces) > 1:
-                result: list[bytes] = []
-                for piece in pieces:
-                    audio, error = await _synthesize_chunk(
-                        session,
-                        piece,
-                        headers=headers,
-                        depth=depth + 1,
-                    )
-                    if error:
-                        return [], error
-                    result.extend(audio)
-                return result, None
         if resp.status == 403:
-            return [], "Chimege API token хүчингүй эсвэл идэвхгүй байна."
+            return None, "Chimege API token хүчингүй эсвэл идэвхгүй байна."
         if resp.status == 400:
-            return [], "Chimege хөрвүүлэх текстийг хүлээж авсангүй."
+            return None, "Chimege хөрвүүлэх текстийг хүлээж авсангүй."
         if resp.status == 503:
-            return [], "Chimege үйлчилгээ ачаалалтай байна. Дахин оролдоно уу."
-        return [], "Chimege дуу үүсгэх үйлчилгээ түр алдаатай байна."
+            return None, "Chimege үйлчилгээ ачаалалтай байна. Дахин оролдоно уу."
+        return None, "Chimege дуу үүсгэх үйлчилгээ түр алдаатай байна."
 
 
 async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
@@ -154,21 +127,37 @@ async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
     token = os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip()
     if not token:
         return None, "Chimege TTS token тохируулагдаагүй байна."
-    headers = {
+    normalize_headers = {
         "Content-Type": "text/plain; charset=utf-8",
         "Token": token,
+    }
+    synthesize_headers = {
+        **normalize_headers,
+        "voice-id": "FEMALE1",
+        "speed": "1.25",
+        "sample-rate": "22050",
     }
     try:
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            # Normalize each bounded chunk so number expansion stays within
-            # Chimege's 300-character normalized-text limit.
+            normalized_text = await _normalize_synthesis_text(
+                session,
+                text,
+                headers=normalize_headers,
+            )
+            if not normalized_text:
+                return None, "Хоосон хариултыг дуу болгон хөрвүүлэх боломжгүй."
             segments: list[bytes] = []
-            for chunk in _split_synthesis_text(text):
-                audio, error = await _synthesize_chunk(session, chunk, headers=headers)
+            for chunk in _split_synthesis_text(normalized_text):
+                audio, error = await _synthesize_chunk(
+                    session,
+                    chunk,
+                    headers=synthesize_headers,
+                )
                 if error:
                     return None, error
-                segments.extend(audio)
+                if audio:
+                    segments.append(audio)
             return (_merge_wav_segments(segments), None) if segments else (
                 None,
                 "Хоосон хариултыг дуу болгон хөрвүүлэх боломжгүй.",

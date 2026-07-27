@@ -43,9 +43,13 @@ class FakeMessage:
         self.from_user = SimpleNamespace(full_name="Tester", username="tester")
         self.reply_to_message = None
         self.answers = []
+        self.audios = []
 
     async def answer(self, text, **kwargs):
         self.answers.append((text, kwargs))
+
+    async def answer_audio(self, audio, **kwargs):
+        self.audios.append((audio, kwargs))
 
 
 class FakeState:
@@ -160,6 +164,29 @@ def test_question_answer_falls_back_to_text_when_tts_fails(monkeypatch):
             {"parse_mode": None, "reply_markup": None},
         )
     ]
+
+
+def test_question_answer_sends_matching_text_and_audio(monkeypatch):
+    decision = _decision(AssistantIntent.DISCOVER_CAPABILITIES).model_copy(
+        update={"direct_answer": "Компанийн мэдээлэлд тусална."}
+    )
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
+
+    async def synthesize(_text):
+        return b"wav-data", None
+
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
+    message = FakeMessage("Юу хийж чадах вэ?")
+    asyncio.run(
+        assistant_handlers._answer_question(
+            message,
+            decision.direct_answer,
+            decision=decision,
+        )
+    )
+
+    assert message.answers[0][0] == decision.direct_answer
+    assert message.audios[0][1]["title"] == "OYUNS хариулт"
 
 
 def test_voice_transcript_uses_shared_router(monkeypatch):

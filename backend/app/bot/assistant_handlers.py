@@ -140,9 +140,9 @@ async def _answer_question(
         return
     audio, error = await voice_service.synthesize(text)
     if audio:
+        await _answer(message, text, reply_markup=reply_markup)
         await message.answer_audio(
             BufferedInputFile(audio, filename="oyuns-answer.wav"),
-            reply_markup=reply_markup,
             title="OYUNS хариулт",
             performer="OYUNS",
         )
