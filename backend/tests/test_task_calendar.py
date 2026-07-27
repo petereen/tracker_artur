@@ -10,6 +10,7 @@ def test_google_calendar_task_url_prefills_task_details_and_one_hour_event():
         title="Prepare quarterly report & review",
         description="Bring the latest numbers.",
         deadline=datetime(2026, 7, 27, 2, 30, tzinfo=timezone.utc),
+        timezone_name="Asia/Ulaanbaatar",
     )
     query = parse_qs(urlparse(url).query)
 
@@ -17,7 +18,8 @@ def test_google_calendar_task_url_prefills_task_details_and_one_hour_event():
     assert query["action"] == ["TEMPLATE"]
     assert query["text"] == ["Prepare quarterly report & review"]
     assert query["details"] == ["Task #42\nBring the latest numbers."]
-    assert query["dates"] == ["20260727T023000Z/20260727T033000Z"]
+    assert query["dates"] == ["20260727T103000/20260727T113000"]
+    assert query["ctz"] == ["Asia/Ulaanbaatar"]
 
 
 def test_task_actions_keyboard_contains_google_calendar_button():

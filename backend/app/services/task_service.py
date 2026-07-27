@@ -372,6 +372,9 @@ def fetch_due_outbox(limit: int = 25) -> list[dict]:
             out.append({
                 "id": r.id, "recipient_tg": r.recipient_tg, "kind": r.kind,
                 "payload": r.payload or {}, "task_id": r.task_id,
+                "task_title": task.title if task else None,
+                "task_description": task.description if task else None,
+                "task_deadline_at": task.deadline_at if task else None,
                 "task_status": task.status if task else None,
             })
         return out

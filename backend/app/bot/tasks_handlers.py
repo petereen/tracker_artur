@@ -121,7 +121,10 @@ async def _create_task_from_text(
         f"Тэргүүлэх зэрэг: {_PRIORITY_EMOJI.get(task['priority'], '🟡')}\n"
         f"Хугацаа: <b>{_fmt_deadline(task['deadline_at'])}</b>",
         parse_mode="HTML",
-        reply_markup=task_actions_kb(task["id"]),
+        reply_markup=task_actions_kb(
+            task["id"], title=task["title"], deadline=task["deadline_at"],
+            description=task.get("description"), timezone_name=task.get("assignee_tz"),
+        ),
     )
 
     _enqueue_assignment_bot(task, tg_id)
@@ -142,6 +145,7 @@ def _enqueue_assignment_bot(task: dict, actor_tg: str | None) -> None:
         payload={
             "title": task["title"],
             "description": task.get("description"),
+            "timezone_name": task.get("assignee_tz") or "Asia/Ulaanbaatar",
             "deadline_iso": _iso(task["deadline_at"]),
         },
         not_before=nb, dedup_key=f"task_assigned:{task['id']}",
@@ -608,7 +612,11 @@ async def cb_draft_confirm(cb: CallbackQuery, state: FSMContext, tg_id: str | No
         task = tasks[0]
         await cb.message.answer(
             f"✅ <b>#{task['id']}</b> даалгавар үүслээ: «{task['title']}» → {d.get('assignee_name') or '—'}",
-            parse_mode="HTML", reply_markup=task_actions_kb(task["id"]),
+            parse_mode="HTML",
+            reply_markup=task_actions_kb(
+                task["id"], title=task["title"], deadline=task["deadline_at"],
+                description=task.get("description"), timezone_name=task.get("assignee_tz"),
+            ),
         )
     await cb.answer("Боллоо ✅")
 

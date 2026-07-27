@@ -206,15 +206,19 @@ def _render_outbox(item: dict):
 
     p = item.get("payload") or {}
     tid = item["task_id"]
-    title = p.get("title", "")
-    description = p.get("description")
+    title = p.get("title") or item.get("task_title") or "Task"
+    description = p.get("description") or item.get("task_description")
     deadline = p.get("deadline_iso")
-    dl_h = _fmt_deadline(datetime.fromisoformat(deadline)) if deadline else "Хугацаагүй"
+    deadline_dt = datetime.fromisoformat(deadline) if deadline else item.get("task_deadline_at")
+    timezone_name = p.get("timezone_name") or "Asia/Ulaanbaatar"
+    dl_h = _fmt_deadline(deadline_dt) if deadline_dt else "Хугацаагүй"
     if item["kind"] == "task_assigned":
         text = (f"📌 Танд #{tid} даалгавар оноолоо:\n«{title}»\nХугацаа: {dl_h}")
-        deadline_dt = datetime.fromisoformat(deadline) if deadline else None
         return text, (
-            task_actions_kb(tid, title=title, deadline=deadline_dt, description=description)
+            task_actions_kb(
+                tid, title=title, deadline=deadline_dt, description=description,
+                timezone_name=timezone_name,
+            )
             if tid else None
         )
     if item["kind"] == "task_overdue":
