@@ -169,7 +169,7 @@ def test_question_answer_falls_back_to_text_when_tts_fails(monkeypatch):
 
 def test_question_answer_sends_matching_text_and_audio(monkeypatch):
     decision = _decision(AssistantIntent.DISCOVER_CAPABILITIES).model_copy(
-        update={"direct_answer": "Компанийн мэдээлэлд тусална."}
+        update={"direct_answer": "Компаний мэдээлэлд тусална."}
     )
     monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
 
