@@ -3,13 +3,48 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import re
 from typing import Any
 
 import aiohttp
 
 RATES_API_URL = "https://rates.oyuns.mn/api/agent/rate"
 RATES_TIMEOUT_SECONDS = 10
+log = logging.getLogger(__name__)
+
+_PROVIDER_ALIASES = {
+    "mongolbank": "MongolBank",
+    "bankofmongolia": "MongolBank",
+    "монголбанк": "MongolBank",
+    "tdbm": "TDBM",
+    "mbank": "MBank",
+    "khanbank": "KhanBank",
+    "golomtbank": "GolomtBank",
+    "xacbank": "XacBank",
+    "arigbank": "ArigBank",
+    "statebank": "StateBank",
+    "capitronbank": "CapitronBank",
+    "bogdbank": "BogdBank",
+    "ckbank": "CKBank",
+    "nibank": "NIBank",
+    "transbank": "TransBank",
+    "naimansharga": "NaimanSharga",
+    "sendmn": "SendMN",
+}
+
+
+def _canonical_provider(provider: str) -> str:
+    """Map common user-facing names to case-sensitive rates-service codes."""
+    alias_key = re.sub(r"[\s_'’.-]+", "", provider).casefold()
+    # Mongolian possessive/case suffixes are often attached to the provider
+    # name in natural requests (for example, ``mbank-ны``).
+    for suffix in ("ний", "ийн", "ны", "ын"):
+        if alias_key.endswith(suffix) and alias_key[: -len(suffix)] in _PROVIDER_ALIASES:
+            alias_key = alias_key[: -len(suffix)]
+            break
+    return _PROVIDER_ALIASES.get(alias_key, provider)
 
 
 def _unavailable() -> dict[str, Any]:
@@ -36,6 +71,7 @@ async def get_exchange_rate(
             "error": "invalid_request",
             "user_message": "Provider and currency pair are required, and force_refresh must be a boolean.",
         }
+    provider = _canonical_provider(provider)
 
     api_key = os.getenv("AGENT_RATES_API_KEY", "").strip()
     if not api_key:
@@ -60,6 +96,12 @@ async def get_exchange_rate(
                     "force_refresh": bool(force_refresh),
                 },
             ) as response:
+                log.info(
+                    "exchange_rate.response provider=%s pair=%s status=%d",
+                    provider,
+                    pair,
+                    response.status,
+                )
                 if response.status == 401:
                     return {
                         "ok": False,
@@ -70,12 +112,28 @@ async def get_exchange_rate(
                     return {
                         "ok": False,
                         "error": "unsupported_provider_or_pair",
-                        "user_message": "That provider or currency pair is unsupported.",
+                        "user_message": (
+                            f"The rates service does not support provider {provider} "
+                            f"with currency pair {pair}."
+                        ),
                     }
                 if response.status < 200 or response.status >= 300:
                     return _unavailable()
                 payload = await response.json(content_type=None)
-    except (asyncio.TimeoutError, aiohttp.ClientError, ValueError):
+    except asyncio.TimeoutError:
+        log.warning(
+            "exchange_rate.timeout provider=%s pair=%s",
+            provider,
+            pair,
+        )
+        return _unavailable()
+    except (aiohttp.ClientError, ValueError) as exc:
+        log.warning(
+            "exchange_rate.request_failed provider=%s pair=%s error_type=%s",
+            provider,
+            pair,
+            type(exc).__name__,
+        )
         return _unavailable()
 
     if not isinstance(payload, dict):

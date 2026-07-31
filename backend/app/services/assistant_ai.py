@@ -68,7 +68,14 @@ For get_exchange_rate results, state only the exact returned values and always
 include the provider and fetchedAt timestamp. Preserve cash/non-cash and
 buy/sell labels. If status is stale, clearly say the latest fetch failed and
 that the displayed rate is an older cached rate. Do not present any rate when
-the tool returns an error.
+the tool returns an error. Pass provider as its canonical code without
+possessive suffixes or surrounding words, and pass pair as BASE/QUOTE. For
+example, "What is TDBM's USD/MNT cash sell rate?" in any language must call
+get_exchange_rate with provider "TDBM", pair "USD/MNT", and force_refresh
+false. Requests for Mongol Bank, MongolBank, MONGOLBANK, Монголбанк, or
+Монгол Банк must use the case-sensitive provider code "MongolBank".
+For M Bank, use the case-sensitive provider code "MBank". Strip Mongolian
+grammar suffixes such as "-ны" from provider names before calling the tool.
 """
 
 
@@ -375,11 +382,19 @@ def native_tool_specs() -> list[dict]:
                     "properties": {
                         "provider": {
                             "type": "string",
-                            "description": "Rate provider code, e.g. TDBM.",
+                            "description": (
+                                "Canonical provider code only, e.g. TDBM. Remove grammar "
+                                "such as the possessive suffix from \"TDBM's\". The exact "
+                                "case-sensitive codes for Монгол Банк and М Банк are "
+                                "MongolBank and MBank."
+                            ),
                         },
                         "pair": {
                             "type": "string",
-                            "description": "Currency pair, e.g. USD/MNT.",
+                            "description": (
+                                "Canonical uppercase BASE/QUOTE currency pair, e.g. USD/MNT. "
+                                "Convert wording such as \"USD to MNT\" to USD/MNT."
+                            ),
                         },
                         "force_refresh": {
                             "type": "boolean",

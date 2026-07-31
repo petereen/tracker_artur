@@ -73,6 +73,57 @@ def test_rate_result_preserves_exact_values_and_stale_notice(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer server-only-test-key"
 
 
+def test_mongolbank_alias_uses_case_sensitive_provider_code(monkeypatch):
+    captured = {}
+    payload = {
+        "source": "MongolBank",
+        "pair": "USD/MNT",
+        "values": [{"label": "official", "amount": "3590.58"}],
+        "fetchedAt": "2026-07-31T01:20:00+00:00",
+        "status": "fresh",
+    }
+    monkeypatch.setenv("AGENT_RATES_API_KEY", "server-only-test-key")
+    monkeypatch.setattr(
+        exchange_rate_service.aiohttp,
+        "ClientSession",
+        lambda **_kwargs: _Session(_Response(200, payload), captured),
+    )
+
+    result = asyncio.run(
+        exchange_rate_service.get_exchange_rate(
+            provider="Монгол Банк",
+            pair="USD/MNT",
+        )
+    )
+
+    assert result["provider"] == "MongolBank"
+    assert captured["json"]["provider"] == "MongolBank"
+
+
+def test_mbank_alias_uses_case_sensitive_provider_code(monkeypatch):
+    captured = {}
+    payload = {
+        "source": "MBank",
+        "pair": "USD/MNT",
+        "values": [{"label": "cash sell", "amount": "3611"}],
+        "fetchedAt": "2026-07-31T01:20:00+00:00",
+        "status": "fresh",
+    }
+    monkeypatch.setenv("AGENT_RATES_API_KEY", "server-only-test-key")
+    monkeypatch.setattr(
+        exchange_rate_service.aiohttp,
+        "ClientSession",
+        lambda **_kwargs: _Session(_Response(200, payload), captured),
+    )
+
+    result = asyncio.run(
+        exchange_rate_service.get_exchange_rate(provider="mbank-ны", pair="USD/MNT")
+    )
+
+    assert result["provider"] == "MBank"
+    assert captured["json"]["provider"] == "MBank"
+
+
 def test_rate_401_does_not_expose_api_key(monkeypatch):
     captured = {}
     monkeypatch.setenv("AGENT_RATES_API_KEY", "not-for-output")
@@ -87,6 +138,25 @@ def test_rate_401_does_not_expose_api_key(monkeypatch):
     )
 
     assert result["error"] == "authentication_configuration_error"
+    assert "not-for-output" not in str(result)
+
+
+def test_rate_404_identifies_attempted_provider_and_pair(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("AGENT_RATES_API_KEY", "not-for-output")
+    monkeypatch.setattr(
+        exchange_rate_service.aiohttp,
+        "ClientSession",
+        lambda **_kwargs: _Session(_Response(404, {}), captured),
+    )
+
+    result = asyncio.run(
+        exchange_rate_service.get_exchange_rate(provider="TDBM", pair="USD/MNT")
+    )
+
+    assert result["error"] == "unsupported_provider_or_pair"
+    assert "TDBM" in result["user_message"]
+    assert "USD/MNT" in result["user_message"]
     assert "not-for-output" not in str(result)
 
 
