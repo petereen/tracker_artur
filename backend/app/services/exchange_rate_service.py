@@ -101,6 +101,7 @@ async def _fetch_catalog(session: aiohttp.ClientSession, api_key: str) -> list[d
             if response.status == 401:
                 return {"ok": False, "error": "authentication_configuration_error", "user_message": "The exchange-rate service authentication is invalid or misconfigured."}
             if response.status < 200 or response.status >= 300:
+                log.warning("exchange_rates.catalog_response status=%s", response.status)
                 return _unavailable()
             payload = await response.json(content_type=None)
     except (asyncio.TimeoutError, aiohttp.ClientError, ValueError) as exc:
@@ -114,7 +115,10 @@ async def _fetch_catalog(session: aiohttp.ClientSession, api_key: str) -> list[d
 
 async def _catalog(force_refresh: bool = False) -> list[dict[str, Any]] | dict[str, Any]:
     global _catalog_cache
-    ttl = max(0.0, float(os.getenv("AGENT_RATES_CACHE_TTL_SECONDS", DEFAULT_CACHE_TTL_SECONDS)))
+    try:
+        ttl = max(0.0, float(os.getenv("AGENT_RATES_CACHE_TTL_SECONDS", DEFAULT_CACHE_TTL_SECONDS)))
+    except ValueError:
+        ttl = DEFAULT_CACHE_TTL_SECONDS
     async with _catalog_lock:
         if not force_refresh and _catalog_cache and time.monotonic() - _catalog_cache[0] <= ttl:
             return _catalog_cache[1]
@@ -145,6 +149,7 @@ async def _fetch_single(provider: str, pair: str, force_refresh: bool) -> dict[s
                 if response.status == 404:
                     return {"ok": False, "error": "not_published_by_provider", "user_message": f"{provider} has not published {pair}."}
                 if response.status < 200 or response.status >= 300:
+                    log.warning("exchange_rate.response provider=%s pair=%s status=%s", provider, pair, response.status)
                     return _unavailable()
                 payload = await response.json(content_type=None)
     except (asyncio.TimeoutError, aiohttp.ClientError, ValueError) as exc:
@@ -177,6 +182,11 @@ async def get_exchange_rate(*, provider: str, pair: str, force_refresh: bool = F
     normalized_pair = normalize_mongolbank_pair(pair) if provider == "MongolBank" else pair.strip().upper()
     catalog = await _catalog(force_refresh=force_refresh)
     if isinstance(catalog, dict):
+        # The catalog is primary, but a transient catalog outage must not take
+        # down an exact provider lookup when the pair endpoint still works.
+        # Keep catalog/all-rates failures visible to callers.
+        if request_type == "single":
+            return await _fetch_single(provider, normalized_pair, force_refresh)
         return catalog
     if request_type == "all" or pair.strip().casefold() in {"all", "all rates", "бүх ханш"}:
         return {"ok": True, "rates": [_result(entry) for entry in catalog if _validate_entry(entry) is not None]}
@@ -191,6 +201,6 @@ async def get_exchange_rate(*, provider: str, pair: str, force_refresh: bool = F
             if _validate_entry(entry) is None:
                 return _unavailable_entry(entry)
             return _result(entry)
-    if provider == "MongolBank":
-        return await _fetch_single(provider, normalized_pair, force_refresh)
-    return {"ok": False, "error": "not_published_by_provider", "user_message": f"{provider} has not published {normalized_pair}."}
+    # A catalog is not an authority for pair availability. Ask the provider
+    # endpoint before reporting that a pair is unpublished, for every provider.
+    return await _fetch_single(provider, normalized_pair, force_refresh)

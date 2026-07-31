@@ -55,7 +55,7 @@ def _entry(source="MongolBank", pair="EUR/MNT", *, kind="subscription", values=N
     }
 
 
-def _mock(monkeypatch, rates, *, post_payload=None, post_status=200):
+def _mock(monkeypatch, rates, *, get_status=200, post_payload=None, post_status=200):
     captured = {}
     monkeypatch.setenv("AGENT_RATES_API_KEY", "server-only-test-key")
     exchange_rate_service.clear_catalog_cache()
@@ -63,7 +63,7 @@ def _mock(monkeypatch, rates, *, post_payload=None, post_status=200):
         exchange_rate_service.aiohttp,
         "ClientSession",
         lambda **_kwargs: _Session(
-            _Response(200, {"rates": rates}),
+            _Response(get_status, {"rates": rates}),
             _Response(post_status, post_payload or {}),
             captured,
         ),
@@ -134,6 +134,20 @@ def test_post_upstream_failure_is_distinguished(monkeypatch):
     result = asyncio.run(exchange_rate_service.get_exchange_rate(provider="MongolBank", pair="CHF"))
     assert result["error"] == "rates_service_failure"
     assert "CHF/MNT" in captured["post"]["json"]["pair"]
+
+
+def test_catalog_failure_uses_exact_mongolbank_fallback(monkeypatch):
+    captured = _mock(monkeypatch, [], get_status=503, post_payload=_entry(pair="USD/MNT"))
+    result = asyncio.run(exchange_rate_service.get_exchange_rate(provider="MongolBank", pair="USD"))
+    assert result["ok"] is True
+    assert captured["post"]["json"]["pair"] == "USD/MNT"
+
+
+def test_catalog_failure_uses_exact_fallback_for_other_provider(monkeypatch):
+    captured = _mock(monkeypatch, [], get_status=503, post_payload=_entry(source="TDBM", pair="USD/MNT"))
+    result = asyncio.run(exchange_rate_service.get_exchange_rate(provider="TDBM", pair="USD/MNT"))
+    assert result["ok"] is True
+    assert captured["post"]["json"] == {"provider": "TDBM", "pair": "USD/MNT", "force_refresh": False}
 
 
 def test_api_key_never_appears_in_result(monkeypatch):
