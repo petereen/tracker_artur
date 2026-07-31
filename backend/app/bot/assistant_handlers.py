@@ -280,6 +280,7 @@ async def execute_tool(
             provider=arguments["provider"],
             pair=arguments["pair"],
             force_refresh=arguments.get("force_refresh", False),
+            request_type=arguments.get("request_type", "single"),
         ), None, None
 
     raise ValueError(f"Unsupported assistant tool: {tool_name}")

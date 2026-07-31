@@ -76,6 +76,13 @@ false. Requests for Mongol Bank, MongolBank, MONGOLBANK, Монголбанк, o
 Монгол Банк must use the case-sensitive provider code "MongolBank".
 For M Bank, use the case-sensitive provider code "MBank". Strip Mongolian
 grammar suffixes such as "-ны" from provider names before calling the tool.
+For requests for every rate, use request_type "all". For formula/calculated
+rate requests (including a named title such as Делькрадо or Трикуэтра), use
+request_type "calculated" and pass the title in pair; for all calculated rates,
+use pair "all calculated". Match formula results by their pair title, formula,
+or stable key. For an all-rates result, include both normal and calculated
+entries, grouped clearly if useful. Do not infer a missing pair from Telegram
+subscriptions.
 """
 
 
@@ -212,8 +219,9 @@ class GetExchangeRateToolArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(min_length=1, max_length=100)
-    pair: str = Field(min_length=1, max_length=20)
+    pair: str = Field(min_length=1, max_length=500)
     force_refresh: StrictBool = False
+    request_type: Literal["single", "all", "calculated"] = "single"
 
     @field_validator("provider", "pair")
     @classmethod
@@ -393,15 +401,22 @@ def native_tool_specs() -> list[dict]:
                             "type": "string",
                             "description": (
                                 "Canonical uppercase BASE/QUOTE currency pair, e.g. USD/MNT. "
-                                "Convert wording such as \"USD to MNT\" to USD/MNT."
+                                "Convert wording such as \"USD to MNT\" to USD/MNT. For "
+                                "MongolBank, accept currency names or any ISO code and "
+                                "normalize to XXX/MNT; do not restrict the currency list."
                             ),
                         },
                         "force_refresh": {
                             "type": "boolean",
                             "description": "True only when the user explicitly asks to refresh.",
                         },
+                        "request_type": {
+                            "type": "string",
+                            "enum": ["single", "all", "calculated"],
+                            "description": "Use all for every published rate, or calculated for formula rates; otherwise single.",
+                        },
                     },
-                    "required": ["provider", "pair", "force_refresh"],
+                    "required": ["provider", "pair", "force_refresh", "request_type"],
                     "additionalProperties": False,
                 },
             },

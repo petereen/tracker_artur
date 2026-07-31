@@ -311,6 +311,7 @@ def test_native_exchange_rate_call_is_validated_without_modifying_arguments():
         "provider": "TDBM",
         "pair": "USD/MNT",
         "force_refresh": False,
+        "request_type": "single",
     }
 
 
