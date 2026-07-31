@@ -15,6 +15,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     ValidationError,
     field_validator,
     model_validator,
@@ -49,6 +50,8 @@ You can:
 - call get_user_tasks when the user asks about their workload or personal tasks;
 - call search_company_knowledge for company policy, procedure, or internal
   knowledge questions;
+- call get_exchange_rate when the user asks for a current currency exchange
+  rate. Never answer an exchange-rate request from memory or estimate a rate;
 - answer normal conversation and capability questions directly without a tool.
 
 The primary response language is Mongolian. Match clearly English or Russian
@@ -61,6 +64,11 @@ synthesize its raw JSON into a context-aware answer. Do not merely repeat JSON
 or use a fixed template. Never invent company facts, claim that a draft has
 already created a task, or expose internal database/Telegram IDs. A task draft
 always requires the user's explicit confirmation before any task is written.
+For get_exchange_rate results, state only the exact returned values and always
+include the provider and fetchedAt timestamp. Preserve cash/non-cash and
+buy/sell labels. If status is stale, clearly say the latest fetch failed and
+that the displayed rate is an older cached rate. Do not present any rate when
+the tool returns an error.
 """
 
 
@@ -86,6 +94,7 @@ class AssistantToolName(str, Enum):
     CREATE_TASK_DRAFT = "create_task_draft"
     GET_USER_TASKS = "get_user_tasks"
     SEARCH_COMPANY_KNOWLEDGE = "search_company_knowledge"
+    GET_EXCHANGE_RATE = "get_exchange_rate"
 
     # Source-compatible aliases for older internal callers. OpenAI only sees
     # the canonical function names above.
@@ -190,6 +199,22 @@ class SearchCompanyKnowledgeToolArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=1, max_length=500)
+
+
+class GetExchangeRateToolArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(min_length=1, max_length=100)
+    pair: str = Field(min_length=1, max_length=20)
+    force_refresh: StrictBool = False
+
+    @field_validator("provider", "pair")
+    @classmethod
+    def _non_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
 
 
 class NativeToolSelection(BaseModel):
@@ -339,6 +364,36 @@ def native_tool_specs() -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": AssistantToolName.GET_EXCHANGE_RATE.value,
+                "description": (
+                    "Retrieve the latest exact exchange rate for a provider and currency pair. "
+                    "Use for bank/exchange rate requests. Never estimate or calculate a rate."
+                ),
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "provider": {
+                            "type": "string",
+                            "description": "Rate provider code, e.g. TDBM.",
+                        },
+                        "pair": {
+                            "type": "string",
+                            "description": "Currency pair, e.g. USD/MNT.",
+                        },
+                        "force_refresh": {
+                            "type": "boolean",
+                            "description": "True only when the user explicitly asks to refresh.",
+                        },
+                    },
+                    "required": ["provider", "pair", "force_refresh"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": AssistantToolName.GET_USER_TASKS.value,
                 "description": (
                     "Retrieve permission-scoped tasks belonging to the current user. Use for "
@@ -396,6 +451,7 @@ _TOOL_ARGUMENT_MODELS: dict[AssistantToolName, type[BaseModel]] = {
     AssistantToolName.CREATE_TASK: CreateTaskToolArguments,
     AssistantToolName.GET_USER_TASKS: GetUserTasksToolArguments,
     AssistantToolName.SEARCH_COMPANY_KNOWLEDGE: SearchCompanyKnowledgeToolArguments,
+    AssistantToolName.GET_EXCHANGE_RATE: GetExchangeRateToolArguments,
 }
 
 
@@ -975,6 +1031,20 @@ async def classify_intent(
                 "router_intent": RouterIntent.COMPANY_INFO,
                 "confidence": 0.97,
                 "knowledge_terms": terms,
+                "selected_tool": selection.tool_name,
+                "tool_arguments": selection.arguments,
+                "react_messages": selection.request_messages,
+                "assistant_tool_message": selection.assistant_message,
+                "tool_call_id": selection.tool_call_id,
+            }
+        )
+
+    if selection.tool_name == AssistantToolName.GET_EXCHANGE_RATE:
+        return fallback.model_copy(
+            update={
+                "intent": AssistantIntent.GENERAL_PRODUCTIVITY,
+                "router_intent": RouterIntent.UNKNOWN,
+                "confidence": 0.97,
                 "selected_tool": selection.tool_name,
                 "tool_arguments": selection.arguments,
                 "react_messages": selection.request_messages,

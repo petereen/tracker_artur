@@ -79,6 +79,8 @@ ADMIN_PASSWORD=your-admin-password
 
 # Optional: enable voice input and AI assistance
 OPENAI_API_KEY=your-openai-api-key
+# Required to answer live exchange-rate questions. Keep server-side only.
+AGENT_RATES_API_KEY=your-agent-rates-api-key
 OPENAI_WHISPER_MODEL=gpt-4o-mini-transcribe
 # Used when OPENAI_TRANSCRIBE_LANGUAGE was previously set to mn/mon.
 OPENAI_MONGOLIAN_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe

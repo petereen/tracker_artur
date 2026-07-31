@@ -17,6 +17,7 @@ from app.bot.tasks_handlers import TaskDraft, begin_task_draft, task_draft_keybo
 from app.services import (
     assistant_ai,
     employee_directory_service,
+    exchange_rate_service,
     knowledge_service,
     task_service,
     unknown_request_service,
@@ -116,6 +117,7 @@ def _should_answer_in_voice(
     if decision.selected_tool in {
         assistant_ai.AssistantToolName.GET_USER_TASKS,
         assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE,
+        assistant_ai.AssistantToolName.GET_EXCHANGE_RATE,
     }:
         return True
     if decision.router_intent in {
@@ -273,6 +275,13 @@ async def execute_tool(
         entries = knowledge_service.search_knowledge([query], limit=5)
         return _knowledge_raw_data(entries, query=query), None, None
 
+    if tool_name == assistant_ai.AssistantToolName.GET_EXCHANGE_RATE:
+        return await exchange_rate_service.get_exchange_rate(
+            provider=arguments["provider"],
+            pair=arguments["pair"],
+            force_refresh=arguments.get("force_refresh", False),
+        ), None, None
+
     raise ValueError(f"Unsupported assistant tool: {tool_name}")
 
 
@@ -383,6 +392,16 @@ async def route_and_respond(
             tg_id=tg_id,
             timezone_name=timezone_name,
         )
+        # Rate-service failures have precise, safe user messages. Do not send
+        # them through the model, which could accidentally invent a rate.
+        if (
+            decision.selected_tool == assistant_ai.AssistantToolName.GET_EXCHANGE_RATE
+            and not raw_result.get("ok")
+        ):
+            answer = raw_result["user_message"]
+            await _answer_question(message, answer, decision=decision)
+            _remember(history_key, text, answer)
+            return
         if presentation:
             # A task draft has a known, confirmation-oriented layout. Rendering
             # it locally avoids an unnecessary second model round trip and

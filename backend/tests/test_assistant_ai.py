@@ -195,6 +195,7 @@ def _tool_message(name: str, arguments: dict) -> dict:
 def test_native_tool_schemas_are_strict():
     assert [tool["function"]["name"] for tool in native_tool_specs()] == [
         "create_task_draft",
+        "get_exchange_rate",
         "get_user_tasks",
         "search_company_knowledge",
     ]
@@ -295,6 +296,22 @@ def test_native_tool_call_rejects_extra_or_invalid_arguments():
         )
         is None
     )
+
+
+def test_native_exchange_rate_call_is_validated_without_modifying_arguments():
+    selection = parse_native_tool_message(
+        _tool_message(
+            "get_exchange_rate",
+            {"provider": " TDBM ", "pair": " USD/MNT ", "force_refresh": False},
+        )
+    )
+    assert selection is not None
+    assert selection.tool_name == AssistantToolName.GET_EXCHANGE_RATE
+    assert selection.arguments == {
+        "provider": "TDBM",
+        "pair": "USD/MNT",
+        "force_refresh": False,
+    }
 
 
 def test_native_direct_answer_is_preserved():
