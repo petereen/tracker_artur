@@ -1,8 +1,9 @@
 """REST API задач: admin (JWT) и Mini App (Telegram initData)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel
@@ -132,6 +133,8 @@ async def list_tasks(
     assignee_id: Optional[int] = None,
     created_by_id: Optional[int] = None,
     active: bool = False,
+    due_from: Optional[date] = None,
+    due_to: Optional[date] = None,
 ):
     q = select(Task)
     if status_:
@@ -142,6 +145,15 @@ async def list_tasks(
         q = q.where(Task.assignee_id == assignee_id)
     if created_by_id is not None:
         q = q.where(Task.created_by_id == created_by_id)
+    # The admin panel uses Mongolian local calendar dates. Convert inclusive
+    # date boundaries to UTC instead of relying on the database session TZ.
+    ub = ZoneInfo("Asia/Ulaanbaatar")
+    if due_from:
+        start = datetime.combine(due_from, time.min, tzinfo=ub).astimezone(timezone.utc)
+        q = q.where(Task.deadline_at >= start)
+    if due_to:
+        end = datetime.combine(due_to, time.max, tzinfo=ub).astimezone(timezone.utc)
+        q = q.where(Task.deadline_at <= end)
     q = q.order_by(Task.deadline_at.asc().nullslast(), Task.priority.asc(), Task.id.desc())
     rows = (await db.execute(q)).scalars().all()
     return [await _serialize(db, t) for t in rows]

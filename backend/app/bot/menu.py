@@ -41,6 +41,7 @@ MANAGER_COMMANDS: list[BotCommand] = [
     BotCommand(command="summary",   description="Өчигдрийн асуулгын хураангуй"),
     BotCommand(command="week",      description="7 хоногийн асуулгын статистик"),
     BotCommand(command="blockers",  description="Сарын гол саад бэрхшээлүүд"),
+    BotCommand(command="test_reports", description="Чек-ин, тайлангийн тест"),
 ]
 
 

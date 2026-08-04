@@ -14,6 +14,7 @@ from app.bot.handlers import router
 from app.bot.middlewares import EmployeeMiddleware
 from app.bot.scheduler import rebuild_jobs, scheduler
 from app.bot.tasks_handlers import router as tasks_router
+from app.bot.work_report_handlers import router as work_report_router
 from app.bot.menu import setup_bot_menus
 from app.core.config import settings
 from app.observability.sentry import init_from_env
@@ -40,6 +41,7 @@ async def main():
     dp.message.middleware(EmployeeMiddleware())
     dp.callback_query.middleware(EmployeeMiddleware())
     dp.include_router(tasks_router)
+    dp.include_router(work_report_router)
     dp.include_router(router)
     dp.include_router(assistant_router)
 

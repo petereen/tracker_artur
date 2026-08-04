@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { LineChart, Line, XAxis, ResponsiveContainer, Tooltip, Area, AreaChart } from 'recharts'
 import { Card, PageHeader, Badge, Btn } from '../components/ui'
-import { useDashboardSummary, useDashboardMetrics, useTopEmployees } from '../api/hooks'
+import { useDashboardSummary, useDashboardMetrics, useTopEmployees, useWorkPerformance } from '../api/hooks'
 
 const METRICS = [
   { key: 'calls',    label: 'Дуудлага',  color: '#388BFD' },
@@ -15,6 +15,7 @@ export function DashboardPage() {
   const summary = useDashboardSummary(30)
   const metricsData = useDashboardMetrics(metric, 30)
   const topEmployees = useTopEmployees()
+  const workPerformance = useWorkPerformance(30)
 
   const m = METRICS.find((x) => x.key === metric)!
   const chartData = metricsData.data || []
@@ -44,6 +45,14 @@ export function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {workPerformance.data && (
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <Card><div className="text-xs text-muted font-medium mb-2">Өдрийн тайлангийн биелэлт</div><div className="text-[26px] font-semibold text-accent">{workPerformance.data.daily_report_rate}%</div><div className="text-xs text-muted mt-1">{workPerformance.data.approved_daily_reports} батлагдсан</div></Card>
+          <Card><div className="text-xs text-muted font-medium mb-2">Ажлын цагийн бүртгэл</div><div className="text-[26px] font-semibold text-green">{workPerformance.data.work_time_entries}</div><div className="text-xs text-muted mt-1">Сүүлийн 30 хоног</div></Card>
+          <Card><div className="text-xs text-muted font-medium mb-2">Сарын тайлангийн биелэлт</div><div className="text-[26px] font-semibold text-[#BC8CFF]">{workPerformance.data.monthly_report_rate}%</div><div className="text-xs text-muted mt-1">{workPerformance.data.approved_monthly_reports} батлагдсан</div></Card>
+        </div>
+      )}
 
       {/* Chart + Top */}
       <div className="grid grid-cols-[2fr_1fr] gap-4 mb-4">

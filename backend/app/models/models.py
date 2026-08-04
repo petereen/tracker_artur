@@ -297,3 +297,87 @@ class NotificationOutbox(Base):
     dedup_key = Column(Text, unique=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     sent_at = Column(DateTime(timezone=True))
+
+
+# ─── Ажлын тайлангууд ────────────────────────────────────────────────────────
+
+WORK_REPORT_TYPES = ("daily", "monthly", "next_month_plan", "daily_test", "monthly_test", "next_month_plan_test")
+WORK_REPORT_STATUSES = ("awaiting", "draft", "editing", "approved")
+WORK_REPORT_REVISION_STATUSES = ("draft", "superseded", "deleted", "approved")
+
+
+class WorkReport(Base):
+    """One report lifecycle for an employee and reporting period.
+
+    ``period_date`` is the local work date for daily reports and the first day
+    of the reported month for monthly reports and their following plan.
+    """
+
+    __tablename__ = "work_reports"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "report_type", "period_date", name="uq_work_report_period"),
+        CheckConstraint(
+            "report_type IN ('daily','monthly','next_month_plan','daily_test','monthly_test','next_month_plan_test')",
+            name="ck_work_reports_type",
+        ),
+        CheckConstraint(
+            "status IN ('awaiting','draft','editing','approved')",
+            name="ck_work_reports_status",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    report_type = Column(Text, nullable=False)
+    period_date = Column(Date, nullable=False)
+    status = Column(Text, nullable=False, server_default="awaiting", default="awaiting")
+    started_at = Column(DateTime(timezone=True))
+    ended_at = Column(DateTime(timezone=True))
+    approved_revision_id = Column(Integer, ForeignKey("work_report_revisions.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    employee = relationship("Employee")
+    revisions = relationship(
+        "WorkReportRevision",
+        back_populates="report",
+        cascade="all, delete-orphan",
+        foreign_keys="WorkReportRevision.report_id",
+    )
+    prompts = relationship("WorkReportPrompt", back_populates="report", cascade="all, delete-orphan")
+
+
+class WorkReportRevision(Base):
+    __tablename__ = "work_report_revisions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft','superseded','deleted','approved')",
+            name="ck_work_report_revisions_status",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("work_reports.id", ondelete="CASCADE"), nullable=False)
+    text = Column(Text, nullable=False)
+    status = Column(Text, nullable=False, server_default="draft", default="draft")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    report = relationship("WorkReport", back_populates="revisions", foreign_keys=[report_id])
+
+
+class WorkReportPrompt(Base):
+    __tablename__ = "work_report_prompts"
+    __table_args__ = (
+        UniqueConstraint("report_id", "prompt_type", "prompt_date", name="uq_work_report_prompt_day"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("work_reports.id", ondelete="CASCADE"), nullable=False)
+    prompt_type = Column(Text, nullable=False)
+    prompt_date = Column(Date, nullable=False)
+    telegram_chat_id = Column(Text, nullable=False)
+    telegram_message_id = Column(Integer)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    report = relationship("WorkReport", back_populates="prompts")

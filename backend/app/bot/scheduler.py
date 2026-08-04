@@ -1,6 +1,7 @@
 """APScheduler — джобы для каждого сотрудника."""
 import logging
 from datetime import datetime, time, timedelta
+from hashlib import sha256
 
 import pytz
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -13,6 +14,7 @@ log = logging.getLogger(__name__)
 DEFAULT_TIMEZONE = pytz.timezone("Asia/Ulaanbaatar")
 jobstores = {"default": SQLAlchemyJobStore(url=settings.SYNC_DATABASE_URL)}
 scheduler = AsyncIOScheduler(jobstores=jobstores, timezone=DEFAULT_TIMEZONE)
+_last_schedule_fingerprint: str | None = None
 
 
 def _make_bot():
@@ -31,9 +33,10 @@ def rebuild_jobs():
     policy = load_policy(manager_settings)
     digest_dow = ",".join(str(d - 1) for d in sorted(policy.work_weekdays)) or "0,1,2,3,4"
 
+    global _last_schedule_fingerprint
     for job in scheduler.get_jobs():
         if any(job.id.startswith(p) for p in
-               ("survey_", "reminder1_", "reminder2_", "missed_", "task_morning_", "task_evening_")):
+               ("survey_", "reminder1_", "reminder2_", "missed_", "monthly_report_", "task_morning_", "task_evening_")):
             job.remove()
 
     from app.services.digest_service import send_employee_morning_digest, send_employee_evening_digest
@@ -54,6 +57,12 @@ def rebuild_jobs():
             id=f"task_evening_{emp.id}", replace_existing=True, args=[emp.id])
 
         sch = get_schedule(emp.id)
+        # Monthly reports apply to every active employee. Employees without a
+        # legacy Schedule row use the same default start-of-day time.
+        morning: time = sch.morning_time if sch and sch.morning_time else time(9, 15)
+        scheduler.add_job(send_monthly_report_prompt, "cron",
+            hour=morning.hour, minute=morning.minute, timezone=tz,
+            id=f"monthly_report_{emp.id}", replace_existing=True, args=[emp.id])
         if not sch:
             continue
 
@@ -81,6 +90,7 @@ def rebuild_jobs():
         scheduler.add_job(mark_missed_job, "cron",
             hour=deadline.hour, minute=deadline.minute, day_of_week=dow, timezone=tz,
             id=f"missed_{emp.id}", replace_existing=True, args=[emp.id])
+
 
     if manager_settings:
         st: time = manager_settings.summary_time or time(9, 0)
@@ -112,12 +122,18 @@ def rebuild_jobs():
     scheduler.add_job(drain_notification_outbox, "interval", minutes=1,
         id="drain_outbox", replace_existing=True)
 
+    _last_schedule_fingerprint = _schedule_fingerprint()
+    scheduler.add_job(reconcile_schedule_jobs, "interval", minutes=1,
+        id="reconcile_schedules", replace_existing=True)
+
     log.info("Scheduler rebuilt for %d employees", len(employees))
 
 
 async def send_survey(employee_id: int):
     from app.models.models import Employee
     from app.bot.db import create_session, get_session
+    from app.bot.work_report_handlers import send_report_prompt
+    from app.services import work_report_service
 
     bot = _make_bot()
     try:
@@ -126,8 +142,17 @@ async def send_survey(employee_id: int):
             if not emp or not emp.is_active:
                 return
             telegram_id = emp.telegram_id
+            timezone_name = emp.timezone
         create_session(employee_id)
-        await bot.send_message(telegram_id, "⏰ Оройн чек-иний цаг боллоо!\nЭхлэхийн тулд /today гэж бичнэ үү.")
+        local_day = _local_today(timezone_name)
+        report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
+        await send_report_prompt(
+            bot,
+            report,
+            telegram_chat_id=telegram_id,
+            prompt_type="daily_checkin",
+            local_day=local_day,
+        )
     finally:
         await bot.session.close()
 
@@ -137,6 +162,7 @@ async def send_reminder(employee_id: int, num: int):
     from sqlalchemy import select
     from app.models.models import Employee, SurveySession
     from app.bot.db import get_session
+    from app.services import work_report_service
 
     bot = _make_bot()
     try:
@@ -152,8 +178,10 @@ async def send_reminder(employee_id: int, num: int):
                 )
             ).scalar_one_or_none()
             telegram_id = emp.telegram_id
-        if sess:
-            await bot.send_message(telegram_id, f"⚠️ Сануулга #{num}: чек-инээ бөглөхөө бүү мартаарай! /today")
+            timezone_name = emp.timezone
+        report_complete = work_report_service.report_is_approved(employee_id, "daily", _local_today(timezone_name))
+        if sess or not report_complete:
+            await bot.send_message(telegram_id, f"⚠️ Сануулга #{num}: чек-ин болон өдрийн тайлангаа бөглөхөө бүү мартаарай! /today")
     finally:
         await bot.session.close()
 
@@ -176,6 +204,73 @@ async def mark_missed_job(employee_id: int):
             await bot.send_message(ms.telegram_id, f"🚨 {emp_name} өнөөдөр чек-ин бөглөөгүй байна.")
     finally:
         await bot.session.close()
+
+
+def _local_today(timezone_name: str | None):
+    try:
+        zone = pytz.timezone(timezone_name or "Asia/Ulaanbaatar")
+    except Exception:
+        zone = DEFAULT_TIMEZONE
+    return datetime.now(zone).date()
+
+
+async def send_monthly_report_prompt(employee_id: int):
+    """Prompt on each of a month's last three local calendar days until approved."""
+    from app.bot.db import get_session
+    from app.bot.work_report_handlers import send_report_prompt
+    from app.models.models import Employee
+    from app.services import work_report_service
+
+    bot = _make_bot()
+    try:
+        with get_session() as s:
+            emp = s.get(Employee, employee_id)
+            if not emp or not emp.is_active:
+                return
+            telegram_id = emp.telegram_id
+            timezone_name = emp.timezone
+        local_day = _local_today(timezone_name)
+        if not work_report_service.is_last_three_days(local_day):
+            return
+        if work_report_service.report_is_approved(employee_id, "monthly", local_day):
+            return
+        report = work_report_service.get_or_create_report(employee_id, "monthly", local_day)
+        await send_report_prompt(
+            bot,
+            report,
+            telegram_chat_id=telegram_id,
+            prompt_type="monthly_report",
+            local_day=local_day,
+        )
+    finally:
+        await bot.session.close()
+
+
+def _schedule_fingerprint() -> str:
+    """Hash only the values that determine employee-specific scheduler jobs."""
+    from app.bot.db import get_all_active_employees, get_schedule
+
+    values: list[str] = []
+    for emp in get_all_active_employees():
+        sch = get_schedule(emp.id)
+        values.append(repr((
+            emp.id, emp.timezone, emp.is_active,
+            sch.evening_time if sch else None,
+            sch.morning_time if sch else None,
+            tuple(sch.weekdays or []) if sch else (),
+            sch.deadline_time if sch else None,
+            tuple(sch.reminder_intervals or []) if sch else (),
+        )))
+    return sha256("|".join(values).encode()).hexdigest()
+
+
+async def reconcile_schedule_jobs():
+    """Apply admin schedule changes without requiring a bot restart."""
+    global _last_schedule_fingerprint
+    current = _schedule_fingerprint()
+    if current != _last_schedule_fingerprint:
+        log.info("Schedule configuration changed; rebuilding jobs")
+        rebuild_jobs()
 
 
 async def morning_summary():

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.models import Answer, Employee, Question, SurveySession, Streak
+from app.models.models import Answer, Employee, Question, SurveySession, Streak, WorkReport
 
 router = APIRouter()
 
@@ -94,3 +94,30 @@ async def top_employees(db: AsyncSession = Depends(get_db), _=Depends(get_curren
         }
         for emp, streak in rows
     ]
+
+
+@router.get("/work-performance")
+async def work_performance(period: int = Query(30), db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+    since = date.today() - timedelta(days=period - 1)
+    active_count = (await db.execute(select(func.count()).where(Employee.is_active == True))).scalar() or 0
+    daily = (await db.execute(
+        select(WorkReport).where(WorkReport.report_type == "daily", WorkReport.period_date >= since)
+    )).scalars().all()
+    approved_daily = [r for r in daily if r.status == "approved"]
+    expected_daily = active_count * period
+    month_start = date.today().replace(day=1)
+    monthly_approved = (await db.execute(
+        select(func.count()).where(
+            WorkReport.report_type == "monthly",
+            WorkReport.period_date == month_start,
+            WorkReport.status == "approved",
+        )
+    )).scalar() or 0
+    return {
+        "period": period,
+        "daily_report_rate": round(len(approved_daily) / expected_daily * 100) if expected_daily else 0,
+        "approved_daily_reports": len(approved_daily),
+        "work_time_entries": sum(1 for r in daily if r.started_at is not None or r.ended_at is not None),
+        "monthly_report_rate": round(monthly_approved / active_count * 100) if active_count else 0,
+        "approved_monthly_reports": monthly_approved,
+    }

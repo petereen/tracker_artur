@@ -1,11 +1,31 @@
 import { useState } from 'react'
-import { Badge, Card, PageHeader, Btn } from '../components/ui'
-import { useAnswers, useEmployees } from '../api/hooks'
+import { Badge, Card, PageHeader } from '../components/ui'
+import { useAnswers, useEmployees, useWorkReports } from '../api/hooks'
+
+const REPORT_TYPE_LABELS: Record<string, string> = {
+  daily: 'Өдрийн тайлан',
+  monthly: 'Сарын тайлан',
+  next_month_plan: 'Дараа сарын төлөвлөгөө',
+  daily_test: 'Өдрийн тайлангийн тест',
+  monthly_test: 'Сарын тайлангийн тест',
+  next_month_plan_test: 'Төлөвлөгөөний тест',
+}
+
+const REPORT_STATUS_LABELS: Record<string, string> = {
+  awaiting: 'Хүлээгдэж буй', draft: 'Ноорог', editing: 'Засаж байна', approved: 'Батлагдсан', deleted: 'Устгасан',
+}
+
+function formatTime(value: string | null) {
+  return value ? new Date(value).toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' }) : '—'
+}
 
 export function JournalPage() {
   const [empFilter, setEmpFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
+  const [tab, setTab] = useState<'answers' | 'reports'>('answers')
+  const [reportType, setReportType] = useState('')
+  const [reportStatus, setReportStatus] = useState('')
 
   const { data: employees = [] } = useEmployees()
   const { data: rows = [] } = useAnswers({
@@ -13,18 +33,29 @@ export function JournalPage() {
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   })
+  const { data: reports = [] } = useWorkReports({
+    employee_id: empFilter ? Number(empFilter) : undefined,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+    report_type: reportType || undefined,
+    status: reportStatus || undefined,
+  })
 
   return (
     <div>
-      <PageHeader title="Хариултын бүртгэл" sub={`${rows.length} бичлэг`}>
-        <a href="/api/answers/export?format=xlsx"
+      <PageHeader title="Бүртгэл" sub={`${tab === 'answers' ? rows.length : reports.length} бичлэг`}>
+        {tab === 'answers' && <a href="/api/answers/export?format=xlsx"
           className="inline-flex items-center gap-1.5 font-medium rounded-lg transition-all cursor-pointer border text-[13px] px-3 py-1 bg-accent text-white border-accent hover:opacity-85">
           Excel татах
-        </a>
+        </a>}
       </PageHeader>
 
       <Card className="admin-table-card !p-0 overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border flex gap-3 flex-wrap items-center">
+          <div className="flex gap-1 bg-surface2 rounded-lg p-1">
+            <button onClick={() => setTab('answers')} className={`px-3 py-1.5 rounded text-xs cursor-pointer border-none ${tab === 'answers' ? 'bg-accent text-white' : 'bg-transparent text-muted'}`}>Асуулгын хариулт</button>
+            <button onClick={() => setTab('reports')} className={`px-3 py-1.5 rounded text-xs cursor-pointer border-none ${tab === 'reports' ? 'bg-accent text-white' : 'bg-transparent text-muted'}`}>Ажлын тайлан</button>
+          </div>
           <select value={empFilter} onChange={(e) => setEmpFilter(e.target.value)}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">
             <option value="">Бүх ажилтан</option>
@@ -34,9 +65,17 @@ export function JournalPage() {
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
-          <div className="ml-auto text-[13px] text-muted">{rows.length} бичлэг</div>
+          {tab === 'reports' && <>
+            <select value={reportType} onChange={(e) => setReportType(e.target.value)} className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">
+              <option value="">Бүх төрөл</option>{Object.entries(REPORT_TYPE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+            <select value={reportStatus} onChange={(e) => setReportStatus(e.target.value)} className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">
+              <option value="">Бүх төлөв</option>{Object.entries(REPORT_STATUS_LABELS).filter(([key]) => key !== 'deleted').map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+          </>}
+          <div className="ml-auto text-[13px] text-muted">{tab === 'answers' ? rows.length : reports.length} бичлэг</div>
         </div>
-        <div className="overflow-x-auto">
+        {tab === 'answers' && <div className="overflow-x-auto">
           <table className="w-full border-collapse min-w-[700px]">
             <thead>
               <tr className="bg-surface2">
@@ -65,7 +104,23 @@ export function JournalPage() {
             </tbody>
           </table>
           {rows.length === 0 && <div className="px-5 py-8 text-center text-muted">Мэдээлэл алга</div>}
-        </div>
+        </div>}
+        {tab === 'reports' && <div className="overflow-x-auto">
+          <table className="w-full border-collapse min-w-[850px]">
+            <thead><tr className="bg-surface2">
+              {['Ажилтан', 'Огноо', 'Төрөл', 'Тайлан', 'Эхэлсэн / Дууссан', 'Төлөв'].map((h) => <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted border-b border-border whitespace-nowrap">{h}</th>)}
+            </tr></thead>
+            <tbody>{reports.map((report, i) => <tr key={report.id} className={`transition-colors hover:bg-surface2 ${i < reports.length - 1 ? 'border-b border-border2' : ''}`}>
+              <td className="px-4 py-2.5 font-medium text-[13px]">{report.employee_name}</td>
+              <td className="px-4 py-2.5 font-mono text-xs text-muted">{report.period_date}</td>
+              <td className="px-4 py-2.5 text-xs">{REPORT_TYPE_LABELS[report.report_type]}</td>
+              <td className="px-4 py-2.5 text-xs max-w-[360px] whitespace-pre-wrap">{report.text || '—'}</td>
+              <td className="px-4 py-2.5 text-xs text-muted">{report.report_type === 'daily' ? `${formatTime(report.started_at)} / ${formatTime(report.ended_at)}` : '—'}</td>
+              <td className="px-4 py-2.5"><Badge color={report.status === 'approved' ? 'green' : report.latest_revision_status === 'deleted' ? 'red' : report.status === 'awaiting' ? 'yellow' : 'blue'}>{REPORT_STATUS_LABELS[report.latest_revision_status === 'deleted' ? 'deleted' : report.status]}</Badge></td>
+            </tr>)}</tbody>
+          </table>
+          {reports.length === 0 && <div className="px-5 py-8 text-center text-muted">Мэдээлэл алга</div>}
+        </div>}
       </Card>
     </div>
   )

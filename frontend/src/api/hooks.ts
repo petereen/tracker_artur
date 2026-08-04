@@ -119,6 +119,9 @@ export function useDashboardSummary(period = 30) {
 export function useDashboardMetrics(metric: string, period = 30) {
   return useQuery({ queryKey: ['dashboard', 'metrics', metric, period], queryFn: () => api.get(`/dashboard/metrics?metric=${metric}&period=${period}`).then((r) => r.data) })
 }
+export function useWorkPerformance(period = 30) {
+  return useQuery({ queryKey: ['dashboard', 'work-performance', period], queryFn: () => api.get(`/dashboard/work-performance?period=${period}`).then((r) => r.data) })
+}
 export function useTopEmployees() {
   return useQuery({ queryKey: ['dashboard', 'top'], queryFn: () => api.get('/dashboard/top-employees').then((r) => r.data) })
 }
@@ -130,6 +133,31 @@ export function useAnswers(filters: { emp_id?: number; date_from?: string; date_
   if (filters.date_from) params.set('date_from', filters.date_from)
   if (filters.date_to) params.set('date_to', filters.date_to)
   return useQuery({ queryKey: ['answers', filters], queryFn: () => api.get(`/answers?${params}`).then((r) => r.data) })
+}
+
+export interface WorkReportOut {
+  id: number
+  employee_id: number
+  employee_name: string
+  report_type: 'daily' | 'monthly' | 'next_month_plan'
+  period_date: string
+  status: 'awaiting' | 'draft' | 'editing' | 'approved'
+  started_at: string | null
+  ended_at: string | null
+  text: string | null
+  latest_revision_status: 'draft' | 'superseded' | 'deleted' | 'approved' | null
+  approved_revision_id: number | null
+  created_at: string
+  updated_at: string
+}
+export function useWorkReports(filters: { employee_id?: number; date_from?: string; date_to?: string; report_type?: string; status?: string } = {}) {
+  const params = new URLSearchParams()
+  if (filters.employee_id) params.set('employee_id', String(filters.employee_id))
+  if (filters.date_from) params.set('date_from', filters.date_from)
+  if (filters.date_to) params.set('date_to', filters.date_to)
+  if (filters.report_type) params.set('report_type', filters.report_type)
+  if (filters.status) params.set('status', filters.status)
+  return useQuery<WorkReportOut[]>({ queryKey: ['work-reports', filters], queryFn: () => api.get(`/work-reports?${params}`).then((r) => r.data) })
 }
 
 // --- Manager Settings ---
@@ -397,11 +425,13 @@ export interface TaskOut {
   reminder_intervals_min: number[]
 }
 
-export function useTasks(filters: { status?: string; assignee_id?: number; active?: boolean } = {}) {
+export function useTasks(filters: { status?: string; assignee_id?: number; active?: boolean; due_from?: string; due_to?: string } = {}) {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)
   if (filters.assignee_id) params.set('assignee_id', String(filters.assignee_id))
   if (filters.active !== undefined) params.set('active', String(filters.active))
+  if (filters.due_from) params.set('due_from', filters.due_from)
+  if (filters.due_to) params.set('due_to', filters.due_to)
   return useQuery<TaskOut[]>({
     queryKey: ['tasks', filters],
     queryFn: () => api.get(`/tasks?${params}`).then((r) => r.data),

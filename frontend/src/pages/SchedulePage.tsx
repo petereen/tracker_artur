@@ -72,9 +72,9 @@ export function SchedulePage() {
                 </div>
               </div>
 
-              <div className={`grid gap-4 mb-5 ${form.variant === 'B' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+              <div className="grid grid-cols-3 gap-4 mb-5">
                 <Input label="Оройн чек-ин" value={form.evening_time || ''} onChange={(v) => f('evening_time', v)} type="time" />
-                {form.variant === 'B' && <Input label="Өглөөний сануулга" value={form.morning_time || ''} onChange={(v) => f('morning_time', v)} type="time" />}
+                <Input label="Өглөө / сарын тайлан" value={form.morning_time || ''} onChange={(v) => f('morning_time', v)} type="time" />
                 <Input label="Алгассан гэж тооцох цаг" value={form.deadline_time || ''} onChange={(v) => f('deadline_time', v)} type="time" />
               </div>
 

@@ -91,10 +91,12 @@ const EMPTY_FORM: CreateForm = {
 export function TasksPage() {
   const { data: employees = [] } = useEmployees()
   const [filterAssignee, setFilterAssignee] = useState('')
+  const [dueFrom, setDueFrom] = useState('')
+  const [dueTo, setDueTo] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM)
 
-  const tasksQuery = useTasks()
+  const tasksQuery = useTasks({ due_from: dueFrom || undefined, due_to: dueTo || undefined })
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
 
@@ -147,6 +149,10 @@ export function TasksPage() {
           onChange={setFilterAssignee}
           options={employeeOptions}
         />
+        <input type="date" value={dueFrom} onChange={(e) => setDueFrom(e.target.value)} aria-label="Хугацаа эхлэх"
+          className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
+        <input type="date" value={dueTo} onChange={(e) => setDueTo(e.target.value)} aria-label="Хугацаа дуусах"
+          className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
         <Btn variant="primary" onClick={() => setShowModal(true)}>+ Шинэ даалгавар</Btn>
       </PageHeader>
 

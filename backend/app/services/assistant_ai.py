@@ -27,6 +27,23 @@ log = logging.getLogger(__name__)
 
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
+
+def assistant_chat_url() -> str:
+    """Return the OpenAI-compatible endpoint used by the assistant model.
+
+    Luna deployments can expose an OpenAI-compatible gateway while keeping the
+    model name unchanged. The default remains the public OpenAI endpoint.
+    """
+    base_url = os.getenv("OPENAI_ASSISTANT_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+    return f"{base_url}/chat/completions"
+
+
+def assistant_api_key() -> str:
+    return (
+        os.getenv("OPENAI_ASSISTANT_API_KEY", "").strip()
+        or os.getenv("OPENAI_API_KEY", "").strip()
+    )
+
 OYUNS_SYSTEM_PROMPT = """\
 You are OYUNS All-In-One Corporate AI Agent (ОМОХ Корпорацийн Ассистент), a
 context-first corporate assistant.
@@ -272,7 +289,7 @@ StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 
 
 def assistant_enabled() -> bool:
-    return bool(os.getenv("OPENAI_API_KEY", "").strip())
+    return bool(assistant_api_key())
 
 
 def assistant_model() -> str:
@@ -535,7 +552,7 @@ async def _call_native_router(
     chat_history: Optional[list[dict]] = None,
     learned_contexts: Optional[list[dict]] = None,
 ) -> Optional[NativeToolSelection]:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_key = assistant_api_key()
     if not api_key:
         return None
 
@@ -583,7 +600,7 @@ conversation history to extract all tool arguments and never invent details.
         timeout = aiohttp.ClientTimeout(total=assistant_timeout_seconds())
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
-                OPENAI_CHAT_URL,
+                assistant_chat_url(),
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -630,7 +647,7 @@ async def synthesize_tool_result(
     voice_mode: bool = False,
 ) -> Optional[str]:
     """Pass raw tool JSON back to OpenAI for the second, user-facing ReAct pass."""
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_key = assistant_api_key()
     if not api_key or not request_messages or not assistant_message or not tool_call_id:
         return None
 
@@ -652,7 +669,7 @@ async def synthesize_tool_result(
         timeout = aiohttp.ClientTimeout(total=assistant_timeout_seconds())
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
-                OPENAI_CHAT_URL,
+                assistant_chat_url(),
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -689,7 +706,7 @@ async def _call_structured(
     user: str,
     timeout_seconds: int = 30,
 ) -> Optional[StructuredModel]:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_key = assistant_api_key()
     if not api_key:
         return None
 
@@ -706,7 +723,7 @@ async def _call_structured(
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
-                OPENAI_CHAT_URL,
+                assistant_chat_url(),
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -759,6 +776,16 @@ _CYRILLIC_RE = re.compile(r"[А-Яа-яЁёӨөҮү]")
 _CAPABILITY_RE = re.compile(
     r"(what can you do|capabilit|how (?:do|can) i use|юу хийж чад|юу чаддаг|"
     r"боломжууд|хэрхэн ашиглах|что ты умеешь|как (?:тебя )?использовать)",
+    re.IGNORECASE,
+)
+_EXCHANGE_RATE_RE = re.compile(
+    r"(?:ханш|exchange\s+rate|currency\s+rate|курс|обменн(?:ый|ого)\s+курс)",
+    re.IGNORECASE,
+)
+_MONGOLBANK_RE = re.compile(r"монгол\s*банк(?:ны|ийн|ын)?|mongol\s*bank(?:'s)?", re.IGNORECASE)
+_CURRENCY_RE = re.compile(
+    r"\b(usd|eur|cny|jpy|krw|rub|gbp|chf)\b|"
+    r"(доллар|евро|юань|иен|вон|рубль|фунт|франк)",
     re.IGNORECASE,
 )
 _QUERY_RE = re.compile(
@@ -893,6 +920,40 @@ def _router_intent_for_fallback(intent: AssistantIntent, text: str) -> RouterInt
     return RouterIntent.UNKNOWN
 
 
+def _fallback_exchange_arguments(text: str) -> dict:
+    """Build a safe rate request when the model router is unavailable."""
+    provider = "MongolBank" if _MONGOLBANK_RE.search(text or "") else "MongolBank"
+    currency_names = {
+        "доллар": "USD", "евро": "EUR", "юань": "CNY", "иен": "JPY",
+        "вон": "KRW", "рубль": "RUB", "фунт": "GBP", "франк": "CHF",
+    }
+    match = _CURRENCY_RE.search(text or "")
+    currency = (match.group(1) if match and match.group(1) else currency_names.get(match.group(2).casefold()) if match else None)
+    return {
+        "provider": provider,
+        "pair": f"{currency}/MNT" if currency else "all",
+        "force_refresh": False,
+        "request_type": "single" if currency else "all",
+    }
+
+
+def _fallback_capability_answer(language: AssistantLanguage) -> str:
+    return {
+        AssistantLanguage.MN: (
+            "Би даалгавар үүсгэх ноорог бэлдэх, таны даалгавар ба ажлын ачааллыг харах, "
+            "ажлаа төлөвлөх, компанийн мэдлэгийн сангаас мэдээлэл хайх, валютын ханш шалгах боломжтой."
+        ),
+        AssistantLanguage.EN: (
+            "I can prepare task drafts, show your workload, help plan your work, search company knowledge, "
+            "and retrieve current exchange rates."
+        ),
+        AssistantLanguage.RU: (
+            "Я могу подготовить черновик задачи, показать вашу нагрузку, помочь спланировать работу, "
+            "найти информацию в базе компании и получить текущий курс валют."
+        ),
+    }[language]
+
+
 def _internal_intent(router_intent: RouterIntent, fallback: AssistantIntent) -> AssistantIntent:
     if router_intent == RouterIntent.CREATE_TASK:
         return AssistantIntent.DELEGATE_TASK
@@ -943,7 +1004,11 @@ def fallback_route(text: str, *, is_manager: bool = False) -> RouteDecision:
         if _TODAY_RE.search(text or "")
         else DateRangeKind.NONE
     )
-    if _CAPABILITY_RE.search(text or ""):
+    exchange_arguments = _fallback_exchange_arguments(text) if _EXCHANGE_RATE_RE.search(text or "") else None
+    if exchange_arguments:
+        intent = AssistantIntent.GENERAL_PRODUCTIVITY
+        confidence = 0.95
+    elif _CAPABILITY_RE.search(text or ""):
         intent = AssistantIntent.DISCOVER_CAPABILITIES
         confidence = 0.96
     elif _QUERY_RE.search(text or ""):
@@ -961,6 +1026,18 @@ def fallback_route(text: str, *, is_manager: bool = False) -> RouteDecision:
     else:
         intent = AssistantIntent.GENERAL_PRODUCTIVITY
         confidence = 0.5
+
+    selected_tool = None
+    tool_arguments = {}
+    direct_answer = None
+    if exchange_arguments:
+        selected_tool = AssistantToolName.GET_EXCHANGE_RATE
+        tool_arguments = exchange_arguments
+    elif intent == AssistantIntent.DISCOVER_CAPABILITIES:
+        direct_answer = _fallback_capability_answer(language)
+    elif _COMPANY_INFO_RE.search(text or ""):
+        selected_tool = AssistantToolName.SEARCH_COMPANY_KNOWLEDGE
+        tool_arguments = {"query": text.strip()}
 
     return RouteDecision(
         intent=intent,
@@ -981,6 +1058,9 @@ def fallback_route(text: str, *, is_manager: bool = False) -> RouteDecision:
         time_budget_minutes=_extract_budget(text),
         knowledge_terms=tokenize_search_terms([text])[:12],
         clarification=None,
+        selected_tool=selected_tool,
+        tool_arguments=tool_arguments,
+        direct_answer=direct_answer,
     )
 
 

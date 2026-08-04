@@ -11,6 +11,9 @@ from app.models.models import (  # noqa: F401
     Task,
     TaskComment,
     NotificationOutbox,
+    WorkReport,
+    WorkReportRevision,
+    WorkReportPrompt,
     AssistantContextExample,
     UnknownAssistantRequest,
 )
