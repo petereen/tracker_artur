@@ -176,6 +176,23 @@ def awaiting_report_for_message(employee_id: int, telegram_chat_id: str) -> Work
         "next_month_plan", "test_next_month_plan",
     }
     with get_session() as s:
+        # Test flows are explicitly started and strictly sequential. They do
+        # not need Telegram reply metadata, and must win over the assistant.
+        active_test_reports = s.execute(
+            select(WorkReport)
+            .where(
+                WorkReport.employee_id == employee_id,
+                WorkReport.status == "awaiting",
+                WorkReport.report_type.in_(TEST_REPORT_TYPES),
+            )
+            .order_by(WorkReport.updated_at.desc(), WorkReport.id.desc())
+        ).scalars().all()
+        if len(active_test_reports) == 1:
+            s.expunge(active_test_reports[0])
+            return active_test_reports[0]
+        if len(active_test_reports) > 1:
+            return None
+
         reports = s.execute(
             select(WorkReport)
             .join(WorkReportPrompt, WorkReportPrompt.report_id == WorkReport.id)
