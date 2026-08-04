@@ -198,6 +198,7 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
 
             await send_test_daily_report_prompt(
                 message.bot,
+                state=state,
                 employee_id=data["employee_id"],
                 telegram_chat_id=str(message.chat.id),
                 local_day=date.today(),

@@ -6,13 +6,21 @@ from html import escape
 
 import pytz
 from aiogram import F, Router
-from aiogram.filters import Command, Filter
+from aiogram.filters import Command, Filter, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.models.models import WorkReport
 from app.services import work_report_service
 
 router = Router()
+
+
+class TestReportFlow(StatesGroup):
+    daily_report = State()
+    monthly_report = State()
+    next_month_plan = State()
 
 
 def _local_now(timezone_name: str | None) -> datetime:
@@ -160,9 +168,17 @@ async def send_daily_prompts(
     return sent
 
 
-async def send_test_daily_report_prompt(bot, *, employee_id: int, telegram_chat_id: str, local_day: date) -> bool:
+async def send_test_daily_report_prompt(
+    bot,
+    *,
+    state: FSMContext,
+    employee_id: int,
+    telegram_chat_id: str,
+    local_day: date,
+) -> bool:
     """Advance the isolated daily test after its test check-in is completed."""
     report = work_report_service.get_or_create_report(employee_id, "daily_test", local_day)
+    await state.set_state(TestReportFlow.daily_report)
     return await send_report_prompt(
         bot,
         report,
@@ -201,8 +217,48 @@ class EditingReport(Filter):
         return {"work_report": report} if report else False
 
 
+async def _show_report_draft(message: Message, report: WorkReport, state: FSMContext) -> None:
+    revision = work_report_service.add_draft(report.id, message.text or "")
+    if not revision:
+        await message.answer("⚠️ Тайлангийн текст хоосон байна.")
+        return
+    await state.clear()
+    await message.answer(_draft_text(report, revision.text), parse_mode="HTML", reply_markup=draft_keyboard(report.id))
+
+
+@router.message(StateFilter(TestReportFlow.daily_report), F.text & ~F.text.startswith("/"))
+async def test_daily_report_text(message: Message, state: FSMContext, employee=None):
+    report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id)) if employee else None
+    if not report or report.report_type != "daily_test":
+        await state.clear()
+        await message.answer("⚠️ Өдрийн тайлангийн тестийн хүсэлт олдсонгүй. /test_daily гэж дахин эхлүүлнэ үү.")
+        return
+    await _show_report_draft(message, report, state)
+
+
+@router.message(StateFilter(TestReportFlow.monthly_report), F.text & ~F.text.startswith("/"))
+async def test_monthly_report_text(message: Message, state: FSMContext, employee=None):
+    report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id)) if employee else None
+    if not report or report.report_type != "monthly_test":
+        await state.clear()
+        await message.answer("⚠️ Сарын тайлангийн тестийн хүсэлт олдсонгүй. /test_monthly гэж дахин эхлүүлнэ үү.")
+        return
+    await _show_report_draft(message, report, state)
+
+
+@router.message(StateFilter(TestReportFlow.next_month_plan), F.text & ~F.text.startswith("/"))
+async def test_next_month_plan_text(message: Message, state: FSMContext, employee=None):
+    report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id)) if employee else None
+    if not report or report.report_type != "next_month_plan_test":
+        await state.clear()
+        await message.answer("⚠️ Төлөвлөгөөний тестийн хүсэлт олдсонгүй. /test_monthly гэж дахин эхлүүлнэ үү.")
+        return
+    await _show_report_draft(message, report, state)
+
+
 @router.message(F.text & ~F.text.startswith("/"), ReportPromptReply())
 async def report_prompt_reply(message: Message, work_report: WorkReport):
+    # Normal report flows are not FSM-bound; preserve their existing behavior.
     revision = work_report_service.add_draft(work_report.id, message.text or "")
     if not revision:
         await message.answer("⚠️ Тайлангийн текст хоосон байна.")
@@ -266,7 +322,7 @@ async def set_report_time(cb: CallbackQuery, employee=None):
 
 
 @router.callback_query(F.data.startswith("wrdraft:"))
-async def report_draft_action(cb: CallbackQuery, employee=None):
+async def report_draft_action(cb: CallbackQuery, state: FSMContext, employee=None):
     try:
         _, report_id_raw, action = (cb.data or "").split(":", 2)
         report_id = int(report_id_raw)
@@ -313,6 +369,8 @@ async def report_draft_action(cb: CallbackQuery, employee=None):
         local_day = _local_now(employee.timezone).date()
         plan_type = "next_month_plan_test" if approved.report_type == "monthly_test" else "next_month_plan"
         plan = work_report_service.get_or_create_report(employee.id, plan_type, local_day)
+        if approved.report_type == "monthly_test":
+            await state.set_state(TestReportFlow.next_month_plan)
         await send_report_prompt(
             cb.bot,
             plan,
@@ -333,7 +391,7 @@ async def _test_manager_ready(message: Message, employee, is_manager: bool) -> b
 
 
 @router.message(Command("test_daily"))
-async def cmd_test_daily(message: Message, employee=None, is_manager: bool = False):
+async def cmd_test_daily(message: Message, state: FSMContext, employee=None, is_manager: bool = False):
     """Start only the sequential daily test: check-in → report → times."""
     if not await _test_manager_ready(message, employee, is_manager):
         return
@@ -355,13 +413,14 @@ async def cmd_test_daily(message: Message, employee=None, is_manager: bool = Fal
 
 
 @router.message(Command("test_monthly"))
-async def cmd_test_monthly(message: Message, employee=None, is_manager: bool = False):
+async def cmd_test_monthly(message: Message, state: FSMContext, employee=None, is_manager: bool = False):
     """Start only the sequential monthly report → next-month-plan test."""
     if not await _test_manager_ready(message, employee, is_manager):
         return
     reset_count = work_report_service.reset_test_reports(frozenset({"monthly_test", "next_month_plan_test"}))
     local_day = _local_now(employee.timezone).date()
     monthly_report = work_report_service.get_or_create_report(employee.id, "monthly_test", local_day)
+    await state.set_state(TestReportFlow.monthly_report)
     sent = await send_report_prompt(
         message.bot,
         monthly_report,
