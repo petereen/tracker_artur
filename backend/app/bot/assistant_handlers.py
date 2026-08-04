@@ -219,29 +219,6 @@ def _knowledge_raw_data(entries: list[dict], *, query: str) -> dict:
     }
 
 
-def _knowledge_fallback_answer(raw_result: dict, language: assistant_ai.AssistantLanguage) -> str:
-    """Answer from approved knowledge if the optional synthesis call is unavailable."""
-    documents = raw_result.get("documents") if isinstance(raw_result, dict) else None
-    if not documents:
-        return {
-            assistant_ai.AssistantLanguage.MN: "Энэ тухай мэдээлэл компанийн мэдлэгийн санд одоогоор алга байна.",
-            assistant_ai.AssistantLanguage.EN: "The company knowledge base does not contain information about this yet.",
-            assistant_ai.AssistantLanguage.RU: "В базе знаний компании пока нет информации по этому вопросу.",
-        }[language]
-    prefix = {
-        assistant_ai.AssistantLanguage.MN: "Мэдлэгийн сангаас дараах мэдээлэл олдлоо:",
-        assistant_ai.AssistantLanguage.EN: "I found the following information in the company knowledge base:",
-        assistant_ai.AssistantLanguage.RU: "В базе знаний найдена следующая информация:",
-    }[language]
-    parts = [prefix]
-    for document in documents[:5]:
-        title = str(document.get("title") or "")
-        content = str(document.get("content") or "").strip()
-        if title and content:
-            parts.append(f"\n{title}: {content}")
-    return "".join(parts)
-
-
 async def execute_tool(
     tool_name: assistant_ai.AssistantToolName,
     arguments: dict,
@@ -438,11 +415,6 @@ async def route_and_respond(
                 raw_result=raw_result,
                 voice_mode=voice_mode,
             )
-            if (
-                not answer
-                and decision.selected_tool == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE
-            ):
-                answer = _knowledge_fallback_answer(raw_result, decision.language)
             if not answer:
                 answer = _generation_unavailable(decision.language)
             await _answer_question(

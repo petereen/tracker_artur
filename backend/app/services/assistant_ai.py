@@ -35,6 +35,8 @@ def assistant_chat_url() -> str:
     model name unchanged. The default remains the public OpenAI endpoint.
     """
     base_url = os.getenv("OPENAI_ASSISTANT_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+    if base_url.endswith("/chat/completions"):
+        return base_url
     return f"{base_url}/chat/completions"
 
 
@@ -783,6 +785,10 @@ _EXCHANGE_RATE_RE = re.compile(
     re.IGNORECASE,
 )
 _MONGOLBANK_RE = re.compile(r"монгол\s*банк(?:ны|ийн|ын)?|mongol\s*bank(?:'s)?", re.IGNORECASE)
+_TDBM_RE = re.compile(
+    r"(?:худалдаа\s*хөгжлийн\s*банк(?:ны|ийн|ын)?|tdbm|trade\s+and\s+development\s+bank)",
+    re.IGNORECASE,
+)
 _CURRENCY_RE = re.compile(
     r"\b(usd|eur|cny|jpy|krw|rub|gbp|chf)\b|"
     r"(доллар|евро|юань|иен|вон|рубль|фунт|франк)",
@@ -922,7 +928,7 @@ def _router_intent_for_fallback(intent: AssistantIntent, text: str) -> RouterInt
 
 def _fallback_exchange_arguments(text: str) -> dict:
     """Build a safe rate request when the model router is unavailable."""
-    provider = "MongolBank" if _MONGOLBANK_RE.search(text or "") else "MongolBank"
+    provider = "TDBM" if _TDBM_RE.search(text or "") else "MongolBank"
     currency_names = {
         "доллар": "USD", "евро": "EUR", "юань": "CNY", "иен": "JPY",
         "вон": "KRW", "рубль": "RUB", "фунт": "GBP", "франк": "CHF",
@@ -1035,7 +1041,7 @@ def fallback_route(text: str, *, is_manager: bool = False) -> RouteDecision:
         tool_arguments = exchange_arguments
     elif intent == AssistantIntent.DISCOVER_CAPABILITIES:
         direct_answer = _fallback_capability_answer(language)
-    elif _COMPANY_INFO_RE.search(text or ""):
+    elif _COMPANY_INFO_RE.search(text or "") and not is_worker_directory_query(text):
         selected_tool = AssistantToolName.SEARCH_COMPANY_KNOWLEDGE
         tool_arguments = {"query": text.strip()}
 
