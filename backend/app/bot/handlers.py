@@ -189,6 +189,7 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
         await _ask_question(message, next_q, state, session_id, next_index, all_qs)
     else:
         complete_session(session_id)
+        data = await state.get_data()
         session_type = data.get("session_type")
         await state.clear()
         await message.answer(build_checkin_summary(session_id), parse_mode="HTML")
