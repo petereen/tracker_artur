@@ -87,4 +87,10 @@ input, select, textarea, button { font-family: inherit; }
     overflow-y: auto;
     padding: 20px;
   }
+
+  .telegram-admin .fixed.inset-0 > .performance-modal {
+    width: calc(100% - 32px);
+    max-height: calc(var(--telegram-viewport-height, 100vh) - 32px);
+    padding: 20px;
+  }
 }

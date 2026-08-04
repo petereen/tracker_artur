@@ -178,7 +178,7 @@ export function EmployeesPage() {
       )}
 
       {performanceId !== null && (
-        <Modal title="Ажилтны гүйцэтгэл" onClose={() => setPerformanceId(null)} className="max-w-4xl">
+        <Modal title="Ажилтны гүйцэтгэл" onClose={() => setPerformanceId(null)} className="performance-modal max-w-6xl max-h-[calc(100vh-48px)] overflow-y-auto">
           {performance.isLoading && <div className="py-12 text-center text-muted">Гүйцэтгэлийн мэдээлэл ачаалж байна…</div>}
           {performance.isError && <div className="py-12 text-center text-red">Мэдээлэл ачаалахад алдаа гарлаа</div>}
           {performance.data && (() => {
