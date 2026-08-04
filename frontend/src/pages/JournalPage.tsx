@@ -19,13 +19,24 @@ function formatTime(value: string | null) {
   return value ? new Date(value).toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' }) : '—'
 }
 
+function localDate(value = new Date()) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+}
+
 export function JournalPage() {
   const [empFilter, setEmpFilter] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
+  const [range, setRange] = useState<'day' | 'week' | 'month' | 'all' | 'custom'>('all')
   const [tab, setTab] = useState<'answers' | 'reports'>('answers')
   const [reportType, setReportType] = useState('')
   const [reportStatus, setReportStatus] = useState('')
+  const setQuickRange = (days: number, key: 'day' | 'week' | 'month') => {
+    const start = new Date()
+    start.setDate(start.getDate() - days + 1)
+    setRange(key); setDateFrom(localDate(start)); setDateTo(localDate())
+  }
+  const setAllTime = () => { setRange('all'); setDateFrom(''); setDateTo('') }
 
   const { data: employees = [] } = useEmployees()
   const { data: rows = [] } = useAnswers({
@@ -56,14 +67,20 @@ export function JournalPage() {
             <button onClick={() => setTab('answers')} className={`px-3 py-1.5 rounded text-xs cursor-pointer border-none ${tab === 'answers' ? 'bg-accent text-white' : 'bg-transparent text-muted'}`}>Асуулгын хариулт</button>
             <button onClick={() => setTab('reports')} className={`px-3 py-1.5 rounded text-xs cursor-pointer border-none ${tab === 'reports' ? 'bg-accent text-white' : 'bg-transparent text-muted'}`}>Ажлын тайлан</button>
           </div>
+          <div className="flex gap-1 bg-surface2 rounded-lg p-1">
+            {[['day', 'Өнөөдөр'], ['week', '7 хоног'], ['month', '30 хоног'], ['all', 'Бүх']].map(([key, label]) => (
+              <button key={key} onClick={() => key === 'day' ? setQuickRange(1, 'day') : key === 'week' ? setQuickRange(7, 'week') : key === 'month' ? setQuickRange(30, 'month') : setAllTime()}
+                className={`px-2.5 py-1.5 rounded text-xs cursor-pointer border-none ${range === key ? 'bg-accent text-white' : 'bg-transparent text-muted'}`}>{label}</button>
+            ))}
+          </div>
           <select value={empFilter} onChange={(e) => setEmpFilter(e.target.value)}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">
             <option value="">Бүх ажилтан</option>
             {employees.map((e: any) => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+          <input type="date" value={dateFrom} onChange={(e) => { setRange('custom'); setDateFrom(e.target.value) }}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+          <input type="date" value={dateTo} onChange={(e) => { setRange('custom'); setDateTo(e.target.value) }}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
           {tab === 'reports' && <>
             <select value={reportType} onChange={(e) => setReportType(e.target.value)} className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">

@@ -126,6 +126,11 @@ def report_for_reply(employee_id: int, telegram_chat_id: str, message_id: int) -
             select(WorkReportPrompt).where(
                 WorkReportPrompt.telegram_chat_id == str(telegram_chat_id),
                 WorkReportPrompt.telegram_message_id == message_id,
+                WorkReportPrompt.prompt_type.in_({
+                    "daily_report", "test_daily_report",
+                    "monthly_report", "test_monthly_report",
+                    "next_month_plan", "test_next_month_plan",
+                }),
             )
         ).scalar_one_or_none()
         if not prompt:

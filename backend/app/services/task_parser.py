@@ -129,7 +129,7 @@ def _detect_priority(text: str) -> int:
 
 
 def parse_task_text(text: str, *, now: datetime, tz: str = "Asia/Ulaanbaatar") -> ParsedTask:
-    """Монгол (мөн хуучин орос) чөлөөт текстийг даалгавар болгон задлана.
+    """Текстийг даалгавар болгон задлана.
 
     ``now`` нь хэрэглэгчийн цагийн бүсэд байгаа timezone-aware утга байна.
     """

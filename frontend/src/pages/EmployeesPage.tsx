@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
-import { useEmployees, useCreateEmployee, useUpdateEmployee } from '../api/hooks'
+import { useEmployees, useCreateEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
 
 const TZ_OPTIONS = [
   { value: 'Asia/Ulaanbaatar',    label: 'Улаанбаатар (UTC+8)' },
@@ -17,6 +17,26 @@ const STATUS_OPTIONS = [
 
 const EMPTY_FORM = { name: '', telegram_id: '', telegram_username: '', timezone: 'Asia/Ulaanbaatar', is_active: true }
 
+const REPORT_TYPE_LABELS: Record<string, string> = {
+  daily: 'Өдрийн тайлан',
+  monthly: 'Сарын тайлан',
+  next_month_plan: 'Дараа сарын төлөвлөгөө',
+}
+
+function formatMinutes(minutes: number) {
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return hours ? `${hours}ц ${rest}м` : `${rest}м`
+}
+
+function formatTime(value: string | null) {
+  return value ? new Date(value).toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' }) : '—'
+}
+
+function localDate(value = new Date()) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+}
+
 export function EmployeesPage() {
   const { data: employees = [] } = useEmployees()
   const create = useCreateEmployee()
@@ -25,7 +45,15 @@ export function EmployeesPage() {
   const [search, setSearch] = useState('')
   // null = закрыто, { id: null } = создание, { id: number } = редактирование
   const [editing, setEditing] = useState<{ id: number | null } | null>(null)
+  const [performanceId, setPerformanceId] = useState<number | null>(null)
+  const [performanceRange, setPerformanceRange] = useState<'day' | 'week' | 'month' | 'all' | 'custom'>('month')
+  const [performanceFrom, setPerformanceFrom] = useState('')
+  const [performanceTo, setPerformanceTo] = useState('')
   const [form, setForm] = useState(EMPTY_FORM)
+  const performanceFilters = performanceRange === 'all'
+    ? { all_time: true }
+    : { period: 30, date_from: performanceFrom || undefined, date_to: performanceTo || undefined }
+  const performance = useEmployeePerformance(performanceId, performanceFilters)
 
   const isEdit = editing?.id != null
 
@@ -73,6 +101,11 @@ export function EmployeesPage() {
   }
 
   const toggle = (emp: any) => update.mutate({ id: emp.id, is_active: !emp.is_active })
+  const setPerformanceQuickRange = (days: number, key: 'day' | 'week' | 'month') => {
+    const start = new Date()
+    start.setDate(start.getDate() - days + 1)
+    setPerformanceRange(key); setPerformanceFrom(localDate(start)); setPerformanceTo(localDate())
+  }
 
   return (
     <div>
@@ -96,14 +129,15 @@ export function EmployeesPage() {
           </thead>
           <tbody>
             {filtered.map((e: any, i: number) => (
-              <tr key={e.id} className={`transition-colors hover:bg-surface2 ${i < filtered.length - 1 ? 'border-b border-border2' : ''}`}>
+              <tr key={e.id} onClick={() => { setPerformanceId(e.id); setPerformanceRange('month'); setPerformanceFrom(''); setPerformanceTo('') }}
+                className={`cursor-pointer transition-colors hover:bg-surface2 ${i < filtered.length - 1 ? 'border-b border-border2' : ''}`}>
                 <td className="px-4 py-3 font-medium">{e.name}</td>
                 <td className="px-4 py-3 text-muted font-mono text-xs">{e.telegram_username || '—'}</td>
                 <td className="px-4 py-3 text-muted2 font-mono text-[11px]">{e.telegram_id}</td>
                 <td className="px-4 py-3 text-muted text-xs">{e.timezone}</td>
                 <td className="px-4 py-3"><Badge color={e.is_active ? 'green' : 'muted'}>{e.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge></td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-1.5">
+                  <div className="flex gap-1.5" onClick={(event) => event.stopPropagation()}>
                     <Btn variant="ghost" onClick={() => openEdit(e)}>Засах</Btn>
                     <Btn variant={e.is_active ? 'danger' : 'ghost'} onClick={() => toggle(e)}>{e.is_active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}</Btn>
                   </div>
@@ -138,6 +172,99 @@ export function EmployeesPage() {
               <Btn variant="primary" onClick={submit} disabled={create.isPending || update.isPending}>{isEdit ? 'Хадгалах' : 'Нэмэх'}</Btn>
             </div>
           </div>
+        </Modal>
+      )}
+
+      {performanceId !== null && (
+        <Modal title="Ажилтны гүйцэтгэл" onClose={() => setPerformanceId(null)} className="max-w-4xl">
+          {performance.isLoading && <div className="py-12 text-center text-muted">Гүйцэтгэлийн мэдээлэл ачаалж байна…</div>}
+          {performance.isError && <div className="py-12 text-center text-red">Мэдээлэл ачаалахад алдаа гарлаа</div>}
+          {performance.data && (() => {
+            const data = performance.data
+            const checkins = data.checkins
+            const workTime = data.work_time
+            const reports = data.reports
+            return <div>
+              <div className="flex items-start justify-between gap-4 mb-5">
+                <div>
+                  <div className="text-lg font-semibold">{data.employee.name}</div>
+                  <div className="text-xs text-muted mt-0.5">{data.employee.telegram_username || 'Telegram username байхгүй'} · {data.employee.timezone}</div>
+                </div>
+                <Badge color={data.employee.is_active ? 'green' : 'muted'}>{data.employee.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge>
+              </div>
+
+              <div className="flex gap-1 bg-surface2 rounded-lg p-1 flex-wrap mb-4">
+                {[['day', 'Өнөөдөр'], ['week', '7 хоног'], ['month', '30 хоног'], ['all', 'Бүх хугацаа']].map(([key, label]) => (
+                  <button key={key} onClick={() => key === 'day' ? setPerformanceQuickRange(1, 'day') : key === 'week' ? setPerformanceQuickRange(7, 'week') : key === 'month' ? setPerformanceQuickRange(30, 'month') : setPerformanceRange('all')}
+                    className={`px-2.5 py-1.5 rounded text-xs cursor-pointer border-none ${performanceRange === key ? 'bg-accent text-white' : 'bg-transparent text-muted'}`}>{label}</button>
+                ))}
+                <input type="date" value={performanceFrom} onChange={(e) => { setPerformanceRange('custom'); setPerformanceFrom(e.target.value) }} className="ml-1 bg-surface border border-border rounded px-2 text-xs text-text outline-none" />
+                <input type="date" value={performanceTo} onChange={(e) => { setPerformanceRange('custom'); setPerformanceTo(e.target.value) }} className="bg-surface border border-border rounded px-2 text-xs text-text outline-none" />
+              </div>
+              <div className="text-xs text-muted mb-2">{data.date_from ? `${data.date_from} – ${data.date_to}` : `Бүх хугацаа · ${data.date_to} хүртэл`}</div>
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                <Card className="!p-4">
+                  <div className="text-xs text-muted">Нийт ажилласан цаг</div>
+                  <div className="text-2xl font-semibold text-green mt-1">{formatMinutes(workTime.total_minutes)}</div>
+                  <div className="text-xs text-muted mt-1">{workTime.complete_entries} бүрэн цагийн бүртгэл</div>
+                </Card>
+                <Card className="!p-4">
+                  <div className="text-xs text-muted">Чек-иний биелэлт</div>
+                  <div className="text-2xl font-semibold text-accent mt-1">{checkins.completion_rate}%</div>
+                  <div className="text-xs text-muted mt-1">{checkins.submitted} / {checkins.total} илгээсэн</div>
+                </Card>
+                <Card className="!p-4">
+                  <div className="text-xs text-muted">Батлагдсан өдрийн тайлан</div>
+                  <div className="text-2xl font-semibold text-purple mt-1">{reports.daily.approved}</div>
+                  <div className="text-xs text-muted mt-1">Нийт {reports.daily.total} тайлан</div>
+                </Card>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-5">
+                <div className="bg-surface2 border border-border rounded-xl p-4">
+                  <div className="font-medium mb-3">Чек-иний статистик</div>
+                  <div className="grid grid-cols-2 gap-y-2 text-[13px]">
+                    <span className="text-muted">Бүрэн бөглөсөн</span><span className="text-right text-green font-medium">{checkins.completed}</span>
+                    <span className="text-muted">Хэсэгчлэн</span><span className="text-right text-yellow font-medium">{checkins.partial}</span>
+                    <span className="text-muted">Алгассан</span><span className="text-right text-red font-medium">{checkins.missed}</span>
+                    <span className="text-muted">Хүлээгдэж буй</span><span className="text-right text-muted font-medium">{checkins.pending}</span>
+                  </div>
+                </div>
+                <div className="bg-surface2 border border-border rounded-xl p-4">
+                  <div className="font-medium mb-3">Ажлын цаг</div>
+                  <div className="grid grid-cols-2 gap-y-2 text-[13px]">
+                    <span className="text-muted">Өдрийн дундаж</span><span className="text-right font-medium">{formatMinutes(workTime.average_minutes)}</span>
+                    <span className="text-muted">Бүрэн бүртгэл</span><span className="text-right font-medium">{workTime.complete_entries}</span>
+                    <span className="text-muted">Дутуу бүртгэл</span><span className="text-right text-yellow font-medium">{workTime.incomplete_entries}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium">Тайлангийн статистик</div>
+                <div className="text-xs text-muted">батлагдсан / нийт</div>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mb-5 text-center">
+                {[
+                  ['Өдрийн тайлан', reports.daily],
+                  ['Сарын тайлан', reports.monthly],
+                  ['Дараа сарын төлөвлөгөө', reports.next_month_plan],
+                ].map(([label, stats]: any) => <div key={label} className="border border-border rounded-lg p-3">
+                  <div className="text-xs text-muted">{label}</div>
+                  <div className="font-semibold mt-1">{stats.approved} / {stats.total}</div>
+                  {stats.pending > 0 && <div className="text-[11px] text-yellow mt-0.5">{stats.pending} хүлээгдэж буй</div>}
+                </div>)}
+              </div>
+
+              <div className="font-medium mb-2">Сүүлийн тайлангууд</div>
+              <div className="border border-border rounded-lg overflow-hidden max-h-52 overflow-y-auto">
+                {data.recent_reports.length ? data.recent_reports.map((report: any, index: number) => <div key={report.id} className={`grid grid-cols-[1fr_auto_auto] gap-3 items-center px-3 py-2.5 text-xs ${index ? 'border-t border-border2' : ''}`}>
+                  <div><div className="font-medium">{REPORT_TYPE_LABELS[report.report_type] || report.report_type}</div><div className="text-muted mt-0.5">{report.period_date}{report.report_type === 'daily' ? ` · ${formatTime(report.started_at)} – ${formatTime(report.ended_at)}` : ''}</div></div>
+                  <Badge color={report.status === 'approved' ? 'green' : report.status === 'awaiting' ? 'yellow' : 'blue'}>{report.status === 'approved' ? 'Батлагдсан' : report.status === 'awaiting' ? 'Хүлээгдэж буй' : 'Ноорог'}</Badge>
+                </div>) : <div className="p-5 text-center text-sm text-muted">Тайлан байхгүй</div>}
+              </div>
+            </div>
+          })()}
         </Modal>
       )}
     </div>

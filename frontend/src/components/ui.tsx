@@ -93,10 +93,10 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
 }
 
 // --- Modal ---
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({ title, onClose, children, className = '' }: { title: string; onClose: () => void; children: React.ReactNode; className?: string }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-2xl p-7 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+      <div className={`bg-surface border border-border rounded-2xl p-7 w-full max-w-lg ${className}`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <div className="text-base font-semibold">{title}</div>
           <button onClick={onClose} className="bg-surface3 border-none rounded text-muted cursor-pointer px-2 py-1 text-base hover:text-text">✕</button>

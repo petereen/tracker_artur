@@ -44,6 +44,14 @@ export function useChangeOwnPassword() {
 export function useEmployees() {
   return useQuery({ queryKey: ['employees'], queryFn: () => api.get('/employees').then((r) => r.data) })
 }
+export function useEmployeePerformance(employeeId: number | null, filters: DateRangeFilters = {}) {
+  const params = dashboardParams(filters)
+  return useQuery({
+    queryKey: ['employees', employeeId, 'performance', filters],
+    queryFn: () => api.get(`/employees/${employeeId}/performance?${params}`).then((r) => r.data),
+    enabled: employeeId !== null,
+  })
+}
 export function useCreateEmployee() {
   const qc = useQueryClient()
   return useMutation({
@@ -113,14 +121,23 @@ export function useUpdateSchedule() {
 }
 
 // --- Dashboard ---
-export function useDashboardSummary(period = 30) {
-  return useQuery({ queryKey: ['dashboard', 'summary', period], queryFn: () => api.get(`/dashboard/summary?period=${period}`).then((r) => r.data) })
+export interface DateRangeFilters { period?: number; date_from?: string; date_to?: string; all_time?: boolean }
+function dashboardParams(filters: DateRangeFilters) {
+  const params = new URLSearchParams()
+  params.set('period', String(filters.period ?? 30))
+  if (filters.date_from) params.set('date_from', filters.date_from)
+  if (filters.date_to) params.set('date_to', filters.date_to)
+  if (filters.all_time) params.set('all_time', 'true')
+  return params
 }
-export function useDashboardMetrics(metric: string, period = 30) {
-  return useQuery({ queryKey: ['dashboard', 'metrics', metric, period], queryFn: () => api.get(`/dashboard/metrics?metric=${metric}&period=${period}`).then((r) => r.data) })
+export function useDashboardSummary(filters: DateRangeFilters = {}) {
+  return useQuery({ queryKey: ['dashboard', 'summary', filters], queryFn: () => api.get(`/dashboard/summary?${dashboardParams(filters)}`).then((r) => r.data) })
 }
-export function useWorkPerformance(period = 30) {
-  return useQuery({ queryKey: ['dashboard', 'work-performance', period], queryFn: () => api.get(`/dashboard/work-performance?period=${period}`).then((r) => r.data) })
+export function useDashboardMetrics(metric: string, filters: DateRangeFilters = {}) {
+  return useQuery({ queryKey: ['dashboard', 'metrics', metric, filters], queryFn: () => api.get(`/dashboard/metrics?metric=${metric}&${dashboardParams(filters)}`).then((r) => r.data) })
+}
+export function useWorkPerformance(filters: DateRangeFilters = {}) {
+  return useQuery({ queryKey: ['dashboard', 'work-performance', filters], queryFn: () => api.get(`/dashboard/work-performance?${dashboardParams(filters)}`).then((r) => r.data) })
 }
 export function useTopEmployees() {
   return useQuery({ queryKey: ['dashboard', 'top'], queryFn: () => api.get('/dashboard/top-employees').then((r) => r.data) })
