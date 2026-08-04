@@ -13,6 +13,11 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from app.models.models import WorkReport
 from app.services import work_report_service
+from app.services.monthly_report_digest_service import (
+    previous_month,
+    seed_dummy_monthly_test_reports,
+    try_send_monthly_report_digest,
+)
 
 router = Router()
 
@@ -435,10 +440,52 @@ async def cmd_test_monthly(message: Message, state: FSMContext, employee=None, i
         )
 
 
+@router.message(Command("seed_monthly_digest"))
+async def cmd_seed_monthly_digest(message: Message, is_manager: bool = False):
+    """Create dummy approved monthly-test reports without sending a digest."""
+    if not is_manager:
+        await message.answer("❌ Энэ команд зөвхөн удирдлагад зориулсан.")
+        return
+
+    today = date.today()
+    period = previous_month(today)
+    worker_count = seed_dummy_monthly_test_reports(period)
+    await message.answer(
+        f"🧪 {worker_count} dummy тайлан үүсгэлээ ({period.year}-{period.month:02d}).\n"
+        "Одоо /test_monthly_digest командыг ажиллуулна уу."
+    )
+
+
+@router.message(Command("test_monthly_digest"))
+async def cmd_test_monthly_digest(message: Message, is_manager: bool = False):
+    """Send the real digest logic for already-seeded dummy reports."""
+    if not is_manager:
+        await message.answer("❌ Энэ команд зөвхөн удирдлагад зориулсан.")
+        return
+
+    sent = await try_send_monthly_report_digest(
+        date.today(),
+        report_type="monthly_test",
+        reserve=False,
+        recipients=[str(message.chat.id)],
+        test_mode=True,
+    )
+    if not sent:
+        await message.answer(
+            "⚠️ Dummy тайлан олдсонгүй эсвэл бүх идэвхтэй ажилтны тайлан бэлэн биш байна. "
+            "Эхлээд /seed_monthly_digest ажиллуулна уу."
+        )
+
+
 @router.message(Command("test_reports"))
 async def cmd_test_reports(message: Message, is_manager: bool = False):
     """Point managers to the intentionally separate, sequential test flows."""
     if not is_manager:
         await message.answer("❌ Энэ команд зөвхөн удирдлагад зориулсан.")
         return
-    await message.answer("🧪 Өдрийн урсгал: /test_daily\n📅 Сарын урсгал: /test_monthly")
+    await message.answer(
+        "🧪 Өдрийн урсгал: /test_daily\n"
+        "📅 Сарын урсгал: /test_monthly\n"
+        "📊 Dummy тайлан үүсгэх: /seed_monthly_digest\n"
+        "📊 Dummy хураангуй ажиллуулах: /test_monthly_digest"
+    )

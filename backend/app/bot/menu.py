@@ -43,6 +43,8 @@ MANAGER_COMMANDS: list[BotCommand] = [
     BotCommand(command="blockers",  description="Сарын гол саад бэрхшээлүүд"),
     BotCommand(command="test_daily", description="Өдрийн урсгалын тест"),
     BotCommand(command="test_monthly", description="Сарын урсгалын тест"),
+    BotCommand(command="seed_monthly_digest", description="Dummy сарын тайлан үүсгэх"),
+    BotCommand(command="test_monthly_digest", description="Dummy сарын хураангуй тест"),
 ]
 
 

@@ -108,6 +108,23 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 docker compose up -d
 ```
 
+### Monthly report digest test
+
+Run the isolated digest test with deterministic dummy reports:
+
+```bash
+cd backend
+python -m pytest -q tests/test_monthly_report_digest.py
+```
+
+The test uses the real monthly digest orchestration and fallback summarizer,
+but does not write reports to the database, call OpenAI, or send Telegram messages.
+
+For a manual Telegram test, a manager can send `/seed_monthly_digest` first.
+The bot creates approved `monthly_test` reports for all active employees.
+Then send `/test_monthly_digest` to run the real digest logic and receive the
+result in that manager chat.
+
 Миграции и admin-пользователь создаются автоматически при первом запуске.
 
 Панель управления: `https://your-domain` или `http://localhost:3010`
