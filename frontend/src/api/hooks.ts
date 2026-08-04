@@ -166,6 +166,7 @@ export interface WorkReportOut {
   approved_revision_id: number | null
   created_at: string
   updated_at: string
+  revisions?: { id: number; text: string; status: string; created_at: string; updated_at: string }[]
 }
 export function useWorkReports(filters: { employee_id?: number; date_from?: string; date_to?: string; report_type?: string; status?: string } = {}) {
   const params = new URLSearchParams()
@@ -175,6 +176,45 @@ export function useWorkReports(filters: { employee_id?: number; date_from?: stri
   if (filters.report_type) params.set('report_type', filters.report_type)
   if (filters.status) params.set('status', filters.status)
   return useQuery<WorkReportOut[]>({ queryKey: ['work-reports', filters], queryFn: () => api.get(`/work-reports?${params}`).then((r) => r.data) })
+}
+export function useWorkReport(reportId: number | null) {
+  return useQuery<WorkReportOut & { revisions: NonNullable<WorkReportOut['revisions']> }>({
+    queryKey: ['work-report', reportId],
+    queryFn: () => api.get(`/work-reports/${reportId}`).then((r) => r.data),
+    enabled: reportId !== null,
+  })
+}
+
+export type PlanHorizon = 'long_term' | 'mid_term' | 'short_term'
+export interface CompanyPlanItem {
+  id: number; plan_month: string; title: string; content: string | null; horizon: PlanHorizon; position: number
+  status: 'approved'; source_employee_id: number | null; source_employee_name: string | null; source_report_id: number | null
+  approved_at: string; created_at: string; updated_at: string
+}
+export interface PlanSuggestion {
+  id: number; employee_id: number; employee_name: string; period_date: string; text: string | null
+  created_at: string; updated_at: string; company_plan_item_count: number
+}
+export function usePlanSuggestions(month: string) {
+  return useQuery<PlanSuggestion[]>({ queryKey: ['company-plan-suggestions', month], queryFn: () => api.get(`/company-plans/suggestions?month=${month}`).then((r) => r.data) })
+}
+export function useCompanyPlan(month: string) {
+  return useQuery<CompanyPlanItem[]>({ queryKey: ['company-plan', month], queryFn: () => api.get(`/company-plans?month=${month}`).then((r) => r.data) })
+}
+export function useCreateCompanyPlanItem() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { source_report_id: number; title: string; content?: string; plan_month: string; horizon: PlanHorizon }) => api.post('/company-plans/items', data).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['company-plan'] }); qc.invalidateQueries({ queryKey: ['company-plan-suggestions'] }); toast.success('Компанийн төлөвлөгөөнд нэмэгдлээ') },
+  })
+}
+export function useReorderCompanyPlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { plan_month: string; columns: Record<PlanHorizon, number[]> }) => api.put('/company-plans/reorder', data).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['company-plan'] }),
+    onError: () => toast.error('Төлөвлөгөөний дараалал хадгалагдсангүй'),
+  })
 }
 
 // --- Manager Settings ---

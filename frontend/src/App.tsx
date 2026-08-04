@@ -14,6 +14,8 @@ import { TgMiniAppPage } from './pages/TgMiniAppPage'
 import { PrivacyPage, TermsPage } from './pages/LegalPages'
 import { KnowledgePage } from './pages/KnowledgePage'
 import { DeveloperPage } from './pages/DeveloperPage'
+import { ReportsPage } from './pages/ReportsPage'
+import { PlansPage } from './pages/PlansPage'
 
 // Check if this is the Telegram Mini App route
 const isTgRoute = () => window.location.pathname === '/tg'
@@ -27,6 +29,8 @@ const PAGES: Record<string, JSX.Element> = {
   questions:  <QuestionsPage />,
   schedule:   <SchedulePage />,
   journal:    <JournalPage />,
+  reports:    <ReportsPage />,
+  plans:      <PlansPage />,
   manager:    <ManagerSettingsPage />,
   onboarding: <OnboardingPage />,
   knowledge:  <KnowledgePage />,

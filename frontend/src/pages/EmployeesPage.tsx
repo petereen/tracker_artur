@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 import { useEmployees, useCreateEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
+import { ReportDetailModal } from '../components/ReportDetailModal'
 
 const TZ_OPTIONS = [
   { value: 'Asia/Ulaanbaatar',    label: 'Улаанбаатар (UTC+8)' },
@@ -50,6 +51,7 @@ export function EmployeesPage() {
   const [performanceFrom, setPerformanceFrom] = useState('')
   const [performanceTo, setPerformanceTo] = useState('')
   const [form, setForm] = useState(EMPTY_FORM)
+  const [reportDetailId, setReportDetailId] = useState<number | null>(null)
   const performanceFilters = performanceRange === 'all'
     ? { all_time: true }
     : { period: 30, date_from: performanceFrom || undefined, date_to: performanceTo || undefined }
@@ -258,15 +260,17 @@ export function EmployeesPage() {
 
               <div className="font-medium mb-2">Сүүлийн тайлангууд</div>
               <div className="border border-border rounded-lg overflow-hidden max-h-52 overflow-y-auto">
-                {data.recent_reports.length ? data.recent_reports.map((report: any, index: number) => <div key={report.id} className={`grid grid-cols-[1fr_auto_auto] gap-3 items-center px-3 py-2.5 text-xs ${index ? 'border-t border-border2' : ''}`}>
-                  <div><div className="font-medium">{REPORT_TYPE_LABELS[report.report_type] || report.report_type}</div><div className="text-muted mt-0.5">{report.period_date}{report.report_type === 'daily' ? ` · ${formatTime(report.started_at)} – ${formatTime(report.ended_at)}` : ''}</div></div>
+                {data.recent_reports.length ? data.recent_reports.map((report: any, index: number) => <div key={report.id} className={`grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-center px-3 py-2.5 text-xs ${index ? 'border-t border-border2' : ''}`}>
+                  <div className="min-w-0"><div className="font-medium">{REPORT_TYPE_LABELS[report.report_type] || report.report_type}</div><div className="text-muted mt-0.5">{report.period_date}{report.report_type === 'daily' ? ` · ${formatTime(report.started_at)} – ${formatTime(report.ended_at)}` : ''}</div>{report.text && <div className="text-muted mt-1 truncate">{report.text}</div>}</div>
                   <Badge color={report.status === 'approved' ? 'green' : report.status === 'awaiting' ? 'yellow' : 'blue'}>{report.status === 'approved' ? 'Батлагдсан' : report.status === 'awaiting' ? 'Хүлээгдэж буй' : 'Ноорог'}</Badge>
+                  <Btn onClick={() => setReportDetailId(report.id)}>Дэлгэрэнгүй</Btn>
                 </div>) : <div className="p-5 text-center text-sm text-muted">Тайлан байхгүй</div>}
               </div>
             </div>
           })()}
         </Modal>
       )}
+      {reportDetailId !== null && <ReportDetailModal reportId={reportDetailId} onClose={() => setReportDetailId(null)} />}
     </div>
   )
 }

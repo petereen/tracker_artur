@@ -381,3 +381,38 @@ class WorkReportPrompt(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     report = relationship("WorkReport", back_populates="prompts")
+
+
+# ─── Компанийн сарын төлөвлөгөө ─────────────────────────────────────────────
+
+COMPANY_PLAN_HORIZONS = ("long_term", "mid_term", "short_term")
+COMPANY_PLAN_STATUSES = ("approved",)
+
+
+class CompanyPlanItem(Base):
+    """An administrator-approved actionable item derived from a worker plan."""
+
+    __tablename__ = "company_plan_items"
+    __table_args__ = (
+        CheckConstraint(
+            "horizon IN ('long_term','mid_term','short_term')",
+            name="ck_company_plan_items_horizon",
+        ),
+        CheckConstraint("status IN ('approved')", name="ck_company_plan_items_status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    plan_month = Column(Date, nullable=False, index=True)
+    title = Column(Text, nullable=False)
+    content = Column(Text)
+    horizon = Column(Text, nullable=False, server_default="short_term", default="short_term")
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+    status = Column(Text, nullable=False, server_default="approved", default="approved")
+    source_employee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    source_report_id = Column(Integer, ForeignKey("work_reports.id", ondelete="SET NULL"))
+    approved_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    source_employee = relationship("Employee", foreign_keys=[source_employee_id])
+    source_report = relationship("WorkReport", foreign_keys=[source_report_id])

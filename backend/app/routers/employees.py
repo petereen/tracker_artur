@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.models import Employee, Schedule, Streak, SurveySession, WorkReport
+from app.models.models import Employee, Schedule, Streak, SurveySession, WorkReport, WorkReportRevision
 
 router = APIRouter()
 
@@ -117,6 +117,17 @@ async def employee_performance(
             "pending": sum(r.status != "approved" for r in matching),
         }
 
+    recent_reports = reports[:8]
+    revisions = (await db.execute(
+        select(WorkReportRevision)
+        .where(WorkReportRevision.report_id.in_([report.id for report in recent_reports] or [-1]))
+        .order_by(WorkReportRevision.id.desc())
+    )).scalars().all()
+    latest_revision = {}
+    revision_by_id = {revision.id: revision for revision in revisions}
+    for revision in revisions:
+        latest_revision.setdefault(revision.report_id, revision)
+
     return {
         "employee": {
             "id": emp.id,
@@ -157,8 +168,13 @@ async def employee_performance(
                 "status": report.status,
                 "started_at": report.started_at,
                 "ended_at": report.ended_at,
+                "text": (
+                    revision_by_id[report.approved_revision_id].text
+                    if report.approved_revision_id in revision_by_id
+                    else (latest_revision[report.id].text if report.id in latest_revision else None)
+                ),
             }
-            for report in reports[:8]
+            for report in recent_reports
         ],
     }
 

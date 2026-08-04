@@ -7,6 +7,8 @@ const NAV = [
   { id: 'questions',  label: 'Асуултууд',     icon: '≡' },
   { id: 'schedule',   label: 'Хуваарь',       icon: '◷' },
   { id: 'journal',    label: 'Бүртгэл',       icon: '☰' },
+  { id: 'reports',    label: 'Тайлангууд',    icon: '▤' },
+  { id: 'plans',      label: 'Төлөвлөгөө',    icon: '▧' },
   { id: 'manager',    label: 'Удирдлага',     icon: '◎' },
   { id: 'knowledge',  label: 'Компаний мэдлэг', icon: '◆' },
   { id: 'developer',  label: 'Хөгжүүлэлт',      icon: '⌘' },
