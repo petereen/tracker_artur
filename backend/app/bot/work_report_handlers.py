@@ -256,7 +256,10 @@ async def cmd_test_reports(message: Message, employee=None, is_manager: bool = F
     sent_types: list[str] = []
     for report_type, prompt_type, label in (
         ("daily_test", "test_daily_checkin", "өдрийн чек-ин"),
+        ("daily_test", "test_daily_report", "өдрийн тайлан"),
+        ("daily_test", "test_daily_start", "ажил эхэлсэн цаг"),
         ("monthly_test", "test_monthly_report", "сарын тайлан"),
+        ("next_month_plan_test", "test_next_month_plan", "дараа сарын төлөвлөгөө"),
     ):
         report = work_report_service.get_or_create_report(employee.id, report_type, local_day)
         if report.status == "approved":
@@ -269,14 +272,6 @@ async def cmd_test_reports(message: Message, employee=None, is_manager: bool = F
             local_day=local_day,
         ):
             sent_types.append(label)
-        if report_type == "daily_test":
-            await send_report_prompt(
-                message.bot,
-                report,
-                telegram_chat_id=employee.telegram_id,
-                prompt_type="test_daily_report",
-                local_day=local_day,
-            )
     if sent_types:
         await message.answer(
             f"🧪 Өмнөх тестийн бүртгэлүүдийг цэвэрлэлээ ({reset_count}). "
