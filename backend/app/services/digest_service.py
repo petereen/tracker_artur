@@ -15,6 +15,7 @@ from app.bot.db import get_session
 from app.models.models import Employee
 from app.services import task_service
 from app.services.notification_policy import load_policy, working_days_between
+from app.services.manager_recipients import manager_telegram_ids
 
 log = logging.getLogger(__name__)
 
@@ -187,7 +188,6 @@ async def send_manager_task_digest() -> None:
         return
     from app.bot.db import get_manager_settings
     ms = get_manager_settings()
-    tg = (ms.telegram_id if ms and ms.telegram_id else None)
-    from app.core.config import settings
-    tg = tg or (str(settings.MANAGER_TG_ID) if settings.MANAGER_TG_ID else None)
-    await _send(tg, build_manager_overview())
+    message = build_manager_overview()
+    for recipient in manager_telegram_ids(ms):
+        await _send(recipient, message)

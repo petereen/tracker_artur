@@ -22,6 +22,7 @@ router = APIRouter()
 class ManagerSettingsOut(BaseModel):
     telegram_id: Optional[str]
     telegram_username: Optional[str]
+    telegram_admin_ids: list[str]
     summary_time: Optional[str]
     weekly_summary_time: Optional[str]
     weekly_summary_day: int
@@ -60,6 +61,7 @@ class ManagerSettingsOut(BaseModel):
 class ManagerSettingsUpdate(BaseModel):
     telegram_id: Optional[str] = None
     telegram_username: Optional[str] = None
+    telegram_admin_ids: Optional[list[str]] = None
     summary_time: Optional[str] = None
     weekly_summary_time: Optional[str] = None
     weekly_summary_day: Optional[int] = None
@@ -78,9 +80,27 @@ async def get_settings(db: AsyncSession = Depends(get_db), _=Depends(get_current
         db.add(s)
         await db.commit()
         await db.refresh(s)
+    return _settings_out(s)
+
+
+def _telegram_admin_ids(s: ManagerSettings) -> list[str]:
+    """Normalize legacy and new recipients into unique, numeric Telegram IDs."""
+    values = list(s.telegram_admin_ids or [])
+    if s.telegram_id:
+        values.insert(0, s.telegram_id)
+    ids: list[str] = []
+    for value in values:
+        value = str(value).strip()
+        if value and value not in ids:
+            ids.append(value)
+    return ids
+
+
+def _settings_out(s: ManagerSettings) -> ManagerSettingsOut:
     return ManagerSettingsOut(
         telegram_id=s.telegram_id,
         telegram_username=s.telegram_username,
+        telegram_admin_ids=_telegram_admin_ids(s),
         summary_time=str(s.summary_time) if s.summary_time else None,
         weekly_summary_time=str(s.weekly_summary_time) if s.weekly_summary_time else None,
         weekly_summary_day=s.weekly_summary_day,
@@ -99,6 +119,15 @@ async def update_settings(data: ManagerSettingsUpdate, db: AsyncSession = Depend
         s = ManagerSettings()
         db.add(s)
     updates = data.model_dump(exclude_none=True)
+    if "telegram_admin_ids" in updates:
+        ids: list[str] = []
+        for value in updates["telegram_admin_ids"]:
+            value = str(value).strip()
+            if value and value not in ids:
+                ids.append(value)
+        updates["telegram_admin_ids"] = ids
+        # Preserve compatibility with existing bot configuration and API clients.
+        updates["telegram_id"] = ids[0] if ids else None
     if "summary_time" in updates:
         updates["summary_time"] = _parse_time(updates["summary_time"])
     if "weekly_summary_time" in updates:
@@ -109,14 +138,4 @@ async def update_settings(data: ManagerSettingsUpdate, db: AsyncSession = Depend
         setattr(s, k, v)
     await db.commit()
     await db.refresh(s)
-    return ManagerSettingsOut(
-        telegram_id=s.telegram_id,
-        telegram_username=s.telegram_username,
-        summary_time=str(s.summary_time) if s.summary_time else None,
-        weekly_summary_time=str(s.weekly_summary_time) if s.weekly_summary_time else None,
-        weekly_summary_day=s.weekly_summary_day,
-        alerts_enabled=s.alerts_enabled,
-        gamification_enabled=s.gamification_enabled,
-        soft_mode_weeks=s.soft_mode_weeks,
-        tts_answers_enabled=s.tts_answers_enabled,
-    )
+    return _settings_out(s)

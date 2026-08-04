@@ -10,13 +10,14 @@ from aiogram.types import TelegramObject
 
 from app.bot.db import get_employee_by_tg, get_manager_settings, link_employee_telegram
 from app.core.config import settings
+from app.services.manager_recipients import manager_telegram_ids
 
 
 def _is_manager(tg_id: str) -> bool:
     if tg_id == str(settings.MANAGER_TG_ID):
         return True
     ms = get_manager_settings()
-    return bool(ms and ms.telegram_id and str(ms.telegram_id) == tg_id)
+    return tg_id in manager_telegram_ids(ms)
 
 
 class EmployeeMiddleware(BaseMiddleware):

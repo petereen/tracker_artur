@@ -22,7 +22,7 @@ export function ManagerSettingsPage() {
   const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
 
   const [form, setForm] = useState({
-    telegram_id: '', telegram_username: '',
+    telegram_id: '', telegram_username: '', telegram_admin_ids: [''],
     summary_time: '09:00', weekly_summary_time: '17:00', weekly_summary_day: '5',
     alerts_enabled: true, gamification_enabled: true, soft_mode_weeks: 1,
     tts_answers_enabled: true,
@@ -32,6 +32,7 @@ export function ManagerSettingsPage() {
     if (data) setForm({
       telegram_id: data.telegram_id || '',
       telegram_username: data.telegram_username || '',
+      telegram_admin_ids: data.telegram_admin_ids?.length ? data.telegram_admin_ids : [data.telegram_id || ''],
       summary_time: data.summary_time?.slice(0, 5) || '09:00',
       weekly_summary_time: data.weekly_summary_time?.slice(0, 5) || '17:00',
       weekly_summary_day: String(data.weekly_summary_day ?? 5),
@@ -43,6 +44,7 @@ export function ManagerSettingsPage() {
   }, [data])
 
   const f = (k: string, v: any) => setForm((prev) => ({ ...prev, [k]: v }))
+  const updateTelegramId = (index: number, value: string) => f('telegram_admin_ids', form.telegram_admin_ids.map((id, i) => i === index ? value : id))
 
   const addAdmin = async () => {
     if (!newAdmin.email || newAdmin.password.length < 8) {
@@ -82,9 +84,18 @@ export function ManagerSettingsPage() {
       <div className="flex flex-col gap-4 max-w-[700px]">
         <Card>
           <div className="font-semibold text-[15px] mb-4">Telegram</div>
-          <div className="grid grid-cols-2 gap-3.5">
-            <Input label="Удирдлагын Telegram ID" value={form.telegram_id} onChange={(v) => f('telegram_id', v)} placeholder="100012345" />
-            <Input label="Username" value={form.telegram_username} onChange={(v) => f('telegram_username', v)} placeholder="@username" />
+          <div className="flex flex-col gap-3.5">
+            {form.telegram_admin_ids.map((telegramId, index) => (
+              <div key={index} className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                <Input label={index === 0 ? 'Удирдлагын Telegram ID' : `Удирдлагын Telegram ID #${index + 1}`} value={telegramId} onChange={(v) => updateTelegramId(index, v)} placeholder="100012345" />
+                {form.telegram_admin_ids.length > 1 && <Btn variant="danger" onClick={() => f('telegram_admin_ids', form.telegram_admin_ids.filter((_, i) => i !== index))}>Устгах</Btn>}
+              </div>
+            ))}
+            <div className="flex items-end gap-3">
+              <Input label="Username (сонголтоор)" value={form.telegram_username} onChange={(v) => f('telegram_username', v)} placeholder="@username" />
+              <Btn onClick={() => f('telegram_admin_ids', [...form.telegram_admin_ids, ''])}>+ Удирдлага нэмэх</Btn>
+            </div>
+            <div className="text-xs text-muted">Сарын AI хураангуй болон удирдлагын мэдэгдлийг энд оруулсан бүх Telegram ID руу илгээнэ.</div>
           </div>
         </Card>
 

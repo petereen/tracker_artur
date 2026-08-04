@@ -17,6 +17,7 @@ from app.core.deps import get_current_user
 from app.core.telegram_auth import verify_init_data
 from app.models.models import DEFAULT_REMINDER_INTERVALS_MIN, Employee, ManagerSettings, NotificationOutbox, Task, TaskComment
 from app.services.notification_policy import load_policy, next_allowed
+from app.services.manager_recipients import manager_telegram_ids
 
 router = APIRouter()          # admin, mount /tasks
 miniapp_router = APIRouter()  # Mini App, mount /miniapp
@@ -231,7 +232,7 @@ async def _miniapp_actor(db: AsyncSession, init_data: Optional[str]) -> tuple[Em
     is_manager = tg_id == str(settings.MANAGER_TG_ID)
     if not is_manager:
         ms = (await db.execute(select(ManagerSettings))).scalars().first()
-        is_manager = bool(ms and ms.telegram_id and str(ms.telegram_id) == tg_id)
+        is_manager = tg_id in manager_telegram_ids(ms)
     if not emp and not is_manager:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not registered")
     return emp, is_manager

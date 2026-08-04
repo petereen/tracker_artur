@@ -118,6 +118,9 @@ class ManagerSettings(Base):
     id = Column(Integer, primary_key=True)
     telegram_id = Column(Text)
     telegram_username = Column(Text)
+    # The original single recipient is kept for backwards compatibility.
+    # New notifications are delivered to every distinct ID in this list.
+    telegram_admin_ids = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     summary_time = Column(Time, default=time(9, 0))
     weekly_summary_time = Column(Time, default=time(17, 0))
     weekly_summary_day = Column(Integer, nullable=False, server_default="5", default=5)
@@ -134,6 +137,17 @@ class ManagerSettings(Base):
     overdue_escalation_days = Column(Integer, default=1)      # рабочих дней просрочки до эскалации руководителю
     notifications_enabled = Column(Boolean, default=True)     # глобальный рубильник рутинных пушей
     tts_answers_enabled = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+
+
+class MonthlyReportDigest(Base):
+    """One successfully reserved monthly management digest per reporting period."""
+
+    __tablename__ = "monthly_report_digests"
+    __table_args__ = (UniqueConstraint("period_date", name="uq_monthly_report_digest_period"),)
+
+    id = Column(Integer, primary_key=True)
+    period_date = Column(Date, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class CompanyKnowledge(Base):

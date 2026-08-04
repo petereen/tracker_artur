@@ -122,6 +122,12 @@ def rebuild_jobs():
     scheduler.add_job(drain_notification_outbox, "interval", minutes=1,
         id="drain_outbox", replace_existing=True)
 
+    # The job checks completion rather than assuming a fixed submission day;
+    # it therefore sends as soon as the final previous-month report is approved.
+    from app.services.monthly_report_digest_service import try_send_monthly_report_digest
+    scheduler.add_job(try_send_monthly_report_digest, "interval", minutes=15,
+        id="monthly_report_digest", replace_existing=True)
+
     _last_schedule_fingerprint = _schedule_fingerprint()
     scheduler.add_job(reconcile_schedule_jobs, "interval", minutes=1,
         id="reconcile_schedules", replace_existing=True)
@@ -190,10 +196,12 @@ async def send_reminder(employee_id: int, num: int):
 async def mark_missed_job(employee_id: int):
     from app.bot.db import mark_session_missed, get_manager_settings, get_session
     from app.models.models import Employee
+    from app.services.manager_recipients import manager_telegram_ids
 
     mark_session_missed(employee_id)
     ms = get_manager_settings()
-    if not ms or not ms.alerts_enabled or not ms.telegram_id:
+    recipients = manager_telegram_ids(ms)
+    if not ms or not ms.alerts_enabled or not recipients:
         return
 
     bot = _make_bot()
@@ -202,7 +210,8 @@ async def mark_missed_job(employee_id: int):
             emp = s.get(Employee, employee_id)
             emp_name = emp.name if emp else None
         if emp_name:
-            await bot.send_message(ms.telegram_id, f"🚨 {emp_name} өнөөдөр чек-ин бөглөөгүй байна.")
+            for recipient in recipients:
+                await bot.send_message(recipient, f"🚨 {emp_name} өнөөдөр чек-ин бөглөөгүй байна.")
     finally:
         await bot.session.close()
 
@@ -276,9 +285,11 @@ async def reconcile_schedule_jobs():
 
 async def morning_summary():
     from app.bot.db import get_manager_settings, get_yesterday_summary
+    from app.services.manager_recipients import manager_telegram_ids
 
     ms = get_manager_settings()
-    if not ms or not ms.telegram_id:
+    recipients = manager_telegram_ids(ms)
+    if not ms or not recipients:
         return
 
     data = get_yesterday_summary()
@@ -290,6 +301,7 @@ async def morning_summary():
 
     bot = _make_bot()
     try:
-        await bot.send_message(ms.telegram_id, "\n".join(lines), parse_mode="HTML")
+        for recipient in recipients:
+            await bot.send_message(recipient, "\n".join(lines), parse_mode="HTML")
     finally:
         await bot.session.close()
