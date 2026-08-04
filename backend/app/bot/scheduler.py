@@ -132,7 +132,7 @@ def rebuild_jobs():
 async def send_survey(employee_id: int):
     from app.models.models import Employee
     from app.bot.db import create_session, get_session
-    from app.bot.work_report_handlers import send_report_prompt
+    from app.bot.work_report_handlers import send_daily_prompts
     from app.services import work_report_service
 
     bot = _make_bot()
@@ -146,19 +146,12 @@ async def send_survey(employee_id: int):
         create_session(employee_id)
         local_day = _local_today(timezone_name)
         report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
-        # Keep the questionnaire and the work report as separate messages.
-        await send_report_prompt(
+        # Keep the questionnaire, raw-text report, and work-time questions as
+        # separate messages, in the same order used by /test_reports.
+        await send_daily_prompts(
             bot,
             report,
             telegram_chat_id=telegram_id,
-            prompt_type="daily_checkin",
-            local_day=local_day,
-        )
-        await send_report_prompt(
-            bot,
-            report,
-            telegram_chat_id=telegram_id,
-            prompt_type="daily_report",
             local_day=local_day,
         )
     finally:

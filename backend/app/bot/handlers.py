@@ -104,19 +104,31 @@ async def cmd_app(message: Message, employee=None, is_manager: bool = False):
 
 @router.message(Command("today"))
 async def cmd_today(message: Message, state: FSMContext, employee=None):
+    await _begin_checkin(message, state, employee)
+
+
+@router.callback_query(F.data == "checkin:start")
+async def cb_start_checkin(cb: CallbackQuery, state: FSMContext, employee=None):
+    await cb.answer()
+    await _begin_checkin(cb, state, employee)
+
+
+async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMContext, employee=None):
+    """Launch the same questionnaire from /today and scheduled prompts."""
     emp = employee
+    target = message_or_cb.message if isinstance(message_or_cb, CallbackQuery) else message_or_cb
     if not emp:
-        await message.answer("❌ Та бүртгэгдээгүй байна.")
+        await target.answer("❌ Та бүртгэгдээгүй байна.")
         return
 
     questions = get_questions()
     if not questions:
-        await message.answer("⚠️ Асуултууд тохируулагдаагүй байна.")
+        await target.answer("⚠️ Асуултууд тохируулагдаагүй байна.")
         return
 
     sess = create_session(emp.id)
     await state.set_state(Survey.answering)
-    await _ask_question(message, questions[0], state, sess.id, 0, questions)
+    await _ask_question(message_or_cb, questions[0], state, sess.id, 0, questions)
 
 
 # ─── inline-ответ на число ───────────────────────────────────────────────────

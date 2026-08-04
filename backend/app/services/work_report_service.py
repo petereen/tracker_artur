@@ -244,7 +244,7 @@ def approve_draft(report_id: int) -> WorkReport | None:
 
 
 def set_work_time(report_id: int, field: str, at: datetime | None = None) -> datetime | None:
-    """Set a daily start/end timestamp only once and return the stored value."""
+    """Set a selected daily start/end timestamp only once and return it."""
     if field not in {"started_at", "ended_at"}:
         raise ValueError("invalid work-time field")
     with get_session() as s:

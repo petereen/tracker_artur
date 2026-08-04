@@ -1,7 +1,7 @@
 """Telegram flow for daily work logs and monthly free-form reports."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timezone
 from html import escape
 
 import pytz
@@ -23,28 +23,26 @@ def _local_now(timezone_name: str | None) -> datetime:
     return datetime.now(zone)
 
 
-def daily_prompt_keyboard(report_id: int) -> InlineKeyboardMarkup:
-    """Legacy keyboard containing both actions.
-
-    Keep this helper for existing integrations; the daily flow now sends one
-    work-time prompt per action via ``work_time_keyboard``.
-    """
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🟢 Одоо эхэллээ", callback_data=f"wrtime:{report_id}:start"),
-        InlineKeyboardButton(text="🔴 Одоо дууслаа", callback_data=f"wrtime:{report_id}:end"),
-    ]])
-
-
 def work_time_keyboard(report_id: int, action: str) -> InlineKeyboardMarkup:
-    if action == "start":
-        text = "🟢 Одоо эхэллээ"
-    elif action == "end":
-        text = "🔴 Одоо дууслаа"
-    else:
+    """Return the fixed half-hour choices used for daily start/end times."""
+    if action not in {"start", "end"}:
         raise ValueError("invalid work-time action")
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=text, callback_data=f"wrtime:{report_id}:{action}"),
-    ]])
+    slots = [
+        time(hour, minute)
+        for hour in range(6, 24)
+        for minute in (0, 30)
+        if (hour, minute) <= (23, 0)
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=slot.strftime("%H:%M"),
+                callback_data=f"wrtime:{report_id}:{action}:{slot.strftime('%H%M')}",
+            )
+            for slot in slots[index:index + 4]
+        ]
+        for index in range(0, len(slots), 4)
+    ])
 
 
 def draft_keyboard(report_id: int) -> InlineKeyboardMarkup:
@@ -55,13 +53,30 @@ def draft_keyboard(report_id: int) -> InlineKeyboardMarkup:
     ]])
 
 
+def checkin_keyboard() -> InlineKeyboardMarkup:
+    """Start the scheduled check-in without asking the worker to type /today."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📋 Чек-ин бөглөх", callback_data="checkin:start"),
+    ]])
+
+
 def _prompt_text(report_type: str, prompt_type: str | None = None) -> str:
     test_prefix = "🧪 <b>ТЕСТ</b> — " if report_type.endswith("_test") else ""
     if report_type in {"daily", "daily_test"}:
         if prompt_type in {"daily_checkin", "test_daily_checkin"}:
             return (
                 f"{test_prefix}⏰ <b>Өдрийн чек-ин</b>\n\n"
-                "Чек-ин бөглөх бол /today гэж бичнэ үү."
+                "Доорх товчийг дарж өнөөдрийн асуултуудад хариулна уу."
+            )
+        if prompt_type in {"daily_start", "test_daily_start"}:
+            return (
+                f"{test_prefix}🟢 <b>Ажил эхэлсэн цаг</b>\n\n"
+                "Өнөөдөр ажлаа хэдэн цагт эхэлсэн бэ?"
+            )
+        if prompt_type in {"daily_end", "test_daily_end"}:
+            return (
+                f"{test_prefix}🔴 <b>Ажил дууссан цаг</b>\n\n"
+                "Өнөөдөр ажлаа хэдэн цагт дууссан бэ?"
             )
         return (
             f"{test_prefix}📝 <b>Өдрийн ажлын тайлан</b>\n\n"
@@ -91,7 +106,9 @@ async def send_report_prompt(
         return False
     try:
         markup = None
-        if prompt_type in {"daily_start", "test_daily_start"}:
+        if prompt_type in {"daily_checkin", "test_daily_checkin"}:
+            markup = checkin_keyboard()
+        elif prompt_type in {"daily_start", "test_daily_start"}:
             markup = work_time_keyboard(report.id, "start")
         elif prompt_type in {"daily_end", "test_daily_end"}:
             markup = work_time_keyboard(report.id, "end")
@@ -106,6 +123,38 @@ async def send_report_prompt(
     except Exception:
         work_report_service.release_reserved_prompt(prompt.id)
         raise
+
+
+async def send_daily_prompts(
+    bot,
+    report: WorkReport,
+    *,
+    telegram_chat_id: str,
+    local_day: date,
+) -> list[str]:
+    """Send the daily check-in/report/time prompts in one canonical order.
+
+    Both the scheduler and ``/test_reports`` use this function so their
+    observable Telegram flows stay identical apart from the test prefix.
+    """
+    is_test = report.report_type == "daily_test"
+    prefix = "test_" if is_test else ""
+    sent: list[str] = []
+    for suffix, label in (
+        ("daily_checkin", "өдрийн чек-ин"),
+        ("daily_report", "өдрийн тайлан"),
+        ("daily_start", "ажил эхэлсэн цаг"),
+        ("daily_end", "ажил дууссан цаг"),
+    ):
+        if await send_report_prompt(
+            bot,
+            report,
+            telegram_chat_id=telegram_chat_id,
+            prompt_type=f"{prefix}{suffix}",
+            local_day=local_day,
+        ):
+            sent.append(label)
+    return sent
 
 
 def _draft_text(report: WorkReport, text: str) -> str:
@@ -155,8 +204,13 @@ async def edit_report_text(message: Message, work_report: WorkReport):
 @router.callback_query(F.data.startswith("wrtime:"))
 async def set_report_time(cb: CallbackQuery, employee=None):
     try:
-        _, report_id_raw, action = (cb.data or "").split(":", 2)
+        _, report_id_raw, action, slot_raw = (cb.data or "").split(":", 3)
         report_id = int(report_id_raw)
+        if len(slot_raw) != 4 or not slot_raw.isdigit():
+            raise ValueError
+        selected_time = time(int(slot_raw[:2]), int(slot_raw[2:]))
+        if not (time(6, 0) <= selected_time <= time(23, 0)) or selected_time.minute not in {0, 30}:
+            raise ValueError
     except (ValueError, AttributeError):
         await cb.answer("Буруу хүсэлт", show_alert=True)
         return
@@ -167,22 +221,22 @@ async def set_report_time(cb: CallbackQuery, employee=None):
     if action not in {"start", "end"}:
         await cb.answer("Буруу хүсэлт", show_alert=True)
         return
-    value = work_report_service.set_work_time(report_id, "started_at" if action == "start" else "ended_at")
+    try:
+        zone = pytz.timezone(employee.timezone or "Asia/Ulaanbaatar")
+    except Exception:
+        zone = pytz.timezone("Asia/Ulaanbaatar")
+    selected_at = zone.localize(datetime.combine(report.period_date, selected_time)).astimezone(timezone.utc)
+    value = work_report_service.set_work_time(
+        report_id,
+        "started_at" if action == "start" else "ended_at",
+        at=selected_at,
+    )
     if not value:
         await cb.answer("Бүртгэх боломжгүй байна.", show_alert=True)
         return
     local_value = value.astimezone(_local_now(employee.timezone).tzinfo).strftime("%H:%M")
     label = "Эхэлсэн" if action == "start" else "Дууссан"
     await cb.answer(f"{label} цаг: {local_value}", show_alert=True)
-    if action == "start":
-        local_day = _local_now(employee.timezone).date()
-        await send_report_prompt(
-            cb.bot,
-            report,
-            telegram_chat_id=employee.telegram_id,
-            prompt_type="test_daily_end" if report.report_type == "daily_test" else "daily_end",
-            local_day=local_day,
-        )
 
 
 @router.callback_query(F.data.startswith("wrdraft:"))
@@ -220,15 +274,6 @@ async def report_draft_action(cb: CallbackQuery, employee=None):
         return
     await cb.answer("Тайлан батлагдлаа.")
     await cb.message.answer("✅ Тайлан хадгалагдлаа.")
-    if approved.report_type in {"daily", "daily_test"}:
-        local_day = _local_now(employee.timezone).date()
-        await send_report_prompt(
-            cb.bot,
-            approved,
-            telegram_chat_id=employee.telegram_id,
-            prompt_type="test_daily_start" if approved.report_type == "daily_test" else "daily_start",
-            local_day=local_day,
-        )
     if approved.report_type in {"monthly", "monthly_test"}:
         local_day = _local_now(employee.timezone).date()
         plan_type = "next_month_plan_test" if approved.report_type == "monthly_test" else "next_month_plan"
@@ -254,29 +299,27 @@ async def cmd_test_reports(message: Message, employee=None, is_manager: bool = F
     reset_count = work_report_service.reset_test_reports()
     local_day = _local_now(employee.timezone).date()
     sent_types: list[str] = []
-    for report_type, prompt_type, label in (
-        ("daily_test", "test_daily_checkin", "өдрийн чек-ин"),
-        ("daily_test", "test_daily_report", "өдрийн тайлан"),
-        ("daily_test", "test_daily_start", "ажил эхэлсэн цаг"),
-        ("monthly_test", "test_monthly_report", "сарын тайлан"),
-        ("next_month_plan_test", "test_next_month_plan", "дараа сарын төлөвлөгөө"),
+    daily_report = work_report_service.get_or_create_report(employee.id, "daily_test", local_day)
+    sent_types.extend(await send_daily_prompts(
+        message.bot,
+        daily_report,
+        telegram_chat_id=employee.telegram_id,
+        local_day=local_day,
+    ))
+    monthly_report = work_report_service.get_or_create_report(employee.id, "monthly_test", local_day)
+    if await send_report_prompt(
+        message.bot,
+        monthly_report,
+        telegram_chat_id=employee.telegram_id,
+        prompt_type="test_monthly_report",
+        local_day=local_day,
     ):
-        report = work_report_service.get_or_create_report(employee.id, report_type, local_day)
-        if report.status == "approved":
-            continue
-        if await send_report_prompt(
-            message.bot,
-            report,
-            telegram_chat_id=employee.telegram_id,
-            prompt_type=prompt_type,
-            local_day=local_day,
-        ):
-            sent_types.append(label)
+        sent_types.append("сарын тайлан")
     if sent_types:
         await message.answer(
             f"🧪 Өмнөх тестийн бүртгэлүүдийг цэвэрлэлээ ({reset_count}). "
             f"Шинэ тестийн мессеж илгээлээ: {', '.join(sent_types)}. "
-            "Reply → ноорог → батлах урсгалаар шалгана уу."
+            "Reply → ноорог → батлах урсгалаар шалгана уу. Сарын тайланг баталсны дараа төлөвлөгөөний тест ирнэ."
         )
     else:
         await message.answer("🧪 Өнөөдрийн тестийн урсгал аль хэдийн илгээгдсэн эсвэл батлагдсан байна.")
