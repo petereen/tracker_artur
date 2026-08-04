@@ -251,6 +251,7 @@ async def cmd_test_reports(message: Message, employee=None, is_manager: bool = F
     if not employee or not employee.is_active:
         await message.answer("⚠️ Тест ажиллуулахын тулд удирдлага идэвхтэй ажилтнаар бүртгэгдсэн байх шаардлагатай.")
         return
+    reset_count = work_report_service.reset_test_reports()
     local_day = _local_now(employee.timezone).date()
     sent_types: list[str] = []
     for report_type, prompt_type, label in (
@@ -277,6 +278,10 @@ async def cmd_test_reports(message: Message, employee=None, is_manager: bool = F
                 local_day=local_day,
             )
     if sent_types:
-        await message.answer(f"🧪 Тестийн мессеж илгээлээ: {', '.join(sent_types)}. Reply → ноорог → батлах урсгалаар шалгана уу.")
+        await message.answer(
+            f"🧪 Өмнөх тестийн бүртгэлүүдийг цэвэрлэлээ ({reset_count}). "
+            f"Шинэ тестийн мессеж илгээлээ: {', '.join(sent_types)}. "
+            "Reply → ноорог → батлах урсгалаар шалгана уу."
+        )
     else:
         await message.answer("🧪 Өнөөдрийн тестийн урсгал аль хэдийн илгээгдсэн эсвэл батлагдсан байна.")

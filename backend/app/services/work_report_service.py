@@ -11,6 +11,9 @@ from app.bot.db import get_session
 from app.models.models import WorkReport, WorkReportPrompt, WorkReportRevision
 
 
+TEST_REPORT_TYPES = frozenset({"daily_test", "monthly_test", "next_month_plan_test"})
+
+
 def month_period(day: date) -> date:
     return day.replace(day=1)
 
@@ -60,6 +63,23 @@ def get_or_create_report(employee_id: int, report_type: str, local_day: date) ->
             s.refresh(report)
         s.expunge(report)
         return report
+
+
+def reset_test_reports() -> int:
+    """Remove all isolated test runs and their prompts/revisions.
+
+    Deleting through the ORM keeps the relationship cascades effective on
+    databases where foreign-key cascades are not enabled by the driver.
+    Returns the number of test report lifecycles removed.
+    """
+    with get_session() as s:
+        reports = s.execute(
+            select(WorkReport).where(WorkReport.report_type.in_(TEST_REPORT_TYPES))
+        ).scalars().all()
+        for report in reports:
+            s.delete(report)
+        s.commit()
+        return len(reports)
 
 
 def get_report(report_id: int) -> WorkReport | None:
