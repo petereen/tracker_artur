@@ -20,7 +20,12 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "manager_settings",
-        sa.Column("telegram_admin_ids", postgresql.JSONB(astext_type=sa.Text()), server_default="'[]'::jsonb", nullable=False),
+        sa.Column(
+            "telegram_admin_ids",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'[]'::jsonb"),
+            nullable=False,
+        ),
     )
     op.execute("UPDATE manager_settings SET telegram_admin_ids = jsonb_build_array(telegram_id) WHERE telegram_id IS NOT NULL")
     op.create_table(
