@@ -53,10 +53,13 @@ def draft_keyboard(report_id: int) -> InlineKeyboardMarkup:
     ]])
 
 
-def checkin_keyboard() -> InlineKeyboardMarkup:
+def checkin_keyboard(is_test: bool = False) -> InlineKeyboardMarkup:
     """Start the scheduled check-in without asking the worker to type /today."""
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📋 Чек-ин бөглөх", callback_data="checkin:start"),
+        InlineKeyboardButton(
+            text="📋 Чек-ин бөглөх",
+            callback_data="checkin:start:test" if is_test else "checkin:start",
+        ),
     ]])
 
 
@@ -107,7 +110,7 @@ async def send_report_prompt(
     try:
         markup = None
         if prompt_type in {"daily_checkin", "test_daily_checkin"}:
-            markup = checkin_keyboard()
+            markup = checkin_keyboard(report.report_type == "daily_test")
         elif prompt_type in {"daily_start", "test_daily_start"}:
             markup = work_time_keyboard(report.id, "start")
         elif prompt_type in {"daily_end", "test_daily_end"}:
@@ -157,6 +160,18 @@ async def send_daily_prompts(
     return sent
 
 
+async def send_test_daily_report_prompt(bot, *, employee_id: int, telegram_chat_id: str, local_day: date) -> bool:
+    """Advance the isolated daily test after its test check-in is completed."""
+    report = work_report_service.get_or_create_report(employee_id, "daily_test", local_day)
+    return await send_report_prompt(
+        bot,
+        report,
+        telegram_chat_id=telegram_chat_id,
+        prompt_type="test_daily_report",
+        local_day=local_day,
+    )
+
+
 def _draft_text(report: WorkReport, text: str) -> str:
     label = {
         "daily": "Өдрийн тайлан", "monthly": "Сарын тайлан", "next_month_plan": "Дараа сарын төлөвлөгөө",
@@ -167,11 +182,14 @@ def _draft_text(report: WorkReport, text: str) -> str:
 
 class ReportPromptReply(Filter):
     async def __call__(self, message: Message, employee=None, **_) -> dict | bool:
-        if not employee or not message.reply_to_message:
+        if not employee:
             return False
-        report = work_report_service.report_for_reply(
-            employee.id, str(message.chat.id), message.reply_to_message.message_id
-        )
+        if message.reply_to_message:
+            report = work_report_service.report_for_reply(
+                employee.id, str(message.chat.id), message.reply_to_message.message_id
+            )
+        else:
+            report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id))
         return {"work_report": report} if report else False
 
 
@@ -237,6 +255,14 @@ async def set_report_time(cb: CallbackQuery, employee=None):
     local_value = value.astimezone(_local_now(employee.timezone).tzinfo).strftime("%H:%M")
     label = "Эхэлсэн" if action == "start" else "Дууссан"
     await cb.answer(f"{label} цаг: {local_value}", show_alert=True)
+    if action == "start" and report.report_type == "daily_test":
+        await send_report_prompt(
+            cb.bot,
+            report,
+            telegram_chat_id=employee.telegram_id,
+            prompt_type="test_daily_end",
+            local_day=_local_now(employee.timezone).date(),
+        )
 
 
 @router.callback_query(F.data.startswith("wrdraft:"))
@@ -274,6 +300,15 @@ async def report_draft_action(cb: CallbackQuery, employee=None):
         return
     await cb.answer("Тайлан батлагдлаа.")
     await cb.message.answer("✅ Тайлан хадгалагдлаа.")
+    if approved.report_type == "daily_test":
+        local_day = _local_now(employee.timezone).date()
+        await send_report_prompt(
+            cb.bot,
+            approved,
+            telegram_chat_id=employee.telegram_id,
+            prompt_type="test_daily_start",
+            local_day=local_day,
+        )
     if approved.report_type in {"monthly", "monthly_test"}:
         local_day = _local_now(employee.timezone).date()
         plan_type = "next_month_plan_test" if approved.report_type == "monthly_test" else "next_month_plan"
@@ -287,39 +322,64 @@ async def report_draft_action(cb: CallbackQuery, employee=None):
         )
 
 
-@router.message(Command("test_reports"))
-async def cmd_test_reports(message: Message, employee=None, is_manager: bool = False):
-    """Manager-only, isolated end-to-end test of the report Telegram flow."""
+async def _test_manager_ready(message: Message, employee, is_manager: bool) -> bool:
     if not is_manager:
         await message.answer("❌ Энэ команд зөвхөн удирдлагад зориулсан.")
-        return
+        return False
     if not employee or not employee.is_active:
         await message.answer("⚠️ Тест ажиллуулахын тулд удирдлага идэвхтэй ажилтнаар бүртгэгдсэн байх шаардлагатай.")
+        return False
+    return True
+
+
+@router.message(Command("test_daily"))
+async def cmd_test_daily(message: Message, employee=None, is_manager: bool = False):
+    """Start only the sequential daily test: check-in → report → times."""
+    if not await _test_manager_ready(message, employee, is_manager):
         return
-    reset_count = work_report_service.reset_test_reports()
+    reset_count = work_report_service.reset_test_reports(frozenset({"daily_test"}))
     local_day = _local_now(employee.timezone).date()
-    sent_types: list[str] = []
     daily_report = work_report_service.get_or_create_report(employee.id, "daily_test", local_day)
-    sent_types.extend(await send_daily_prompts(
+    sent = await send_report_prompt(
         message.bot,
         daily_report,
         telegram_chat_id=employee.telegram_id,
+        prompt_type="test_daily_checkin",
         local_day=local_day,
-    ))
+    )
+    if sent:
+        await message.answer(
+            f"🧪 Өмнөх өдрийн тестийг цэвэрлэлээ ({reset_count}). "
+            "Эхлээд чек-ин бөглөнө үү. Дараа нь өдрийн тайлан, ажил эхэлсэн ба дууссан цагийн асуултууд нэг нэгээрээ ирнэ."
+        )
+
+
+@router.message(Command("test_monthly"))
+async def cmd_test_monthly(message: Message, employee=None, is_manager: bool = False):
+    """Start only the sequential monthly report → next-month-plan test."""
+    if not await _test_manager_ready(message, employee, is_manager):
+        return
+    reset_count = work_report_service.reset_test_reports(frozenset({"monthly_test", "next_month_plan_test"}))
+    local_day = _local_now(employee.timezone).date()
     monthly_report = work_report_service.get_or_create_report(employee.id, "monthly_test", local_day)
-    if await send_report_prompt(
+    sent = await send_report_prompt(
         message.bot,
         monthly_report,
         telegram_chat_id=employee.telegram_id,
         prompt_type="test_monthly_report",
         local_day=local_day,
-    ):
-        sent_types.append("сарын тайлан")
-    if sent_types:
+    )
+    if sent:
         await message.answer(
-            f"🧪 Өмнөх тестийн бүртгэлүүдийг цэвэрлэлээ ({reset_count}). "
-            f"Шинэ тестийн мессеж илгээлээ: {', '.join(sent_types)}. "
-            "Reply → ноорог → батлах урсгалаар шалгана уу. Сарын тайланг баталсны дараа төлөвлөгөөний тест ирнэ."
+            f"🧪 Өмнөх сарын тестийг цэвэрлэлээ ({reset_count}). "
+            "Сарын тайлангийн Reply → ноорог → батлах урсгалыг шалгана уу. Баталсны дараа дараа сарын төлөвлөгөө ирнэ."
         )
-    else:
-        await message.answer("🧪 Өнөөдрийн тестийн урсгал аль хэдийн илгээгдсэн эсвэл батлагдсан байна.")
+
+
+@router.message(Command("test_reports"))
+async def cmd_test_reports(message: Message, is_manager: bool = False):
+    """Point managers to the intentionally separate, sequential test flows."""
+    if not is_manager:
+        await message.answer("❌ Энэ команд зөвхөн удирдлагад зориулсан.")
+        return
+    await message.answer("🧪 Өдрийн урсгал: /test_daily\n📅 Сарын урсгал: /test_monthly")

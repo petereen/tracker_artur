@@ -2,7 +2,15 @@ import asyncio
 from types import SimpleNamespace
 
 from app.bot import work_report_handlers
-from app.bot.work_report_handlers import _draft_text, _prompt_text, checkin_keyboard, draft_keyboard, send_daily_prompts, work_time_keyboard
+from app.bot.work_report_handlers import (
+    _draft_text,
+    _prompt_text,
+    checkin_keyboard,
+    draft_keyboard,
+    send_daily_prompts,
+    send_test_daily_report_prompt,
+    work_time_keyboard,
+)
 
 
 def test_draft_prompt_has_all_lifecycle_actions():
@@ -17,6 +25,7 @@ def test_daily_checkin_and_report_are_separate_prompts():
     assert "товч" in checkin
     assert "ажлын тайлан" in report
     assert [button.callback_data for row in checkin_keyboard().inline_keyboard for button in row] == ["checkin:start"]
+    assert [button.callback_data for row in checkin_keyboard(True).inline_keyboard for button in row] == ["checkin:start:test"]
 
 
 def test_work_time_prompts_have_one_action_each():
@@ -43,11 +52,29 @@ def test_daily_prompt_orchestration_has_the_required_order(monkeypatch):
         return True
 
     monkeypatch.setattr(work_report_handlers, "send_report_prompt", fake_send_report_prompt)
-    report = SimpleNamespace(report_type="daily_test")
+    report = SimpleNamespace(report_type="daily")
     labels = asyncio.run(send_daily_prompts(None, report, telegram_chat_id="1", local_day=None))
 
-    assert sent == ["test_daily_checkin", "test_daily_report", "test_daily_start", "test_daily_end"]
+    assert sent == ["daily_checkin", "daily_report", "daily_start", "daily_end"]
     assert labels == ["өдрийн чек-ин", "өдрийн тайлан", "ажил эхэлсэн цаг", "ажил дууссан цаг"]
+
+
+def test_test_daily_advances_to_the_report_only_after_checkin(monkeypatch):
+    report = SimpleNamespace(id=9, report_type="daily_test")
+    captured = {}
+
+    monkeypatch.setattr(work_report_handlers.work_report_service, "get_or_create_report", lambda *_: report)
+
+    async def fake_send_report_prompt(bot, supplied_report, **kwargs):
+        captured["report"] = supplied_report
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(work_report_handlers, "send_report_prompt", fake_send_report_prompt)
+
+    assert asyncio.run(send_test_daily_report_prompt(None, employee_id=3, telegram_chat_id="1", local_day=None)) is True
+    assert captured["report"] is report
+    assert captured["prompt_type"] == "test_daily_report"
 
 
 def test_report_draft_renders_the_worker_raw_text_without_rewriting():

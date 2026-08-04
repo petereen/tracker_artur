@@ -107,13 +107,13 @@ async def cmd_today(message: Message, state: FSMContext, employee=None):
     await _begin_checkin(message, state, employee)
 
 
-@router.callback_query(F.data == "checkin:start")
+@router.callback_query(F.data.startswith("checkin:start"))
 async def cb_start_checkin(cb: CallbackQuery, state: FSMContext, employee=None):
     await cb.answer()
-    await _begin_checkin(cb, state, employee)
+    await _begin_checkin(cb, state, employee, session_type="daily_test" if (cb.data or "").endswith(":test") else "evening")
 
 
-async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMContext, employee=None):
+async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMContext, employee=None, session_type: str = "evening"):
     """Launch the same questionnaire from /today and scheduled prompts."""
     emp = employee
     target = message_or_cb.message if isinstance(message_or_cb, CallbackQuery) else message_or_cb
@@ -126,8 +126,9 @@ async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMConte
         await target.answer("⚠️ Асуултууд тохируулагдаагүй байна.")
         return
 
-    sess = create_session(emp.id)
+    sess = create_session(emp.id, session_type=session_type)
     await state.set_state(Survey.answering)
+    await state.update_data(session_type=session_type, employee_id=emp.id)
     await _ask_question(message_or_cb, questions[0], state, sess.id, 0, questions)
 
 
@@ -188,8 +189,18 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
         await _ask_question(message, next_q, state, session_id, next_index, all_qs)
     else:
         complete_session(session_id)
+        session_type = data.get("session_type")
         await state.clear()
         await message.answer(build_checkin_summary(session_id), parse_mode="HTML")
+        if session_type == "daily_test":
+            from app.bot.work_report_handlers import send_test_daily_report_prompt
+
+            await send_test_daily_report_prompt(
+                message.bot,
+                employee_id=data["employee_id"],
+                telegram_chat_id=str(message.chat.id),
+                local_day=date.today(),
+            )
 
 
 # ─── /my_stats ────────────────────────────────────────────────────────────────

@@ -65,7 +65,7 @@ def get_or_create_report(employee_id: int, report_type: str, local_day: date) ->
         return report
 
 
-def reset_test_reports() -> int:
+def reset_test_reports(report_types: frozenset[str] = TEST_REPORT_TYPES) -> int:
     """Remove all isolated test runs and their prompts/revisions.
 
     Deleting through the ORM keeps the relationship cascades effective on
@@ -74,7 +74,7 @@ def reset_test_reports() -> int:
     """
     with get_session() as s:
         reports = s.execute(
-            select(WorkReport).where(WorkReport.report_type.in_(TEST_REPORT_TYPES))
+            select(WorkReport).where(WorkReport.report_type.in_(report_types))
         ).scalars().all()
         for report in reports:
             s.delete(report)
@@ -160,6 +160,45 @@ def report_for_reply(employee_id: int, telegram_chat_id: str, message_id: int) -
             return None
         s.expunge(report)
         return report
+
+
+def awaiting_report_for_message(employee_id: int, telegram_chat_id: str) -> WorkReport | None:
+    """Return one unambiguous report that can accept a non-reply text.
+
+    Reply matching remains the normal path. This fallback prevents the general
+    assistant from consuming a worker's report when Telegram's reply context
+    is absent, but deliberately refuses to guess when more than one report is
+    awaiting text.
+    """
+    report_prompt_types = {
+        "daily_report", "test_daily_report",
+        "monthly_report", "test_monthly_report",
+        "next_month_plan", "test_next_month_plan",
+    }
+    with get_session() as s:
+        reports = s.execute(
+            select(WorkReport)
+            .join(WorkReportPrompt, WorkReportPrompt.report_id == WorkReport.id)
+            .where(
+                WorkReport.employee_id == employee_id,
+                WorkReport.status == "awaiting",
+                WorkReportPrompt.telegram_chat_id == str(telegram_chat_id),
+                WorkReportPrompt.prompt_type.in_(report_prompt_types),
+            )
+            .distinct()
+        ).scalars().all()
+        if len(reports) == 1:
+            chosen = reports[0]
+        else:
+            # A deliberately started test flow is the one safe exception to
+            # the ambiguity rule: it should remain usable even if a normal
+            # production report is also awaiting text.
+            test_reports = [report for report in reports if report.report_type in TEST_REPORT_TYPES]
+            if len(test_reports) != 1:
+                return None
+            chosen = test_reports[0]
+        s.expunge(chosen)
+        return chosen
 
 
 def _current_draft(s, report_id: int) -> WorkReportRevision | None:
