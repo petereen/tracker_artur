@@ -218,6 +218,27 @@ def awaiting_report_for_message(employee_id: int, telegram_chat_id: str) -> Work
         return chosen
 
 
+def awaiting_report_for_employee_type(employee_id: int, report_type: str) -> WorkReport | None:
+    """Get the most recent awaiting report of one explicit type.
+
+    Sequential test states call this instead of inferring intent from all
+    outstanding test records.
+    """
+    with get_session() as s:
+        report = s.execute(
+            select(WorkReport)
+            .where(
+                WorkReport.employee_id == employee_id,
+                WorkReport.report_type == report_type,
+                WorkReport.status == "awaiting",
+            )
+            .order_by(WorkReport.period_date.desc(), WorkReport.id.desc())
+        ).scalars().first()
+        if report:
+            s.expunge(report)
+        return report
+
+
 def _current_draft(s, report_id: int) -> WorkReportRevision | None:
     return s.execute(
         select(WorkReportRevision)

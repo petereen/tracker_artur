@@ -228,8 +228,8 @@ async def _show_report_draft(message: Message, report: WorkReport, state: FSMCon
 
 @router.message(StateFilter(TestReportFlow.daily_report), F.text & ~F.text.startswith("/"))
 async def test_daily_report_text(message: Message, state: FSMContext, employee=None):
-    report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id)) if employee else None
-    if not report or report.report_type != "daily_test":
+    report = work_report_service.awaiting_report_for_employee_type(employee.id, "daily_test") if employee else None
+    if not report:
         await state.clear()
         await message.answer("⚠️ Өдрийн тайлангийн тестийн хүсэлт олдсонгүй. /test_daily гэж дахин эхлүүлнэ үү.")
         return
@@ -238,8 +238,8 @@ async def test_daily_report_text(message: Message, state: FSMContext, employee=N
 
 @router.message(StateFilter(TestReportFlow.monthly_report), F.text & ~F.text.startswith("/"))
 async def test_monthly_report_text(message: Message, state: FSMContext, employee=None):
-    report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id)) if employee else None
-    if not report or report.report_type != "monthly_test":
+    report = work_report_service.awaiting_report_for_employee_type(employee.id, "monthly_test") if employee else None
+    if not report:
         await state.clear()
         await message.answer("⚠️ Сарын тайлангийн тестийн хүсэлт олдсонгүй. /test_monthly гэж дахин эхлүүлнэ үү.")
         return
@@ -248,8 +248,8 @@ async def test_monthly_report_text(message: Message, state: FSMContext, employee
 
 @router.message(StateFilter(TestReportFlow.next_month_plan), F.text & ~F.text.startswith("/"))
 async def test_next_month_plan_text(message: Message, state: FSMContext, employee=None):
-    report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id)) if employee else None
-    if not report or report.report_type != "next_month_plan_test":
+    report = work_report_service.awaiting_report_for_employee_type(employee.id, "next_month_plan_test") if employee else None
+    if not report:
         await state.clear()
         await message.answer("⚠️ Төлөвлөгөөний тестийн хүсэлт олдсонгүй. /test_monthly гэж дахин эхлүүлнэ үү.")
         return
