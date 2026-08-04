@@ -16,6 +16,8 @@ log = logging.getLogger(__name__)
 EMPLOYEE_COMMANDS: list[BotCommand] = [
     BotCommand(command="app",     description="Даалгаврын самбар нээх"),
     BotCommand(command="today",   description="Өнөөдрийн чек-ин бөглөх"),
+    BotCommand(command="daystart", description="Ажил эхэлсэн цаг бүртгэх"),
+    BotCommand(command="dayend",   description="Ажил дууссан цаг бүртгэх"),
     BotCommand(command="mytasks", description="Миний идэвхтэй даалгаврууд"),
     BotCommand(command="done",    description="Даалгаврыг дууссанд тэмдэглэх"),
     BotCommand(command="snooze",  description="Даалгаврын хугацааг хойшлуулах"),
@@ -28,6 +30,8 @@ EMPLOYEE_COMMANDS: list[BotCommand] = [
 MANAGER_COMMANDS: list[BotCommand] = [
     BotCommand(command="app",       description="Удирдлагын самбар нээх"),
     BotCommand(command="today",     description="Өнөөдрийн чек-ин бөглөх"),
+    BotCommand(command="daystart",  description="Ажил эхэлсэн цаг бүртгэх"),
+    BotCommand(command="dayend",    description="Ажил дууссан цаг бүртгэх"),
     BotCommand(command="mytasks",   description="Миний идэвхтэй даалгаврууд"),
     BotCommand(command="done",      description="Даалгаврыг дууссанд тэмдэглэх"),
     BotCommand(command="snooze",    description="Даалгаврын хугацааг хойшлуулах"),

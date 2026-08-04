@@ -1,7 +1,7 @@
 """Telegram flow for daily work logs and monthly free-form reports."""
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, timezone
 from html import escape
 
 import pytz
@@ -36,28 +36,6 @@ def _local_now(timezone_name: str | None) -> datetime:
     return datetime.now(zone)
 
 
-def work_time_keyboard(report_id: int, action: str) -> InlineKeyboardMarkup:
-    """Return the fixed half-hour choices used for daily start/end times."""
-    if action not in {"start", "end"}:
-        raise ValueError("invalid work-time action")
-    slots = [
-        time(hour, minute)
-        for hour in range(6, 24)
-        for minute in (0, 30)
-        if (hour, minute) <= (23, 0)
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text=slot.strftime("%H:%M"),
-                callback_data=f"wrtime:{report_id}:{action}:{slot.strftime('%H%M')}",
-            )
-            for slot in slots[index:index + 4]
-        ]
-        for index in range(0, len(slots), 4)
-    ])
-
-
 def draft_keyboard(report_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Батлах", callback_data=f"wrdraft:{report_id}:approve"),
@@ -83,16 +61,6 @@ def _prompt_text(report_type: str, prompt_type: str | None = None) -> str:
             return (
                 f"{test_prefix}⏰ <b>Өдрийн чек-ин</b>\n\n"
                 "Доорх товчийг дарж өнөөдрийн асуултуудад хариулна уу."
-            )
-        if prompt_type in {"daily_start", "test_daily_start"}:
-            return (
-                f"{test_prefix}🟢 <b>Ажил эхэлсэн цаг</b>\n\n"
-                "Өнөөдөр ажлаа хэдэн цагт эхэлсэн бэ?"
-            )
-        if prompt_type in {"daily_end", "test_daily_end"}:
-            return (
-                f"{test_prefix}🔴 <b>Ажил дууссан цаг</b>\n\n"
-                "Өнөөдөр ажлаа хэдэн цагт дууссан бэ?"
             )
         return (
             f"{test_prefix}📝 <b>Өдрийн ажлын тайлан</b>\n\n"
@@ -124,10 +92,6 @@ async def send_report_prompt(
         markup = None
         if prompt_type in {"daily_checkin", "test_daily_checkin"}:
             markup = checkin_keyboard(report.report_type == "daily_test")
-        elif prompt_type in {"daily_start", "test_daily_start"}:
-            markup = work_time_keyboard(report.id, "start")
-        elif prompt_type in {"daily_end", "test_daily_end"}:
-            markup = work_time_keyboard(report.id, "end")
         sent = await bot.send_message(
             telegram_chat_id,
             _prompt_text(report.report_type, prompt_type),
@@ -148,29 +112,24 @@ async def send_daily_prompts(
     telegram_chat_id: str,
     local_day: date,
 ) -> list[str]:
-    """Send the daily check-in/report/time prompts in one canonical order.
+    """Start the daily flow with only its first prompt.
 
-    Both the scheduler and ``/test_reports`` use this function so their
-    observable Telegram flows stay identical apart from the test prefix.
+    The remaining prompts are sent by the completion handlers.  Keeping the
+    scheduler to one prompt prevents Telegram from receiving the whole flow
+    as a burst before the employee has answered anything.
     """
     is_test = report.report_type == "daily_test"
     prefix = "test_" if is_test else ""
-    sent: list[str] = []
-    for suffix, label in (
-        ("daily_checkin", "өдрийн чек-ин"),
-        ("daily_report", "өдрийн тайлан"),
-        ("daily_start", "ажил эхэлсэн цаг"),
-        ("daily_end", "ажил дууссан цаг"),
+    label = "өдрийн чек-ин"
+    if await send_report_prompt(
+        bot,
+        report,
+        telegram_chat_id=telegram_chat_id,
+        prompt_type=f"{prefix}daily_checkin",
+        local_day=local_day,
     ):
-        if await send_report_prompt(
-            bot,
-            report,
-            telegram_chat_id=telegram_chat_id,
-            prompt_type=f"{prefix}{suffix}",
-            local_day=local_day,
-        ):
-            sent.append(label)
-    return sent
+        return [label]
+    return []
 
 
 async def send_test_daily_report_prompt(
@@ -280,50 +239,31 @@ async def edit_report_text(message: Message, work_report: WorkReport):
     await message.answer(_draft_text(work_report, revision.text), parse_mode="HTML", reply_markup=draft_keyboard(work_report.id))
 
 
-@router.callback_query(F.data.startswith("wrtime:"))
-async def set_report_time(cb: CallbackQuery, employee=None):
-    try:
-        _, report_id_raw, action, slot_raw = (cb.data or "").split(":", 3)
-        report_id = int(report_id_raw)
-        if len(slot_raw) != 4 or not slot_raw.isdigit():
-            raise ValueError
-        selected_time = time(int(slot_raw[:2]), int(slot_raw[2:]))
-        if not (time(6, 0) <= selected_time <= time(23, 0)) or selected_time.minute not in {0, 30}:
-            raise ValueError
-    except (ValueError, AttributeError):
-        await cb.answer("Буруу хүсэлт", show_alert=True)
+async def _record_work_time(message: Message, employee, field: str, label: str) -> None:
+    if not employee:
+        await message.answer("❌ Та бүртгэгдээгүй байна.")
         return
-    report = work_report_service.get_report(report_id)
-    if not employee or not report or report.employee_id != employee.id:
-        await cb.answer("Энэ бүртгэл танд хамаарахгүй.", show_alert=True)
-        return
-    if action not in {"start", "end"}:
-        await cb.answer("Буруу хүсэлт", show_alert=True)
-        return
-    try:
-        zone = pytz.timezone(employee.timezone or "Asia/Ulaanbaatar")
-    except Exception:
-        zone = pytz.timezone("Asia/Ulaanbaatar")
-    selected_at = zone.localize(datetime.combine(report.period_date, selected_time)).astimezone(timezone.utc)
+    local_now = _local_now(employee.timezone)
+    report = work_report_service.get_or_create_report(employee.id, "daily", local_now.date())
     value = work_report_service.set_work_time(
-        report_id,
-        "started_at" if action == "start" else "ended_at",
-        at=selected_at,
+        report.id,
+        field,
+        at=local_now.astimezone(timezone.utc),
     )
     if not value:
-        await cb.answer("Бүртгэх боломжгүй байна.", show_alert=True)
+        await message.answer("⚠️ Ажлын цагийг бүртгэх боломжгүй байна.")
         return
-    local_value = value.astimezone(_local_now(employee.timezone).tzinfo).strftime("%H:%M")
-    label = "Эхэлсэн" if action == "start" else "Дууссан"
-    await cb.answer(f"{label} цаг: {local_value}", show_alert=True)
-    if action == "start" and report.report_type == "daily_test":
-        await send_report_prompt(
-            cb.bot,
-            report,
-            telegram_chat_id=employee.telegram_id,
-            prompt_type="test_daily_end",
-            local_day=_local_now(employee.timezone).date(),
-        )
+    await message.answer(f"✅ {label}: <b>{value.astimezone(local_now.tzinfo):%H:%M}</b>", parse_mode="HTML")
+
+
+@router.message(Command("daystart"))
+async def cmd_daystart(message: Message, employee=None):
+    await _record_work_time(message, employee, "started_at", "Ажил эхэлсэн цаг")
+
+
+@router.message(Command("dayend"))
+async def cmd_dayend(message: Message, employee=None):
+    await _record_work_time(message, employee, "ended_at", "Ажил дууссан цаг")
 
 
 @router.callback_query(F.data.startswith("wrdraft:"))
@@ -361,15 +301,6 @@ async def report_draft_action(cb: CallbackQuery, state: FSMContext, employee=Non
         return
     await cb.answer("Тайлан батлагдлаа.")
     await cb.message.answer("✅ Тайлан хадгалагдлаа.")
-    if approved.report_type == "daily_test":
-        local_day = _local_now(employee.timezone).date()
-        await send_report_prompt(
-            cb.bot,
-            approved,
-            telegram_chat_id=employee.telegram_id,
-            prompt_type="test_daily_start",
-            local_day=local_day,
-        )
     if approved.report_type in {"monthly", "monthly_test"}:
         local_day = _local_now(employee.timezone).date()
         plan_type = "next_month_plan_test" if approved.report_type == "monthly_test" else "next_month_plan"
@@ -413,7 +344,7 @@ async def cmd_test_daily(message: Message, state: FSMContext, employee=None, is_
     if sent:
         await message.answer(
             f"🧪 Өмнөх өдрийн тестийг цэвэрлэлээ ({reset_count}). "
-            "Эхлээд чек-ин бөглөнө үү. Дараа нь өдрийн тайлан, ажил эхэлсэн ба дууссан цагийн асуултууд нэг нэгээрээ ирнэ."
+            "Эхлээд чек-ин бөглөнө үү. Ажлын цаг бүртгэхдээ /daystart болон /dayend командыг ашиглана уу."
         )
 
 

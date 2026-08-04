@@ -80,6 +80,8 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
         f"Мөн би танд өдөр бүр богино асуулга илгээнэ.\n\n"
         f"📊 /my_stats — таны статистик\n"
         f"📋 /today — чек-ин бөглөх\n"
+        f"🟢 /daystart — ажил эхэлсэн цаг\n"
+        f"🔴 /dayend — ажил дууссан цаг\n"
         f"🏆 /leaderboard — багийн чансаа\n"
         f"❓ /help — тусламж"
     )
@@ -191,6 +193,7 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
         complete_session(session_id)
         data = await state.get_data()
         session_type = data.get("session_type")
+        employee_id = data.get("employee_id")
         await state.clear()
         await message.answer(build_checkin_summary(session_id), parse_mode="HTML")
         if session_type == "daily_test":
@@ -201,6 +204,20 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
                 state=state,
                 employee_id=data["employee_id"],
                 telegram_chat_id=str(message.chat.id),
+                local_day=date.today(),
+            )
+        elif session_type == "evening" and employee_id:
+            from app.bot.work_report_handlers import send_report_prompt
+            from app.services import work_report_service
+
+            report = work_report_service.get_or_create_report(
+                employee_id, "daily", date.today()
+            )
+            await send_report_prompt(
+                message.bot,
+                report,
+                telegram_chat_id=str(message.chat.id),
+                prompt_type="daily_report",
                 local_day=date.today(),
             )
 

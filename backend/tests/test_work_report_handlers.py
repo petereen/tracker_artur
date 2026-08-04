@@ -9,7 +9,6 @@ from app.bot.work_report_handlers import (
     draft_keyboard,
     send_daily_prompts,
     send_test_daily_report_prompt,
-    work_time_keyboard,
 )
 
 
@@ -28,23 +27,13 @@ def test_daily_checkin_and_report_are_separate_prompts():
     assert [button.callback_data for row in checkin_keyboard(True).inline_keyboard for button in row] == ["checkin:start:test"]
 
 
-def test_work_time_prompts_have_one_action_each():
-    start = [button.callback_data for row in work_time_keyboard(42, "start").inline_keyboard for button in row]
-    end = [button.callback_data for row in work_time_keyboard(42, "end").inline_keyboard for button in row]
-    assert len(start) == len(end) == 35
-    assert start[0] == "wrtime:42:start:0600"
-    assert start[-1] == "wrtime:42:start:2300"
-    assert end[0] == "wrtime:42:end:0600"
-    assert end[-1] == "wrtime:42:end:2300"
-
-
-def test_daily_time_prompt_texts_are_distinct_from_report_text():
-    assert "эхэлсэн" in _prompt_text("daily", "daily_start")
-    assert "дууссан" in _prompt_text("daily", "daily_end")
+def test_daily_report_prompt_does_not_include_work_time_prompts():
     assert "ажлын тайлан" in _prompt_text("daily", "daily_report")
+    assert "эхэлсэн цаг" not in _prompt_text("daily", "daily_report")
+    assert "дууссан цаг" not in _prompt_text("daily", "daily_report")
 
 
-def test_daily_prompt_orchestration_has_the_required_order(monkeypatch):
+def test_daily_prompt_orchestration_starts_with_checkin_only(monkeypatch):
     sent = []
 
     async def fake_send_report_prompt(bot, report, *, telegram_chat_id, prompt_type, local_day):
@@ -55,8 +44,8 @@ def test_daily_prompt_orchestration_has_the_required_order(monkeypatch):
     report = SimpleNamespace(report_type="daily")
     labels = asyncio.run(send_daily_prompts(None, report, telegram_chat_id="1", local_day=None))
 
-    assert sent == ["daily_checkin", "daily_report", "daily_start", "daily_end"]
-    assert labels == ["өдрийн чек-ин", "өдрийн тайлан", "ажил эхэлсэн цаг", "ажил дууссан цаг"]
+    assert sent == ["daily_checkin"]
+    assert labels == ["өдрийн чек-ин"]
 
 
 def test_test_daily_advances_to_the_report_only_after_checkin(monkeypatch):
