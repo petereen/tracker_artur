@@ -72,20 +72,32 @@ stored. Back up the Docker volume with PostgreSQL.
 
 ```env
 BOT_TOKEN=Telegram bot token
+TELEGRAM_BOT_USERNAME=Telegram bot username without @ (enables browser Login Widget)
 MINI_APP_URL=https://erp.oyuns.mn/tg
+TELEGRAM_REFRESH_TOKEN_DAYS=365
 OPENAI_API_KEY=OpenAI project key
 CHIMEGE_API_TOKEN=Chimege STT token
 CHIMEGE_TTS_API_TOKEN=Chimege TTS token
 AGENT_RATES_API_KEY=OYUNS rates service key
 ```
 
+Opening the Mini App verifies Telegram's signed `initData`, links the active
+registered employee to an enterprise account, and writes a one-year `HttpOnly`
+browser session. It is revoked only by Logout (or account disablement); clearing
+browser/Telegram storage also removes the local cookie. Add each employee's
+Telegram ID in Administration before they use this sign-in.
+
 Manual tasks, reports, and the Calendar URL fallback remain available when AI,
 voice, rates, or Calendar providers are unavailable.
+
+For browser Telegram login, set `TELEGRAM_BOT_USERNAME` and use BotFather's
+`/setdomain` command with `erp.oyuns.mn`, then rebuild the frontend so the Login
+Widget is included. The Mini App itself does not require the Login Widget.
 
 ## 5. Deployment order
 
 1. Back up PostgreSQL.
-2. Deploy the new image and run `alembic upgrade r6s7t8u9v0w1` once.
+2. Deploy the new image and run `alembic upgrade s7t8u9v0w1x2` once.
 3. Start `backend`, `worker`, `bot`, and `frontend`; verify `/api/health`.
 4. Test admin login, create a second account from Administration, change its
    password/status, private attachment access, Google connection, and one task

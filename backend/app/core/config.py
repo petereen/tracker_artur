@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     SYNC_DATABASE_URL: str
     SECRET_KEY: str
     BOT_TOKEN: str = ""
+    TELEGRAM_BOT_USERNAME: str = ""
     MANAGER_TG_ID: str = "306983322"
     # Public HTTPS address opened by Telegram. It must point to the Mini App
     # route on the ERP domain, not directly to the API container.
@@ -16,6 +17,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_HOURS: int = 24
     ENTERPRISE_ACCESS_TOKEN_MINUTES: int = 15
     REFRESH_TOKEN_DAYS: int = 30
+    # Telegram Mini App sessions use a one-year absolute refresh lifetime.
+    TELEGRAM_REFRESH_TOKEN_DAYS: int = 365
     AUTH_COOKIE_SECURE: bool = True
     PUBLIC_APP_URL: str = "https://erp.oyuns.mn"
     CORS_ORIGINS: str = "https://erp.oyuns.mn"

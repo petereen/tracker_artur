@@ -58,7 +58,13 @@ def test_enterprise_schema_registers_required_foundation_tables():
 
 def test_versioned_routes_include_auth_clock_tasks_reports_and_realtime():
     paths = {route.path for route in app.routes}
-    assert {"/v1/auth/login", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime"}.issubset(paths)
+    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime"}.issubset(paths)
+
+
+def test_refresh_sessions_record_the_authentication_method():
+    refresh_sessions = Base.metadata.tables["refresh_sessions"]
+    assert "auth_method" in refresh_sessions.c
+    assert refresh_sessions.c.auth_method.server_default.arg == "password"
 
 
 def test_workflow_statuses_have_legacy_compatibility_mapping():

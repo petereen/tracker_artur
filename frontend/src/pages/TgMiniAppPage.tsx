@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMiniMe, useMiniTasks, useMiniCreateTask, useMiniUpdateTask, MiniTaskOut, TaskScope } from '../api/miniapp'
+import { api } from '../api/client'
+import { useAuthStore } from '../store/auth'
 
 const PRIORITY_BAR: Record<number, string> = { 1: 'bg-red-500', 2: 'bg-amber-400', 3: 'bg-green-500' }
 
@@ -88,6 +90,7 @@ export function TgMiniAppPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ done: true })
+  const setToken = useAuthStore((state) => state.setToken)
 
   useEffect(() => {
     try {
@@ -96,6 +99,19 @@ export function TgMiniAppPage() {
       else setInitData('')
     } catch { setInitData('') }
   }, [])
+
+  // A signed Telegram launch is also an enterprise sign-in. The HttpOnly
+  // refresh cookie persists for one year; task APIs still send initData as a
+  // defence-in-depth identity check while inside Telegram.
+  useEffect(() => {
+    if (!initData) return
+    api.post('/v1/auth/telegram', undefined, {
+      headers: { 'X-Telegram-Init-Data': initData },
+    }).then(({ data }) => setToken(data.access_token)).catch(() => {
+      // Preserve the existing Mini App UX when an employee has not yet been
+      // provisioned for enterprise access.
+    })
+  }, [initData, setToken])
 
   const meQuery = useMiniMe()
   const tasksQuery = useMiniTasks(scope, true)

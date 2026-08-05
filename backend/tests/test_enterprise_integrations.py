@@ -12,6 +12,7 @@ def test_followup_schema_and_routes_are_registered():
     assert "password_reset_tokens" in Base.metadata.tables
     paths = {route.path for route in app.routes}
     assert {
+        "/v1/auth/telegram",
         "/v1/auth/accounts/invite",
         "/v1/auth/password-reset/request",
         "/v1/auth/password-reset/confirm",

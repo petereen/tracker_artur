@@ -1,9 +1,10 @@
 import hashlib
 import secrets
+import hmac
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response, status
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -20,7 +21,9 @@ from app.core.security import (
     new_refresh_token,
     verify_account_password,
 )
-from app.models.models import JobQueue, PasswordResetToken, RefreshSession, RoleAssignment, UserAccount
+from app.core.telegram_auth import verify_init_data
+from app.models.models import Employee, JobQueue, ManagerSettings, Organization, PasswordResetToken, RefreshSession, RoleAssignment, UserAccount
+from app.services.manager_recipients import manager_telegram_ids
 from app.services.email_service import email_is_configured
 from app.services.secret_box import encrypt_secret
 
@@ -38,6 +41,16 @@ class LoginInput(BaseModel):
     @classmethod
     def normalize_email(cls, value: str) -> str:
         return value.strip().lower()
+
+
+class TelegramWidgetLogin(BaseModel):
+    id: int
+    first_name: str = ""
+    last_name: str | None = None
+    username: str | None = None
+    photo_url: str | None = None
+    auth_date: int
+    hash: str
 
 
 class AccessTokenOut(BaseModel):
@@ -125,11 +138,12 @@ class AccountInvite(BaseModel):
         return email
 
 
-def _set_refresh_cookie(response: Response, token: str) -> None:
+def _set_refresh_cookie(response: Response, token: str, expires_at: datetime) -> None:
+    max_age = max(1, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
     response.set_cookie(
         REFRESH_COOKIE,
         token,
-        max_age=settings.REFRESH_TOKEN_DAYS * 86400,
+        max_age=max_age,
         httponly=True,
         secure=settings.AUTH_COOKIE_SECURE,
         samesite="lax",
@@ -202,17 +216,115 @@ async def login(data: LoginInput, response: Response, db: AsyncSession = Depends
     account.locked_until = None
     account.last_login_at = now
     refresh_token, token_hash = new_refresh_token()
+    refresh_expires_at = now + timedelta(days=settings.REFRESH_TOKEN_DAYS)
     db.add(
         RefreshSession(
             account_id=account.id,
             token_hash=token_hash,
             device_label=data.device_label,
-            expires_at=now + timedelta(days=settings.REFRESH_TOKEN_DAYS),
+            auth_method="password",
+            expires_at=refresh_expires_at,
         )
     )
     await db.commit()
-    _set_refresh_cookie(response, refresh_token)
+    _set_refresh_cookie(response, refresh_token, refresh_expires_at)
     return _access(account)
+
+
+async def _telegram_session(response: Response, db: AsyncSession, telegram_id: str, username: str | None, device_label: str):
+    """Link a registered Telegram identity and issue the one-year session."""
+    telegram_user = {"id": telegram_id, "username": username} if username else {"id": telegram_id}
+    if not telegram_user or not telegram_id.isdigit():
+        raise HTTPException(status_code=401, detail="Invalid Telegram login")
+
+    employee = await db.scalar(select(Employee).where(Employee.telegram_id == telegram_id))
+    if employee is None and telegram_user.get("username"):
+        username = str(telegram_user["username"]).lstrip("@")
+        employee = await db.scalar(select(Employee).where(Employee.telegram_username.ilike(username)))
+        if employee and employee.telegram_id != telegram_id:
+            employee.telegram_id = telegram_id
+    if not employee or not employee.is_active:
+        raise HTTPException(status_code=403, detail="Telegram user is not registered as an active employee")
+
+    manager_settings = (await db.execute(select(ManagerSettings))).scalars().first()
+    is_manager = telegram_id == str(settings.MANAGER_TG_ID) or telegram_id in manager_telegram_ids(manager_settings)
+    account = await db.scalar(select(UserAccount).where(UserAccount.employee_id == employee.id))
+    if account is None and employee.email:
+        account = await db.scalar(select(UserAccount).where(func.lower(UserAccount.email) == employee.email.lower()))
+        if account and account.employee_id is None:
+            account.employee_id = employee.id
+        elif account and account.employee_id != employee.id:
+            raise HTTPException(status_code=409, detail="Employee email is linked to another account")
+    if account is None:
+        organization = await db.get(Organization, 1)
+        if not organization:
+            raise HTTPException(status_code=503, detail="Organization setup is incomplete")
+        account = UserAccount(
+            organization_id=organization.id,
+            employee_id=employee.id,
+            email=f"telegram-{telegram_id}",
+            password_hash=hash_account_password(secrets.token_urlsafe(48)),
+            status="active",
+            locale=employee.primary_language or "mn",
+        )
+        db.add(account)
+        await db.flush()
+
+    if account.status == "disabled":
+        raise HTTPException(status_code=403, detail="Account is disabled")
+    account.status = "active"
+    account.failed_login_count = 0
+    account.locked_until = None
+    account.last_login_at = datetime.now(timezone.utc)
+    roles = (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all()
+    if not roles:
+        db.add(RoleAssignment(account_id=account.id, role="manager" if is_manager else "member"))
+    elif is_manager and "manager" not in roles:
+        db.add(RoleAssignment(account_id=account.id, role="manager"))
+
+    now = datetime.now(timezone.utc)
+    refresh_expires_at = now + timedelta(days=settings.TELEGRAM_REFRESH_TOKEN_DAYS)
+    refresh_token, token_hash = new_refresh_token()
+    db.add(RefreshSession(
+        account_id=account.id,
+        token_hash=token_hash,
+        device_label=device_label,
+        auth_method="telegram",
+        expires_at=refresh_expires_at,
+    ))
+    await db.commit()
+    _set_refresh_cookie(response, refresh_token, refresh_expires_at)
+    return _access(account)
+
+
+@router.post("/telegram", response_model=AccessTokenOut)
+async def telegram_login(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    x_telegram_init_data: str | None = Header(default=None),
+):
+    """Exchange verified Telegram Mini App data for a durable web session."""
+    telegram_user = verify_init_data(x_telegram_init_data or "")
+    telegram_id = str((telegram_user or {}).get("id") or "")
+    if not telegram_user or not telegram_id.isdigit():
+        raise HTTPException(status_code=401, detail="Invalid Telegram login")
+    return await _telegram_session(response, db, telegram_id, telegram_user.get("username"), "telegram-mini-app")
+
+
+@router.post("/telegram-widget", response_model=AccessTokenOut)
+async def telegram_widget_login(data: TelegramWidgetLogin, response: Response, db: AsyncSession = Depends(get_db)):
+    """Verify the browser Login Widget payload and issue the same session."""
+    if not settings.BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="Telegram authentication is not configured")
+    if abs(datetime.now(timezone.utc).timestamp() - data.auth_date) > 86400:
+        raise HTTPException(status_code=401, detail="Telegram login has expired")
+    payload = data.model_dump(exclude={"hash"}, exclude_none=True)
+    check_string = "\n".join(f"{key}={value}" for key, value in sorted(payload.items()))
+    secret_key = hashlib.sha256(settings.BOT_TOKEN.encode()).digest()
+    expected = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, data.hash):
+        raise HTTPException(status_code=401, detail="Invalid Telegram login")
+    return await _telegram_session(response, db, str(data.id), data.username, "telegram-login-widget")
 
 
 @router.post("/refresh", response_model=AccessTokenOut)
@@ -241,9 +353,16 @@ async def refresh(
     session.revoked_at = now
     session.last_used_at = now
     token, token_hash = new_refresh_token()
-    db.add(RefreshSession(account_id=account.id, token_hash=token_hash, expires_at=now + timedelta(days=settings.REFRESH_TOKEN_DAYS)))
+    expires_at = session.expires_at if session.auth_method == "telegram" else now + timedelta(days=settings.REFRESH_TOKEN_DAYS)
+    db.add(RefreshSession(
+        account_id=account.id,
+        token_hash=token_hash,
+        device_label=session.device_label,
+        auth_method=session.auth_method,
+        expires_at=expires_at,
+    ))
     await db.commit()
-    _set_refresh_cookie(response, token)
+    _set_refresh_cookie(response, token, expires_at)
     return _access(account)
 
 

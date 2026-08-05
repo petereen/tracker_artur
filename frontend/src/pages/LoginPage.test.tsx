@@ -5,9 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LoginPage } from './LoginPage'
 
 const mutateAsync = vi.fn()
+const mutate = vi.fn()
 
 vi.mock('../api/enterprise', () => ({
   useEnterpriseLogin: () => ({ mutateAsync, isPending: false }),
+  useTelegramWidgetLogin: () => ({ mutate, isPending: false }),
 }))
 
 function renderLogin() {

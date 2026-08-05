@@ -556,6 +556,7 @@ class RefreshSession(Base):
     account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
     token_hash = Column(String(64), nullable=False, unique=True)
     device_label = Column(Text)
+    auth_method = Column(Text, nullable=False, server_default="password", default="password")
     expires_at = Column(DateTime(timezone=True), nullable=False)
     revoked_at = Column(DateTime(timezone=True))
     last_used_at = Column(DateTime(timezone=True))

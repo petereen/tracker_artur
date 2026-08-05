@@ -61,6 +61,14 @@ export function useEnterpriseLogin() {
   })
 }
 
+export function useTelegramWidgetLogin() {
+  const setToken = useAuthStore((state) => state.setToken)
+  return useMutation({
+    mutationFn: (payload: Record<string, string | number>) => api.post('/v1/auth/telegram-widget', payload).then((response) => response.data),
+    onSuccess: (data) => setToken(data.access_token),
+  })
+}
+
 export function usePasswordResetRequest() {
   return useMutation({
     mutationFn: (email: string) => api.post('/v1/auth/password-reset/request', { email }).then((response) => response.data),

@@ -57,6 +57,7 @@ a { color: inherit; text-decoration: none; }
 .field-with-icon { align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 11px; color: var(--color-muted); display: flex; gap: 9px; padding: 0 12px; }
 .field-with-icon:focus-within { border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-soft); }.field-with-icon input { background: transparent; border: 0; min-height: 44px; outline: 0; width: 100%; }
 .login-card footer { display: flex; gap: 20px; justify-content: center; margin-top: 25px; color: var(--color-muted); font-size: .75rem; }
+.telegram-login { align-items: center; border-top: 1px solid var(--color-border); display: flex; flex-direction: column; gap: 10px; margin-top: 22px; padding-top: 18px; color: var(--color-muted); font-size: .78rem; }
 .auth-help-link { color: var(--color-accent); display: block; font-size: .78rem; font-weight: 650; margin-top: 18px; text-align: center; }.auth-error { color: var(--color-red) !important; font-size: .76rem; margin: 0 !important; }
 
 .workspace-shell { min-height: 100vh; }.workspace-sidebar { background: var(--glass-heavy); backdrop-filter: blur(26px) saturate(145%); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; inset: 0 auto 0 0; padding: 18px 12px 14px; position: fixed; width: 236px; z-index: 30; }
