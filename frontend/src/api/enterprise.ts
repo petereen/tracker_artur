@@ -135,13 +135,9 @@ export async function bootstrapSession() {
 }
 
 export function useActor(enabled = true) {
-  const setActor = useAuthStore((state) => state.setActor)
   return useQuery<Actor>({
     queryKey: ['v1', 'actor'],
-    queryFn: () => api.get('/v1/auth/me').then((response) => {
-      setActor(response.data)
-      return response.data
-    }),
+    queryFn: () => api.get('/v1/auth/me').then((response) => response.data),
     enabled,
   })
 }
@@ -157,8 +153,8 @@ export function useEnterpriseSummary(period?: DateRange) {
   return useQuery({ queryKey: ['v1', 'analytics', period], queryFn: () => api.get('/v1/analytics/summary', { params: period }).then((response) => response.data) })
 }
 
-export function useClock() {
-  return useQuery<{ active: ClockEntry | null; server_time: string }>({ queryKey: ['v1', 'clock'], queryFn: () => api.get('/v1/clock/status').then((response) => response.data), refetchInterval: 30_000 })
+export function useClock(enabled = true) {
+  return useQuery<{ active: ClockEntry | null; server_time: string }>({ queryKey: ['v1', 'clock'], queryFn: () => api.get('/v1/clock/status').then((response) => response.data), enabled, refetchInterval: enabled ? 30_000 : false })
 }
 
 export function useClockAction() {

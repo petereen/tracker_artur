@@ -70,6 +70,7 @@ export function EnterpriseShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const token = useAuthStore((state) => state.token)
+  const setActor = useAuthStore((state) => state.setActor)
   const actorQuery = useActor(Boolean(token))
   const logout = useEnterpriseLogout()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -93,7 +94,10 @@ export function EnterpriseShell() {
 
   const roles = actorQuery.data?.roles ?? []
   useEffect(() => {
-    if (actorQuery.data?.locale) i18n.changeLanguage(actorQuery.data.locale)
+    if (actorQuery.data) setActor(actorQuery.data)
+  }, [actorQuery.data, setActor])
+  useEffect(() => {
+    if (actorQuery.data?.locale && i18n.language !== actorQuery.data.locale) i18n.changeLanguage(actorQuery.data.locale)
   }, [actorQuery.data?.locale, i18n])
   const nav = useMemo(() => NAV.filter((item) => !item.roles.length || item.roles.some((role) => roles.includes(role))), [roles])
   const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))

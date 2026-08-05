@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Fix production React render-depth error and suppress employee-unlinked clock polling (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Phase 1 foundation: Add enterprise schema, identity, RBAC, shared events, and real-time infrastructure
 - [x] Phase 2 foundation: Build the responsive Apple-style application shell and design system
 - [ ] Phase 3 completion: Add external malware scanning plus editable task calendar/timeline and collaboration UI
@@ -17,6 +18,7 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Prevent actor query side effects and locale update loops; avoid clock polling for accounts without an employee link (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Add admin multi-role access controls with last-admin protection and make new Telegram web accounts default to member (`frontend/src/pages/AdministrationHubPage.tsx`, `backend/app/routers/enterprise_auth.py`)
 - [x] Add self-service profile identity, avatar URL, locale, username, and password management while retaining the admin-appointed employee name (`frontend/src/pages/ProfilePage.tsx`, `backend/app/routers/enterprise_auth.py`)
 - [x] Activate the OYUNS web assistant with task/report drafting and confirmation-gated task creation (`frontend/src/components/OyunsAssistant.tsx`)
