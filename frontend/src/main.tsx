@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast'
 import * as Sentry from '@sentry/react'
 import App from './App'
 import './index.css'
+import './i18n'
 
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({

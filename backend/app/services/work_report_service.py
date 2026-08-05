@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.bot.db import get_session
-from app.models.models import WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
+from app.models.models import Employee, WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
 
 
 TEST_REPORT_TYPES = frozenset({"daily_test", "monthly_test", "next_month_plan_test"})
@@ -337,11 +337,14 @@ def set_work_time(report_id: int, field: str, at: datetime | None = None) -> dat
         return current
 
 
-def _active_time_entry(s, report_id: int, mode: str | None = None) -> WorkTimeEntry | None:
-    query = select(WorkTimeEntry).where(
-        WorkTimeEntry.report_id == report_id,
-        WorkTimeEntry.ended_at.is_(None),
-    )
+def _active_time_entry(
+    s, report_id: int | None = None, mode: str | None = None, employee_id: int | None = None
+) -> WorkTimeEntry | None:
+    query = select(WorkTimeEntry).where(WorkTimeEntry.ended_at.is_(None))
+    if employee_id is not None:
+        query = query.where(WorkTimeEntry.employee_id == employee_id)
+    elif report_id is not None:
+        query = query.where(WorkTimeEntry.report_id == report_id)
     if mode:
         query = query.where(WorkTimeEntry.mode == mode)
     return s.execute(query.order_by(WorkTimeEntry.started_at.desc(), WorkTimeEntry.id.desc())).scalars().first()
@@ -360,10 +363,20 @@ def start_work_time(
     report = get_or_create_report(employee_id, "daily", local_day)
     started_at = at or datetime.now(timezone.utc)
     with get_session() as s:
-        active = _active_time_entry(s, report.id)
+        active = _active_time_entry(s, report.id, employee_id=employee_id)
         if active:
             return ("already_active" if active.mode == mode else "other_active", active)
-        entry = WorkTimeEntry(report_id=report.id, mode=mode, started_at=started_at)
+        employee = s.get(Employee, employee_id)
+        entry = WorkTimeEntry(
+            report_id=report.id,
+            employee_id=employee_id,
+            local_work_date=local_day,
+            timezone=(employee.timezone if employee else "Asia/Ulaanbaatar"),
+            entry_type="work",
+            source_channel="telegram",
+            mode=mode,
+            started_at=started_at,
+        )
         s.add(entry)
         s.commit()
         s.refresh(entry)
@@ -380,7 +393,7 @@ def end_work_time(
     report = get_or_create_report(employee_id, "daily", local_day)
     ended_at = at or datetime.now(timezone.utc)
     with get_session() as s:
-        active = _active_time_entry(s, report.id)
+        active = _active_time_entry(s, report.id, employee_id=employee_id)
         if not active:
             return "not_started", None
         if active.mode != mode:
@@ -407,19 +420,24 @@ def work_time_entries(report_id: int) -> list[WorkTimeEntry]:
 def summarize_work_time(entries: list[WorkTimeEntry], now: datetime | None = None) -> dict:
     """Return total, mode totals, and detailed intervals in minutes."""
     current = now or datetime.now(timezone.utc)
-    totals = {"remote": 0, "in_person": 0}
+    totals = {"remote": 0, "in_person": 0, "break": 0}
     details = []
     complete_entries = 0
     for entry in entries:
         end = entry.ended_at or current
         seconds = max(0, (end - entry.started_at).total_seconds())
         minutes = round(seconds / 60)
-        totals[entry.mode] = totals.get(entry.mode, 0) + minutes
+        entry_type = getattr(entry, "entry_type", "work") or "work"
+        if entry_type == "break":
+            totals["break"] += minutes
+        elif entry.mode in {"remote", "in_person"}:
+            totals[entry.mode] += minutes
         if entry.ended_at is not None:
             complete_entries += 1
         details.append({
             "id": entry.id,
             "mode": entry.mode,
+            "entry_type": entry_type,
             "started_at": entry.started_at,
             "ended_at": entry.ended_at,
             "minutes": minutes,
@@ -429,6 +447,7 @@ def summarize_work_time(entries: list[WorkTimeEntry], now: datetime | None = Non
         "total_minutes": totals["remote"] + totals["in_person"],
         "remote_minutes": totals["remote"],
         "in_person_minutes": totals["in_person"],
+        "break_minutes": totals["break"],
         "complete_entries": complete_entries,
         "incomplete_entries": len(entries) - complete_entries,
         "entries": details,

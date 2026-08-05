@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.security import decode_token
-from app.models.models import AdminUser
+from app.models.models import AdminUser, RoleAssignment, UserAccount
 
 bearer = HTTPBearer()
 
@@ -19,6 +19,22 @@ async def get_current_user(
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     sub = payload.get("sub")
+    if payload.get("kind") == "enterprise":
+        account = await db.get(UserAccount, int(sub))
+        if not account or account.status != "active":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        is_admin = await db.scalar(
+            select(RoleAssignment.id).where(
+                RoleAssignment.account_id == account.id,
+                RoleAssignment.role == "admin",
+            )
+        )
+        if not is_admin or not account.legacy_admin_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Legacy admin access required")
+        user = await db.get(AdminUser, account.legacy_admin_id)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        return user
     result = await db.execute(select(AdminUser).where(AdminUser.id == int(sub)))
     user = result.scalar_one_or_none()
     if not user:

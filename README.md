@@ -1,6 +1,6 @@
 # OYUNS Agent
 
-Корпоративный AI-ассистент для личной продуктивности, постановки и контроля задач, ответов по управляемой базе знаний и ежедневных опросов метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://tracker.adarasoft.com** (Dokploy на VPS). Документы: [Политика конфиденциальности](https://tracker.adarasoft.com/privacy) · [Условия использования](https://tracker.adarasoft.com/terms).
+Корпоративный AI-ассистент для личной продуктивности, постановки и контроля задач, ответов по управляемой базе знаний и ежедневных опросов метрик — через Telegram-бота, веб-панель и Telegram Mini App. Прод: **https://erp.oyuns.mn** (Dokploy на VPS). Legacy admin: **https://artur.oyuns.mn**. Документы: [Политика конфиденциальности](https://erp.oyuns.mn/privacy) · [Условия использования](https://erp.oyuns.mn/terms).
 
 ## Стек
 

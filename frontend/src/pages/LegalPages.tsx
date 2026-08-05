@@ -3,7 +3,7 @@
 const UPDATED = '2026 оны 5 сарын 31'
 const OPERATOR = '«OYUNS Agent» үйлчилгээний оператор'
 const CONTACT = 'admin@adarasoft.com'
-const DOMAIN = 'tracker.adarasoft.com'
+const DOMAIN = 'erp.oyuns.mn'
 
 function LegalShell({ title, children }: { title: string; children: React.ReactNode }) {
   return (

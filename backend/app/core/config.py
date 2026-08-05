@@ -8,12 +8,33 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = ""
     MANAGER_TG_ID: str = "306983322"
     # Public HTTPS address opened by Telegram. It must point to the Mini App
-    # route (for example, https://artur.oyuns.mn/tg), not the API container.
-    MINI_APP_URL: str = ""
+    # route on the ERP domain, not directly to the API container.
+    MINI_APP_URL: str = "https://erp.oyuns.mn/tg"
     ADMIN_EMAIL: str = "admin@company.ru"
+    ADMIN_USERNAME: str = ""
     ADMIN_PASSWORD: str = "admin123"
     ACCESS_TOKEN_EXPIRE_HOURS: int = 24
+    ENTERPRISE_ACCESS_TOKEN_MINUTES: int = 15
+    REFRESH_TOKEN_DAYS: int = 30
+    AUTH_COOKIE_SECURE: bool = True
+    PUBLIC_APP_URL: str = "https://erp.oyuns.mn"
+    CORS_ORIGINS: str = "https://erp.oyuns.mn"
+    AUTH_EMAIL_VERIFICATION_ENABLED: bool = False
+    PASSWORD_RESET_MINUTES: int = 30
+    INVITATION_EXPIRE_HOURS: int = 168
+    SMTP_HOST: str = "smtp.resend.com"
+    SMTP_PORT: int = 465
+    SMTP_USERNAME: str = "resend"
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_USE_TLS: bool = True
     KNOWLEDGE_UPLOAD_DIR: str = "/app/uploads/knowledge"
+    ATTACHMENT_STORAGE_BACKEND: str = "local"
+    ATTACHMENT_UPLOAD_DIR: str = "/app/uploads/attachments"
+    ATTACHMENT_MAX_BYTES: int = 25 * 1024 * 1024
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = ""
 
     class Config:
         env_file = ".env"

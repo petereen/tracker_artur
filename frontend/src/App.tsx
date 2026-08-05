@@ -1,96 +1,77 @@
-import { useState, useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { bootstrapSession } from './api/enterprise'
+import { EnterpriseShell } from './components/EnterpriseShell'
 import { useAuthStore } from './store/auth'
-import { Sidebar } from './components/Sidebar'
 import { LoginPage } from './pages/LoginPage'
-import { DashboardPage } from './pages/DashboardPage'
-import { EmployeesPage } from './pages/EmployeesPage'
-import { QuestionsPage } from './pages/QuestionsPage'
-import { SchedulePage } from './pages/SchedulePage'
-import { JournalPage } from './pages/JournalPage'
-import { ManagerSettingsPage } from './pages/ManagerSettingsPage'
-import { OnboardingPage } from './pages/OnboardingPage'
-import { TasksPage } from './pages/TasksPage'
-import { TgMiniAppPage } from './pages/TgMiniAppPage'
-import { PrivacyPage, TermsPage } from './pages/LegalPages'
-import { KnowledgePage } from './pages/KnowledgePage'
-import { DeveloperPage } from './pages/DeveloperPage'
-import { ReportsPage } from './pages/ReportsPage'
-import { PlansPage } from './pages/PlansPage'
+import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordResetPages'
 
-// Check if this is the Telegram Mini App route
-const isTgRoute = () => window.location.pathname === '/tg'
-const telegramWebApp = () => (window as any).Telegram?.WebApp
-const isTelegramWebApp = () => Boolean(telegramWebApp()?.initData)
+const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
+const ProjectsWorkspacePage = lazy(() => import('./pages/ProjectsWorkspacePage').then((module) => ({ default: module.ProjectsWorkspacePage })))
+const EnterpriseTasksPage = lazy(() => import('./pages/EnterpriseTasksPage').then((module) => ({ default: module.EnterpriseTasksPage })))
+const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
+const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
+const OkrsWorkspacePage = lazy(() => import('./pages/OkrsWorkspacePage').then((module) => ({ default: module.OkrsWorkspacePage })))
+const AdministrationHubPage = lazy(() => import('./pages/AdministrationHubPage').then((module) => ({ default: module.AdministrationHubPage })))
+const TgMiniAppPage = lazy(() => import('./pages/TgMiniAppPage').then((module) => ({ default: module.TgMiniAppPage })))
+const EmployeesPage = lazy(() => import('./pages/EmployeesPage').then((module) => ({ default: module.EmployeesPage })))
+const QuestionsPage = lazy(() => import('./pages/QuestionsPage').then((module) => ({ default: module.QuestionsPage })))
+const SchedulePage = lazy(() => import('./pages/SchedulePage').then((module) => ({ default: module.SchedulePage })))
+const ManagerSettingsPage = lazy(() => import('./pages/ManagerSettingsPage').then((module) => ({ default: module.ManagerSettingsPage })))
+const KnowledgePage = lazy(() => import('./pages/KnowledgePage').then((module) => ({ default: module.KnowledgePage })))
+const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then((module) => ({ default: module.OnboardingPage })))
+const DeveloperPage = lazy(() => import('./pages/DeveloperPage').then((module) => ({ default: module.DeveloperPage })))
+const PrivacyPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.PrivacyPage })))
+const TermsPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.TermsPage })))
 
-const PAGES: Record<string, JSX.Element> = {
-  dashboard:  <DashboardPage />,
-  employees:  <EmployeesPage />,
-  tasks:      <TasksPage />,
-  questions:  <QuestionsPage />,
-  schedule:   <SchedulePage />,
-  journal:    <JournalPage />,
-  reports:    <ReportsPage />,
-  plans:      <PlansPage />,
-  manager:    <ManagerSettingsPage />,
-  onboarding: <OnboardingPage />,
-  knowledge:  <KnowledgePage />,
-  developer:  <DeveloperPage />,
+function AuthenticatedApp() {
+  const token = useAuthStore((state) => state.token)
+  const initialized = useAuthStore((state) => state.initialized)
+
+  useEffect(() => {
+    if (!initialized) bootstrapSession()
+  }, [initialized])
+
+  if (!initialized) return <div className="app-loading"><img src="/oyuns-aio-logo.png" alt="OYUNS" /><span>Ажлын орон зайг бэлтгэж байна…</span></div>
+  if (!token) return <LoginPage />
+
+  return (
+    <Routes>
+      <Route element={<EnterpriseShell />}>
+        <Route index element={<EnterpriseDashboardPage />} />
+        <Route path="projects" element={<ProjectsWorkspacePage />} />
+        <Route path="tasks" element={<EnterpriseTasksPage />} />
+        <Route path="reports" element={<EnterpriseReportsPage />} />
+        <Route path="capacity" element={<CapacityWorkspacePage />} />
+        <Route path="okrs" element={<OkrsWorkspacePage />} />
+        <Route path="analytics" element={<EnterpriseDashboardPage />} />
+        <Route path="administration" element={<AdministrationHubPage />} />
+        <Route path="legacy/employees" element={<EmployeesPage />} />
+        <Route path="legacy/questions" element={<QuestionsPage />} />
+        <Route path="legacy/schedule" element={<SchedulePage />} />
+        <Route path="legacy/manager" element={<ManagerSettingsPage />} />
+        <Route path="legacy/knowledge" element={<KnowledgePage />} />
+        <Route path="legacy/onboarding" element={<OnboardingPage />} />
+        <Route path="legacy/developer" element={<DeveloperPage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
 }
 
 export default function App() {
-  const token = useAuthStore((s) => s.token)
-  const [page, setPage] = useState('dashboard')
-  const [hydrated, setHydrated] = useState(false)
-
-  useEffect(() => {
-    // Ждём пока Zustand persist прочитает localStorage
-    const unsub = useAuthStore.persist.onFinishHydration(() => setHydrated(true))
-    // Если hydration уже завершился — сразу выставляем
-    if (useAuthStore.persist.hasHydrated()) setHydrated(true)
-    return unsub
-  }, [])
-
-  useEffect(() => {
-    // Telegram supplies a viewport that can change as its chrome expands/collapses.
-    // Keep this isolated to the authenticated panel; /tg has its own layout.
-    const tg = telegramWebApp()
-    if (!tg || isTgRoute()) return
-
-    const setViewportHeight = () => {
-      document.documentElement.style.setProperty('--telegram-viewport-height', `${tg.viewportStableHeight || tg.viewportHeight || window.innerHeight}px`)
-    }
-    tg.ready()
-    tg.expand()
-    setViewportHeight()
-    tg.onEvent('viewportChanged', setViewportHeight)
-    return () => tg.offEvent('viewportChanged', setViewportHeight)
-  }, [])
-
-  // Public routes (no auth required)
-  if (isTgRoute()) {
-    return <TgMiniAppPage />
-  }
-  if (window.location.pathname === '/privacy') return <PrivacyPage />
-  if (window.location.pathname === '/terms') return <TermsPage />
-
-  if (!hydrated) {
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
-        <div className="text-muted text-sm">Ачаалж байна...</div>
-      </div>
-    )
-  }
-
-  if (!token) return <LoginPage />
-
-  const telegramAdmin = isTelegramWebApp()
-
   return (
-    <div className={`flex min-h-screen ${telegramAdmin ? 'telegram-admin' : ''}`}>
-      <Sidebar active={page} onNav={setPage} />
-      <main className="admin-main flex-1 overflow-y-auto px-9 py-8 min-w-0">
-        {PAGES[page]}
-      </main>
-    </div>
+    <BrowserRouter>
+      <Suspense fallback={<div className="app-loading"><img src="/oyuns-aio-logo.png" alt="OYUNS" /><span>Ачаалж байна…</span></div>}>
+        <Routes>
+          <Route path="/tg" element={<TgMiniAppPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/*" element={<AuthenticatedApp />} />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
   )
 }

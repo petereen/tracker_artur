@@ -24,6 +24,13 @@ miniapp_router = APIRouter()  # Mini App, mount /miniapp
 
 ACTIVE_STATUSES = ("open", "in_progress", "overdue")
 VALID_STATUSES = ("open", "in_progress", "done", "overdue", "cancelled")
+WORKFLOW_FROM_LEGACY = {
+    "open": "to_do",
+    "in_progress": "in_progress",
+    "done": "done",
+    "overdue": "to_do",
+    "cancelled": "cancelled",
+}
 
 
 # ─── схемы ────────────────────────────────────────────────────────────────────
@@ -116,6 +123,8 @@ async def _apply_update(task: Task, data: TaskUpdate) -> None:
         if data.status not in VALID_STATUSES:
             raise HTTPException(status_code=400, detail="invalid status")
         task.status = data.status
+        task.workflow_status = WORKFLOW_FROM_LEGACY[data.status]
+        task.version = (task.version or 1) + 1
         if data.status == "done" and not task.completed_at:
             task.completed_at = datetime.now(timezone.utc)
     for field in ("title", "description", "assignee_id", "deadline_at", "priority"):
@@ -165,6 +174,7 @@ async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), _=De
     task = Task(
         title=data.title, description=data.description, assignee_id=data.assignee_id,
         deadline_at=data.deadline_at, priority=data.priority, status="open",
+        workflow_status="to_do", organization_id=1,
         reminder_intervals_min=list(DEFAULT_REMINDER_INTERVALS_MIN),
     )
     db.add(task)
@@ -288,6 +298,7 @@ async def miniapp_create(
         title=data.title, description=data.description, assignee_id=assignee_id,
         created_by_id=emp.id if emp else None,
         deadline_at=data.deadline_at, priority=data.priority, status="open",
+        workflow_status="to_do", organization_id=1,
         reminder_intervals_min=list(DEFAULT_REMINDER_INTERVALS_MIN),
     )
     db.add(task)

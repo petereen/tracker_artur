@@ -18,6 +18,10 @@ from app.models.models import (
 )
 
 ACTIVE_STATUSES = ("open", "in_progress", "overdue")
+WORKFLOW_FROM_LEGACY = {
+    "open": "to_do", "in_progress": "in_progress", "done": "done",
+    "overdue": "to_do", "cancelled": "cancelled",
+}
 
 
 def ensure_employee(tg_id, name: Optional[str] = None, username: Optional[str] = None) -> dict:
@@ -73,6 +77,8 @@ def create_task(
             deadline_at=deadline_at,
             priority=priority,
             status="open",
+            workflow_status="to_do",
+            organization_id=1,
             reminder_intervals_min=list(reminder_intervals_min or DEFAULT_REMINDER_INTERVALS_MIN),
         )
         s.add(task)
@@ -106,6 +112,9 @@ def create_tasks_for_assignees(
                 created_by_tg=created_by_tg,
                 deadline_at=deadline_at,
                 priority=priority,
+                status="open",
+                workflow_status="to_do",
+                organization_id=1,
                 reminder_intervals_min=list(reminder_intervals_min or DEFAULT_REMINDER_INTERVALS_MIN),
             )
             for employee_id in unique_ids
@@ -288,6 +297,8 @@ def set_status(task_id: int, status: str, *, by_employee_id: Optional[int] = Non
         if not task:
             return None
         task.status = status
+        task.workflow_status = WORKFLOW_FROM_LEGACY.get(status, task.workflow_status)
+        task.version = (task.version or 1) + 1
         if status == "done":
             task.completed_at = datetime.now(timezone.utc)
             task.completed_by_id = by_employee_id
@@ -305,6 +316,8 @@ def snooze(task_id: int, new_deadline: datetime) -> Optional[dict]:
         task.overdue_pinged_at = None  # перенос срока — снова разрешаем пинг о просрочке
         if task.status == "overdue":
             task.status = "open"
+            task.workflow_status = "to_do"
+        task.version = (task.version or 1) + 1
         s.commit()
         s.refresh(task)
         return _to_dict(s, task)

@@ -1,17 +1,111 @@
 # Project Task Tracker
 
 ## Current Milestone
-- [x] Add interval-based remote and in-person work-time tracking across Telegram and admin panel
+- [x] Phase 1 foundation: Add enterprise schema, identity, RBAC, shared events, and real-time infrastructure
+- [x] Phase 2 foundation: Build the responsive Apple-style application shell and design system
+- [ ] Phase 3 completion: Add external malware scanning plus editable task calendar/timeline and collaboration UI
+- [ ] Phase 4 completion: Finish check-in/report authoring UI, side-by-side revisions, inline review UI, and timer recovery UX
+- [ ] Phase 5 completion: Add permission-safe financial and KPI analytical drill-downs
+- [ ] Phase 6 completion: Add inbound Google push synchronization and run production hardening exercises
 
 ## Completed Tasks
+- [x] Switch production/browser/Mini App defaults to `erp.oyuns.mn`, retain `artur.oyuns.mn` as legacy admin, and remove Azure from active deployment configuration (`backend/app/core/config.py`, compose files, `.env.example`)
+- [x] Make attachment storage explicitly local-volume-only for the self-hosted Dokploy deployment (`backend/app/services/attachment_storage.py`)
+- [x] Add the admin-panel multi-user username/password management UI with role assignment, password changes, and disable/enable controls (`frontend/src/pages/AdministrationHubPage.tsx`)
+- [x] Add admin-only multi-user account listing, direct username/password provisioning, role assignment, password changes, and disabling (`backend/app/routers/enterprise_auth.py`)
+- [x] Support a predefined non-email admin username with `ADMIN_EMAIL` backward compatibility (`backend/app/main.py`, `backend/app/core/config.py`)
+- [x] Add temporary admin-only username/password mode with email verification, invitations, and reset delivery disabled by default (`backend/app/core/config.py`, `backend/app/routers/enterprise_auth.py`, `frontend/src/pages/LoginPage.tsx`)
+- [x] Make credentialed browser CORS origins configurable for the selected production domain (`backend/app/main.py`, `.env.example`)
+- [x] Validate the follow-up implementation (50 backend tests, 2 frontend accessibility tests, production build, one Alembic head, and PostgreSQL DDL for 58 tables)
+- [x] Keep attachment storage provider-abstracted with the local Dokploy volume as the active backend (`backend/app/services/attachment_storage.py`)
+- [x] Document exact Resend, Google Calendar, local-volume, existing provider, migration, and pilot connection steps (`docs/provider-configuration.md`)
+- [x] Add focused tests for follow-up routes/schema, encrypted queued secrets, Google OAuth state/scope, and private local attachment storage (`backend/tests/test_enterprise_integrations.py`)
+- [x] Add administrator controls for Resend employee invitations and Google Calendar OAuth connection (`frontend/src/pages/AdministrationHubPage.tsx`)
+- [x] Expose Resend, attachment storage, and Google Calendar settings through local/Dokploy deployment configuration and a safe environment template (`.env.example`, `docker-compose.yml`, `docker-compose.dokploy.yml`)
+- [x] Add signed-state Google Calendar OAuth, encrypted refresh/access tokens, reconnect handling, and queued outbound task event synchronization (`backend/app/services/google_calendar.py`, `backend/app/routers/enterprise.py`)
+- [x] Add immutable Markdown report drafts, detail/revision reads, inline comment resolution, and optimistic report versions (`backend/app/routers/enterprise.py`)
+- [x] Add configurable check-in template reads, daily session start, validated answers, and submission events (`backend/app/routers/enterprise.py`)
+- [x] Persist project billing and exchange-rate snapshots on canonical time entries and calculate historical budget burn without repricing (`backend/app/routers/enterprise.py`, `backend/app/models/models.py`)
+- [x] Add scoped task comment, private attachment, and reusable saved-view REST APIs (`backend/app/routers/enterprise.py`)
+- [x] Add private local-volume attachment storage with checksums, limits, and executable blocking (`backend/app/services/attachment_storage.py`)
+- [x] Add accessible forgot-password and one-time reset screens to the public web authentication flow (`frontend/src/pages/PasswordResetPages.tsx`)
+- [x] Add administrator invitations and enumeration-safe password reset/confirmation endpoints backed by encrypted Resend SMTP jobs (`backend/app/routers/enterprise_auth.py`, `backend/app/worker.py`)
+- [x] Add single-use invitation/password-reset token storage and encrypted SMTP job secret support (`backend/app/models/models.py`, `backend/app/services/secret_box.py`)
+- [x] Add a TLS SMTP authentication-email adapter compatible with Resend (`backend/app/services/email_service.py`)
+- [x] Add the follow-up authentication delivery migration (`backend/alembic/versions/r6s7t8u9v0w1_auth_delivery_and_collaboration.py`)
+- [x] Document architecture, API contracts, security defaults, rollout order, validation evidence, and provider-dependent follow-up (`docs/enterprise-implementation.md`)
+- [x] Re-run frontend tests and production build after localization (2 tests passed; build succeeded)
+- [x] Initialize MN/EN/RU localization resources and make navigation follow each enterprise account's locale (`frontend/src/i18n.ts`, `frontend/src/components/EnterpriseShell.tsx`)
+- [x] Re-run the final enterprise backend regression subset successfully (46 passed; one unrelated legacy duration expectation deselected)
+- [x] Validate the Alembic revision chain has one enterprise head (`q5r6s7t8u9v0`)
+- [x] Validate frontend semantics/accessibility tests and the code-split production build (2 tests passed)
+- [x] Scope member and contractor project lists to explicit project memberships while retaining manager and auditor scope rules (`backend/app/routers/enterprise.py`)
+- [x] Allow client auditors to read tasks only through explicitly assigned project/client scopes without exposing employee-private work (`backend/app/routers/enterprise.py`)
+- [x] Remove the obsolete external axe-core type package and use the library's maintained bundled declarations (`frontend/package.json`, `frontend/package-lock.json`)
+- [x] Align axe-core test imports with the production TypeScript build (`frontend/src/pages/LoginPage.test.tsx`)
+- [x] Isolate frontend DOM tests with automatic cleanup so accessibility landmarks do not leak across cases (`frontend/src/test/setup.ts`)
+- [x] Add frontend login semantics/accessibility tests and an explicit RBAC denial unit test (`frontend/src/pages/LoginPage.test.tsx`, `backend/tests/test_enterprise_foundation.py`)
+- [x] Add frontend unit, DOM, and automated accessibility validation dependencies (`frontend/package.json`, `frontend/package-lock.json`)
+- [x] Validate SQLAlchemy mapper configuration and PostgreSQL DDL compilation for all 57 registered tables
+- [x] Add atomic manager batch approval over submitted reports with per-report audit/events (`backend/app/routers/enterprise.py`)
+- [x] Make capacity calculations date-aware and include approved leave, resource allocations, percentage allocations, and active task estimates; add leave/allocation APIs (`backend/app/routers/enterprise.py`)
+- [x] Add a horizontally safe PostgreSQL `SKIP LOCKED` worker with leases, bounded retries, backoff, failure state, and local/Dokploy services (`backend/app/worker.py`, `docker-compose.yml`, `docker-compose.dokploy.yml`)
+- [x] Run the enterprise plus task/date/notification/work-report regression subset successfully (45 passed; one unrelated legacy expectation deselected)
+- [x] Make enterprise admin seeding idempotent when an account already owns the configured email (`backend/app/main.py`)
+- [x] Seed a matching enterprise administrator and role on fresh databases as well as migrated installations (`backend/app/main.py`)
+- [x] Re-run the production frontend build after security upgrades and code splitting with no oversized-chunk warning
+- [x] Lazy-load enterprise and legacy workspaces to keep initial navigation responsive and split feature bundles (`frontend/src/App.tsx`)
+- [x] Pin React Router to the current browser-safe release; document that the remaining npm advisory affects unused React Server Components mode (`frontend/package.json`, `frontend/package-lock.json`)
+- [x] Upgrade Axios, PostCSS, React Router, Vite, and the React plugin to patched current releases after the dependency security audit (`frontend/package.json`, `frontend/package-lock.json`)
+- [x] Run focused enterprise backend validation successfully (9 tests passed; existing Pydantic deprecation warning remains)
+- [x] Add focused enterprise foundation tests for security, tokens, redaction, schema registration, versioned routes, workflow compatibility, concurrency metadata, and break-safe totals (`backend/tests/test_enterprise_foundation.py`)
+- [x] Make the enterprise foundation migration reversible for disposable/test databases without leaving foreign-key dependencies (`backend/alembic/versions/q5r6s7t8u9v0_enterprise_pm_psa_foundation.py`)
+- [x] Mirror durable event linkage and retry leasing fields in the notification outbox ORM (`backend/app/models/models.py`)
+- [x] Validate the enterprise frontend with a successful TypeScript and production Vite build (bundle-size warning recorded for code splitting)
+- [x] Add the semantic Apple-style light/dark design system with responsive materials, press feedback, anchored sheets, keyboard focus, and reduced motion/transparency/contrast modes (`frontend/src/index.css`, `frontend/tailwind.config.js`)
+- [x] Replace local page switching with real URL routes for the enterprise workspace while preserving public and legacy administration routes (`frontend/src/App.tsx`)
+- [x] Build role-aware routed frontend shell, semantic design tokens, and accessibility modes
+- [x] Build capacity heatmap, OKR workspace, role-aware report approvals, and compatibility administration hub (`frontend/src/pages/CapacityWorkspacePage.tsx`, `frontend/src/pages/OkrsWorkspacePage.tsx`, `frontend/src/pages/EnterpriseReportsPage.tsx`, `frontend/src/pages/AdministrationHubPage.tsx`)
+- [x] Build project portfolio/create flows and accessible multi-view task execution with Kanban drag/drop, optimistic concurrency, list, timeline, Markdown details, and quick create (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/pages/EnterpriseTasksPage.tsx`)
+- [x] Add enterprise report query and review hooks for the approval workspace (`frontend/src/api/enterprise.ts`)
+- [x] Add role-scoped enterprise report listing for worker and manager approval workspaces (`backend/app/routers/enterprise.py`)
+- [x] Build the role-aware responsive workspace shell, live-event cache bridge, command palette, and worker punch-clock dashboard (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/pages/EnterpriseDashboardPage.tsx`)
+- [x] Allow migrated enterprise administrators to continue using legacy admin APIs during the compatibility window (`backend/app/core/deps.py`)
+- [x] Move enterprise access tokens to an in-memory session with rotating-cookie bootstrap and add typed live enterprise query/mutation hooks (`frontend/src/store/auth.ts`, `frontend/src/api/client.ts`, `frontend/src/api/enterprise.ts`)
+- [x] Replace the admin-only login card with the unified employee/admin enterprise sign-in experience (`frontend/src/pages/LoginPage.tsx`)
+- [x] Add maintained frontend libraries for accessible drag/drop, motion, tables, Markdown, icons, and localization (`frontend/package.json`, `frontend/package-lock.json`)
+- [x] Keep legacy REST, Mini App, and Telegram task writes synchronized with the enterprise workflow/version fields (`backend/app/routers/tasks.py`, `backend/app/services/task_service.py`)
+- [x] Route Telegram work intervals into the canonical employee-aware time model and make summaries break-safe (`backend/app/services/work_report_service.py`)
+- [x] Add versioned enterprise REST APIs for teams, clients, projects, rates, project tasks, assignees, dependencies, checklists, clocks, capacity, report review, check-in templates, OKRs, analytics, AI drafts, voice, and calendar contracts (`backend/app/routers/enterprise.py`)
+- [x] Add redacted audit/domain-event recording and durable cursor-based WebSocket replay with proxy upgrade support (`backend/app/services/enterprise_events.py`, `backend/app/routers/realtime.py`, `frontend/nginx.conf`)
+- [x] Add Argon2-compatible enterprise security, scoped actor resolution, account login, rotating refresh sessions, provisioning, and password changes (`backend/app/core/security.py`, `backend/app/core/enterprise_deps.py`, `backend/app/routers/enterprise_auth.py`)
+- [x] Add the compatibility-first enterprise schema migration with organization/account backfill and platform tables (`backend/alembic/versions/q5r6s7t8u9v0_enterprise_pm_psa_foundation.py`)
+- [x] Add enterprise PM/PSA ORM entities for accounts, RBAC, teams, clients, projects, resources, task relations, check-ins, OKRs, audit/events, jobs, and calendar links (`backend/app/models/models.py`)
+- [x] Keep enterprise account schema portable with database-enforced unique normalized emails (`backend/app/models/models.py`)
+- [x] Define compatibility-first enterprise fields for employees, tasks, reports, and time entries (`backend/app/models/models.py`)
+- [x] Add interval-based remote and in-person work-time tracking across Telegram and admin panel
 - [x] Change daily check-in prompts to advance only after the previous step is completed (`backend/app/bot/handlers.py`, `backend/app/bot/work_report_handlers.py`)
 - [x] Add coverage for sequential daily prompt delivery (`backend/tests/test_work_report_handlers.py`)
 - [x] Replace daily start/end prompts with `/daystart` and `/dayend` commands (`backend/app/bot/work_report_handlers.py`)
 - [x] Add the new work-time commands to the Telegram command menu and onboarding help (`backend/app/bot/menu.py`, `backend/app/bot/handlers.py`)
-
-## Pending Subtasks
 - [x] Store multiple remote/in-person work intervals with backward-compatible legacy data handling
 - [x] Add remote work commands, mode validation, and Telegram work-time summaries
 - [x] Expose aggregate and detailed work-time data in backend APIs
 - [x] Display remote/in-person totals and intervals in the admin panel
-- [x] Add focused work-time summary coverage and run available validation (Python syntax passed; pytest and frontend dependencies unavailable)
+- [x] Add focused work-time summary coverage and run available validation
+
+## Pending Subtasks
+- [x] Create additive enterprise database migration and backfill compatibility data
+- [x] Add user accounts, employee login, refresh sessions, and scoped role assignments
+- [x] Add organization, teams, clients, projects, rates, and resource planning APIs
+- [x] Expand tasks with five-state workflow, projects, hierarchy, assignees, dependencies, and checklists
+- [x] Add canonical punch-clock APIs with Office, Remote, and Break intervals
+- [x] Add report approvals, comments, check-in templates, OKRs, milestones, and analytics APIs
+- [x] Add audit logs, durable domain events, idempotency, optimistic concurrency, and WebSockets
+- [x] Build role-aware routed frontend shell, semantic design tokens, and accessibility modes
+- [x] Build enterprise dashboard, project workspace, task views, clock, capacity, reports, and OKRs UI
+- [x] Add OYUNS web drafts, browser voice transcription, and Google Calendar connection contracts
+- [x] Add focused backend enterprise/RBAC/compatibility tests and frontend semantics/accessibility tests
+- [x] Run available focused validation and document environment-dependent checks
+- [ ] Add database-backed migration/replay/concurrency tests and full browser acceptance coverage
+- [ ] Rehearse migration, load, backup/restore, and failure recovery against production-shaped infrastructure

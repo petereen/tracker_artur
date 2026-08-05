@@ -26,8 +26,9 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       BOT_TOKEN: ${BOT_TOKEN:-}
       MANAGER_TG_ID: ${MANAGER_TG_ID:-306983322}
-      MINI_APP_URL: ${MINI_APP_URL:-}
+      MINI_APP_URL: ${MINI_APP_URL:-https://erp.oyuns.mn/tg}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AGENT_RATES_API_KEY: ${AGENT_RATES_API_KEY:-}
@@ -39,11 +40,24 @@ services:
       CHIMEGE_API_TOKEN: ${CHIMEGE_API_TOKEN:-}
       CHIMEGE_TTS_API_TOKEN: ${CHIMEGE_TTS_API_TOKEN:-}
       CHIMEGE_PUNCTUATE: ${CHIMEGE_PUNCTUATE:-true}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://erp.oyuns.mn}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://erp.oyuns.mn}
+      AUTH_EMAIL_VERIFICATION_ENABLED: ${AUTH_EMAIL_VERIFICATION_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp.resend.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:-resend}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      ATTACHMENT_STORAGE_BACKEND: ${ATTACHMENT_STORAGE_BACKEND:-local}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
     ports:
       # Keep the API private; the frontend proxies /api/ to it on the Docker network.
       - "127.0.0.1:8010:8000"
     volumes:
       - knowledge_uploads:/app/uploads/knowledge
+      - attachment_uploads:/app/uploads/attachments
 
   bot:
     build: ./backend
@@ -56,9 +70,19 @@ services:
       SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
       SECRET_KEY: ${SECRET_KEY}
       BOT_TOKEN: ${BOT_TOKEN:-}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://erp.oyuns.mn}
+      SMTP_HOST: ${SMTP_HOST:-smtp.resend.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:-resend}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       MANAGER_TG_ID: ${MANAGER_TG_ID:-306983322}
-      MINI_APP_URL: ${MINI_APP_URL:-}
+      MINI_APP_URL: ${MINI_APP_URL:-https://erp.oyuns.mn/tg}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AGENT_RATES_API_KEY: ${AGENT_RATES_API_KEY:-}
@@ -72,13 +96,35 @@ services:
       CHIMEGE_PUNCTUATE: ${CHIMEGE_PUNCTUATE:-true}
     command: python -m app.bot.main
 
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://erp.oyuns.mn}
+      SMTP_HOST: ${SMTP_HOST:-smtp.resend.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:-resend}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+    command: python -m app.worker
+
   frontend:
     build: ./frontend
     restart: unless-stopped
     depends_on:
       - backend
     ports:
-      # The host Nginx vhost for artur.oyuns.mn is the only public entry point.
+      # Dokploy should expose erp.oyuns.mn; artur.oyuns.mn remains the legacy admin host.
       - "127.0.0.1:3010:80"
     networks:
       default: {}
@@ -90,6 +136,7 @@ services:
 volumes:
   pgdata:
   knowledge_uploads:
+  attachment_uploads:
 
 networks:
   web-edge:
