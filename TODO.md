@@ -11,6 +11,7 @@
 ## Completed Tasks
 - [x] Switch production/browser/Mini App defaults to `erp.oyuns.mn`, retain `artur.oyuns.mn` as legacy admin, and remove Azure from active deployment configuration (`backend/app/core/config.py`, compose files, `.env.example`)
 - [x] Make attachment storage explicitly local-volume-only for the self-hosted Dokploy deployment (`backend/app/services/attachment_storage.py`)
+- [x] Fix follow-up Alembic migration so it does not re-add columns already created by the enterprise foundation migration (`backend/alembic/versions/r6s7t8u9v0w1_auth_delivery_and_collaboration.py`)
 - [x] Add the admin-panel multi-user username/password management UI with role assignment, password changes, and disable/enable controls (`frontend/src/pages/AdministrationHubPage.tsx`)
 - [x] Add admin-only multi-user account listing, direct username/password provisioning, role assignment, password changes, and disabling (`backend/app/routers/enterprise_auth.py`)
 - [x] Support a predefined non-email admin username with `ADMIN_EMAIL` backward compatibility (`backend/app/main.py`, `backend/app/core/config.py`)
