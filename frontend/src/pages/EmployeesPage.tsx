@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import toast from 'react-hot-toast'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 import { useEmployees, useCreateEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
+import { useCreateManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
 import { ReportDetailModal } from '../components/ReportDetailModal'
 
 const TZ_OPTIONS = [
@@ -24,6 +26,11 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
   next_month_plan: 'Дараа сарын төлөвлөгөө',
 }
 
+const ACCESS_ROLES = [
+  ['member', 'Member'], ['manager', 'Manager'], ['team_lead', 'Team lead'],
+  ['contractor', 'Contractor'], ['client_auditor', 'Client auditor'], ['admin', 'Admin'],
+] as const
+
 function formatMinutes(minutes: number) {
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
@@ -42,6 +49,9 @@ export function EmployeesPage() {
   const { data: employees = [] } = useEmployees()
   const create = useCreateEmployee()
   const update = useUpdateEmployee()
+  const accounts = useManagedAccounts()
+  const createAccount = useCreateManagedAccount()
+  const updateAccount = useUpdateManagedAccount()
 
   const [search, setSearch] = useState('')
   // null = закрыто, { id: null } = создание, { id: number } = редактирование
@@ -103,6 +113,31 @@ export function EmployeesPage() {
   }
 
   const toggle = (emp: any) => update.mutate({ id: emp.id, is_active: !emp.is_active })
+  const accountFor = (emp: any) => accounts.data?.find((account) => account.telegram_id === emp.telegram_id)
+    || accounts.data?.find((account) => account.employee_id === emp.id)
+  const toggleAccessRole = async (emp: any, role: string) => {
+    const account = accountFor(emp)
+    if (!account) return
+    const roles = account.roles.includes(role) ? account.roles.filter((item) => item !== role) : [...account.roles, role]
+    if (!roles.length) { toast.error('Хэрэглэгч дор хаяж нэг эрхтэй байна'); return }
+    try {
+      await updateAccount.mutateAsync({ id: account.id, roles })
+      toast.success('Хандалтын эрх шинэчлэгдлээ')
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Эрх шинэчлэгдсэнгүй')
+    }
+  }
+  const linkAccess = async (emp: any) => {
+    const password = window.prompt(`${emp.name}-ийн шинэ нууц үг (10+ тэмдэгт):`)
+    if (!password) return
+    if (password.length < 10) { toast.error('Нууц үг 10+ тэмдэгт байх ёстой'); return }
+    try {
+      await createAccount.mutateAsync({ email: `telegram-${emp.telegram_id}`, password, employee_id: emp.id, roles: ['member'], locale: 'mn' })
+      toast.success('Ажилтны хандалт холбогдлоо')
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Хандалт холбогдсонгүй')
+    }
+  }
   const setPerformanceQuickRange = (days: number, key: 'day' | 'week' | 'month') => {
     const start = new Date()
     start.setDate(start.getDate() - days + 1)
@@ -124,7 +159,7 @@ export function EmployeesPage() {
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-surface2">
-              {['Ажилтан', 'Telegram', 'ID', 'Цагийн бүс', 'Төлөв', ''].map((h) => (
+              {['Ажилтан', 'Telegram', 'ID', 'Хандалт', 'Цагийн бүс', 'Төлөв', ''].map((h) => (
                 <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted border-b border-border whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -136,6 +171,18 @@ export function EmployeesPage() {
                 <td className="px-4 py-3 font-medium">{e.name}</td>
                 <td className="px-4 py-3 text-muted font-mono text-xs">{e.telegram_username || '—'}</td>
                 <td className="px-4 py-3 text-muted2 font-mono text-[11px]">{e.telegram_id}</td>
+                <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                  {(() => {
+                    const account = accountFor(e)
+                    if (!account) return <Btn variant="ghost" onClick={() => linkAccess(e)} disabled={createAccount.isPending}>Холбох</Btn>
+                    return <div className="flex flex-wrap gap-x-2 gap-y-1 max-w-[240px]">
+                      {ACCESS_ROLES.map(([value, label]) => <label key={value} className="inline-flex items-center gap-1 text-[11px] text-muted whitespace-nowrap">
+                        <input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleAccessRole(e, value)} disabled={updateAccount.isPending} />
+                        {label}
+                      </label>)}
+                    </div>
+                  })()}
+                </td>
                 <td className="px-4 py-3 text-muted text-xs">{e.timezone}</td>
                 <td className="px-4 py-3"><Badge color={e.is_active ? 'green' : 'muted'}>{e.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge></td>
                 <td className="px-4 py-3">

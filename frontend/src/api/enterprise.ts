@@ -91,6 +91,7 @@ export interface ManagedAccount {
   id: number
   email: string
   employee_id: number | null
+  telegram_id: string | null
   locale: string
   roles: string[]
   status: 'active' | 'invited' | 'locked' | 'disabled'
@@ -103,7 +104,7 @@ export function useManagedAccounts() {
 export function useCreateManagedAccount() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { email: string; password: string; roles: string[]; locale: string }) => api.post('/v1/auth/accounts', input).then((response) => response.data),
+    mutationFn: (input: { email: string; password: string; roles: string[]; locale: string; employee_id?: number }) => api.post('/v1/auth/accounts', input).then((response) => response.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'accounts'] }),
   })
 }

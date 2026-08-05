@@ -1,6 +1,10 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add employee-section access role management matched by Telegram ID (`frontend/src/pages/EmployeesPage.tsx`, `backend/app/routers/enterprise_auth.py`)
+- [x] Expose linked account Telegram IDs and allow employee-linked account creation (`frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise_auth.py`)
+- [x] Prevent duplicate employee-to-account links during employee access provisioning (`backend/app/routers/enterprise_auth.py`)
+- [x] Add friendly Telegram work-time reminders at 12:00, 19:00, and 23:00 (`backend/app/bot/scheduler.py`, `backend/app/services/work_report_service.py`)
 - [x] Fix production React render-depth error and suppress employee-unlinked clock polling (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Phase 1 foundation: Add enterprise schema, identity, RBAC, shared events, and real-time infrastructure
 - [x] Phase 2 foundation: Build the responsive Apple-style application shell and design system
@@ -18,6 +22,7 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Add employee-section access role management matched by Telegram ID, with linked account provisioning and role toggles (`frontend/src/pages/EmployeesPage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise_auth.py`)
 - [x] Serialize persistent APScheduler job rebuilds across bot replicas with a PostgreSQL advisory lock (`backend/app/bot/scheduler.py`)
 - [x] Stabilize empty role selectors to prevent React external-store render loops after login (`frontend/src/store/auth.ts`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/pages/EnterpriseReportsPage.tsx`)
 - [x] Prevent actor query side effects and locale update loops; avoid clock polling for accounts without an employee link (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.tsx`)

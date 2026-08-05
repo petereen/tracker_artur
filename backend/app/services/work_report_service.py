@@ -417,6 +417,26 @@ def work_time_entries(report_id: int) -> list[WorkTimeEntry]:
         return entries
 
 
+def work_time_status(employee_id: int, local_day: date) -> dict[str, str | bool | None]:
+    """Return whether a worker has started work and whether an interval is open."""
+    with get_session() as s:
+        entries = s.execute(
+            select(WorkTimeEntry)
+            .where(
+                WorkTimeEntry.employee_id == employee_id,
+                WorkTimeEntry.local_work_date == local_day,
+                WorkTimeEntry.entry_type == "work",
+            )
+            .order_by(WorkTimeEntry.started_at.desc(), WorkTimeEntry.id.desc())
+        ).scalars().all()
+        active = next((entry for entry in entries if entry.ended_at is None), None)
+        return {
+            "started": bool(entries),
+            "active": active is not None,
+            "mode": active.mode if active else None,
+        }
+
+
 def summarize_work_time(entries: list[WorkTimeEntry], now: datetime | None = None) -> dict:
     """Return total, mode totals, and detailed intervals in minutes."""
     current = now or datetime.now(timezone.utc)

@@ -38,7 +38,7 @@ def _rebuild_jobs_unlocked():
     global _last_schedule_fingerprint
     for job in scheduler.get_jobs():
         if any(job.id.startswith(p) for p in
-               ("survey_", "reminder1_", "reminder2_", "missed_", "monthly_report_", "task_morning_", "task_evening_")):
+               ("survey_", "reminder1_", "reminder2_", "missed_", "monthly_report_", "task_morning_", "task_evening_", "work_time_")):
             job.remove()
 
     from app.services.digest_service import send_employee_morning_digest, send_employee_evening_digest
@@ -65,6 +65,18 @@ def _rebuild_jobs_unlocked():
         scheduler.add_job(send_monthly_report_prompt, "cron",
             hour=morning.hour, minute=morning.minute, timezone=tz,
             id=f"monthly_report_{emp.id}", replace_existing=True, args=[emp.id])
+
+        # Work-time reminders are fixed local-time guardrails and apply even
+        # when an employee has no legacy Schedule row.
+        scheduler.add_job(send_work_time_reminder, "cron",
+            hour=12, minute=0, timezone=tz,
+            id=f"work_time_start_{emp.id}", replace_existing=True,
+            args=[emp.id, "start"])
+        for hour in (19, 23):
+            scheduler.add_job(send_work_time_reminder, "cron",
+                hour=hour, minute=0, timezone=tz,
+                id=f"work_time_end_{hour}_{emp.id}", replace_existing=True,
+                args=[emp.id, "end"])
         if not sch:
             continue
 
@@ -224,6 +236,47 @@ async def send_reminder(employee_id: int, num: int):
         report_complete = work_report_service.report_is_approved(employee_id, "daily", _local_today(timezone_name))
         if sess or not report_complete:
             await bot.send_message(telegram_id, f"⚠️ Сануулга #{num}: чек-ин болон өдрийн тайлангаа бөглөхөө бүү мартаарай! /today")
+    finally:
+        await bot.session.close()
+
+
+async def send_work_time_reminder(employee_id: int, reminder_type: str):
+    """Nudge a worker only when today's work interval needs attention."""
+    from app.bot.db import get_session
+    from app.models.models import Employee
+    from app.services import work_report_service
+
+    bot = _make_bot()
+    try:
+        with get_session() as s:
+            emp = s.get(Employee, employee_id)
+            if not emp or not emp.is_active or not emp.telegram_id:
+                return
+            telegram_id = emp.telegram_id
+            timezone_name = emp.timezone
+
+        local_day = _local_today(timezone_name)
+        state = work_report_service.work_time_status(employee_id, local_day)
+        if reminder_type == "start":
+            if state["started"]:
+                return
+            message = (
+                "🕛 Цагаа бүртгэхээ мартсан юм биш биз? 🙂\n\n"
+                "Өнөөдрийн ажлаа эхлүүлсэн бол эхэлсэн цагаа бүртгэнэ үү:\n"
+                "🏢 Оффис: <b>/daystart</b>\n"
+                "🏠 Remote: <b>/remotestart</b>"
+            )
+        else:
+            if not state["active"]:
+                return
+            end_command = "/dayend" if state["mode"] == "in_person" else "/remoteend"
+            mode_label = "оффисын" if state["mode"] == "in_person" else "remote"
+            message = (
+                "🌙 Ажлаа дуусгахаа мартсан юм биш биз? 🙂\n\n"
+                f"Таны {mode_label} ажлын цаг одоогоор нээлттэй байна. "
+                f"Дуусгахдаа <b>{end_command}</b> командыг ашиглана уу."
+            )
+        await bot.send_message(telegram_id, message, parse_mode="HTML")
     finally:
         await bot.session.close()
 

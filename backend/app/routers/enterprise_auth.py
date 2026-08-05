@@ -68,6 +68,7 @@ class AccountOut(BaseModel):
     status: str
     name: str | None = None
     avatar_url: str | None = None
+    telegram_id: str | None = None
 
 
 class AccountCreate(BaseModel):
@@ -463,6 +464,13 @@ async def create_account(
     roles = sorted(set(data.roles))
     if not roles or not set(roles).issubset(allowed):
         raise HTTPException(status_code=400, detail="Invalid roles")
+    if data.employee_id:
+        employee = await db.get(Employee, data.employee_id)
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        linked_account = await db.scalar(select(UserAccount.id).where(UserAccount.employee_id == data.employee_id))
+        if linked_account:
+            raise HTTPException(status_code=409, detail="Employee already has an account")
     existing = await db.scalar(select(UserAccount.id).where(func.lower(UserAccount.email) == data.email))
     if existing:
         raise HTTPException(status_code=409, detail="Email already has an account")
@@ -480,7 +488,8 @@ async def create_account(
     for role in roles:
         db.add(RoleAssignment(account_id=account.id, role=role))
     await db.commit()
-    return AccountOut(id=account.id, email=account.email, employee_id=account.employee_id, locale=account.locale, roles=roles, status=account.status)
+    employee = await db.get(Employee, account.employee_id) if account.employee_id else None
+    return AccountOut(id=account.id, email=account.email, employee_id=account.employee_id, locale=account.locale, roles=roles, status=account.status, telegram_id=employee.telegram_id if employee else None)
 
 
 @router.get("/accounts", response_model=list[AccountOut])
@@ -492,7 +501,8 @@ async def list_accounts(
     output = []
     for account in accounts:
         roles = (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all()
-        output.append(AccountOut(id=account.id, email=account.email, employee_id=account.employee_id, locale=account.locale, roles=sorted(set(roles)), status=account.status))
+        employee = await db.get(Employee, account.employee_id) if account.employee_id else None
+        output.append(AccountOut(id=account.id, email=account.email, employee_id=account.employee_id, locale=account.locale, roles=sorted(set(roles)), status=account.status, telegram_id=employee.telegram_id if employee else None))
     return output
 
 
@@ -546,7 +556,8 @@ async def update_account(
     else:
         roles = sorted(set((await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all()))
     await db.commit()
-    return AccountOut(id=account.id, email=account.email, employee_id=account.employee_id, locale=account.locale, roles=roles, status=account.status)
+    employee = await db.get(Employee, account.employee_id) if account.employee_id else None
+    return AccountOut(id=account.id, email=account.email, employee_id=account.employee_id, locale=account.locale, roles=roles, status=account.status, telegram_id=employee.telegram_id if employee else None)
 
 
 @router.post("/accounts/invite", response_model=AccountOut, status_code=status.HTTP_201_CREATED)
