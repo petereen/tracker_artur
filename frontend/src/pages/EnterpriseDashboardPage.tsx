@@ -5,10 +5,17 @@ import { useClock, useClockAction, useEnterpriseSummary } from '../api/enterpris
 import { PeriodPreset, periodFromPreset, TimePeriodFilter } from '../components/TimePeriodFilter'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 
-function elapsed(startedAt?: string) {
-  if (!startedAt) return '00:00:00'
-  const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000))
+function formatDuration(seconds: number) {
+  seconds = Math.max(0, Math.floor(seconds))
   return [Math.floor(seconds / 3600), Math.floor(seconds % 3600 / 60), seconds % 60].map((value) => String(value).padStart(2, '0')).join(':')
+}
+
+function formatLocalTime(value: string, timezone: string) {
+  try {
+    return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone }).format(new Date(value))
+  } catch {
+    return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+  }
 }
 
 export function EnterpriseDashboardPage() {
@@ -25,6 +32,11 @@ export function EnterpriseDashboardPage() {
   const active = clock.data?.active
   const working = active?.entry_type === 'work'
   const onBreak = active?.entry_type === 'break'
+  const todayEntries = clock.data?.today_entries ?? []
+  const todayWorkSeconds = todayEntries.reduce((total, entry) => {
+    if (entry.entry_type !== 'work') return total
+    return total + Math.max(0, ((entry.ended_at ? new Date(entry.ended_at).getTime() : Date.now()) - new Date(entry.started_at).getTime()) / 1000)
+  }, 0)
 
   const cards = [
     { label: 'Идэвхтэй төсөл', value: summary.data?.active_projects ?? '—', icon: BriefcaseBusiness, tone: 'blue' },
@@ -37,9 +49,16 @@ export function EnterpriseDashboardPage() {
     <div className="dashboard-grid">
       <div className="dashboard-period"><div><span className="eyebrow">{isSupervisor ? 'Байгууллагын тойм' : 'Хувийн тойм'}</span><h2>{isSupervisor ? 'Нийт гүйцэтгэлийн үзүүлэлт' : 'Таны гүйцэтгэлийн үзүүлэлт'}</h2></div><TimePeriodFilter preset={periodPreset} period={period} onChange={(nextPreset, nextPeriod) => { setPeriodPreset(nextPreset); setPeriod(nextPeriod) }} /></div>
       <section className="clock-panel panel">
-        <div className="panel-heading"><div><span className="eyebrow">Punch clock</span><h2>{working ? 'Ажиллаж байна' : onBreak ? 'Завсарлага' : 'Өдрөө эхлүүлэх үү?'}</h2></div><span className={`live-indicator ${active ? 'online' : ''}`}>{active ? 'LIVE' : 'OFF'}</span></div>
-        <div className="clock-time" aria-live="polite">{elapsed(active?.started_at)}</div>
+        <div className="panel-heading"><div><span className="eyebrow">Punch clock</span><h2>Өнөөдрийн ажлын цаг</h2></div><span className={`live-indicator ${active ? 'online' : ''}`}>{active ? 'LIVE' : 'OFF'}</span></div>
+        <div className="clock-summary"><div className="clock-time" aria-live="polite">{formatDuration(todayWorkSeconds)}</div>
         <p>{working ? `${active?.mode === 'remote' ? 'Remote' : 'Оффис'} горимоор ажиллаж байна.` : onBreak ? 'Завсарлагын хугацаа ажилласан цагт орохгүй.' : 'Telegram болон вэбийн цагийн төлөв үргэлж ижил байна.'}</p>
+        <div className="clock-details" aria-label="Өнөөдрийн цагийн дэлгэрэнгүй">
+          {todayEntries.map((entry) => {
+            const seconds = Math.max(0, ((entry.ended_at ? new Date(entry.ended_at).getTime() : Date.now()) - new Date(entry.started_at).getTime()) / 1000)
+            return <div key={entry.id}>{entry.entry_type === 'break' ? 'Завсарлага' : entry.mode === 'remote' ? 'Remote' : 'Оффис'}: {formatLocalTime(entry.started_at, clock.data?.timezone ?? 'Asia/Ulaanbaatar')}–{entry.ended_at ? formatLocalTime(entry.ended_at, clock.data?.timezone ?? 'Asia/Ulaanbaatar') : 'одоо'} ({formatDuration(seconds)})</div>
+          })}
+        </div>
+        </div>
         <div className="clock-actions">
           {!active && <><button className="clock-button office" onClick={() => action.mutate({ action: 'start', mode: 'in_person' })}><House />Оффис эхлэх</button><button className="clock-button remote" onClick={() => action.mutate({ action: 'start', mode: 'remote' })}><Laptop2 />Remote эхлэх</button></>}
           {working && <><button className="clock-button break" onClick={() => action.mutate({ action: 'break' })}><Coffee />Завсарлага</button><button className="clock-button stop" onClick={() => action.mutate({ action: 'stop' })}><Pause />Өдөр дуусгах</button></>}

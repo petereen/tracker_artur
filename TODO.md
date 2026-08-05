@@ -22,6 +22,9 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Place the daily total beside compact interval details on desktop and stack them on mobile (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`)
+- [x] Style the web clock’s daily interval details as compact supporting text (`frontend/src/index.css`)
+- [x] Display total worktime for today with compact interval details in the web punch clock (`backend/app/routers/enterprise.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Add employee-section access role management matched by Telegram ID, with linked account provisioning and role toggles (`frontend/src/pages/EmployeesPage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise_auth.py`)
 - [x] Serialize persistent APScheduler job rebuilds across bot replicas with a PostgreSQL advisory lock (`backend/app/bot/scheduler.py`)
 - [x] Stabilize empty role selectors to prevent React external-store render loops after login (`frontend/src/store/auth.ts`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/pages/EnterpriseReportsPage.tsx`)

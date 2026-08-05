@@ -840,8 +840,26 @@ async def delete_saved_view(view_id: int, db: AsyncSession = Depends(get_db), ac
 async def clock_status(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if not actor.employee_id:
         raise HTTPException(status_code=409, detail="Account is not linked to an employee")
-    entry = await _active_entry(db, actor.employee_id)
-    return {"active": _entry_out(entry) if entry else None, "server_time": datetime.now(timezone.utc)}
+    employee = await db.get(Employee, actor.employee_id)
+    now = datetime.now(timezone.utc)
+    local_day = now.astimezone(ZoneInfo(employee.timezone)).date()
+    entries = (
+        await db.execute(
+            select(WorkTimeEntry)
+            .where(
+                WorkTimeEntry.employee_id == employee.id,
+                WorkTimeEntry.local_work_date == local_day,
+            )
+            .order_by(WorkTimeEntry.started_at, WorkTimeEntry.id)
+        )
+    ).scalars().all()
+    active = next((item for item in reversed(entries) if item.ended_at is None), None)
+    return {
+        "active": _entry_out(active) if active else None,
+        "today_entries": [_entry_out(item) for item in entries],
+        "timezone": employee.timezone,
+        "server_time": now,
+    }
 
 
 @router.post("/clock/start")

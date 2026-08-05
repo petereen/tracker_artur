@@ -155,7 +155,7 @@ export function useEnterpriseSummary(period?: DateRange) {
 }
 
 export function useClock(enabled = true) {
-  return useQuery<{ active: ClockEntry | null; server_time: string }>({ queryKey: ['v1', 'clock'], queryFn: () => api.get('/v1/clock/status').then((response) => response.data), enabled, refetchInterval: enabled ? 30_000 : false })
+  return useQuery<{ active: ClockEntry | null; today_entries: ClockEntry[]; timezone: string; server_time: string }>({ queryKey: ['v1', 'clock'], queryFn: () => api.get('/v1/clock/status').then((response) => response.data), enabled, refetchInterval: enabled ? 30_000 : false })
 }
 
 export function useClockAction() {
