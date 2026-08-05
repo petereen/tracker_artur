@@ -10,6 +10,8 @@ export interface Actor {
   avatar_url?: string | null
 }
 
+export const EMPTY_ROLES: string[] = []
+
 interface AuthState {
   token: string | null
   actor: Actor | null

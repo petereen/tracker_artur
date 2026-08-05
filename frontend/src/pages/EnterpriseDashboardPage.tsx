@@ -3,7 +3,7 @@ import { motion } from 'motion/react'
 import { ArrowUpRight, BriefcaseBusiness, CheckCircle2, Coffee, House, Laptop2, Pause, Play, TimerReset } from 'lucide-react'
 import { useClock, useClockAction, useEnterpriseSummary } from '../api/enterprise'
 import { PeriodPreset, periodFromPreset, TimePeriodFilter } from '../components/TimePeriodFilter'
-import { useAuthStore } from '../store/auth'
+import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 
 function elapsed(startedAt?: string) {
   if (!startedAt) return '00:00:00'
@@ -18,7 +18,7 @@ export function EnterpriseDashboardPage() {
   const employeeId = useAuthStore((state) => state.actor?.employee_id)
   const clock = useClock(employeeId != null)
   const action = useClockAction()
-  const roles = useAuthStore((state) => state.actor?.roles ?? [])
+  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const isSupervisor = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const [, tick] = useState(0)
   useEffect(() => { const timer = window.setInterval(() => tick((value) => value + 1), 1000); return () => clearInterval(timer) }, [])

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Check, FileCheck2, MessageSquareWarning, RotateCcw, Save, Send, X } from 'lucide-react'
-import { useAuthStore } from '../store/auth'
+import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { useEnterpriseReports, useReportDetail, useReportReview, useSaveReportDraft } from '../api/enterprise'
 import { PeriodPreset, periodFromPreset, TimePeriodFilter } from '../components/TimePeriodFilter'
 
@@ -13,7 +13,7 @@ export function EnterpriseReportsPage() {
   const detail = useReportDetail(selectedId)
   const saveDraft = useSaveReportDraft()
   const review = useReportReview()
-  const roles = useAuthStore((state) => state.actor?.roles ?? [])
+  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const canReview = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const isAdmin = roles.includes('admin')
   const selected = reports.data?.find((report) => report.id === selectedId)

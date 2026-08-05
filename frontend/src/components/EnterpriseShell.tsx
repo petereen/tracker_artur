@@ -8,7 +8,7 @@ import {
   LayoutDashboard, LogOut, Menu, Search, Settings2, Sparkles, Users2, X,
 } from 'lucide-react'
 import { useActor, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance } from '../api/enterprise'
-import { useAuthStore } from '../store/auth'
+import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { periodFromPreset } from './TimePeriodFilter'
 import { OyunsAssistant } from './OyunsAssistant'
 
@@ -92,7 +92,7 @@ export function EnterpriseShell() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const roles = actorQuery.data?.roles ?? []
+  const roles = actorQuery.data?.roles ?? EMPTY_ROLES
   useEffect(() => {
     if (actorQuery.data) setActor(actorQuery.data)
   }, [actorQuery.data, setActor])
