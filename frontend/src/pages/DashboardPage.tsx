@@ -14,6 +14,12 @@ function localDate(value = new Date()) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
 }
 
+function formatMinutes(minutes: number) {
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return hours ? `${hours}ц ${rest}м` : `${rest}м`
+}
+
 export function DashboardPage() {
   const [metric, setMetric] = useState('calls')
   const [range, setRange] = useState<'day' | 'week' | 'month' | 'all' | 'custom'>('month')
@@ -76,12 +82,15 @@ export function DashboardPage() {
       </div>
 
       {workPerformance.data && (
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-5 gap-4 mb-4">
           <Card><div className="text-xs text-muted font-medium mb-2">Өдрийн тайлангийн биелэлт</div><div className="text-[26px] font-semibold text-accent">{workPerformance.data.daily_report_rate}%</div><div className="text-xs text-muted mt-1">{workPerformance.data.approved_daily_reports} батлагдсан</div></Card>
-          <Card><div className="text-xs text-muted font-medium mb-2">Ажлын цагийн бүртгэл</div><div className="text-[26px] font-semibold text-green">{workPerformance.data.work_time_entries}</div><div className="text-xs text-muted mt-1">{rangeLabel}</div></Card>
+          <Card><div className="text-xs text-muted font-medium mb-2">Нийт ажилласан цаг</div><div className="text-[26px] font-semibold text-green">{formatMinutes(workPerformance.data.work_time?.total_minutes || 0)}</div><div className="text-xs text-muted mt-1">{workPerformance.data.work_time_entries} интервал</div></Card>
+          <Card><div className="text-xs text-muted font-medium mb-2">Оффис</div><div className="text-[26px] font-semibold text-blue">{formatMinutes(workPerformance.data.work_time?.in_person_minutes || 0)}</div><div className="text-xs text-muted mt-1">ажилласан цаг</div></Card>
+          <Card><div className="text-xs text-muted font-medium mb-2">Remote</div><div className="text-[26px] font-semibold text-purple">{formatMinutes(workPerformance.data.work_time?.remote_minutes || 0)}</div><div className="text-xs text-muted mt-1">ажилласан цаг</div></Card>
           <Card><div className="text-xs text-muted font-medium mb-2">Сарын тайлангийн биелэлт</div><div className="text-[26px] font-semibold text-[#BC8CFF]">{workPerformance.data.monthly_report_rate}%</div><div className="text-xs text-muted mt-1">{workPerformance.data.approved_monthly_reports} батлагдсан</div></Card>
         </div>
       )}
+
 
       {/* Chart + Top */}
       <div className="grid grid-cols-[2fr_1fr] gap-4 mb-4">

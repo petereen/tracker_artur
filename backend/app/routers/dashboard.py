@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.models import Answer, Employee, Question, SurveySession, Streak, WorkReport
+from app.models.models import Answer, Employee, Question, SurveySession, Streak, WorkReport, WorkTimeEntry
+from app.services.work_report_service import summarize_work_time
 
 router = APIRouter()
 
@@ -127,6 +128,17 @@ async def work_performance(
             *([WorkReport.period_date <= until] if until else []),
         )
     )).scalars().all()
+    entries = (await db.execute(
+        select(WorkTimeEntry)
+        .join(WorkReport, WorkTimeEntry.report_id == WorkReport.id)
+        .where(
+            WorkReport.report_type == "daily",
+            *([WorkReport.period_date >= since] if since else []),
+            *([WorkReport.period_date <= until] if until else []),
+        )
+        .order_by(WorkTimeEntry.started_at, WorkTimeEntry.id)
+    )).scalars().all()
+    time_summary = summarize_work_time(entries, now=datetime.now(timezone.utc))
     approved_daily = [r for r in daily if r.status == "approved"]
     effective_days = period if since else ((date.today() - min((r.period_date for r in daily), default=date.today())).days + 1)
     expected_daily = active_count * effective_days
@@ -148,7 +160,14 @@ async def work_performance(
         "date_to": str(until) if until else None,
         "daily_report_rate": round(len(approved_daily) / expected_daily * 100) if expected_daily else 0,
         "approved_daily_reports": len(approved_daily),
-        "work_time_entries": sum(1 for r in daily if r.started_at is not None or r.ended_at is not None),
+        "work_time_entries": len(entries),
+        "work_time": {
+            "total_minutes": time_summary["total_minutes"],
+            "remote_minutes": time_summary["remote_minutes"],
+            "in_person_minutes": time_summary["in_person_minutes"],
+            "complete_entries": time_summary["complete_entries"],
+            "incomplete_entries": time_summary["incomplete_entries"],
+        },
         "monthly_report_rate": round(monthly_approved / (active_count * expected_months) * 100) if active_count else 0,
         "approved_monthly_reports": monthly_approved,
     }

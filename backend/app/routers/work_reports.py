@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.models import Employee, WorkReport, WorkReportRevision
+from app.models.models import Employee, WorkReport, WorkReportRevision, WorkTimeEntry
+from app.services.work_report_service import summarize_work_time
 
 router = APIRouter()
 VALID_TYPES = {"daily", "monthly", "next_month_plan", "daily_test", "monthly_test", "next_month_plan_test"}
@@ -23,6 +24,11 @@ async def _serialize(db: AsyncSession, report: WorkReport, *, with_revisions: bo
     )).scalars().all()
     approved = next((r for r in revisions if r.id == report.approved_revision_id), None)
     latest = revisions[0] if revisions else None
+    entries = (await db.execute(
+        select(WorkTimeEntry)
+        .where(WorkTimeEntry.report_id == report.id)
+        .order_by(WorkTimeEntry.started_at, WorkTimeEntry.id)
+    )).scalars().all()
     out = {
         "id": report.id,
         "employee_id": report.employee_id,
@@ -37,6 +43,7 @@ async def _serialize(db: AsyncSession, report: WorkReport, *, with_revisions: bo
         "approved_revision_id": report.approved_revision_id,
         "created_at": report.created_at,
         "updated_at": report.updated_at,
+        "work_time": summarize_work_time(entries, now=datetime.now(timezone.utc)),
     }
     if with_revisions:
         out["revisions"] = [

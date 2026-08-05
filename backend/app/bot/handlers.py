@@ -82,6 +82,9 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
         f"📋 /today — чек-ин бөглөх\n"
         f"🟢 /daystart — ажил эхэлсэн цаг\n"
         f"🔴 /dayend — ажил дууссан цаг\n"
+        f"🏠 /remotestart — remote ажил эхэлсэн цаг\n"
+        f"🏠 /remoteend — remote ажил дууссан цаг\n"
+        f"📊 /worktime — өнөөдрийн ажлын цаг\n"
         f"🏆 /leaderboard — багийн чансаа\n"
         f"❓ /help — тусламж"
     )
@@ -330,6 +333,9 @@ async def cmd_help(message: Message, is_manager: bool = False):
         text = (
             "📋 <b>Командууд</b>\n\n"
             "/today — чек-ин бөглөх\n"
+            "/daystart, /dayend — оффисын ажлын цаг\n"
+            "/remotestart, /remoteend — remote ажлын цаг\n"
+            "/worktime — өнөөдрийн ажлын цагийн дэлгэрэнгүй\n"
             "/my_stats — миний статистик\n"
             "/leaderboard — багийн чансаа\n"
             "/help — энэ тусламж\n"

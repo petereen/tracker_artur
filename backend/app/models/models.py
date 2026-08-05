@@ -359,6 +359,7 @@ class WorkReport(Base):
         foreign_keys="WorkReportRevision.report_id",
     )
     prompts = relationship("WorkReportPrompt", back_populates="report", cascade="all, delete-orphan")
+    work_time_entries = relationship("WorkTimeEntry", back_populates="report", cascade="all, delete-orphan")
 
 
 class WorkReportRevision(Base):
@@ -395,6 +396,25 @@ class WorkReportPrompt(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     report = relationship("WorkReport", back_populates="prompts")
+
+
+class WorkTimeEntry(Base):
+    """One non-overlapping in-person or remote work interval for a day."""
+
+    __tablename__ = "work_time_entries"
+    __table_args__ = (
+        CheckConstraint("mode IN ('in_person','remote')", name="ck_work_time_entries_mode"),
+        CheckConstraint("ended_at IS NULL OR ended_at >= started_at", name="ck_work_time_entries_range"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("work_reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    mode = Column(Text, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    ended_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    report = relationship("WorkReport", back_populates="work_time_entries")
 
 
 # ─── Компанийн сарын төлөвлөгөө ─────────────────────────────────────────────

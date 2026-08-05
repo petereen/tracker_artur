@@ -239,31 +239,108 @@ async def edit_report_text(message: Message, work_report: WorkReport):
     await message.answer(_draft_text(work_report, revision.text), parse_mode="HTML", reply_markup=draft_keyboard(work_report.id))
 
 
-async def _record_work_time(message: Message, employee, field: str, label: str) -> None:
+def _mode_label(mode: str) -> str:
+    return "оффис" if mode == "in_person" else "remote"
+
+
+def _work_time_summary_text(summary: dict, tz) -> str:
+    lines = [
+        f"📊 <b>Өнөөдрийн ажлын цаг</b>: {summary['total_minutes'] // 60}ц {summary['total_minutes'] % 60}м",
+        f"🏢 Оффис: {summary['in_person_minutes'] // 60}ц {summary['in_person_minutes'] % 60}м",
+        f"🏠 Remote: {summary['remote_minutes'] // 60}ц {summary['remote_minutes'] % 60}м",
+    ]
+    if summary["entries"]:
+        lines.append("\n<b>Дэлгэрэнгүй:</b>")
+        for entry in summary["entries"]:
+            start = entry["started_at"].astimezone(tz).strftime("%H:%M")
+            end = entry["ended_at"].astimezone(tz).strftime("%H:%M") if entry["ended_at"] else "одоо"
+            lines.append(f"• {_mode_label(entry['mode'])}: {start}–{end} ({entry['minutes']}м)")
+    return "\n".join(lines)
+
+
+async def _change_work_time(message: Message, employee, mode: str, action: str) -> None:
+    if not employee:
+        await message.answer("❌ Та бүртгэгдээгүй байна.")
+        return
+    local_now = _local_now(employee.timezone)
+    at = local_now.astimezone(timezone.utc)
+    result, entry = (
+        work_report_service.start_work_time(employee.id, local_now.date(), mode, at)
+        if action == "start"
+        else work_report_service.end_work_time(employee.id, local_now.date(), mode, at)
+    )
+    other_end = "/dayend" if mode == "remote" else "/remoteend"
+    matching_start = "/daystart" if mode == "in_person" else "/remotestart"
+    if result == "other_active":
+        await message.answer(
+            f"⚠️ {_mode_label(entry.mode).capitalize()} ажил одоо үргэлжилж байна. "
+            f"Эхлээд <b>{other_end}</b> командаар дуусгана уу.", parse_mode="HTML"
+        )
+        return
+    if result == "already_active":
+        await message.answer(
+            f"ℹ️ {_mode_label(mode).capitalize()} ажил аль хэдийн эхэлсэн байна. "
+            f"Дуусгахдаа <b>{other_end}</b> ашиглана уу.", parse_mode="HTML"
+        )
+        return
+    if result == "not_started":
+        await message.answer(
+            f"⚠️ Өнөөдөр {_mode_label(mode)} ажил эхлээгүй байна. "
+            f"Эхлээд <b>{matching_start}</b> командыг ашиглана уу.", parse_mode="HTML"
+        )
+        return
+    summary = work_report_service.summarize_work_time(
+        work_report_service.work_time_entries(entry.report_id), now=at
+    )
+    if action == "start":
+        await message.answer(
+            f"✅ {_mode_label(mode).capitalize()} ажил эхэллээ: <b>{local_now:%H:%M}</b>",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(
+            f"✅ {_mode_label(mode).capitalize()} ажил дууслаа: <b>{local_now:%H:%M}</b>\n\n"
+            f"{_work_time_summary_text(summary, local_now.tzinfo)}",
+            parse_mode="HTML",
+        )
+
+
+async def _show_work_time(message: Message, employee=None) -> None:
     if not employee:
         await message.answer("❌ Та бүртгэгдээгүй байна.")
         return
     local_now = _local_now(employee.timezone)
     report = work_report_service.get_or_create_report(employee.id, "daily", local_now.date())
-    value = work_report_service.set_work_time(
-        report.id,
-        field,
-        at=local_now.astimezone(timezone.utc),
+    summary = work_report_service.summarize_work_time(
+        work_report_service.work_time_entries(report.id),
+        now=local_now.astimezone(timezone.utc),
     )
-    if not value:
-        await message.answer("⚠️ Ажлын цагийг бүртгэх боломжгүй байна.")
-        return
-    await message.answer(f"✅ {label}: <b>{value.astimezone(local_now.tzinfo):%H:%M}</b>", parse_mode="HTML")
+    await message.answer(_work_time_summary_text(summary, local_now.tzinfo), parse_mode="HTML")
 
 
 @router.message(Command("daystart"))
 async def cmd_daystart(message: Message, employee=None):
-    await _record_work_time(message, employee, "started_at", "Ажил эхэлсэн цаг")
+    await _change_work_time(message, employee, "in_person", "start")
 
 
 @router.message(Command("dayend"))
 async def cmd_dayend(message: Message, employee=None):
-    await _record_work_time(message, employee, "ended_at", "Ажил дууссан цаг")
+    await _change_work_time(message, employee, "in_person", "end")
+
+
+@router.message(Command("remotestart"))
+async def cmd_remotestart(message: Message, employee=None):
+    await _change_work_time(message, employee, "remote", "start")
+
+
+@router.message(Command("remoteend"))
+async def cmd_remoteend(message: Message, employee=None):
+    await _change_work_time(message, employee, "remote", "end")
+
+
+@router.message(Command("worktime"))
+async def cmd_worktime(message: Message, employee=None):
+    await _show_work_time(message, employee)
 
 
 @router.callback_query(F.data.startswith("wrdraft:"))
@@ -344,7 +421,7 @@ async def cmd_test_daily(message: Message, state: FSMContext, employee=None, is_
     if sent:
         await message.answer(
             f"🧪 Өмнөх өдрийн тестийг цэвэрлэлээ ({reset_count}). "
-            "Эхлээд чек-ин бөглөнө үү. Ажлын цаг бүртгэхдээ /daystart болон /dayend командыг ашиглана уу."
+            "Эхлээд чек-ин бөглөнө үү. Ажлын цаг бүртгэхдээ /daystart, /dayend, /remotestart, /remoteend командыг ашиглана уу."
         )
 
 

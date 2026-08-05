@@ -235,11 +235,24 @@ export function EmployeesPage() {
                 <div className="bg-surface2 border border-border rounded-xl p-4">
                   <div className="font-medium mb-3">Ажлын цаг</div>
                   <div className="grid grid-cols-2 gap-y-2 text-[13px]">
+                    <span className="text-muted">Оффис</span><span className="text-right font-medium">{formatMinutes(workTime.in_person_minutes)}</span>
+                    <span className="text-muted">Remote</span><span className="text-right font-medium">{formatMinutes(workTime.remote_minutes)}</span>
                     <span className="text-muted">Өдрийн дундаж</span><span className="text-right font-medium">{formatMinutes(workTime.average_minutes)}</span>
-                    <span className="text-muted">Бүрэн бүртгэл</span><span className="text-right font-medium">{workTime.complete_entries}</span>
+                    <span className="text-muted">Бүрэн интервал</span><span className="text-right font-medium">{workTime.complete_entries}</span>
                     <span className="text-muted">Дутуу бүртгэл</span><span className="text-right text-yellow font-medium">{workTime.incomplete_entries}</span>
                   </div>
                 </div>
+              </div>
+
+              <div className="font-medium mb-2">Өдрийн ажлын цагийн дэлгэрэнгүй</div>
+              <div className="border border-border rounded-lg overflow-hidden max-h-56 overflow-y-auto mb-5">
+                {(workTime.days || []).length ? workTime.days.map((day: any, index: number) => <div key={day.period_date} className={`px-3 py-2.5 text-xs ${index ? 'border-t border-border2' : ''}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">{day.period_date}</span>
+                    <span className="text-green font-medium">Нийт {formatMinutes(day.total_minutes)} · Оффис {formatMinutes(day.in_person_minutes)} · Remote {formatMinutes(day.remote_minutes)}</span>
+                  </div>
+                  <div className="text-muted mt-1">{day.entries.map((entry: any) => `${entry.mode === 'remote' ? 'Remote' : 'Оффис'} ${formatTime(entry.started_at)}–${formatTime(entry.ended_at)} (${formatMinutes(entry.minutes)})`).join(' · ') || 'Интервал бүртгэгдээгүй'}</div>
+                </div>) : <div className="p-5 text-center text-sm text-muted">Ажлын цагийн мэдээлэл алга</div>}
               </div>
 
               <div className="flex items-center justify-between mb-2">
@@ -261,7 +274,7 @@ export function EmployeesPage() {
               <div className="font-medium mb-2">Сүүлийн тайлангууд</div>
               <div className="border border-border rounded-lg overflow-hidden max-h-52 overflow-y-auto">
                 {data.recent_reports.length ? data.recent_reports.map((report: any, index: number) => <div key={report.id} className={`grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-center px-3 py-2.5 text-xs ${index ? 'border-t border-border2' : ''}`}>
-                  <div className="min-w-0"><div className="font-medium">{REPORT_TYPE_LABELS[report.report_type] || report.report_type}</div><div className="text-muted mt-0.5">{report.period_date}{report.report_type === 'daily' ? ` · ${formatTime(report.started_at)} – ${formatTime(report.ended_at)}` : ''}</div>{report.text && <div className="text-muted mt-1 truncate">{report.text}</div>}</div>
+                  <div className="min-w-0"><div className="font-medium">{REPORT_TYPE_LABELS[report.report_type] || report.report_type}</div><div className="text-muted mt-0.5">{report.period_date}{report.report_type === 'daily' ? ` · ${formatMinutes(report.work_time?.total_minutes || 0)} · Оффис ${formatMinutes(report.work_time?.in_person_minutes || 0)} · Remote ${formatMinutes(report.work_time?.remote_minutes || 0)}` : ''}</div>{report.text && <div className="text-muted mt-1 truncate">{report.text}</div>}</div>
                   <Badge color={report.status === 'approved' ? 'green' : report.status === 'awaiting' ? 'yellow' : 'blue'}>{report.status === 'approved' ? 'Батлагдсан' : report.status === 'awaiting' ? 'Хүлээгдэж буй' : 'Ноорог'}</Badge>
                   <Btn onClick={() => setReportDetailId(report.id)}>Дэлгэрэнгүй</Btn>
                 </div>) : <div className="p-5 text-center text-sm text-muted">Тайлан байхгүй</div>}

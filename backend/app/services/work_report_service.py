@@ -8,10 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.bot.db import get_session
-from app.models.models import WorkReport, WorkReportPrompt, WorkReportRevision
+from app.models.models import WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
 
 
 TEST_REPORT_TYPES = frozenset({"daily_test", "monthly_test", "next_month_plan_test"})
+WORK_TIME_MODES = frozenset({"in_person", "remote"})
 
 
 def month_period(day: date) -> date:
@@ -334,6 +335,104 @@ def set_work_time(report_id: int, field: str, at: datetime | None = None) -> dat
             setattr(report, field, current)
             s.commit()
         return current
+
+
+def _active_time_entry(s, report_id: int, mode: str | None = None) -> WorkTimeEntry | None:
+    query = select(WorkTimeEntry).where(
+        WorkTimeEntry.report_id == report_id,
+        WorkTimeEntry.ended_at.is_(None),
+    )
+    if mode:
+        query = query.where(WorkTimeEntry.mode == mode)
+    return s.execute(query.order_by(WorkTimeEntry.started_at.desc(), WorkTimeEntry.id.desc())).scalars().first()
+
+
+def start_work_time(
+    employee_id: int, local_day: date, mode: str, at: datetime | None = None
+) -> tuple[str, WorkTimeEntry | None]:
+    """Start a mode only when no other mode is currently open.
+
+    Returns ``started``, ``already_active`` or ``other_active`` so Telegram
+    can tell the worker which matching end command is required.
+    """
+    if mode not in WORK_TIME_MODES:
+        raise ValueError("invalid work-time mode")
+    report = get_or_create_report(employee_id, "daily", local_day)
+    started_at = at or datetime.now(timezone.utc)
+    with get_session() as s:
+        active = _active_time_entry(s, report.id)
+        if active:
+            return ("already_active" if active.mode == mode else "other_active", active)
+        entry = WorkTimeEntry(report_id=report.id, mode=mode, started_at=started_at)
+        s.add(entry)
+        s.commit()
+        s.refresh(entry)
+        s.expunge(entry)
+        return "started", entry
+
+
+def end_work_time(
+    employee_id: int, local_day: date, mode: str, at: datetime | None = None
+) -> tuple[str, WorkTimeEntry | None]:
+    """End only the requested mode; reject a mismatched open mode."""
+    if mode not in WORK_TIME_MODES:
+        raise ValueError("invalid work-time mode")
+    report = get_or_create_report(employee_id, "daily", local_day)
+    ended_at = at or datetime.now(timezone.utc)
+    with get_session() as s:
+        active = _active_time_entry(s, report.id)
+        if not active:
+            return "not_started", None
+        if active.mode != mode:
+            return "other_active", active
+        active.ended_at = ended_at
+        s.commit()
+        s.refresh(active)
+        s.expunge(active)
+        return "ended", active
+
+
+def work_time_entries(report_id: int) -> list[WorkTimeEntry]:
+    with get_session() as s:
+        entries = s.execute(
+            select(WorkTimeEntry)
+            .where(WorkTimeEntry.report_id == report_id)
+            .order_by(WorkTimeEntry.started_at, WorkTimeEntry.id)
+        ).scalars().all()
+        for entry in entries:
+            s.expunge(entry)
+        return entries
+
+
+def summarize_work_time(entries: list[WorkTimeEntry], now: datetime | None = None) -> dict:
+    """Return total, mode totals, and detailed intervals in minutes."""
+    current = now or datetime.now(timezone.utc)
+    totals = {"remote": 0, "in_person": 0}
+    details = []
+    complete_entries = 0
+    for entry in entries:
+        end = entry.ended_at or current
+        seconds = max(0, (end - entry.started_at).total_seconds())
+        minutes = round(seconds / 60)
+        totals[entry.mode] = totals.get(entry.mode, 0) + minutes
+        if entry.ended_at is not None:
+            complete_entries += 1
+        details.append({
+            "id": entry.id,
+            "mode": entry.mode,
+            "started_at": entry.started_at,
+            "ended_at": entry.ended_at,
+            "minutes": minutes,
+            "open": entry.ended_at is None,
+        })
+    return {
+        "total_minutes": totals["remote"] + totals["in_person"],
+        "remote_minutes": totals["remote"],
+        "in_person_minutes": totals["in_person"],
+        "complete_entries": complete_entries,
+        "incomplete_entries": len(entries) - complete_entries,
+        "entries": details,
+    }
 
 
 def report_is_approved(employee_id: int, report_type: str, local_day: date) -> bool:

@@ -161,6 +161,12 @@ export interface WorkReportOut {
   status: 'awaiting' | 'draft' | 'editing' | 'approved'
   started_at: string | null
   ended_at: string | null
+  work_time?: {
+    total_minutes: number
+    remote_minutes: number
+    in_person_minutes: number
+    entries: { id: number; mode: 'remote' | 'in_person'; started_at: string; ended_at: string | null; minutes: number; open: boolean }[]
+  }
   text: string | null
   latest_revision_status: 'draft' | 'superseded' | 'deleted' | 'approved' | null
   approved_revision_id: number | null

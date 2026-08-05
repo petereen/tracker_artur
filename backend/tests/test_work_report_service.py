@@ -50,3 +50,21 @@ def test_work_time_keeps_the_first_selected_value(monkeypatch):
     assert work_report_service.set_work_time(7, "started_at", second) == first
     assert report.started_at == first
     assert session.commits == 1
+
+
+def test_work_time_summary_splits_remote_and_in_person_intervals():
+    now = datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc)
+    entries = [
+        SimpleNamespace(id=1, mode="in_person", started_at=datetime(2026, 8, 4, 1, 0, tzinfo=timezone.utc), ended_at=datetime(2026, 8, 4, 3, 30, tzinfo=timezone.utc)),
+        SimpleNamespace(id=2, mode="remote", started_at=datetime(2026, 8, 4, 4, 0, tzinfo=timezone.utc), ended_at=datetime(2026, 8, 4, 5, 0, tzinfo=timezone.utc)),
+        SimpleNamespace(id=3, mode="remote", started_at=datetime(2026, 8, 4, 6, 0, tzinfo=timezone.utc), ended_at=None),
+    ]
+
+    summary = work_report_service.summarize_work_time(entries, now=now)
+
+    assert summary["in_person_minutes"] == 150
+    assert summary["remote_minutes"] == 120
+    assert summary["total_minutes"] == 270
+    assert summary["complete_entries"] == 2
+    assert summary["incomplete_entries"] == 1
+    assert summary["entries"][-1]["open"] is True

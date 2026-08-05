@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, field_validator
@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.models import Employee, Schedule, Streak, SurveySession, WorkReport, WorkReportRevision
+from app.models.models import Employee, Schedule, Streak, SurveySession, WorkReport, WorkReportRevision, WorkTimeEntry
+from app.services.work_report_service import summarize_work_time
 
 router = APIRouter()
 
@@ -102,11 +103,27 @@ async def employee_performance(
 
     completed_checkins = sum(s.status == "completed" for s in sessions)
     submitted_checkins = sum(s.status in ("completed", "partial") for s in sessions)
-    work_durations = [
-        max(0, (report.ended_at - report.started_at).total_seconds())
+    report_ids = [report.id for report in daily_reports]
+    entries = (await db.execute(
+        select(WorkTimeEntry)
+        .where(WorkTimeEntry.report_id.in_(report_ids or [-1]))
+        .order_by(WorkTimeEntry.started_at, WorkTimeEntry.id)
+    )).scalars().all()
+    entries_by_report: dict[int, list[WorkTimeEntry]] = {}
+    for entry in entries:
+        entries_by_report.setdefault(entry.report_id, []).append(entry)
+    now = datetime.now(timezone.utc)
+    daily_work_time = {
+        report.id: summarize_work_time(entries_by_report.get(report.id, []), now=now)
         for report in daily_reports
-        if report.started_at is not None and report.ended_at is not None
-    ]
+    }
+    work_totals = {
+        "total_minutes": sum(item["total_minutes"] for item in daily_work_time.values()),
+        "remote_minutes": sum(item["remote_minutes"] for item in daily_work_time.values()),
+        "in_person_minutes": sum(item["in_person_minutes"] for item in daily_work_time.values()),
+        "complete_entries": sum(item["complete_entries"] for item in daily_work_time.values()),
+        "incomplete_entries": sum(item["incomplete_entries"] for item in daily_work_time.values()),
+    }
     approved_daily = sum(report.status == "approved" for report in daily_reports)
 
     def report_summary(report_type: str) -> dict:
@@ -148,12 +165,15 @@ async def employee_performance(
             "completion_rate": round(submitted_checkins / len(sessions) * 100) if sessions else 0,
         },
         "work_time": {
-            "total_minutes": round(sum(work_durations) / 60),
-            "average_minutes": round(sum(work_durations) / len(work_durations) / 60) if work_durations else 0,
-            "complete_entries": len(work_durations),
-            "incomplete_entries": sum(
-                (r.started_at is None) != (r.ended_at is None) for r in daily_reports
-            ),
+            **work_totals,
+            "average_minutes": round(work_totals["total_minutes"] / len(daily_work_time)) if daily_work_time else 0,
+            "days": [
+                {
+                    "period_date": str(report.period_date),
+                    **daily_work_time[report.id],
+                }
+                for report in daily_reports
+            ],
         },
         "reports": {
             "daily": {**report_summary("daily"), "approved": approved_daily},
@@ -168,6 +188,7 @@ async def employee_performance(
                 "status": report.status,
                 "started_at": report.started_at,
                 "ended_at": report.ended_at,
+                "work_time": daily_work_time.get(report.id, {"total_minutes": 0, "remote_minutes": 0, "in_person_minutes": 0, "entries": []}),
                 "text": (
                     revision_by_id[report.approved_revision_id].text
                     if report.approved_revision_id in revision_by_id
