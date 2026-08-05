@@ -18,6 +18,7 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Serialize persistent APScheduler job rebuilds across bot replicas with a PostgreSQL advisory lock (`backend/app/bot/scheduler.py`)
 - [x] Stabilize empty role selectors to prevent React external-store render loops after login (`frontend/src/store/auth.ts`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/pages/EnterpriseReportsPage.tsx`)
 - [x] Prevent actor query side effects and locale update loops; avoid clock polling for accounts without an employee link (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Add admin multi-role access controls with last-admin protection and make new Telegram web accounts default to member (`frontend/src/pages/AdministrationHubPage.tsx`, `backend/app/routers/enterprise_auth.py`)

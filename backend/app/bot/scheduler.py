@@ -6,6 +6,7 @@ from hashlib import sha256
 import pytz
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sqlalchemy import text
 
 from app.core.config import settings
 
@@ -15,6 +16,7 @@ DEFAULT_TIMEZONE = pytz.timezone("Asia/Ulaanbaatar")
 jobstores = {"default": SQLAlchemyJobStore(url=settings.SYNC_DATABASE_URL)}
 scheduler = AsyncIOScheduler(jobstores=jobstores, timezone=DEFAULT_TIMEZONE)
 _last_schedule_fingerprint: str | None = None
+_REBUILD_LOCK_KEY = 67129841
 
 
 def _make_bot():
@@ -24,7 +26,7 @@ def _make_bot():
     return Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
 
-def rebuild_jobs():
+def _rebuild_jobs_unlocked():
     from app.bot.db import get_all_active_employees, get_manager_settings, get_schedule
     from app.services.notification_policy import load_policy
 
@@ -133,6 +135,39 @@ def rebuild_jobs():
         id="reconcile_schedules", replace_existing=True)
 
     log.info("Scheduler rebuilt for %d employees", len(employees))
+
+
+def rebuild_jobs():
+    """Rebuild persistent jobs with a cross-process PostgreSQL lock.
+
+    APScheduler's ``replace_existing`` prevents duplicates within one
+    scheduler, but two bot replicas can still race on the same job store.
+    PostgreSQL advisory locks make deployment restarts and overlapping
+    replicas harmless while retaining the existing SQLite-compatible
+    behavior for local/test configurations.
+    """
+    jobstore = jobstores["default"]
+    engine = getattr(jobstore, "engine", None)
+    if engine is None or engine.dialect.name != "postgresql":
+        _rebuild_jobs_unlocked()
+        return
+
+    with engine.connect() as connection:
+        acquired = connection.execute(
+            text("SELECT pg_try_advisory_lock(:lock_key)"),
+            {"lock_key": _REBUILD_LOCK_KEY},
+        ).scalar()
+        if not acquired:
+            log.warning("Another scheduler is rebuilding jobs; skipping this rebuild")
+            return
+        try:
+            _rebuild_jobs_unlocked()
+        finally:
+            connection.execute(
+                text("SELECT pg_advisory_unlock(:lock_key)"),
+                {"lock_key": _REBUILD_LOCK_KEY},
+            )
+            connection.commit()
 
 
 async def send_survey(employee_id: int):
