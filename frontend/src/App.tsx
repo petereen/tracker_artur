@@ -13,6 +13,7 @@ const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage')
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
 const OkrsWorkspacePage = lazy(() => import('./pages/OkrsWorkspacePage').then((module) => ({ default: module.OkrsWorkspacePage })))
 const AdministrationHubPage = lazy(() => import('./pages/AdministrationHubPage').then((module) => ({ default: module.AdministrationHubPage })))
+const ProfilePage = lazy(() => import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })))
 const TgMiniAppPage = lazy(() => import('./pages/TgMiniAppPage').then((module) => ({ default: module.TgMiniAppPage })))
 const EmployeesPage = lazy(() => import('./pages/EmployeesPage').then((module) => ({ default: module.EmployeesPage })))
 const QuestionsPage = lazy(() => import('./pages/QuestionsPage').then((module) => ({ default: module.QuestionsPage })))
@@ -46,6 +47,7 @@ function AuthenticatedApp() {
         <Route path="okrs" element={<OkrsWorkspacePage />} />
         <Route path="analytics" element={<EnterpriseDashboardPage />} />
         <Route path="administration" element={<AdministrationHubPage />} />
+        <Route path="profile" element={<ProfilePage />} />
         <Route path="legacy/employees" element={<EmployeesPage />} />
         <Route path="legacy/questions" element={<QuestionsPage />} />
         <Route path="legacy/schedule" element={<SchedulePage />} />

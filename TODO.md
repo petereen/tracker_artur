@@ -7,8 +7,26 @@
 - [ ] Phase 4 completion: Finish check-in/report authoring UI, side-by-side revisions, inline review UI, and timer recovery UX
 - [ ] Phase 5 completion: Add permission-safe financial and KPI analytical drill-downs
 - [ ] Phase 6 completion: Add inbound Google push synchronization and run production hardening exercises
+- [x] Enforce worker-private tasks, reports, and performance while exposing organization views to administrators and supervisors (`backend/app/routers/enterprise.py`)
+- [x] Replace the placeholder task timeline with date-driven Timeline/Calendar views and editable scheduling (`frontend/src/pages/EnterpriseTasksPage.tsx`)
+- [x] Add worker report draft/edit/submit UI and administrator-only submitted-report reopening (`frontend/src/pages/EnterpriseReportsPage.tsx`)
+- [x] Add searchable worker presence sidebar and supervisor worker-performance drill-down (`frontend/src/components/EnterpriseShell.tsx`)
+- [x] Add reusable period controls to operational and analytics workspaces (`frontend/src/components/TimePeriodFilter.tsx`)
+- [x] Make the OYUNS header action open an actionable assistant conversation (`frontend/src/components/OyunsAssistant.tsx`)
+- [x] Add employee self-service profile customization for avatar, username, and password (`frontend/src/pages/ProfilePage.tsx`)
+- [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Add admin multi-role access controls with last-admin protection and make new Telegram web accounts default to member (`frontend/src/pages/AdministrationHubPage.tsx`, `backend/app/routers/enterprise_auth.py`)
+- [x] Add self-service profile identity, avatar URL, locale, username, and password management while retaining the admin-appointed employee name (`frontend/src/pages/ProfilePage.tsx`, `backend/app/routers/enterprise_auth.py`)
+- [x] Activate the OYUNS web assistant with task/report drafting and confirmation-gated task creation (`frontend/src/components/OyunsAssistant.tsx`)
+- [x] Add quick/custom period filters across dashboards, projects, tasks, reports, capacity, and OKRs (`frontend/src/components/TimePeriodFilter.tsx`)
+- [x] Add a searchable live worker-presence drawer and permission-gated supervisor performance drill-down (`frontend/src/components/EnterpriseShell.tsx`, `backend/app/routers/enterprise.py`)
+- [x] Add worker report authoring, immutable post-submit behavior, supervisor review, and administrator-only reopening (`frontend/src/pages/EnterpriseReportsPage.tsx`, `backend/app/routers/enterprise.py`)
+- [x] Replace placeholder task timeline positions with schedule-derived Timeline and Calendar views plus editable task dates (`frontend/src/pages/EnterpriseTasksPage.tsx`)
+- [x] Scope task, report, time, and KPI detail to the current worker while preserving organization-wide supervisor/admin views (`backend/app/routers/enterprise.py`)
+- [x] Scope ERP personal productivity totals to the Telegram-linked employee instead of all work-time entries (`backend/app/routers/enterprise.py`)
+- [x] Add the missing work-time exchange-rate schema migration so Telegram `/daystart`, `/dayend`, and remote work commands can query existing databases (`backend/alembic/versions/t8u9v0w1x2y3_add_work_time_exchange_rate_snapshot.py`)
 - [x] Switch production/browser/Mini App defaults to `erp.oyuns.mn`, retain `artur.oyuns.mn` as legacy admin, and remove Azure from active deployment configuration (`backend/app/core/config.py`, compose files, `.env.example`)
 - [x] Make attachment storage explicitly local-volume-only for the self-hosted Dokploy deployment (`backend/app/services/attachment_storage.py`)
 - [x] Fix follow-up Alembic migration so it does not re-add columns already created by the enterprise foundation migration (`backend/alembic/versions/r6s7t8u9v0w1_auth_delivery_and_collaboration.py`)

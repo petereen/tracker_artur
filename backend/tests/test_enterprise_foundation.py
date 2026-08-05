@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.core.security import (
@@ -13,6 +15,7 @@ from app.core.enterprise_deps import ActorContext
 from app.main import app
 from app.models.models import Base
 from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _task_out
+from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE
 from app.services.enterprise_events import _redact
 from app.services.work_report_service import summarize_work_time
 
@@ -65,6 +68,23 @@ def test_refresh_sessions_record_the_authentication_method():
     refresh_sessions = Base.metadata.tables["refresh_sessions"]
     assert "auth_method" in refresh_sessions.c
     assert refresh_sessions.c.auth_method.server_default.arg == "password"
+
+
+def test_work_time_exchange_rate_column_has_a_follow_up_migration():
+    work_time_entries = Base.metadata.tables["work_time_entries"]
+    migration_path = Path(__file__).parents[1] / "alembic/versions/t8u9v0w1x2y3_add_work_time_exchange_rate_snapshot.py"
+    migration_spec = spec_from_file_location("work_time_exchange_migration", migration_path)
+    assert migration_spec and migration_spec.loader
+    migration = module_from_spec(migration_spec)
+    migration_spec.loader.exec_module(migration)
+
+    assert "exchange_rate_snapshot_id" in work_time_entries.c
+    assert migration.down_revision == "s7t8u9v0w1x2"
+    assert migration.revision == "t8u9v0w1x2y3"
+    assert any(
+        fk.target_fullname == "exchange_rate_snapshots.id"
+        for fk in work_time_entries.c.exchange_rate_snapshot_id.foreign_keys
+    )
 
 
 def test_workflow_statuses_have_legacy_compatibility_mapping():
@@ -124,3 +144,9 @@ def test_actor_role_checks_are_explicit_and_deny_unassigned_roles():
     )
     assert actor.has_any_role("member") is True
     assert actor.has_any_role("admin", "manager", "team_lead") is False
+
+
+def test_new_telegram_web_accounts_default_to_member_access():
+    assert TELEGRAM_DEFAULT_ROLE == "member"
+    paths = {route.path for route in app.routes}
+    assert "/v1/auth/accounts/{account_id}" in paths

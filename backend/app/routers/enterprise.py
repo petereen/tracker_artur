@@ -543,12 +543,23 @@ async def project_budget_burn(project_id: int, db: AsyncSession = Depends(get_db
 
 
 @router.get("/tasks")
-async def list_tasks(project_id: int | None = None, workflow_status: str | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def list_tasks(
+    project_id: int | None = None,
+    workflow_status: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
     query = select(Task).where(Task.organization_id == actor.organization_id, Task.is_archived.is_(False))
     if project_id:
         query = query.where(Task.project_id == project_id)
     if workflow_status:
         query = query.where(Task.workflow_status == workflow_status)
+    if date_from:
+        query = query.where(or_(Task.deadline_at.is_(None), Task.deadline_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)))
+    if date_to:
+        query = query.where(or_(Task.start_at.is_(None), Task.start_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)))
     if actor.has_any_role("client_auditor"):
         scoped_projects = select(RoleAssignment.project_id).where(
             RoleAssignment.account_id == actor.account_id,
@@ -612,8 +623,10 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     task = await db.get(Task, task_id, with_for_update=True)
     if not task or task.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Task not found")
-    if not actor.has_any_role(*MANAGEMENT_ROLES) and task.assignee_id != actor.employee_id:
-        raise HTTPException(status_code=403, detail="Task is outside your scope")
+    if not actor.has_any_role(*MANAGEMENT_ROLES):
+        is_contributor = actor.employee_id is not None and bool(await db.scalar(select(TaskAssignee.id).where(TaskAssignee.task_id == task.id, TaskAssignee.employee_id == actor.employee_id)))
+        if task.assignee_id != actor.employee_id and not is_contributor:
+            raise HTTPException(status_code=403, detail="Task is outside your scope")
     if if_match is not None:
         try:
             expected = int(if_match.strip('W/"'))
@@ -938,21 +951,29 @@ async def list_time_entries(employee_id: int | None = None, date_from: date | No
 
 
 @router.get("/capacity")
-async def capacity(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
+async def capacity(
+    date_from: date | None = None,
+    date_to: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
+):
     today = date.today()
-    week_start = today - timedelta(days=today.weekday())
-    week_end = week_start + timedelta(days=6)
+    week_start = date_from or today - timedelta(days=today.weekday())
+    week_end = date_to or week_start + timedelta(days=6)
+    if week_start > week_end or (week_end - week_start).days > 366:
+        raise HTTPException(status_code=400, detail="Capacity period must be between 1 and 367 days")
+    period_workdays = sum(1 for offset in range((week_end - week_start).days + 1) if (week_start + timedelta(days=offset)).weekday() < 5)
     employees = (await db.execute(select(Employee).where(Employee.is_active.is_(True)).order_by(Employee.name))).scalars().all()
     allocations = (await db.execute(select(ResourceAllocation).where(ResourceAllocation.status.in_(("planned", "active")), ResourceAllocation.starts_on <= week_end, ResourceAllocation.ends_on >= week_start))).scalars().all()
     approved_leave = (await db.execute(select(TimeOff).where(TimeOff.status == "approved", TimeOff.starts_on <= week_end, TimeOff.ends_on >= week_start))).scalars().all()
-    estimated_tasks = (await db.execute(select(Task).where(Task.organization_id == actor.organization_id, Task.workflow_status.in_(("backlog", "to_do", "in_progress", "review")), Task.estimate_minutes.isnot(None)))).scalars().all()
+    estimated_tasks = (await db.execute(select(Task).where(Task.organization_id == actor.organization_id, Task.workflow_status.in_(("backlog", "to_do", "in_progress", "review")), Task.estimate_minutes.isnot(None), or_(Task.deadline_at.is_(None), Task.deadline_at >= datetime.combine(week_start, datetime.min.time(), tzinfo=timezone.utc)), or_(Task.start_at.is_(None), Task.start_at < datetime.combine(week_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))))).scalars().all()
     by_employee: dict[int, int] = {}
     for allocation in allocations:
         by_employee[allocation.employee_id] = by_employee.get(allocation.employee_id, 0) + int(allocation.planned_minutes or 0)
         if allocation.planned_minutes is None and allocation.allocation_percent is not None:
             employee = next((item for item in employees if item.id == allocation.employee_id), None)
             if employee:
-                by_employee[allocation.employee_id] += round(employee.weekly_capacity_minutes * float(allocation.allocation_percent) / 100)
+                by_employee[allocation.employee_id] += round(employee.weekly_capacity_minutes / 5 * period_workdays * float(allocation.allocation_percent) / 100)
     for task in estimated_tasks:
         if task.assignee_id:
             by_employee[task.assignee_id] = by_employee.get(task.assignee_id, 0) + int(task.estimate_minutes or 0)
@@ -967,7 +988,7 @@ async def capacity(db: AsyncSession = Depends(get_db), actor: ActorContext = Dep
         leave_minutes[leave.employee_id] = leave_minutes.get(leave.employee_id, 0) + (leave.partial_day_minutes or round(employee.weekly_capacity_minutes / 5) * working_days)
     result = []
     for employee in employees:
-        available = max(0, employee.weekly_capacity_minutes - leave_minutes.get(employee.id, 0))
+        available = max(0, round(employee.weekly_capacity_minutes / 5 * period_workdays) - leave_minutes.get(employee.id, 0))
         planned = by_employee.get(employee.id, 0)
         utilization = round(planned * 100 / max(available, 1), 1)
         result.append({"employee_id": employee.id, "name": employee.name, "available_minutes": available, "planned_minutes": planned, "leave_minutes": leave_minutes.get(employee.id, 0), "utilization_percent": utilization, "warning": "over" if utilization > 100 else "near" if utilization >= 90 else None})
@@ -1003,7 +1024,7 @@ async def create_resource_allocation(data: AllocationInput, db: AsyncSession = D
 @router.post("/reports/{report_id}/submit")
 async def submit_report(report_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     report = await db.get(WorkReport, report_id, with_for_update=True)
-    if not report or (not actor.has_any_role(*MANAGEMENT_ROLES) and report.employee_id != actor.employee_id):
+    if not report or report.employee_id != actor.employee_id:
         raise HTTPException(status_code=404, detail="Report not found")
     if report.status not in {"awaiting", "draft", "editing", "revision_requested"}:
         raise HTTPException(status_code=409, detail="Report cannot be submitted from its current state")
@@ -1029,7 +1050,7 @@ async def report_detail(report_id: int, db: AsyncSession = Depends(get_db), acto
 @router.put("/reports/{report_id}/draft")
 async def save_report_draft(report_id: int, data: ReportDraftInput, if_match: str | None = Header(default=None, alias="If-Match"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     report = await db.get(WorkReport, report_id, with_for_update=True)
-    if not report or (not actor.has_any_role(*MANAGEMENT_ROLES) and report.employee_id != actor.employee_id):
+    if not report or report.employee_id != actor.employee_id:
         raise HTTPException(status_code=404, detail="Report not found")
     if report.status == "approved":
         raise HTTPException(status_code=409, detail="Approved reports are immutable")
@@ -1050,6 +1071,8 @@ async def save_report_draft(report_id: int, data: ReportDraftInput, if_match: st
 @router.get("/reports")
 async def list_enterprise_reports(
     report_status: str | None = Query(default=None, alias="status"),
+    date_from: date | None = None,
+    date_to: date | None = None,
     db: AsyncSession = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ):
@@ -1060,6 +1083,10 @@ async def list_enterprise_reports(
         query = query.where(WorkReport.employee_id == actor.employee_id)
     if report_status:
         query = query.where(WorkReport.status == report_status)
+    if date_from:
+        query = query.where(WorkReport.period_date >= date_from)
+    if date_to:
+        query = query.where(WorkReport.period_date <= date_to)
     rows = (await db.execute(query.order_by(WorkReport.period_date.desc(), WorkReport.id.desc()).limit(500))).all()
     return [
         {
@@ -1117,7 +1144,7 @@ async def batch_approve_reports(data: ReportBatchInput, db: AsyncSession = Depen
 @router.post("/reports/{report_id}/comments", status_code=status.HTTP_201_CREATED)
 async def add_report_comment(report_id: int, data: ReportCommentInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     report = await db.get(WorkReport, report_id)
-    if not report:
+    if not report or (not actor.has_any_role(*MANAGEMENT_ROLES) and report.employee_id != actor.employee_id):
         raise HTTPException(status_code=404, detail="Report not found")
     comment = ReportComment(report_id=report_id, author_account_id=actor.account_id, **data.model_dump())
     db.add(comment)
@@ -1139,6 +1166,37 @@ async def resolve_report_comment(report_id: int, comment_id: int, is_resolved: b
     await record_change(db, actor=actor, topic="reports", aggregate_type="report_comment", aggregate_id=comment.id, operation="resolved" if is_resolved else "reopened", after={"is_resolved": is_resolved})
     await db.commit()
     return {"id": comment.id, "is_resolved": comment.is_resolved}
+
+
+@router.post("/reports/{report_id}/reopen")
+async def reopen_report(
+    report_id: int,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(require_roles("admin")),
+):
+    report = await db.get(WorkReport, report_id, with_for_update=True)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report.status not in {"submitted", "approved"}:
+        raise HTTPException(status_code=409, detail="Only sent reports can be reopened")
+    before = {"status": report.status, "version": report.version}
+    report.status = "revision_requested"
+    report.reviewed_at = None
+    report.reviewer_account_id = None
+    report.version += 1
+    await record_change(
+        db,
+        actor=actor,
+        topic="reports",
+        aggregate_type="work_report",
+        aggregate_id=report.id,
+        operation="admin_reopened",
+        version=report.version,
+        before=before,
+        after={"status": report.status, "version": report.version},
+    )
+    await db.commit()
+    return {"id": report.id, "status": report.status, "version": report.version}
 
 
 @router.post("/checkin-templates", status_code=status.HTTP_201_CREATED)
@@ -1252,14 +1310,117 @@ async def create_milestone(data: MilestoneInput, db: AsyncSession = Depends(get_
     return {"id": milestone.id, **data.model_dump()}
 
 
+def _task_employee_scope(employee_id: int):
+    contributor_tasks = select(TaskAssignee.task_id).where(TaskAssignee.employee_id == employee_id)
+    return or_(Task.assignee_id == employee_id, Task.id.in_(contributor_tasks))
+
+
+async def _performance_summary(db: AsyncSession, actor: ActorContext, employee_id: int | None, date_from: date, date_to: date) -> dict:
+    task_conditions = [Task.organization_id == actor.organization_id, Task.is_archived.is_(False)]
+    if employee_id is not None:
+        task_conditions.append(_task_employee_scope(employee_id))
+    task_conditions.extend((
+        or_(Task.deadline_at.is_(None), Task.deadline_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)),
+        or_(Task.start_at.is_(None), Task.start_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)),
+    ))
+    task_total = await db.scalar(select(func.count()).select_from(Task).where(*task_conditions)) or 0
+    completed = await db.scalar(select(func.count()).select_from(Task).where(*task_conditions, Task.workflow_status == "done")) or 0
+
+    work_conditions = [
+        WorkTimeEntry.entry_type == "work",
+        WorkTimeEntry.ended_at.isnot(None),
+        WorkTimeEntry.local_work_date >= date_from,
+        WorkTimeEntry.local_work_date <= date_to,
+    ]
+    if employee_id is not None:
+        work_conditions.append(WorkTimeEntry.employee_id == employee_id)
+    worked = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).where(*work_conditions)) or 0
+    billable = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).where(*work_conditions, WorkTimeEntry.is_billable.is_(True), WorkTimeEntry.approval_status == "approved")) or 0
+
+    report_conditions = [WorkReport.period_date >= date_from, WorkReport.period_date <= date_to]
+    if employee_id is not None:
+        report_conditions.append(WorkReport.employee_id == employee_id)
+    report_total = await db.scalar(select(func.count()).select_from(WorkReport).where(*report_conditions)) or 0
+    submitted_reports = await db.scalar(select(func.count()).select_from(WorkReport).where(*report_conditions, WorkReport.status.in_(("submitted", "approved")))) or 0
+    return {
+        "task_total": task_total,
+        "completed_tasks": completed,
+        "completion_rate": round(completed * 100 / max(task_total, 1), 1),
+        "worked_minutes": round(float(worked)),
+        "average_work_minutes": round(float(worked) / max((date_to - date_from).days + 1, 1)),
+        "billable_minutes": round(float(billable)),
+        "billable_ratio": round(float(billable) * 100 / max(float(worked), 1), 1),
+        "report_total": report_total,
+        "submitted_reports": submitted_reports,
+        "report_submission_rate": round(submitted_reports * 100 / max(report_total, 1), 1),
+        "date_from": date_from,
+        "date_to": date_to,
+    }
+
+
 @router.get("/analytics/summary")
-async def analytics_summary(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    task_total = await db.scalar(select(func.count()).select_from(Task).where(Task.organization_id == actor.organization_id)) or 0
-    completed = await db.scalar(select(func.count()).select_from(Task).where(Task.organization_id == actor.organization_id, Task.workflow_status == "done")) or 0
-    active_projects = await db.scalar(select(func.count()).select_from(Project).where(Project.organization_id == actor.organization_id, Project.status == "active")) or 0
-    worked = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).where(WorkTimeEntry.entry_type == "work", WorkTimeEntry.ended_at.isnot(None))) or 0
-    billable = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).where(WorkTimeEntry.entry_type == "work", WorkTimeEntry.is_billable.is_(True), WorkTimeEntry.approval_status == "approved", WorkTimeEntry.ended_at.isnot(None))) or 0
-    return {"task_total": task_total, "completed_tasks": completed, "completion_rate": round(completed * 100 / max(task_total, 1), 1), "active_projects": active_projects, "worked_minutes": round(float(worked)), "billable_minutes": round(float(billable)), "billable_ratio": round(float(billable) * 100 / max(float(worked), 1), 1)}
+async def analytics_summary(
+    date_from: date | None = None,
+    date_to: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    period_end = date_to or date.today()
+    period_start = date_from or period_end - timedelta(days=6)
+    if period_start > period_end:
+        raise HTTPException(status_code=400, detail="date_from must not be after date_to")
+    employee_scope = None if actor.has_any_role(*MANAGEMENT_ROLES) else actor.employee_id
+    if employee_scope is None and not actor.has_any_role(*MANAGEMENT_ROLES):
+        return {**await _performance_summary(db, actor, -1, period_start, period_end), "active_projects": 0, "scope": "personal"}
+    summary = await _performance_summary(db, actor, employee_scope, period_start, period_end)
+    project_query = select(func.count()).select_from(Project).where(Project.organization_id == actor.organization_id, Project.status == "active")
+    if employee_scope is not None:
+        project_query = project_query.where(Project.id.in_(select(ProjectMember.project_id).where(ProjectMember.employee_id == employee_scope)))
+    summary["active_projects"] = await db.scalar(project_query) or 0
+    summary["scope"] = "organization" if employee_scope is None else "personal"
+    return summary
+
+
+@router.get("/workers")
+async def worker_directory(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    employees = (await db.execute(select(Employee).where(Employee.is_active.is_(True)).order_by(Employee.name))).scalars().all()
+    open_entries = (await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.ended_at.is_(None)))).scalars().all()
+    by_employee = {entry.employee_id: entry for entry in open_entries}
+    return [
+        {
+            "id": employee.id,
+            "name": employee.name,
+            "job_title": employee.job_title,
+            "telegram_username": employee.telegram_username,
+            "avatar_url": (employee.metadata_json or {}).get("avatar_url"),
+            "presence": (
+                "break" if by_employee.get(employee.id) and by_employee[employee.id].entry_type == "break"
+                else by_employee[employee.id].mode if by_employee.get(employee.id) else "offline"
+            ),
+        }
+        for employee in employees
+    ]
+
+
+@router.get("/workers/{employee_id}/performance")
+async def worker_performance(
+    employee_id: int,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
+):
+    employee = await db.get(Employee, employee_id)
+    if not employee or not employee.is_active:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    period_end = date_to or date.today()
+    period_start = date_from or period_end - timedelta(days=6)
+    if period_start > period_end:
+        raise HTTPException(status_code=400, detail="date_from must not be after date_to")
+    return {
+        "employee": {"id": employee.id, "name": employee.name, "job_title": employee.job_title},
+        **await _performance_summary(db, actor, employee.id, period_start, period_end),
+    }
 
 
 @router.post("/assistant/drafts")

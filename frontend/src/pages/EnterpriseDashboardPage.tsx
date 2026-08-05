@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
 import { ArrowUpRight, BriefcaseBusiness, CheckCircle2, Coffee, House, Laptop2, Pause, Play, TimerReset } from 'lucide-react'
 import { useClock, useClockAction, useEnterpriseSummary } from '../api/enterprise'
+import { PeriodPreset, periodFromPreset, TimePeriodFilter } from '../components/TimePeriodFilter'
+import { useAuthStore } from '../store/auth'
 
 function elapsed(startedAt?: string) {
   if (!startedAt) return '00:00:00'
@@ -10,9 +12,13 @@ function elapsed(startedAt?: string) {
 }
 
 export function EnterpriseDashboardPage() {
-  const summary = useEnterpriseSummary()
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset | 'custom'>('week')
+  const [period, setPeriod] = useState(() => periodFromPreset('week'))
+  const summary = useEnterpriseSummary(period)
   const clock = useClock()
   const action = useClockAction()
+  const roles = useAuthStore((state) => state.actor?.roles ?? [])
+  const isSupervisor = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const [, tick] = useState(0)
   useEffect(() => { const timer = window.setInterval(() => tick((value) => value + 1), 1000); return () => clearInterval(timer) }, [])
   const active = clock.data?.active
@@ -28,6 +34,7 @@ export function EnterpriseDashboardPage() {
 
   return (
     <div className="dashboard-grid">
+      <div className="dashboard-period"><div><span className="eyebrow">{isSupervisor ? 'Байгууллагын тойм' : 'Хувийн тойм'}</span><h2>{isSupervisor ? 'Нийт гүйцэтгэлийн үзүүлэлт' : 'Таны гүйцэтгэлийн үзүүлэлт'}</h2></div><TimePeriodFilter preset={periodPreset} period={period} onChange={(nextPreset, nextPeriod) => { setPeriodPreset(nextPreset); setPeriod(nextPeriod) }} /></div>
       <section className="clock-panel panel">
         <div className="panel-heading"><div><span className="eyebrow">Punch clock</span><h2>{working ? 'Ажиллаж байна' : onBreak ? 'Завсарлага' : 'Өдрөө эхлүүлэх үү?'}</h2></div><span className={`live-indicator ${active ? 'online' : ''}`}>{active ? 'LIVE' : 'OFF'}</span></div>
         <div className="clock-time" aria-live="polite">{elapsed(active?.started_at)}</div>
@@ -40,7 +47,7 @@ export function EnterpriseDashboardPage() {
       </section>
       <section className="daily-focus panel"><span className="eyebrow">Өнөөдрийн төвлөрөл</span><h2>Хамгийн чухал ажлаа тодорхой болго.</h2><div className="focus-question"><span>1</span><div><strong>Таны эхний 3 зорилт юу вэ?</strong><p>Богино, үйлдэлд чиглэсэн байдлаар бичнэ үү.</p></div></div><div className="focus-question"><span>2</span><div><strong>Саад болж байгаа зүйл бий юу?</strong><p>Удирдлагад эрт харагдвал хурдан шийдэгдэнэ.</p></div></div><button className="secondary-action">Өдрийн check-in бөглөх</button></section>
       <section className="metrics-grid" aria-label="Гүйцэтгэлийн үзүүлэлт">{cards.map(({ label, value, icon: Icon, tone }, index) => <motion.article className={`metric-card ${tone}`} key={label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * .04, type: 'spring', bounce: 0, duration: .35 }}><Icon /><span>{label}</span><strong>{value}</strong></motion.article>)}</section>
-      <section className="panel productivity-panel"><div className="panel-heading"><div><span className="eyebrow">Хувийн бүтээмж</span><h2>Ажилласан цагийн зураглал</h2></div></div><div className="progress-row"><div><span>Нийт ажилласан</span><strong>{Math.round((summary.data?.worked_minutes ?? 0) / 60)} цаг</strong></div><div className="progress-track"><span style={{ width: `${Math.min(100, (summary.data?.worked_minutes ?? 0) / 24)}%` }} /></div></div><div className="progress-row"><div><span>Billable ажил</span><strong>{Math.round((summary.data?.billable_minutes ?? 0) / 60)} цаг</strong></div><div className="progress-track green"><span style={{ width: `${summary.data?.billable_ratio ?? 0}%` }} /></div></div></section>
+      <section className="panel productivity-panel"><div className="panel-heading"><div><span className="eyebrow">{isSupervisor ? 'Багийн бүтээмж' : 'Хувийн бүтээмж'}</span><h2>Ажилласан цагийн зураглал</h2></div></div><div className="progress-row"><div><span>Нийт ажилласан</span><strong>{Math.round((summary.data?.worked_minutes ?? 0) / 60)} цаг</strong></div><div className="progress-track"><span style={{ width: `${Math.min(100, (summary.data?.worked_minutes ?? 0) / 24)}%` }} /></div></div><div className="progress-row"><div><span>Billable ажил</span><strong>{Math.round((summary.data?.billable_minutes ?? 0) / 60)} цаг</strong></div><div className="progress-track green"><span style={{ width: `${summary.data?.billable_ratio ?? 0}%` }} /></div></div></section>
     </div>
   )
 }

@@ -151,8 +151,10 @@ export function useEnterpriseLogout() {
   return useMutation({ mutationFn: () => api.post('/v1/auth/logout'), onSettled: () => logout() })
 }
 
-export function useEnterpriseSummary() {
-  return useQuery({ queryKey: ['v1', 'analytics'], queryFn: () => api.get('/v1/analytics/summary').then((response) => response.data) })
+export interface DateRange { date_from: string; date_to: string }
+
+export function useEnterpriseSummary(period?: DateRange) {
+  return useQuery({ queryKey: ['v1', 'analytics', period], queryFn: () => api.get('/v1/analytics/summary', { params: period }).then((response) => response.data) })
 }
 
 export function useClock() {
@@ -180,8 +182,8 @@ export function useCreateProject() {
   })
 }
 
-export function useEnterpriseTasks(projectId?: number) {
-  return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId], queryFn: () => api.get('/v1/tasks', { params: projectId ? { project_id: projectId } : {} }).then((response) => response.data) })
+export function useEnterpriseTasks(projectId?: number, period?: DateRange) {
+  return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId, period], queryFn: () => api.get('/v1/tasks', { params: { ...(projectId ? { project_id: projectId } : {}), ...period } }).then((response) => response.data) })
 }
 
 export function useCreateEnterpriseTask() {
@@ -210,22 +212,78 @@ export function useUpdateEnterpriseTask() {
   })
 }
 
-export function useCapacity() {
-  return useQuery<any[]>({ queryKey: ['v1', 'capacity'], queryFn: () => api.get('/v1/capacity').then((response) => response.data) })
+export function useCapacity(period?: DateRange) {
+  return useQuery<any[]>({ queryKey: ['v1', 'capacity', period], queryFn: () => api.get('/v1/capacity', { params: period }).then((response) => response.data) })
 }
 
 export function useObjectives() {
   return useQuery<any[]>({ queryKey: ['v1', 'objectives'], queryFn: () => api.get('/v1/objectives').then((response) => response.data) })
 }
 
-export function useEnterpriseReports(status?: string) {
-  return useQuery<any[]>({ queryKey: ['v1', 'reports', status], queryFn: () => api.get('/v1/reports', { params: status ? { status } : {} }).then((response) => response.data) })
+export function useEnterpriseReports(status?: string, period?: DateRange) {
+  return useQuery<any[]>({ queryKey: ['v1', 'reports', status, period], queryFn: () => api.get('/v1/reports', { params: { ...(status ? { status } : {}), ...period } }).then((response) => response.data) })
 }
 
 export function useReportReview() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, action }: { id: number; action: 'approve' | 'request-revision' | 'submit' }) => api.post(`/v1/reports/${id}/${action}`).then((response) => response.data),
+    mutationFn: ({ id, action }: { id: number; action: 'approve' | 'request-revision' | 'submit' | 'reopen' }) => api.post(`/v1/reports/${id}/${action}`).then((response) => response.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'reports'] }),
+  })
+}
+
+export function useReportDetail(id?: number) {
+  return useQuery<any>({ queryKey: ['v1', 'reports', 'detail', id], queryFn: () => api.get(`/v1/reports/${id}`).then((response) => response.data), enabled: Boolean(id) })
+}
+
+export function useSaveReportDraft() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, version, title, markdown }: { id: number; version: number; title?: string; markdown: string }) => api.put(`/v1/reports/${id}/draft`, { title, markdown }, { headers: { 'If-Match': String(version) } }).then((response) => response.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'reports'] }),
+  })
+}
+
+export interface WorkerDirectoryItem {
+  id: number
+  name: string
+  job_title: string | null
+  telegram_username: string | null
+  avatar_url: string | null
+  presence: 'offline' | 'in_person' | 'remote' | 'break'
+}
+
+export function useWorkerDirectory() {
+  return useQuery<WorkerDirectoryItem[]>({ queryKey: ['v1', 'workers'], queryFn: () => api.get('/v1/workers').then((response) => response.data), refetchInterval: 30_000 })
+}
+
+export function useWorkerPerformance(employeeId?: number, period?: DateRange, enabled = true) {
+  return useQuery<any>({ queryKey: ['v1', 'workers', employeeId, 'performance', period], queryFn: () => api.get(`/v1/workers/${employeeId}/performance`, { params: period }).then((response) => response.data), enabled: Boolean(employeeId) && enabled })
+}
+
+export function useAssistantDraft() {
+  return useMutation({ mutationFn: (input: { text: string; kind: 'task' | 'report' }) => api.post('/v1/assistant/drafts', input).then((response) => response.data) })
+}
+
+export interface UserProfile {
+  username: string
+  name: string
+  employee_id: number | null
+  telegram_username: string | null
+  avatar_url: string | null
+  locale: 'mn' | 'en' | 'ru'
+  roles: string[]
+}
+
+export function useProfile() {
+  return useQuery<UserProfile>({ queryKey: ['v1', 'profile'], queryFn: () => api.get('/v1/auth/profile').then((response) => response.data) })
+}
+
+export function useUpdateProfile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { username?: string; avatar_url?: string | null; locale?: string; current_password?: string; new_password?: string }) => api.patch('/v1/auth/profile', input).then((response) => response.data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success('Профайл хадгалагдлаа') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Профайл хадгалагдсангүй'),
   })
 }

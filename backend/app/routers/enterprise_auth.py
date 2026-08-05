@@ -22,14 +22,14 @@ from app.core.security import (
     verify_account_password,
 )
 from app.core.telegram_auth import verify_init_data
-from app.models.models import Employee, JobQueue, ManagerSettings, Organization, PasswordResetToken, RefreshSession, RoleAssignment, UserAccount
-from app.services.manager_recipients import manager_telegram_ids
+from app.models.models import Employee, JobQueue, Organization, PasswordResetToken, RefreshSession, RoleAssignment, UserAccount
 from app.services.email_service import email_is_configured
 from app.services.secret_box import encrypt_secret
 
 
 router = APIRouter()
 REFRESH_COOKIE = "oyuns_refresh"
+TELEGRAM_DEFAULT_ROLE = "member"
 
 
 class LoginInput(BaseModel):
@@ -66,6 +66,8 @@ class AccountOut(BaseModel):
     locale: str
     roles: list[str]
     status: str
+    name: str | None = None
+    avatar_url: str | None = None
 
 
 class AccountCreate(BaseModel):
@@ -107,6 +109,32 @@ class AccountAdminPatch(BaseModel):
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(min_length=10, max_length=128)
+
+
+class ProfilePatch(BaseModel):
+    username: str | None = Field(default=None, min_length=1, max_length=254)
+    avatar_url: str | None = Field(default=None, max_length=2048)
+    locale: Literal["mn", "en", "ru"] | None = None
+    current_password: str | None = None
+    new_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_profile_username(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        identifier = value.strip().lower()
+        if not identifier or any(char.isspace() for char in identifier):
+            raise ValueError("A valid username is required")
+        return identifier
+
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url(cls, value: str | None) -> str | None:
+        value = value.strip() if value else None
+        if value and not value.startswith("https://"):
+            raise ValueError("Avatar URL must use HTTPS")
+        return value
 
 
 class PasswordResetRequest(BaseModel):
@@ -246,8 +274,6 @@ async def _telegram_session(response: Response, db: AsyncSession, telegram_id: s
     if not employee or not employee.is_active:
         raise HTTPException(status_code=403, detail="Telegram user is not registered as an active employee")
 
-    manager_settings = (await db.execute(select(ManagerSettings))).scalars().first()
-    is_manager = telegram_id == str(settings.MANAGER_TG_ID) or telegram_id in manager_telegram_ids(manager_settings)
     account = await db.scalar(select(UserAccount).where(UserAccount.employee_id == employee.id))
     if account is None and employee.email:
         account = await db.scalar(select(UserAccount).where(func.lower(UserAccount.email) == employee.email.lower()))
@@ -278,9 +304,7 @@ async def _telegram_session(response: Response, db: AsyncSession, telegram_id: s
     account.last_login_at = datetime.now(timezone.utc)
     roles = (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all()
     if not roles:
-        db.add(RoleAssignment(account_id=account.id, role="manager" if is_manager else "member"))
-    elif is_manager and "manager" not in roles:
-        db.add(RoleAssignment(account_id=account.id, role="manager"))
+        db.add(RoleAssignment(account_id=account.id, role=TELEGRAM_DEFAULT_ROLE))
 
     now = datetime.now(timezone.utc)
     refresh_expires_at = now + timedelta(days=settings.TELEGRAM_REFRESH_TOKEN_DAYS)
@@ -383,8 +407,50 @@ async def logout(
 
 
 @router.get("/me", response_model=AccountOut)
-async def me(actor: ActorContext = Depends(get_actor)):
-    return AccountOut(id=actor.account_id, email=actor.email, employee_id=actor.employee_id, locale=actor.locale, roles=sorted(actor.roles), status="active")
+async def me(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    employee = await db.get(Employee, actor.employee_id) if actor.employee_id else None
+    return AccountOut(id=actor.account_id, email=actor.email, employee_id=actor.employee_id, locale=actor.locale, roles=sorted(actor.roles), status="active", name=employee.name if employee else actor.email, avatar_url=(employee.metadata_json or {}).get("avatar_url") if employee else None)
+
+
+@router.get("/profile")
+async def profile(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    employee = await db.get(Employee, actor.employee_id) if actor.employee_id else None
+    return {
+        "username": actor.email,
+        "locale": actor.locale,
+        "employee_id": actor.employee_id,
+        "name": employee.name if employee else actor.email,
+        "telegram_username": employee.telegram_username if employee else None,
+        "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None,
+        "roles": sorted(actor.roles),
+    }
+
+
+@router.patch("/profile")
+async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    account = await db.get(UserAccount, actor.account_id, with_for_update=True)
+    employee = await db.get(Employee, actor.employee_id, with_for_update=True) if actor.employee_id else None
+    if data.username and data.username != account.email:
+        if not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]:
+            raise HTTPException(status_code=400, detail="Current password is required to change username")
+        duplicate = await db.scalar(select(UserAccount.id).where(func.lower(UserAccount.email) == data.username, UserAccount.id != account.id))
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Username already exists")
+        account.email = data.username
+    if data.new_password:
+        if not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]:
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+        account.password_hash = hash_account_password(data.new_password)
+        account.must_change_password = False
+        await db.execute(RefreshSession.__table__.update().where(RefreshSession.account_id == account.id, RefreshSession.revoked_at.is_(None)).values(revoked_at=datetime.now(timezone.utc)))
+    if data.locale:
+        account.locale = data.locale
+        if employee:
+            employee.primary_language = data.locale
+    if employee and "avatar_url" in data.model_fields_set:
+        employee.metadata_json = {**(employee.metadata_json or {}), "avatar_url": data.avatar_url}
+    await db.commit()
+    return {"username": account.email, "locale": account.locale, "employee_id": actor.employee_id, "name": employee.name if employee else account.email, "telegram_username": employee.telegram_username if employee else None, "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None, "roles": sorted(actor.roles), "password_changed": bool(data.new_password)}
 
 
 @router.post("/accounts", response_model=AccountOut, status_code=status.HTTP_201_CREATED)
@@ -462,6 +528,18 @@ async def update_account(
         roles = sorted(set(roles))
         if not roles or not set(roles).issubset(allowed):
             raise HTTPException(status_code=400, detail="Invalid roles")
+        current_roles = set((await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all())
+        if "admin" in current_roles and "admin" not in roles:
+            other_admins = await db.scalar(
+                select(func.count()).select_from(RoleAssignment).join(UserAccount, UserAccount.id == RoleAssignment.account_id).where(
+                    RoleAssignment.role == "admin",
+                    RoleAssignment.account_id != account.id,
+                    UserAccount.organization_id == actor.organization_id,
+                    UserAccount.status == "active",
+                )
+            )
+            if not other_admins:
+                raise HTTPException(status_code=400, detail="At least one active administrator is required")
         await db.execute(RoleAssignment.__table__.delete().where(RoleAssignment.account_id == account.id))
         for role in roles:
             db.add(RoleAssignment(account_id=account.id, role=role))

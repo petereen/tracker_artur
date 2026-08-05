@@ -4,11 +4,13 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import {
-  BarChart3, BriefcaseBusiness, CheckSquare2, Clock3, FileCheck2, Goal,
+  BarChart3, BriefcaseBusiness, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal,
   LayoutDashboard, LogOut, Menu, Search, Settings2, Sparkles, Users2, X,
 } from 'lucide-react'
-import { useActor, useEnterpriseLogout } from '../api/enterprise'
+import { useActor, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance } from '../api/enterprise'
 import { useAuthStore } from '../store/auth'
+import { periodFromPreset } from './TimePeriodFilter'
+import { OyunsAssistant } from './OyunsAssistant'
 
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
@@ -25,6 +27,7 @@ const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар',
   '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/okrs': 'OKR ба зорилго',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
+  '/profile': 'Миний профайл',
 }
 
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
@@ -71,6 +74,11 @@ export function EnterpriseShell() {
   const logout = useEnterpriseLogout()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const [workersOpen, setWorkersOpen] = useState(false)
+  const [workerSearch, setWorkerSearch] = useState('')
+  const [selectedWorker, setSelectedWorker] = useState<number>()
+  const workers = useWorkerDirectory()
 
   useEffect(() => setMobileOpen(false), [location.pathname])
   useEffect(() => {
@@ -88,6 +96,9 @@ export function EnterpriseShell() {
     if (actorQuery.data?.locale) i18n.changeLanguage(actorQuery.data.locale)
   }, [actorQuery.data?.locale, i18n])
   const nav = useMemo(() => NAV.filter((item) => !item.roles.length || item.roles.some((role) => roles.includes(role))), [roles])
+  const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
+  const workerPerformance = useWorkerPerformance(selectedWorker, periodFromPreset('week'), canReviewWorkers)
+  const visibleWorkers = useMemo(() => (workers.data ?? []).filter((worker) => worker.name.toLowerCase().includes(workerSearch.toLowerCase())), [workerSearch, workers.data])
   const title = TITLES[location.pathname] ?? 'OYUNS Workspace'
 
   return (
@@ -104,8 +115,8 @@ export function EnterpriseShell() {
             ))}
           </nav>
           <div className="sidebar-profile">
-            <div className="avatar">{actorQuery.data?.email?.[0]?.toUpperCase() ?? 'O'}</div>
-            <div><strong>{actorQuery.data?.email ?? '…'}</strong><span>{roles[0] ?? 'member'}</span></div>
+            <button className="avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{actorQuery.data?.avatar_url ? <img src={actorQuery.data.avatar_url} alt="" /> : actorQuery.data?.name?.[0]?.toUpperCase() ?? actorQuery.data?.email?.[0]?.toUpperCase() ?? 'O'}</button>
+            <button className="profile-identity" onClick={() => navigate('/profile')}><strong>{actorQuery.data?.name ?? actorQuery.data?.email ?? '…'}</strong><span>{roles[0] ?? 'member'}</span></button>
             <button onClick={() => logout.mutate()} aria-label={t('action.logout')}><LogOut size={17} /></button>
           </div>
         </aside>
@@ -115,11 +126,13 @@ export function EnterpriseShell() {
             <div><span className="eyebrow">OYUNS / Workspace</span><h1>{title}</h1></div>
             <div className="header-actions">
               <button className="search-trigger" onClick={() => setCommandOpen(true)}><Search size={16} /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
-              <button className="ai-trigger" onClick={() => navigate('/tasks?create=ai')}><Sparkles size={16} /> OYUNS</button>
+              <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>
             </div>
           </header>
           <div className="workspace-content"><Outlet /></div>
         </main>
+        <aside className={`workers-drawer ${workersOpen ? 'open' : ''}`} aria-label="Ажилтны төлөв"><button className="workers-toggle" onClick={() => setWorkersOpen((value) => !value)} aria-label={workersOpen ? 'Ажилтны жагсаалт хаах' : 'Ажилтны жагсаалт нээх'}>{workersOpen ? <ChevronRight /> : <><ChevronLeft /><Users2 /></>}</button>{workersOpen && <div className="workers-content"><header><div><span className="eyebrow">Live presence</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)}><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => canReviewWorkers && setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={worker.avatar_url} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{canReviewWorkers && selectedWorker && <section className="worker-performance">{workerPerformance.isLoading ? <p>Үзүүлэлт ачаалж байна…</p> : <><header><strong>{workerPerformance.data?.employee?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span><span>Billable<strong>{workerPerformance.data?.billable_ratio ?? 0}%</strong></span></div></>}</section>}</div>}</aside>
+        <OyunsAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
         <AnimatePresence>
           {commandOpen && (
             <motion.div className="command-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setCommandOpen(false)}>

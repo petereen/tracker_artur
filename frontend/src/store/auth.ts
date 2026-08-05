@@ -6,6 +6,8 @@ export interface Actor {
   employee_id: number | null
   locale: string
   roles: string[]
+  name?: string | null
+  avatar_url?: string | null
 }
 
 interface AuthState {
