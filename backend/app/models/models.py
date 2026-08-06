@@ -294,6 +294,8 @@ class Task(Base):
     workflow_status = Column(Text, nullable=False, server_default="to_do", default="to_do")
     start_at = Column(DateTime(timezone=True))
     estimate_minutes = Column(Integer)
+    work_location_type = Column(String(16))
+    work_location = Column(Text)
     sort_position = Column(Numeric(20, 8), nullable=False, server_default="0", default=0)
     version = Column(Integer, nullable=False, server_default="1", default=1)
     is_archived = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
@@ -855,6 +857,25 @@ class SavedView(Base):
     visible_columns = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     sort = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     is_shared = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+
+
+class PersonalTimeBlock(Base):
+    __tablename__ = "personal_time_blocks"
+    __table_args__ = (
+        Index("ix_personal_time_blocks_account_start", "account_id", "starts_at"),
+        CheckConstraint("ends_at > starts_at", name="ck_personal_time_blocks_positive_duration"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="SET NULL"))
+    title = Column(Text, nullable=False)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class CheckinTemplate(Base):

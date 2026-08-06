@@ -364,8 +364,11 @@ def start_work_time(
     started_at = at or datetime.now(timezone.utc)
     with get_session() as s:
         active = _active_time_entry(s, report.id, employee_id=employee_id)
-        if active:
+        if active and active.entry_type == "work":
             return ("already_active" if active.mode == mode else "other_active", active)
+        if active and active.entry_type == "break":
+            active.ended_at = started_at
+            s.flush()
         employee = s.get(Employee, employee_id)
         entry = WorkTimeEntry(
             report_id=report.id,
@@ -387,7 +390,7 @@ def start_work_time(
 def end_work_time(
     employee_id: int, local_day: date, mode: str, at: datetime | None = None
 ) -> tuple[str, WorkTimeEntry | None]:
-    """End only the requested mode; reject a mismatched open mode."""
+    """End the current day even when the worker is paused."""
     if mode not in WORK_TIME_MODES:
         raise ValueError("invalid work-time mode")
     report = get_or_create_report(employee_id, "daily", local_day)
@@ -396,13 +399,31 @@ def end_work_time(
         active = _active_time_entry(s, report.id, employee_id=employee_id)
         if not active:
             return "not_started", None
-        if active.mode != mode:
-            return "other_active", active
         active.ended_at = ended_at
         s.commit()
         s.refresh(active)
         s.expunge(active)
         return "ended", active
+
+
+def pause_work_time(employee_id: int, local_day: date, at: datetime | None = None) -> tuple[str, WorkTimeEntry | None]:
+    report = get_or_create_report(employee_id, "daily", local_day)
+    paused_at = at or datetime.now(timezone.utc)
+    with get_session() as s:
+        active = _active_time_entry(s, report.id, employee_id=employee_id)
+        if not active:
+            return "not_started", None
+        if active.entry_type == "break":
+            s.expunge(active)
+            return "already_paused", active
+        active.ended_at = paused_at
+        employee = s.get(Employee, employee_id)
+        pause = WorkTimeEntry(report_id=report.id, employee_id=employee_id, local_work_date=local_day, timezone=employee.timezone if employee else "Asia/Ulaanbaatar", entry_type="break", mode=None, started_at=paused_at, source_channel="telegram")
+        s.add(pause)
+        s.commit()
+        s.refresh(pause)
+        s.expunge(pause)
+        return "paused", pause
 
 
 def work_time_entries(report_id: int) -> list[WorkTimeEntry]:
@@ -425,7 +446,6 @@ def work_time_status(employee_id: int, local_day: date) -> dict[str, str | bool 
             .where(
                 WorkTimeEntry.employee_id == employee_id,
                 WorkTimeEntry.local_work_date == local_day,
-                WorkTimeEntry.entry_type == "work",
             )
             .order_by(WorkTimeEntry.started_at.desc(), WorkTimeEntry.id.desc())
         ).scalars().all()
@@ -433,7 +453,7 @@ def work_time_status(employee_id: int, local_day: date) -> dict[str, str | bool 
         return {
             "started": bool(entries),
             "active": active is not None,
-            "mode": active.mode if active else None,
+            "mode": active.mode if active and active.entry_type == "work" else "break" if active else None,
         }
 
 

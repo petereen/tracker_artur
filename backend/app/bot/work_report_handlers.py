@@ -135,14 +135,15 @@ async def send_daily_prompts(
 async def send_test_daily_report_prompt(
     bot,
     *,
-    state: FSMContext,
+    state: FSMContext | None = None,
     employee_id: int,
     telegram_chat_id: str,
     local_day: date,
 ) -> bool:
     """Advance the isolated daily test after its test check-in is completed."""
     report = work_report_service.get_or_create_report(employee_id, "daily_test", local_day)
-    await state.set_state(TestReportFlow.daily_report)
+    if state is not None:
+        await state.set_state(TestReportFlow.daily_report)
     return await send_report_prompt(
         bot,
         report,
@@ -254,7 +255,8 @@ def _work_time_summary_text(summary: dict, tz) -> str:
         for entry in summary["entries"]:
             start = entry["started_at"].astimezone(tz).strftime("%H:%M")
             end = entry["ended_at"].astimezone(tz).strftime("%H:%M") if entry["ended_at"] else "одоо"
-            lines.append(f"• {_mode_label(entry['mode'])}: {start}–{end} ({entry['minutes']}м)")
+            label = "завсарлага" if entry.get("entry_type") == "break" else _mode_label(entry["mode"])
+            lines.append(f"• {label}: {start}–{end} ({entry['minutes']}м)")
     return "\n".join(lines)
 
 
@@ -336,6 +338,21 @@ async def cmd_remotestart(message: Message, employee=None):
 @router.message(Command("remoteend"))
 async def cmd_remoteend(message: Message, employee=None):
     await _change_work_time(message, employee, "remote", "end")
+
+
+@router.message(Command("daypause"))
+async def cmd_daypause(message: Message, employee=None):
+    if not employee:
+        await message.answer("❌ Та бүртгэгдээгүй байна.")
+        return
+    local_now = _local_now(employee.timezone)
+    result, _ = work_report_service.pause_work_time(employee.id, local_now.date(), local_now.astimezone(timezone.utc))
+    if result == "not_started":
+        await message.answer("⚠️ Эхлээд /daystart эсвэл /remotestart ашиглана уу.")
+    elif result == "already_paused":
+        await message.answer("ℹ️ Ажлын цаг аль хэдийн түр зогссон байна.")
+    else:
+        await message.answer("⏸ Ажлын цаг түр зогслоо. /daystart эсвэл /remotestart командаар үргэлжлүүлнэ үү.")
 
 
 @router.message(Command("worktime"))

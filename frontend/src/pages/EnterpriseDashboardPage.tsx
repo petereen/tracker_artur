@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
-import { ArrowUpRight, BriefcaseBusiness, CheckCircle2, Coffee, House, Laptop2, Pause, Play, TimerReset } from 'lucide-react'
-import { useClock, useClockAction, useEnterpriseSummary } from '../api/enterprise'
+import { ArrowUpRight, BriefcaseBusiness, CheckCircle2, Coffee, House, Laptop2, Pause, Play } from 'lucide-react'
+import { useClock, useClockAction, useEnterpriseSummary, useEnterpriseTasks, useStartCheckin, useSubmitCheckin, useTodayCheckin } from '../api/enterprise'
 import { PeriodPreset, periodFromPreset, TimePeriodFilter } from '../components/TimePeriodFilter'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 
@@ -25,6 +25,13 @@ export function EnterpriseDashboardPage() {
   const employeeId = useAuthStore((state) => state.actor?.employee_id)
   const clock = useClock(employeeId != null)
   const action = useClockAction()
+  const todayCheckin = useTodayCheckin()
+  const startCheckin = useStartCheckin()
+  const submitCheckin = useSubmitCheckin()
+  const [checkinOpen, setCheckinOpen] = useState(false)
+  const [answers, setAnswers] = useState<Record<number, string>>({})
+  const today = new Date().toISOString().slice(0, 10)
+  const todayTasks = useEnterpriseTasks(undefined, { date_from: today, date_to: today })
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const isSupervisor = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const [, tick] = useState(0)
@@ -42,8 +49,21 @@ export function EnterpriseDashboardPage() {
     { label: 'Идэвхтэй төсөл', value: summary.data?.active_projects ?? '—', icon: BriefcaseBusiness, tone: 'blue' },
     { label: 'Дууссан даалгавар', value: summary.data?.completed_tasks ?? '—', icon: CheckCircle2, tone: 'green' },
     { label: 'Гүйцэтгэл', value: summary.data ? `${summary.data.completion_rate}%` : '—', icon: ArrowUpRight, tone: 'purple' },
-    { label: 'Billable харьцаа', value: summary.data ? `${summary.data.billable_ratio}%` : '—', icon: TimerReset, tone: 'amber' },
+    { label: 'Ажилласан цаг', value: summary.data ? `${Math.round(summary.data.worked_minutes / 60 * 10) / 10}ц` : '—', icon: Coffee, tone: 'amber' },
   ]
+
+  const openCheckin = async () => {
+    if (todayCheckin.data?.checkin?.status === 'submitted') return
+    if (!todayCheckin.data?.checkin && todayCheckin.data?.template?.id) await startCheckin.mutateAsync(todayCheckin.data.template.id)
+    setCheckinOpen(true)
+  }
+  const saveCheckin = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const current = todayCheckin.data?.checkin || await startCheckin.mutateAsync(todayCheckin.data.template.id)
+    const questions = todayCheckin.data?.template?.questions ?? []
+    await submitCheckin.mutateAsync({ id: current.id, answers: questions.map((question: any) => question.answer_type === 'integer' || question.answer_type === 'decimal' ? { question_id: question.id, value_numeric: Number(answers[question.id]) } : { question_id: question.id, value_text: answers[question.id] }) })
+    setCheckinOpen(false)
+  }
 
   return (
     <div className="dashboard-grid">
@@ -65,9 +85,9 @@ export function EnterpriseDashboardPage() {
           {onBreak && <><button className="clock-button office" onClick={() => action.mutate({ action: 'resume' })}><Play />Үргэлжлүүлэх</button><button className="clock-button stop" onClick={() => action.mutate({ action: 'stop' })}><Pause />Өдөр дуусгах</button></>}
         </div>
       </section>
-      <section className="daily-focus panel"><span className="eyebrow">Өнөөдрийн төвлөрөл</span><h2>Хамгийн чухал ажлаа тодорхой болго.</h2><div className="focus-question"><span>1</span><div><strong>Таны эхний 3 зорилт юу вэ?</strong><p>Богино, үйлдэлд чиглэсэн байдлаар бичнэ үү.</p></div></div><div className="focus-question"><span>2</span><div><strong>Саад болж байгаа зүйл бий юу?</strong><p>Удирдлагад эрт харагдвал хурдан шийдэгдэнэ.</p></div></div><button className="secondary-action">Өдрийн check-in бөглөх</button></section>
+      <section className="daily-focus panel"><span className="eyebrow">Өнөөдрийн төвлөрөл</span><h2>Хамгийн чухал ажлаа тодорхой болго.</h2>{todayCheckin.data?.template?.questions?.slice(0, 2).map((question: any, index: number) => <div className="focus-question" key={question.id}><span>{index + 1}</span><div><strong>{question.prompt?.mn || question.prompt?.en}</strong><p>{question.is_required ? 'Заавал хариулна' : 'Сонголттой'}</p></div></div>)}{!todayCheckin.data?.template && <p>Check-in асуулт тохируулаагүй байна.</p>}<button className="secondary-action" onClick={openCheckin} disabled={!todayCheckin.data?.template || todayCheckin.data?.checkin?.status === 'submitted'}>{todayCheckin.data?.checkin?.status === 'submitted' ? 'Өнөөдрийн check-in бөглөгдсөн' : 'Өдрийн check-in бөглөх'}</button>{checkinOpen && <form className="checkin-form" onSubmit={saveCheckin}>{todayCheckin.data.template.questions.map((question: any) => <label key={question.id}><strong>{question.prompt?.mn || question.prompt?.en}</strong>{question.choices?.length ? <select required={question.is_required} value={answers[question.id] || ''} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}><option value="">Сонгох</option>{question.choices.map((choice: any) => <option key={String(choice)}>{String(choice)}</option>)}</select> : <textarea required={question.is_required} value={answers[question.id] || ''} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} />}</label>)}<div><button type="button" className="secondary-action compact" onClick={() => setCheckinOpen(false)}>Цуцлах</button><button className="primary-action compact" disabled={submitCheckin.isPending}>Хадгалах</button></div></form>}</section>
       <section className="metrics-grid" aria-label="Гүйцэтгэлийн үзүүлэлт">{cards.map(({ label, value, icon: Icon, tone }, index) => <motion.article className={`metric-card ${tone}`} key={label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * .04, type: 'spring', bounce: 0, duration: .35 }}><Icon /><span>{label}</span><strong>{value}</strong></motion.article>)}</section>
-      <section className="panel productivity-panel"><div className="panel-heading"><div><span className="eyebrow">{isSupervisor ? 'Багийн бүтээмж' : 'Хувийн бүтээмж'}</span><h2>Ажилласан цагийн зураглал</h2></div></div><div className="progress-row"><div><span>Нийт ажилласан</span><strong>{Math.round((summary.data?.worked_minutes ?? 0) / 60)} цаг</strong></div><div className="progress-track"><span style={{ width: `${Math.min(100, (summary.data?.worked_minutes ?? 0) / 24)}%` }} /></div></div><div className="progress-row"><div><span>Billable ажил</span><strong>{Math.round((summary.data?.billable_minutes ?? 0) / 60)} цаг</strong></div><div className="progress-track green"><span style={{ width: `${summary.data?.billable_ratio ?? 0}%` }} /></div></div></section>
+      <section className="panel productivity-panel"><div className="panel-heading"><div><span className="eyebrow">Өнөөдрийн ажил</span><h2>Хийх даалгаврууд</h2></div></div>{todayTasks.data?.length ? todayTasks.data.slice(0, 6).map((task) => <div className="progress-row" key={task.id}><div><span>{task.primary_owner_name || 'Хариуцагчгүй'}</span><strong>{task.title}</strong></div><span>{task.deadline_at ? new Date(task.deadline_at).toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' }) : 'Хугацаагүй'}</span></div>) : <p>Өнөөдөр төлөвлөсөн даалгавар алга.</p>}</section>
     </div>
   )
 }

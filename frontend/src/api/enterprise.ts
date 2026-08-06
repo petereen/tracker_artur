@@ -15,9 +15,15 @@ export interface EnterpriseTask {
   workflow_status: WorkflowStatus
   priority: number
   primary_owner_id: number | null
+  primary_owner_name: string | null
+  assignee_ids: number[]
+  assignee_names: string[]
+  project_name: string | null
   start_at: string | null
   deadline_at: string | null
   estimate_minutes: number | null
+  work_location_type: 'office' | 'remote' | 'custom' | null
+  work_location: string | null
   sort_position: number
   version: number
   is_archived: boolean
@@ -29,6 +35,8 @@ export interface Project {
   public_id: string
   client_id: number | null
   manager_id: number | null
+  manager_name: string | null
+  member_ids: number[]
   code: string
   name: string
   description: string | null
@@ -114,6 +122,7 @@ export function useUpdateManagedAccount() {
   return useMutation({
     mutationFn: ({ id, ...input }: { id: number; username?: string; password?: string; roles?: string[]; status?: 'active' | 'disabled' }) => api.patch(`/v1/auth/accounts/${id}`, input).then((response) => response.data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'accounts'] }),
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Хэрэглэгчийн эрх шинэчлэгдсэнгүй'),
   })
 }
 
@@ -150,8 +159,8 @@ export function useEnterpriseLogout() {
 
 export interface DateRange { date_from: string; date_to: string }
 
-export function useEnterpriseSummary(period?: DateRange) {
-  return useQuery({ queryKey: ['v1', 'analytics', period], queryFn: () => api.get('/v1/analytics/summary', { params: period }).then((response) => response.data) })
+export function useEnterpriseSummary(period?: DateRange, employeeId?: number) {
+  return useQuery({ queryKey: ['v1', 'analytics', period, employeeId], queryFn: () => api.get('/v1/analytics/summary', { params: { ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data) })
 }
 
 export function useClock(enabled = true) {
@@ -176,6 +185,7 @@ export function useCreateProject() {
   return useMutation({
     mutationFn: (input: Record<string, unknown>) => api.post('/v1/projects', input).then((response) => response.data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл үүслээ') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл үүссэнгүй'),
   })
 }
 
@@ -188,6 +198,7 @@ export function useCreateEnterpriseTask() {
   return useMutation({
     mutationFn: (input: Record<string, unknown>) => api.post('/v1/tasks', input, { headers: { 'Idempotency-Key': crypto.randomUUID() } }).then((response) => response.data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); toast.success('Даалгавар үүслээ') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Даалгавар үүссэнгүй'),
   })
 }
 
@@ -219,6 +230,40 @@ export function useObjectives() {
 
 export function useEnterpriseReports(status?: string, period?: DateRange) {
   return useQuery<any[]>({ queryKey: ['v1', 'reports', status, period], queryFn: () => api.get('/v1/reports', { params: { ...(status ? { status } : {}), ...period } }).then((response) => response.data) })
+}
+
+export function useTodayCheckin() {
+  return useQuery<any>({ queryKey: ['v1', 'checkins', 'today'], queryFn: () => api.get('/v1/checkins/today').then((response) => response.data) })
+}
+
+export function useStartCheckin() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (template_id: number) => api.post('/v1/checkins', { template_id }).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'checkins'] }) })
+}
+
+export function useSubmitCheckin() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: ({ id, answers }: { id: number; answers: any[] }) => api.post(`/v1/checkins/${id}/submit`, { answers }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'checkins'] }); toast.success('Өдрийн check-in хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Check-in хадгалагдсангүй') })
+}
+
+export function useDailyAnalytics(period: DateRange, employeeId?: number) {
+  return useQuery<any>({ queryKey: ['v1', 'analytics', 'daily', period, employeeId], queryFn: () => api.get('/v1/analytics/daily', { params: { ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data) })
+}
+
+export interface PersonalTimeBlock { id: number; title: string; starts_at: string; ends_at: string; task_id: number | null; version: number }
+
+export function useCalendarEvents(scope: 'private' | 'corporate', period: DateRange) {
+  return useQuery<any>({ queryKey: ['v1', 'calendar', scope, period], queryFn: () => api.get('/v1/calendar/events', { params: { scope, ...period } }).then((response) => response.data) })
+}
+
+export function useCreateTimeBlock() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/time-blocks', input).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }), onError: (error: any) => toast.error(error.response?.data?.detail || 'Хувийн төлөвлөгөө хадгалагдсангүй') })
+}
+
+export function useDeleteTimeBlock() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (id: number) => api.delete(`/v1/calendar/time-blocks/${id}`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }) })
 }
 
 export function useReportReview() {

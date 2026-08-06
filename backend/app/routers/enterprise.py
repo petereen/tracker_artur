@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Resp
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -32,9 +33,11 @@ from app.models.models import (
     KeyResult,
     Milestone,
     Objective,
+    PersonalTimeBlock,
     Project,
     ProjectMember,
     ProjectRate,
+    Question,
     ReportComment,
     ResourceAllocation,
     RoleAssignment,
@@ -92,6 +95,7 @@ def _task_out(item: Task) -> dict:
         "priority": item.priority, "primary_owner_id": item.assignee_id,
         "start_at": item.start_at, "deadline_at": item.deadline_at,
         "estimate_minutes": item.estimate_minutes, "sort_position": _decimal(item.sort_position),
+        "work_location_type": item.work_location_type, "work_location": item.work_location,
         "version": item.version, "is_archived": item.is_archived,
         "created_at": item.created_at, "completed_at": item.completed_at,
         "is_overdue": bool(item.deadline_at and item.deadline_at < datetime.now(timezone.utc) and item.workflow_status not in {"done", "cancelled"}),
@@ -129,6 +133,7 @@ class ProjectInput(BaseModel):
     name: str = Field(min_length=1, max_length=240)
     client_id: int | None = None
     manager_id: int | None = None
+    member_ids: list[int] = Field(default_factory=list)
     description: str | None = None
     status: Literal["draft", "planned", "active", "on_hold", "completed", "cancelled"] = "draft"
     starts_on: date | None = None
@@ -167,6 +172,8 @@ class EnterpriseTaskInput(BaseModel):
     start_at: datetime | None = None
     deadline_at: datetime | None = None
     estimate_minutes: int | None = Field(default=None, ge=0)
+    work_location_type: Literal["office", "remote", "custom"] | None = None
+    work_location: str | None = Field(default=None, max_length=500)
     sort_position: Decimal = Decimal("0")
 
 
@@ -178,9 +185,12 @@ class EnterpriseTaskPatch(BaseModel):
     workflow_status: str | None = None
     priority: int | None = Field(default=None, ge=1, le=4)
     primary_owner_id: int | None = None
+    assignee_ids: list[int] | None = None
     start_at: datetime | None = None
     deadline_at: datetime | None = None
     estimate_minutes: int | None = Field(default=None, ge=0)
+    work_location_type: Literal["office", "remote", "custom"] | None = None
+    work_location: str | None = Field(default=None, max_length=500)
     sort_position: Decimal | None = None
     is_archived: bool | None = None
 
@@ -302,6 +312,20 @@ class CheckinTemplateInput(BaseModel):
     team_id: int | None = None
     cadence: str = "daily"
     questions: list[dict] = Field(default_factory=list)
+
+
+class PersonalTimeBlockInput(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+    starts_at: datetime
+    ends_at: datetime
+    task_id: int | None = None
+
+
+class PersonalTimeBlockPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    task_id: int | None = None
 
 
 class TimeOffInput(BaseModel):
@@ -455,17 +479,40 @@ async def list_projects(status_filter: str | None = Query(default=None, alias="s
         member_projects = select(ProjectMember.project_id).where(ProjectMember.employee_id == actor.employee_id)
         query = query.where(Project.id.in_(member_projects))
     rows = (await db.execute(query.order_by(Project.status, Project.name))).scalars().all()
-    return [_project_out(row) for row in rows]
+    employee_ids = {row.manager_id for row in rows if row.manager_id}
+    people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all()} if employee_ids else {}
+    member_rows = (await db.execute(select(ProjectMember).where(ProjectMember.project_id.in_([row.id for row in rows])))).scalars().all() if rows else []
+    members_by_project: dict[int, list[int]] = {}
+    for member in member_rows:
+        members_by_project.setdefault(member.project_id, []).append(member.employee_id)
+    return [{**_project_out(row), "manager_name": people.get(row.manager_id), "member_ids": members_by_project.get(row.id, [])} for row in rows]
 
 
 @router.post("/projects", status_code=status.HTTP_201_CREATED)
 async def create_project(data: ProjectInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "manager"))):
-    project = Project(organization_id=actor.organization_id, **data.model_dump())
+    payload = data.model_dump(exclude={"member_ids"})
+    employee_ids = set(data.member_ids)
+    if data.manager_id:
+        employee_ids.add(data.manager_id)
+    if employee_ids:
+        valid = set((await db.execute(select(Employee.id).where(Employee.id.in_(employee_ids), Employee.is_active.is_(True)))).scalars().all())
+        if valid != employee_ids:
+            raise HTTPException(status_code=400, detail="Project owner or member is invalid")
+    project = Project(organization_id=actor.organization_id, **payload)
     db.add(project)
-    await db.flush()
-    await record_change(db, actor=actor, topic="projects", aggregate_type="project", aggregate_id=project.id, operation="created", version=project.version, after=_project_out(project))
-    await db.commit()
-    return _project_out(project)
+    try:
+        await db.flush()
+        for employee_id in employee_ids:
+            db.add(ProjectMember(project_id=project.id, employee_id=employee_id, project_role="owner" if employee_id == data.manager_id else "member"))
+        await db.flush()
+        manager = await db.get(Employee, data.manager_id) if data.manager_id else None
+        output = {**_project_out(project), "manager_name": manager.name if manager else None, "member_ids": sorted(employee_ids)}
+        await record_change(db, actor=actor, topic="projects", aggregate_type="project", aggregate_id=project.id, operation="created", version=project.version, after=output)
+        await db.commit()
+        return output
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Project code already exists") from exc
 
 
 @router.post("/projects/{project_id}/members", status_code=status.HTTP_201_CREATED)
@@ -577,7 +624,16 @@ async def list_tasks(
         contributor_tasks = select(TaskAssignee.task_id).where(TaskAssignee.employee_id == actor.employee_id)
         query = query.where(or_(Task.assignee_id == actor.employee_id, Task.id.in_(contributor_tasks)))
     rows = (await db.execute(query.order_by(Task.workflow_status, Task.sort_position, Task.id))).scalars().all()
-    return [_task_out(row) for row in rows]
+    task_ids = [row.id for row in rows]
+    assignment_rows = (await db.execute(select(TaskAssignee).where(TaskAssignee.task_id.in_(task_ids)))).scalars().all() if task_ids else []
+    assignees: dict[int, list[int]] = {}
+    for assignment in assignment_rows:
+        assignees.setdefault(assignment.task_id, []).append(assignment.employee_id)
+    employee_ids = {row.assignee_id for row in rows if row.assignee_id} | {item.employee_id for item in assignment_rows}
+    people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all()} if employee_ids else {}
+    project_ids = {row.project_id for row in rows if row.project_id}
+    projects = {row.id: row.name for row in (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()} if project_ids else {}
+    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id)} for row in rows]
 
 
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)
@@ -595,12 +651,24 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
             if existing.request_hash != request_hash:
                 raise HTTPException(status_code=409, detail="Idempotency key was used with different input")
             return existing.response_body
-    owner_id = data.primary_owner_id or actor.employee_id
+    if data.project_id:
+        project = await db.get(Project, data.project_id)
+        if not project or project.organization_id != actor.organization_id:
+            raise HTTPException(status_code=400, detail="Project is invalid")
+    requested_assignees = set(data.assignee_ids)
+    if data.primary_owner_id:
+        requested_assignees.add(data.primary_owner_id)
+    if requested_assignees:
+        valid = set((await db.execute(select(Employee.id).where(Employee.id.in_(requested_assignees), Employee.is_active.is_(True)))).scalars().all())
+        if valid != requested_assignees:
+            raise HTTPException(status_code=400, detail="Task assignee is invalid")
+    owner_id = data.primary_owner_id
     task = Task(
         organization_id=actor.organization_id, project_id=data.project_id, parent_task_id=data.parent_task_id,
         title=data.title, description=data.description, workflow_status=data.workflow_status,
         status=LEGACY_STATUS[data.workflow_status], priority=data.priority, assignee_id=owner_id,
         start_at=data.start_at, deadline_at=data.deadline_at, estimate_minutes=data.estimate_minutes,
+        work_location_type=data.work_location_type, work_location=data.work_location,
         sort_position=data.sort_position, created_by_id=actor.employee_id,
     )
     db.add(task)
@@ -610,7 +678,8 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         assignees.add(owner_id)
     for employee_id in assignees:
         db.add(TaskAssignee(task_id=task.id, employee_id=employee_id, assignment_role="primary" if employee_id == owner_id else "contributor"))
-    output = _task_out(task)
+    owner = await db.get(Employee, owner_id) if owner_id else None
+    output = {**_task_out(task), "assignee_ids": sorted(assignees), "primary_owner_name": owner.name if owner else None}
     await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after=output)
     if idempotency_key:
         db.add(IdempotencyRecord(account_id=actor.account_id, operation="create_task", key=idempotency_key, request_hash=request_hash, response_status=201, response_body=json.loads(json.dumps(output, default=str)), expires_at=datetime.now(timezone.utc) + timedelta(days=1)))
@@ -635,9 +704,26 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
         if task.version != expected:
             raise HTTPException(status_code=409, detail={"message": "Task changed", "latest": _task_out(task)})
     patch = data.model_dump(exclude_unset=True)
+    if not actor.has_any_role(*MANAGEMENT_ROLES):
+        current = set((await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all())
+        changed = (("primary_owner_id" in patch and patch["primary_owner_id"] != task.assignee_id) or ("project_id" in patch and patch["project_id"] != task.project_id) or ("assignee_ids" in patch and set(patch["assignee_ids"] or []) != current))
+        if changed:
+            raise HTTPException(status_code=403, detail="Only managers can change task delegation")
     if patch.get("workflow_status") and patch["workflow_status"] not in WORKFLOW_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid workflow status")
     before = _task_out(task)
+    assignee_ids = patch.pop("assignee_ids", None)
+    if assignee_ids is not None:
+        requested = set(assignee_ids)
+        if patch.get("primary_owner_id"):
+            requested.add(patch["primary_owner_id"])
+        valid = set((await db.execute(select(Employee.id).where(Employee.id.in_(requested), Employee.is_active.is_(True)))).scalars().all()) if requested else set()
+        if valid != requested:
+            raise HTTPException(status_code=400, detail="Task assignee is invalid")
+        await db.execute(TaskAssignee.__table__.delete().where(TaskAssignee.task_id == task.id))
+        owner = patch.get("primary_owner_id", task.assignee_id)
+        for employee_id in requested:
+            db.add(TaskAssignee(task_id=task.id, employee_id=employee_id, assignment_role="primary" if employee_id == owner else "contributor"))
     for field, value in patch.items():
         setattr(task, "assignee_id" if field == "primary_owner_id" else field, value)
     if data.workflow_status:
@@ -645,7 +731,8 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
         task.completed_at = datetime.now(timezone.utc) if data.workflow_status == "done" else None
     task.version += 1
     await db.flush()
-    output = _task_out(task)
+    current_assignees = (await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all()
+    output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees))}
     await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before=before, after=output)
     await db.commit()
     return output
@@ -663,6 +750,76 @@ async def replace_assignees(task_id: int, data: AssigneesInput, db: AsyncSession
     await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="assignees_changed", version=task.version, after={"employee_ids": data.employee_ids})
     await db.commit()
     return {"employee_ids": sorted(set(data.employee_ids)), "version": task.version}
+
+
+def _time_block_out(item: PersonalTimeBlock) -> dict:
+    return {"id": item.id, "title": item.title, "starts_at": item.starts_at, "ends_at": item.ends_at, "task_id": item.task_id, "version": item.version}
+
+
+@router.get("/calendar/events")
+async def calendar_events(scope: Literal["private", "corporate"] = "private", date_from: date | None = None, date_to: date | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    period_start = date_from or date.today() - timedelta(days=14)
+    period_end = date_to or period_start + timedelta(days=41)
+    task_rows = await list_tasks(date_from=period_start, date_to=period_end, db=db, actor=actor)
+    if scope == "private":
+        task_rows = [row for row in task_rows if actor.employee_id and actor.employee_id in row.get("assignee_ids", [])]
+    task_events = [{"kind": "task", **row} for row in task_rows if row.get("start_at") or row.get("deadline_at")]
+    blocks: list[dict] = []
+    if scope == "private":
+        start = datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc)
+        end = datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        rows = (await db.execute(select(PersonalTimeBlock).where(PersonalTimeBlock.account_id == actor.account_id, PersonalTimeBlock.starts_at < end, PersonalTimeBlock.ends_at > start).order_by(PersonalTimeBlock.starts_at))).scalars().all()
+        blocks = [{"kind": "time_block", **_time_block_out(row)} for row in rows]
+    return {"scope": scope, "tasks": task_events, "time_blocks": blocks}
+
+
+@router.post("/calendar/time-blocks", status_code=status.HTTP_201_CREATED)
+async def create_time_block(data: PersonalTimeBlockInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if data.ends_at <= data.starts_at:
+        raise HTTPException(status_code=400, detail="Time block must end after it starts")
+    if data.task_id:
+        await _task_for_actor(db, data.task_id, actor, write=True)
+    block = PersonalTimeBlock(organization_id=actor.organization_id, account_id=actor.account_id, **data.model_dump())
+    db.add(block)
+    await db.flush()
+    await record_change(db, actor=actor, topic="calendar", aggregate_type="personal_time_block", aggregate_id=block.id, operation="created", after=_time_block_out(block))
+    await db.commit()
+    return _time_block_out(block)
+
+
+@router.patch("/calendar/time-blocks/{block_id}")
+async def update_time_block(block_id: int, data: PersonalTimeBlockPatch, if_match: str | None = Header(default=None, alias="If-Match"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    block = await db.get(PersonalTimeBlock, block_id, with_for_update=True)
+    if not block or block.account_id != actor.account_id:
+        raise HTTPException(status_code=404, detail="Time block not found")
+    if if_match is not None:
+        try:
+            expected = int(if_match.strip('W/"'))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="If-Match must contain a version") from exc
+        if expected != block.version:
+            raise HTTPException(status_code=409, detail="Time block changed")
+    patch = data.model_dump(exclude_unset=True)
+    starts_at = patch.get("starts_at", block.starts_at)
+    ends_at = patch.get("ends_at", block.ends_at)
+    if ends_at <= starts_at:
+        raise HTTPException(status_code=400, detail="Time block must end after it starts")
+    if patch.get("task_id"):
+        await _task_for_actor(db, patch["task_id"], actor, write=True)
+    for field, value in patch.items():
+        setattr(block, field, value)
+    block.version += 1
+    await db.commit()
+    return _time_block_out(block)
+
+
+@router.delete("/calendar/time-blocks/{block_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_time_block(block_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    block = await db.get(PersonalTimeBlock, block_id)
+    if not block or block.account_id != actor.account_id:
+        raise HTTPException(status_code=404, detail="Time block not found")
+    await db.delete(block)
+    await db.commit()
 
 
 @router.post("/tasks/{task_id}/dependencies", status_code=status.HTTP_201_CREATED)
@@ -1232,6 +1389,16 @@ async def create_checkin_template(data: CheckinTemplateInput, db: AsyncSession =
 @router.get("/checkin-templates")
 async def list_checkin_templates(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     templates = (await db.execute(select(CheckinTemplate).where(CheckinTemplate.organization_id == actor.organization_id, CheckinTemplate.is_active.is_(True)).order_by(CheckinTemplate.name))).scalars().all()
+    if not templates and actor.has_any_role(*MANAGEMENT_ROLES):
+        legacy_questions = (await db.execute(select(Question).order_by(Question.sort_order))).scalars().all()
+        if legacy_questions:
+            template = CheckinTemplate(organization_id=actor.organization_id, name="Daily check-in", cadence="daily")
+            db.add(template)
+            await db.flush()
+            for position, question in enumerate(legacy_questions):
+                db.add(CheckinQuestion(template_id=template.id, prompt={"mn": question.text}, answer_type=question.answer_type, choices=question.options or [], is_required=True, position=position))
+            await db.commit()
+            templates = [template]
     output = []
     for template in templates:
         questions = (await db.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == template.id).order_by(CheckinQuestion.position))).scalars().all()
@@ -1250,6 +1417,35 @@ async def list_checkins(local_date: date | None = None, db: AsyncSession = Depen
     return [{"id": row.id, "template_id": row.template_id, "local_date": row.local_date, "status": row.status, "source": row.source, "started_at": row.started_at, "submitted_at": row.submitted_at} for row in rows]
 
 
+@router.get("/checkins/today")
+async def today_checkin(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if not actor.employee_id:
+        return {"template": None, "checkin": None, "answers": []}
+    employee = await db.get(Employee, actor.employee_id)
+    local_day = datetime.now(timezone.utc).astimezone(ZoneInfo(employee.timezone)).date()
+    templates = (await db.execute(select(CheckinTemplate).where(CheckinTemplate.organization_id == actor.organization_id, CheckinTemplate.is_active.is_(True)).order_by(CheckinTemplate.id))).scalars().all()
+    if not templates:
+        legacy_questions = (await db.execute(select(Question).order_by(Question.sort_order))).scalars().all()
+        if not legacy_questions:
+            return {"template": None, "checkin": None, "answers": []}
+        template = CheckinTemplate(organization_id=actor.organization_id, name="Daily check-in", cadence="daily")
+        db.add(template)
+        await db.flush()
+        for position, question in enumerate(legacy_questions):
+            db.add(CheckinQuestion(template_id=template.id, prompt={"mn": question.text}, answer_type=question.answer_type, choices=question.options or [], is_required=question.is_required, position=position))
+        await db.commit()
+        templates = [template]
+    template = templates[0]
+    questions = (await db.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == template.id).order_by(CheckinQuestion.position))).scalars().all()
+    checkin = (await db.execute(select(Checkin).where(Checkin.employee_id == actor.employee_id, Checkin.template_id == template.id, Checkin.local_date == local_day))).scalar_one_or_none()
+    answers = (await db.execute(select(CheckinAnswer).where(CheckinAnswer.checkin_id == checkin.id))).scalars().all() if checkin else []
+    return {
+        "template": {"id": template.id, "name": template.name, "questions": [{"id": q.id, "prompt": q.prompt, "answer_type": q.answer_type, "choices": q.choices, "is_required": q.is_required} for q in questions]},
+        "checkin": {"id": checkin.id, "status": checkin.status, "local_date": checkin.local_date} if checkin else None,
+        "answers": [{"question_id": a.question_id, "value_text": a.value_text, "value_numeric": _decimal(a.value_numeric), "value_json": a.value_json} for a in answers],
+    }
+
+
 @router.post("/checkins", status_code=status.HTTP_201_CREATED)
 async def start_checkin(data: CheckinStartInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if not actor.employee_id:
@@ -1257,7 +1453,8 @@ async def start_checkin(data: CheckinStartInput, db: AsyncSession = Depends(get_
     template = await db.get(CheckinTemplate, data.template_id)
     if not template or template.organization_id != actor.organization_id or not template.is_active:
         raise HTTPException(status_code=404, detail="Check-in template not found")
-    local_day = data.local_date or date.today()
+    employee = await db.get(Employee, actor.employee_id)
+    local_day = data.local_date or datetime.now(timezone.utc).astimezone(ZoneInfo(employee.timezone)).date()
     existing = (await db.execute(select(Checkin).where(Checkin.employee_id == actor.employee_id, Checkin.template_id == data.template_id, Checkin.local_date == local_day))).scalar_one_or_none()
     if existing:
         return {"id": existing.id, "template_id": existing.template_id, "local_date": existing.local_date, "status": existing.status}
@@ -1380,6 +1577,7 @@ async def _performance_summary(db: AsyncSession, actor: ActorContext, employee_i
 async def analytics_summary(
     date_from: date | None = None,
     date_to: date | None = None,
+    employee_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ):
@@ -1387,7 +1585,9 @@ async def analytics_summary(
     period_start = date_from or period_end - timedelta(days=6)
     if period_start > period_end:
         raise HTTPException(status_code=400, detail="date_from must not be after date_to")
-    employee_scope = None if actor.has_any_role(*MANAGEMENT_ROLES) else actor.employee_id
+    if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
+        raise HTTPException(status_code=403, detail="Worker analytics are outside your scope")
+    employee_scope = employee_id if actor.has_any_role(*MANAGEMENT_ROLES) and employee_id is not None else None if actor.has_any_role(*MANAGEMENT_ROLES) else actor.employee_id
     if employee_scope is None and not actor.has_any_role(*MANAGEMENT_ROLES):
         return {**await _performance_summary(db, actor, -1, period_start, period_end), "active_projects": 0, "scope": "personal"}
     summary = await _performance_summary(db, actor, employee_scope, period_start, period_end)
@@ -1395,8 +1595,50 @@ async def analytics_summary(
     if employee_scope is not None:
         project_query = project_query.where(Project.id.in_(select(ProjectMember.project_id).where(ProjectMember.employee_id == employee_scope)))
     summary["active_projects"] = await db.scalar(project_query) or 0
-    summary["scope"] = "organization" if employee_scope is None else "personal"
+    summary["scope"] = "organization" if employee_scope is None else "worker" if actor.has_any_role(*MANAGEMENT_ROLES) and employee_id else "personal"
     return summary
+
+
+@router.get("/analytics/daily")
+async def analytics_daily(
+    date_from: date,
+    date_to: date,
+    employee_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    if date_from > date_to or (date_to - date_from).days > 370:
+        raise HTTPException(status_code=400, detail="Analytics period must be between 1 and 371 days")
+    if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
+        raise HTTPException(status_code=403, detail="Worker analytics are outside your scope")
+    target = employee_id if actor.has_any_role(*MANAGEMENT_ROLES) else actor.employee_id
+    work_query = select(
+        WorkTimeEntry.local_work_date,
+        func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0),
+    ).where(
+        WorkTimeEntry.entry_type == "work", WorkTimeEntry.ended_at.isnot(None),
+        WorkTimeEntry.local_work_date >= date_from, WorkTimeEntry.local_work_date <= date_to,
+    )
+    if target is not None:
+        work_query = work_query.where(WorkTimeEntry.employee_id == target)
+    work_rows = (await db.execute(work_query.group_by(WorkTimeEntry.local_work_date))).all()
+    work_by_day = {row[0]: round(float(row[1])) for row in work_rows}
+    task_query = select(Task.completed_at).where(
+        Task.organization_id == actor.organization_id, Task.workflow_status == "done", Task.completed_at.isnot(None),
+        Task.completed_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc),
+        Task.completed_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc),
+    )
+    if target is not None:
+        task_query = task_query.where(_task_employee_scope(target))
+    completed_by_day: dict[date, int] = {}
+    for completed_at in (await db.execute(task_query)).scalars().all():
+        completed_by_day[completed_at.date()] = completed_by_day.get(completed_at.date(), 0) + 1
+    days = []
+    cursor = date_from
+    while cursor <= date_to:
+        days.append({"date": cursor, "worked_minutes": work_by_day.get(cursor, 0), "completed_tasks": completed_by_day.get(cursor, 0)})
+        cursor += timedelta(days=1)
+    return {"date_from": date_from, "date_to": date_to, "employee_id": target, "days": days}
 
 
 @router.get("/workers")

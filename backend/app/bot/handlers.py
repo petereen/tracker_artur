@@ -1,6 +1,7 @@
 """aiogram handlers — сотрудник и руководитель."""
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
@@ -12,7 +13,8 @@ from sqlalchemy import func, select
 
 from app.bot.db import (
     complete_session, create_session, get_manager_settings,
-    get_questions, get_session, get_streak, get_yesterday_summary,
+    canonical_checkin_complete, get_questions, get_session, get_streak, get_yesterday_summary,
+    mirror_completed_session,
     mark_employee_onboarded, save_answer,
 )
 from app.core.config import settings
@@ -84,6 +86,7 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
         f"🔴 /dayend — ажил дууссан цаг\n"
         f"🏠 /remotestart — remote ажил эхэлсэн цаг\n"
         f"🏠 /remoteend — remote ажил дууссан цаг\n"
+        f"⏸ /daypause — ажлын цаг түр зогсоох\n"
         f"📊 /worktime — өнөөдрийн ажлын цаг\n"
         f"🏆 /leaderboard — багийн чансаа\n"
         f"❓ /help — тусламж"
@@ -131,7 +134,14 @@ async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMConte
         await target.answer("⚠️ Асуултууд тохируулагдаагүй байна.")
         return
 
-    sess = create_session(emp.id, session_type=session_type)
+    local_day = datetime.now(ZoneInfo(emp.timezone)).date()
+    if session_type == "evening" and canonical_checkin_complete(emp.id, local_day):
+        await target.answer("✅ Өнөөдрийн чек-ин аль хэдийн бөглөгдсөн байна.")
+        return
+    sess = create_session(emp.id, session_type=session_type, local_day=local_day)
+    if sess.status == "completed":
+        await target.answer("✅ Өнөөдрийн чек-ин аль хэдийн бөглөгдсөн байна.")
+        return
     await state.set_state(Survey.answering)
     await state.update_data(session_type=session_type, employee_id=emp.id)
     await _ask_question(message_or_cb, questions[0], state, sess.id, 0, questions)
@@ -194,6 +204,7 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
         await _ask_question(message, next_q, state, session_id, next_index, all_qs)
     else:
         complete_session(session_id)
+        mirror_completed_session(session_id)
         data = await state.get_data()
         session_type = data.get("session_type")
         employee_id = data.get("employee_id")
@@ -335,6 +346,7 @@ async def cmd_help(message: Message, is_manager: bool = False):
             "/today — чек-ин бөглөх\n"
             "/daystart, /dayend — оффисын ажлын цаг\n"
             "/remotestart, /remoteend — remote ажлын цаг\n"
+            "/daypause — ажлын цаг түр зогсоох\n"
             "/worktime — өнөөдрийн ажлын цагийн дэлгэрэнгүй\n"
             "/my_stats — миний статистик\n"
             "/leaderboard — багийн чансаа\n"

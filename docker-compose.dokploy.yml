@@ -62,13 +62,18 @@ services:
     volumes:
       - knowledge_uploads:/app/uploads/knowledge
       - attachment_uploads:/app/uploads/attachments
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   bot:
     build:
       context: ./backend
     restart: unless-stopped
     depends_on:
-      db:
+      backend:
         condition: service_healthy
     environment: *app_environment
     command: python -m app.bot.main
@@ -78,7 +83,7 @@ services:
       context: ./backend
     restart: unless-stopped
     depends_on:
-      db:
+      backend:
         condition: service_healthy
     environment: *app_environment
     command: python -m app.worker

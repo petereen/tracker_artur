@@ -184,7 +184,7 @@ def rebuild_jobs():
 
 async def send_survey(employee_id: int):
     from app.models.models import Employee
-    from app.bot.db import create_session, get_session
+    from app.bot.db import canonical_checkin_complete, create_session, get_session
     from app.bot.work_report_handlers import send_daily_prompts
     from app.services import work_report_service
 
@@ -196,8 +196,12 @@ async def send_survey(employee_id: int):
                 return
             telegram_id = emp.telegram_id
             timezone_name = emp.timezone
-        create_session(employee_id)
         local_day = _local_today(timezone_name)
+        if canonical_checkin_complete(employee_id, local_day):
+            return
+        session = create_session(employee_id, local_day=local_day)
+        if session.status == "completed":
+            return
         report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
         # Keep the questionnaire, raw-text report, and work-time questions as
         # separate messages, in the same order used by /test_reports.
@@ -215,7 +219,7 @@ async def send_reminder(employee_id: int, num: int):
     from datetime import date as d
     from sqlalchemy import select
     from app.models.models import Employee, SurveySession
-    from app.bot.db import get_session
+    from app.bot.db import canonical_checkin_complete, get_session
     from app.services import work_report_service
 
     bot = _make_bot()
@@ -224,18 +228,26 @@ async def send_reminder(employee_id: int, num: int):
             emp = s.get(Employee, employee_id)
             if not emp:
                 return
+            local_day = _local_today(emp.timezone)
             sess = s.execute(
                 select(SurveySession).where(
                     SurveySession.employee_id == employee_id,
-                    SurveySession.date == d.today(),
+                    SurveySession.date == local_day,
+                    SurveySession.type == "evening",
                     SurveySession.status == "pending",
                 )
-            ).scalar_one_or_none()
+            ).scalars().first()
             telegram_id = emp.telegram_id
             timezone_name = emp.timezone
-        report_complete = work_report_service.report_is_approved(employee_id, "daily", _local_today(timezone_name))
-        if sess or not report_complete:
-            await bot.send_message(telegram_id, f"⚠️ Сануулга #{num}: чек-ин болон өдрийн тайлангаа бөглөхөө бүү мартаарай! /today")
+        checkin_complete = canonical_checkin_complete(employee_id, local_day) or sess is None
+        report_complete = work_report_service.report_is_approved(employee_id, "daily", local_day)
+        missing = []
+        if not checkin_complete:
+            missing.append("чек-ин (/today)")
+        if not report_complete:
+            missing.append("өдрийн тайлан")
+        if missing:
+            await bot.send_message(telegram_id, f"⚠️ Сануулга #{num}: " + " болон ".join(missing) + "-аа бөглөхөө бүү мартаарай!")
     finally:
         await bot.session.close()
 

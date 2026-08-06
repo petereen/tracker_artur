@@ -9,6 +9,8 @@ import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordResetPage
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
 const ProjectsWorkspacePage = lazy(() => import('./pages/ProjectsWorkspacePage').then((module) => ({ default: module.ProjectsWorkspacePage })))
 const EnterpriseTasksPage = lazy(() => import('./pages/EnterpriseTasksPage').then((module) => ({ default: module.EnterpriseTasksPage })))
+const CalendarWorkspacePage = lazy(() => import('./pages/CalendarWorkspacePage').then((module) => ({ default: module.CalendarWorkspacePage })))
+const StatsWorkspacePage = lazy(() => import('./pages/StatsWorkspacePage').then((module) => ({ default: module.StatsWorkspacePage })))
 const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
 const OkrsWorkspacePage = lazy(() => import('./pages/OkrsWorkspacePage').then((module) => ({ default: module.OkrsWorkspacePage })))
@@ -42,10 +44,11 @@ function AuthenticatedApp() {
         <Route index element={<EnterpriseDashboardPage />} />
         <Route path="projects" element={<ProjectsWorkspacePage />} />
         <Route path="tasks" element={<EnterpriseTasksPage />} />
+        <Route path="calendar" element={<CalendarWorkspacePage />} />
         <Route path="reports" element={<EnterpriseReportsPage />} />
         <Route path="capacity" element={<CapacityWorkspacePage />} />
         <Route path="okrs" element={<OkrsWorkspacePage />} />
-        <Route path="analytics" element={<EnterpriseDashboardPage />} />
+        <Route path="analytics" element={<StatsWorkspacePage />} />
         <Route path="administration" element={<AdministrationHubPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="legacy/employees" element={<EmployeesPage />} />

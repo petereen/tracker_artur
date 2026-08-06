@@ -43,7 +43,7 @@ export function AdministrationHubPage() {
     const next = window.prompt(`${account.email} шинэ нууц үг (10+ тэмдэгт):`)
     if (!next) return
     if (next.length < 10) { toast.error('Нууц үг 10+ тэмдэгт байх ёстой'); return }
-    await updateAccount.mutateAsync({ id: account.id, password: next }); toast.success('Нууц үг шинэчлэгдлээ')
+    try { await updateAccount.mutateAsync({ id: account.id, password: next }); toast.success('Нууц үг шинэчлэгдлээ') } catch { /* mutation hook shows the server error */ }
   }
   const toggleRole = async (account: { id: number; roles: string[] }, roleName: string) => {
     const roles = account.roles.includes(roleName) ? account.roles.filter((item) => item !== roleName) : [...account.roles, roleName]

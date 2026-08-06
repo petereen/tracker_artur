@@ -29,12 +29,16 @@ async def get_current_user(
                 RoleAssignment.role == "admin",
             )
         )
-        if not is_admin or not account.legacy_admin_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Legacy admin access required")
-        user = await db.get(AdminUser, account.legacy_admin_id)
-        if not user:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-        return user
+        if not is_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required")
+        if account.legacy_admin_id:
+            user = await db.get(AdminUser, account.legacy_admin_id)
+            if user:
+                return user
+        # Legacy management routes only use this dependency as an admin gate.
+        # A transient compatibility principal avoids requiring every enterprise
+        # administrator to own a duplicate row in the retired admin table.
+        return AdminUser(id=0, email=account.email, password_hash=account.password_hash)
     result = await db.execute(select(AdminUser).where(AdminUser.id == int(sub)))
     user = result.scalar_one_or_none()
     if not user:

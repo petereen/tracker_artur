@@ -5,7 +5,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.models import Answer, Employee, ManagerSettings, Question, Schedule, Streak, SurveySession
+from app.models.models import (
+    Answer, Checkin, CheckinAnswer, CheckinQuestion, CheckinTemplate, Employee,
+    ManagerSettings, Question, Schedule, Streak, SurveySession, UserAccount,
+)
 
 engine = create_engine(settings.SYNC_DATABASE_URL)
 
@@ -61,8 +64,8 @@ def get_streak(employee_id: int) -> Streak | None:
         return s.execute(select(Streak).where(Streak.employee_id == employee_id)).scalar_one_or_none()
 
 
-def create_session(employee_id: int, session_type: str = "evening") -> SurveySession:
-    today = date.today()
+def create_session(employee_id: int, session_type: str = "evening", local_day: date | None = None) -> SurveySession:
+    today = local_day or date.today()
     with get_session() as s:
         existing = s.execute(
             select(SurveySession).where(
@@ -84,6 +87,41 @@ def create_session(employee_id: int, session_type: str = "evening") -> SurveySes
         s.commit()
         s.refresh(sess)
         return sess
+
+
+def canonical_checkin_complete(employee_id: int, local_day: date) -> bool:
+    with get_session() as s:
+        return bool(s.execute(select(Checkin.id).where(Checkin.employee_id == employee_id, Checkin.local_date == local_day, Checkin.status == "submitted")).scalars().first())
+
+
+def mirror_completed_session(session_id: int, source: str = "telegram") -> None:
+    """Mirror a completed legacy questionnaire into the canonical check-in."""
+    with get_session() as s:
+        session = s.get(SurveySession, session_id)
+        if not session:
+            return
+        account = s.execute(select(UserAccount).where(UserAccount.employee_id == session.employee_id)).scalar_one_or_none()
+        if not account:
+            return
+        template = s.execute(select(CheckinTemplate).where(CheckinTemplate.organization_id == account.organization_id, CheckinTemplate.is_active.is_(True)).order_by(CheckinTemplate.id)).scalars().first()
+        if not template:
+            return
+        checkin = s.execute(select(Checkin).where(Checkin.employee_id == session.employee_id, Checkin.template_id == template.id, Checkin.local_date == session.date)).scalar_one_or_none()
+        if not checkin:
+            checkin = Checkin(employee_id=session.employee_id, template_id=template.id, local_date=session.date, source=source, started_at=session.started_at)
+            s.add(checkin)
+            s.flush()
+        if checkin.status == "submitted":
+            return
+        legacy_answers = s.execute(select(Answer).where(Answer.session_id == session.id).order_by(Answer.id)).scalars().all()
+        questions = s.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == template.id).order_by(CheckinQuestion.position)).scalars().all()
+        for question, answer in zip(questions, legacy_answers):
+            existing = s.execute(select(CheckinAnswer).where(CheckinAnswer.checkin_id == checkin.id, CheckinAnswer.question_id == question.id)).scalar_one_or_none()
+            if not existing:
+                s.add(CheckinAnswer(checkin_id=checkin.id, question_id=question.id, value_text=answer.value_text, value_numeric=answer.value_numeric))
+        checkin.status = "submitted"
+        checkin.submitted_at = session.completed_at or datetime.now(timezone.utc)
+        s.commit()
 
 
 def save_answer(session_id: int, question_id: int, value_text: str | None, value_numeric=None):

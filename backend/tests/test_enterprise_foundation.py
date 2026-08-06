@@ -54,14 +54,14 @@ def test_enterprise_schema_registers_required_foundation_tables():
         "organizations", "user_accounts", "role_assignments", "teams", "clients", "projects",
         "task_assignees", "task_dependencies", "task_check_items", "checkin_templates", "checkins",
         "objectives", "key_results", "milestones", "audit_logs", "domain_events", "job_queue",
-        "calendar_connections", "calendar_event_links",
+        "calendar_connections", "calendar_event_links", "personal_time_blocks",
     }
     assert required.issubset(Base.metadata.tables)
 
 
 def test_versioned_routes_include_auth_clock_tasks_reports_and_realtime():
     paths = {route.path for route in app.routes}
-    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime"}.issubset(paths)
+    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime", "/v1/checkins/today", "/v1/calendar/events", "/v1/analytics/daily"}.issubset(paths)
 
 
 def test_refresh_sessions_record_the_authentication_method():
@@ -107,6 +107,8 @@ def test_task_serialization_computes_overdue_without_mutating_workflow():
         start_at=None,
         deadline_at=datetime.now(timezone.utc) - timedelta(minutes=1),
         estimate_minutes=30,
+        work_location_type="office",
+        work_location="HQ",
         sort_position=1,
         version=3,
         is_archived=False,
@@ -117,6 +119,22 @@ def test_task_serialization_computes_overdue_without_mutating_workflow():
     assert output["workflow_status"] == "review"
     assert output["is_overdue"] is True
     assert output["version"] == 3
+    assert output["work_location_type"] == "office"
+    assert output["work_location"] == "HQ"
+
+
+def test_planning_migration_follows_current_head_and_models_nullable_location():
+    tasks = Base.metadata.tables["tasks"]
+    blocks = Base.metadata.tables["personal_time_blocks"]
+    migration_path = Path(__file__).parents[1] / "alembic/versions/u9v0w1x2y3z4_planning_calendar_reliability.py"
+    migration_spec = spec_from_file_location("planning_calendar_migration", migration_path)
+    assert migration_spec and migration_spec.loader
+    migration = module_from_spec(migration_spec)
+    migration_spec.loader.exec_module(migration)
+    assert migration.down_revision == "t8u9v0w1x2y3"
+    assert tasks.c.work_location_type.nullable is True
+    assert tasks.c.work_location.nullable is True
+    assert {"organization_id", "account_id", "starts_at", "ends_at", "version"}.issubset(blocks.c)
 
 
 def test_work_time_summary_excludes_breaks_from_productive_total():
