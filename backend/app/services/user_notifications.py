@@ -48,7 +48,10 @@ async def create_notifications(
     manager_settings = (await db.execute(select(ManagerSettings).limit(1))).scalar_one_or_none()
     policy = load_policy(manager_settings)
     created: list[UserNotification] = []
+    covered_employee_ids: set[int] = set()
     for account, employee in rows:
+        if employee:
+            covered_employee_ids.add(employee.id)
         scoped_key = f"{dedup_key}:account:{account.id}"
         existing = await db.scalar(select(UserNotification.id).where(UserNotification.dedup_key == scoped_key))
         if existing:
@@ -94,6 +97,25 @@ async def create_notifications(
         await db.flush()
         await db.execute(text("SELECT pg_notify('oyuns_events', :event_id)"), {"event_id": str(realtime_event.id)})
         created.append(notification)
+    # Telegram users may be registered employees before they have opened the
+    # web app and therefore have no UserAccount yet. They cannot receive an
+    # in-app notification, but must still receive the Telegram delivery.
+    unlinked_employee_ids = employee_set - covered_employee_ids
+    if unlinked_employee_ids:
+        unlinked = (await db.execute(select(Employee).where(Employee.id.in_(unlinked_employee_ids), Employee.is_active.is_(True)))).scalars().all()
+        for employee in unlinked:
+            if not employee.telegram_id:
+                continue
+            scoped_key = f"telegram:{dedup_key}:employee:{employee.id}"
+            exists = await db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedup_key == scoped_key))
+            if exists:
+                continue
+            not_before = next_allowed(datetime.now(timezone.utc), employee.timezone, policy)
+            db.add(NotificationOutbox(
+                event_id=source_event_id, task_id=task_id, recipient_tg=str(employee.telegram_id),
+                kind=kind, payload={"title": title, "body": body, "target_url": target_url, **(payload or {})},
+                not_before=not_before, status="pending", dedup_key=scoped_key,
+            ))
     return created
 
 
@@ -106,6 +128,7 @@ def mirror_existing_telegram_notification(
     dedup_key: str,
     target_url: str,
     payload: dict | None = None,
+    telegram_status: str = "sent",
 ) -> None:
     """Persist a web copy after a legacy scheduler has sent its Telegram message."""
     from app.bot.db import get_session
@@ -115,7 +138,11 @@ def mirror_existing_telegram_notification(
         if not account:
             return
         scoped_key = f"{dedup_key}:account:{account.id}"
-        if db.execute(select(UserNotification.id).where(UserNotification.dedup_key == scoped_key)).scalar_one_or_none():
+        existing = db.execute(select(UserNotification).where(UserNotification.dedup_key == scoped_key)).scalar_one_or_none()
+        if existing:
+            if telegram_status == "sent" and existing.telegram_status != "sent":
+                existing.telegram_status = "sent"
+                db.commit()
             return
         notification = UserNotification(
             organization_id=account.organization_id,
@@ -126,7 +153,7 @@ def mirror_existing_telegram_notification(
             body=body,
             target_url=target_url,
             payload=payload or {},
-            telegram_status="sent",
+            telegram_status=telegram_status,
             dedup_key=scoped_key,
         )
         db.add(notification)

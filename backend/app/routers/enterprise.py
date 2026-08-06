@@ -718,7 +718,7 @@ async def create_project(data: ProjectInput, db: AsyncSession = Depends(get_db),
         source_event = await record_change(db, actor=actor, topic="projects", aggregate_type="project", aggregate_id=project.id, operation="created", version=project.version, after=output)
         await create_notifications(
             db, organization_id=actor.organization_id, employee_ids=employee_ids,
-            exclude_employee_id=actor.employee_id, kind="project_member_added",
+            kind="project_member_added",
             title="Шинэ төсөл", body=f"Та “{project.name}” төсөлд нэмэгдлээ.",
             target_url=f"/projects?project={project.id}", payload={"project_id": project.id},
             source_event_id=source_event.id, dedup_key=f"project-created:{project.id}",
@@ -773,7 +773,7 @@ async def review_project_request(request_id: int, data: ProjectRequestReview, db
     if data.action == "approved" and request.project_id:
         await create_notifications(
             db, organization_id=actor.organization_id, employee_ids=member_ids,
-            exclude_employee_id=actor.employee_id, kind="project_member_added", title="Шинэ төсөл",
+            kind="project_member_added", title="Шинэ төсөл",
             body=f"Та “{payload.name}” төсөлд нэмэгдлээ.", target_url=f"/projects?project={request.project_id}",
             payload={"project_id": request.project_id}, source_event_id=source_event.id,
             dedup_key=f"project-created:{request.project_id}",
@@ -793,7 +793,7 @@ async def add_project_member(project_id: int, data: ProjectMemberInput, db: Asyn
     source_event = await record_change(db, actor=actor, topic="capacity", aggregate_type="project_member", aggregate_id=member.id, operation="created", after=data.model_dump(mode="json"))
     await create_notifications(
         db, organization_id=actor.organization_id, employee_ids={data.employee_id},
-        exclude_employee_id=actor.employee_id, kind="project_member_added", title="Төсөлд нэмэгдлээ",
+        kind="project_member_added", title="Төсөлд нэмэгдлээ",
         body=f"Та “{project.name}” төсөлд нэмэгдлээ.", target_url=f"/projects?project={project.id}",
         payload={"project_id": project.id}, source_event_id=source_event.id,
         dedup_key=f"project-member:{project.id}:{data.employee_id}",
@@ -993,7 +993,7 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after=output)
     await create_notifications(
         db, organization_id=actor.organization_id, employee_ids=assignees,
-        exclude_employee_id=actor.employee_id, kind="task_assigned", title="Шинэ даалгавар",
+        kind="task_assigned", title="Шинэ даалгавар",
         body=f"Танд “{task.title}” даалгавар оноолоо.", target_url=f"/tasks?task={task.id}",
         payload={"task_id": task.id, "title": task.title, "deadline_iso": task.deadline_at.isoformat() if task.deadline_at else None},
         source_event_id=source_event.id, task_id=task.id, dedup_key=f"task-created:{task.id}",

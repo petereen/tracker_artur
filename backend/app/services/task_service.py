@@ -15,6 +15,7 @@ from app.models.models import (
     DomainEvent,
     NotificationOutbox,
     Task,
+    TaskAssignee,
     TaskComment,
     UserNotification,
     UserAccount,
@@ -441,6 +442,10 @@ def mark_outbox(outbox_id: int, status: str) -> None:
 def _to_dict(s, task: Task) -> dict:
     assignee = s.get(Employee, task.assignee_id) if task.assignee_id else None
     creator = s.get(Employee, task.created_by_id) if task.created_by_id else None
+    assigned_ids = set(s.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id)).scalars())
+    if task.assignee_id:
+        assigned_ids.add(task.assignee_id)
+    assigned_people = s.execute(select(Employee).where(Employee.id.in_(assigned_ids))).scalars().all() if assigned_ids else []
     return {
         "id": task.id,
         "title": task.title,
@@ -455,6 +460,7 @@ def _to_dict(s, task: Task) -> dict:
         "assignee_name": assignee.name if assignee else None,
         "assignee_tg": assignee.telegram_id if assignee else None,
         "assignee_tz": assignee.timezone if assignee else None,
+        "assignees": [{"id": employee.id, "telegram_id": employee.telegram_id, "timezone": employee.timezone} for employee in assigned_people],
         "created_by_id": task.created_by_id,
         "created_by_tg": task.created_by_tg,
         "creator_name": creator.name if creator else None,

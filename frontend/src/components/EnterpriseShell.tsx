@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import {
   BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal,
-  LayoutDashboard, LogOut, Menu, Moon, Search, Send, Sparkles, Sun, Users2, X,
+  LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X,
 } from 'lucide-react'
 import { useActor, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
@@ -21,9 +21,10 @@ const NAV = [
   { to: '/projects', label: 'nav.projects', icon: BriefcaseBusiness, roles: [] },
   { to: '/plans', label: 'nav.plans', icon: Goal, roles: [] },
   { to: '/analytics', label: 'nav.analytics', icon: BarChart3, roles: [] },
+  { to: '/administration', label: 'nav.settings', icon: Settings2, roles: ['admin', 'manager', 'team_lead'] },
 ]
 
-const NAV_GROUP_BREAKS = new Set(['/calendar', '/projects', '/analytics'])
+const NAV_GROUP_BREAKS = new Set(['/calendar', '/projects', '/analytics', '/administration'])
 
 const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',

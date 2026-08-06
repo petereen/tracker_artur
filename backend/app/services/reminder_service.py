@@ -121,7 +121,8 @@ async def send_task_reminder(task_id: int, minutes_before: int) -> None:
     task = task_service.get_task(task_id)
     if not task or task["status"] in ("done", "cancelled"):
         return
-    if not task["assignee_tg"]:
+    recipients = task.get("assignees") or ([{"id": task["assignee_id"], "telegram_id": task["assignee_tg"], "timezone": task["assignee_tz"]}] if task.get("assignee_id") else [])
+    if not recipients:
         return
 
     if minutes_before == 0:
@@ -138,19 +139,36 @@ async def send_task_reminder(task_id: int, minutes_before: int) -> None:
         f"#{task['id']} {task['title']}\n"
         f"Хугацаа: <b>{_fmt_deadline(task['deadline_at'])}</b> ({when})"
     )
-    bot = _make_bot()
+    from app.services.user_notifications import mirror_existing_telegram_notification
+
+    bot = None
     try:
-        await bot.send_message(task["assignee_tg"], text, reply_markup=task_reminder_kb(task["id"]))
-        from app.services.user_notifications import mirror_existing_telegram_notification
-        mirror_existing_telegram_notification(
-            employee_id=task["assignee_id"], kind="task_deadline", title="Даалгаврын сануулга",
-            body=f"“{task['title']}” даалгаврын хугацаа: {_fmt_deadline(task['deadline_at'])}.",
-            target_url=f"/tasks?task={task['id']}",
-            dedup_key=f"task-reminder:{task['id']}:{minutes_before}",
-            payload={"task_id": task["id"]},
-        )
+        for recipient in recipients:
+            dedup_key = f"task-reminder:{task['id']}:{minutes_before}:employee:{recipient['id']}"
+            telegram_id = recipient.get("telegram_id")
+            mirror_existing_telegram_notification(
+                employee_id=recipient["id"], kind="task_deadline", title="Даалгаврын сануулга",
+                body=f"“{task['title']}” даалгаврын хугацаа: {_fmt_deadline(task['deadline_at'])}.",
+                target_url=f"/tasks?task={task['id']}", dedup_key=dedup_key,
+                payload={"task_id": task["id"]}, telegram_status="queued" if telegram_id else "unavailable",
+            )
+            if not telegram_id:
+                continue
+            if bot is None:
+                bot = _make_bot()
+            try:
+                await bot.send_message(telegram_id, text, reply_markup=task_reminder_kb(task["id"]))
+                mirror_existing_telegram_notification(
+                    employee_id=recipient["id"], kind="task_deadline", title="Даалгаврын сануулга",
+                    body=f"“{task['title']}” даалгаврын хугацаа: {_fmt_deadline(task['deadline_at'])}.",
+                    target_url=f"/tasks?task={task['id']}", dedup_key=dedup_key,
+                    payload={"task_id": task["id"]}, telegram_status="sent",
+                )
+            except Exception:  # noqa: BLE001
+                log.exception("deadline reminder failed for task=%s employee=%s", task_id, recipient["id"])
     finally:
-        await bot.session.close()
+        if bot is not None:
+            await bot.session.close()
 
 
 def escalate_overdue(task_id: int) -> None:
