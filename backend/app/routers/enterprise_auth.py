@@ -1,7 +1,7 @@
 import hashlib
 import secrets
 import hmac
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response, status
@@ -116,6 +116,10 @@ class ProfilePatch(BaseModel):
     username: str | None = Field(default=None, min_length=1, max_length=254)
     avatar_url: str | None = Field(default=None, max_length=2048)
     locale: Literal["mn", "en", "ru"] | None = None
+    phone_number: str | None = Field(default=None, max_length=80)
+    birthday: date | None = None
+    work_direction: str | None = Field(default=None, max_length=240)
+    work_branch: str | None = Field(default=None, max_length=240)
     current_password: str | None = None
     new_password: str | None = Field(default=None, min_length=10, max_length=128)
 
@@ -423,6 +427,11 @@ async def profile(db: AsyncSession = Depends(get_db), actor: ActorContext = Depe
         "name": employee.name if employee else actor.email,
         "telegram_username": employee.telegram_username if employee else None,
         "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None,
+        "phone_number": employee.phone_number if employee else None,
+        "birthday": employee.birthday if employee else None,
+        "work_direction": employee.work_direction if employee else None,
+        "work_branch": employee.work_branch if employee else None,
+        "telegram_connected": bool(employee and employee.telegram_id),
         "roles": sorted(actor.roles),
     }
 
@@ -450,8 +459,38 @@ async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db),
             employee.primary_language = data.locale
     if employee and "avatar_url" in data.model_fields_set:
         employee.metadata_json = {**(employee.metadata_json or {}), "avatar_url": data.avatar_url}
+    if employee:
+        for field in ("phone_number", "birthday", "work_direction", "work_branch"):
+            if field in data.model_fields_set:
+                setattr(employee, field, getattr(data, field))
     await db.commit()
-    return {"username": account.email, "locale": account.locale, "employee_id": actor.employee_id, "name": employee.name if employee else account.email, "telegram_username": employee.telegram_username if employee else None, "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None, "roles": sorted(actor.roles), "password_changed": bool(data.new_password)}
+    return {"username": account.email, "locale": account.locale, "employee_id": actor.employee_id, "name": employee.name if employee else account.email, "telegram_username": employee.telegram_username if employee else None, "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None, "phone_number": employee.phone_number if employee else None, "birthday": employee.birthday if employee else None, "work_direction": employee.work_direction if employee else None, "work_branch": employee.work_branch if employee else None, "telegram_connected": bool(employee and employee.telegram_id), "roles": sorted(actor.roles), "password_changed": bool(data.new_password)}
+
+
+@router.get("/workers/{employee_id}/profile")
+async def worker_profile(employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    employee = await db.get(Employee, employee_id)
+    if not employee or not employee.is_active:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return {"id": employee.id, "name": employee.name, "avatar_url": (employee.metadata_json or {}).get("avatar_url"), "phone_number": employee.phone_number, "birthday": employee.birthday, "work_direction": employee.work_direction, "work_branch": employee.work_branch, "telegram_username": employee.telegram_username, "telegram_connected": bool(employee.telegram_id), "job_title": employee.job_title}
+
+
+@router.post("/profile/telegram-link")
+async def complete_telegram_link(init_data: str, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if not actor.employee_id:
+        raise HTTPException(status_code=409, detail="Link an employee profile before connecting Telegram")
+    telegram_user = verify_init_data(init_data)
+    telegram_id = str((telegram_user or {}).get("id") or "")
+    if not telegram_id.isdigit():
+        raise HTTPException(status_code=400, detail="Telegram account is missing")
+    duplicate = await db.scalar(select(Employee.id).where(Employee.telegram_id == telegram_id, Employee.id != actor.employee_id))
+    if duplicate:
+        raise HTTPException(status_code=409, detail="This Telegram account is already connected")
+    employee = await db.get(Employee, actor.employee_id, with_for_update=True)
+    employee.telegram_id = telegram_id
+    employee.telegram_username = telegram_user.get("username") or employee.telegram_username
+    await db.commit()
+    return {"telegram_connected": True, "telegram_username": employee.telegram_username}
 
 
 @router.post("/accounts", response_model=AccountOut, status_code=status.HTTP_201_CREATED)

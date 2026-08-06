@@ -129,7 +129,7 @@ async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMConte
         await target.answer("❌ Та бүртгэгдээгүй байна.")
         return
 
-    questions = get_questions()
+    questions = get_questions(emp.id)
     if not questions:
         await target.answer("⚠️ Асуултууд тохируулагдаагүй байна.")
         return
@@ -177,6 +177,7 @@ async def msg_answer(message: Message, state: FSMContext):
 
 
 async def _process_answer(message: Message, state: FSMContext, session_id: int, q_index: int, question_ids: list, value: str):
+    data = await state.get_data()
     with get_session() as s:
         q = s.get(Question, question_ids[q_index])
     if not q:
@@ -199,7 +200,7 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
     if next_index < len(question_ids):
         with get_session() as s:
             next_q = s.get(Question, question_ids[next_index])
-            all_qs = list(s.execute(select(Question).order_by(Question.sort_order)).scalars())
+            all_qs = get_questions(data.get("employee_id"))
         await state.update_data(q_index=next_index)
         await _ask_question(message, next_q, state, session_id, next_index, all_qs)
     else:

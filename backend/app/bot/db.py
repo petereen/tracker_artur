@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.models import (
-    Answer, Checkin, CheckinAnswer, CheckinQuestion, CheckinTemplate, Employee,
+    Answer, Checkin, CheckinAnswer, CheckinQuestion, CheckinTemplate, Employee, EmployeeQuestion,
     ManagerSettings, Question, Schedule, Streak, SurveySession, UserAccount,
 )
 
@@ -44,9 +44,13 @@ def get_all_active_employees() -> list[Employee]:
         return list(s.execute(select(Employee).where(Employee.is_active == True)).scalars())
 
 
-def get_questions() -> list[Question]:
+def get_questions(employee_id: int | None = None) -> list[Question]:
     with get_session() as s:
-        return list(s.execute(select(Question).order_by(Question.sort_order)).scalars())
+        query = select(Question).order_by(Question.sort_order)
+        if employee_id is not None:
+            assigned = select(EmployeeQuestion.question_id).where(EmployeeQuestion.employee_id == employee_id)
+            query = query.where(~Question.id.in_(assigned) | Question.id.not_in(select(EmployeeQuestion.question_id)))
+        return list(s.execute(query).scalars())
 
 
 def get_schedule(employee_id: int) -> Schedule | None:

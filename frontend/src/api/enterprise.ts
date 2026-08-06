@@ -184,7 +184,7 @@ export function useCreateProject() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: Record<string, unknown>) => api.post('/v1/projects', input).then((response) => response.data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл үүслээ') },
+    onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success(data.requires_approval ? 'Төслийн хүсэлтийг хяналтад илгээлээ' : 'Төсөл үүслээ') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл үүссэнгүй'),
   })
 }
@@ -256,6 +256,15 @@ export function useCalendarEvents(scope: 'private' | 'corporate', period: DateRa
   return useQuery<any>({ queryKey: ['v1', 'calendar', scope, period], queryFn: () => api.get('/v1/calendar/events', { params: { scope, ...period } }).then((response) => response.data) })
 }
 
+export function useCreateCalendarEntry() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/entries', input).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success('Календарийн зүйл хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Календарийн зүйл хадгалагдсангүй') })
+}
+
+export function useTodayAgenda() {
+  return useQuery<any>({ queryKey: ['v1', 'today', 'agenda'], queryFn: () => api.get('/v1/today/agenda').then((response) => response.data) })
+}
+
 export function useCreateTimeBlock() {
   const queryClient = useQueryClient()
   return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/time-blocks', input).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }), onError: (error: any) => toast.error(error.response?.data?.detail || 'Хувийн төлөвлөгөө хадгалагдсангүй') })
@@ -303,8 +312,16 @@ export function useWorkerPerformance(employeeId?: number, period?: DateRange, en
   return useQuery<any>({ queryKey: ['v1', 'workers', employeeId, 'performance', period], queryFn: () => api.get(`/v1/workers/${employeeId}/performance`, { params: period }).then((response) => response.data), enabled: Boolean(employeeId) && enabled })
 }
 
+export function useWorkerProfile(employeeId?: number) {
+  return useQuery<any>({ queryKey: ['v1', 'workers', employeeId, 'profile'], queryFn: () => api.get(`/v1/auth/workers/${employeeId}/profile`).then((response) => response.data), enabled: Boolean(employeeId) })
+}
+
 export function useAssistantDraft() {
   return useMutation({ mutationFn: (input: { text: string; kind: 'task' | 'report' }) => api.post('/v1/assistant/drafts', input).then((response) => response.data) })
+}
+
+export function useAssistantChat() {
+  return useMutation({ mutationFn: (input: { text: string; conversation_id?: number }) => api.post('/v1/assistant/conversations', input).then((response) => response.data) })
 }
 
 export interface UserProfile {
@@ -315,6 +332,11 @@ export interface UserProfile {
   avatar_url: string | null
   locale: 'mn' | 'en' | 'ru'
   roles: string[]
+  phone_number: string | null
+  birthday: string | null
+  work_direction: string | null
+  work_branch: string | null
+  telegram_connected: boolean
 }
 
 export function useProfile() {
@@ -324,8 +346,13 @@ export function useProfile() {
 export function useUpdateProfile() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { username?: string; avatar_url?: string | null; locale?: string; current_password?: string; new_password?: string }) => api.patch('/v1/auth/profile', input).then((response) => response.data),
+    mutationFn: (input: { username?: string; avatar_url?: string | null; locale?: string; phone_number?: string | null; birthday?: string | null; work_direction?: string | null; work_branch?: string | null; current_password?: string; new_password?: string }) => api.patch('/v1/auth/profile', input).then((response) => response.data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success('Профайл хадгалагдлаа') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Профайл хадгалагдсангүй'),
   })
+}
+
+export function useTelegramProfileLink() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (init_data: string) => api.post('/v1/auth/profile/telegram-link', null, { params: { init_data } }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); toast.success('Telegram холбогдлоо') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Telegram холбогдсонгүй') })
 }

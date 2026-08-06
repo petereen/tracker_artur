@@ -1,12 +1,12 @@
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.models import Question
+from app.models.models import Employee, EmployeeQuestion, Question
 
 router = APIRouter()
 
@@ -14,9 +14,10 @@ router = APIRouter()
 class QuestionCreate(BaseModel):
     text: str
     answer_type: str
-    options: list[Any] = []
+    options: list[Any] = Field(default_factory=list)
     is_required: bool = True
     sort_order: int = 0
+    employee_ids: list[int] = Field(default_factory=list)
 
 
 class QuestionUpdate(BaseModel):
@@ -25,6 +26,7 @@ class QuestionUpdate(BaseModel):
     options: Optional[list[Any]] = None
     is_required: Optional[bool] = None
     sort_order: Optional[int] = None
+    employee_ids: Optional[list[int]] = None
 
 
 class QuestionOut(BaseModel):
@@ -34,6 +36,7 @@ class QuestionOut(BaseModel):
     options: list[Any]
     is_required: bool
     sort_order: int
+    employee_ids: list[int] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -62,17 +65,34 @@ class ReorderRequest(BaseModel):
 
 @router.get("", response_model=list[QuestionOut])
 async def list_questions(db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
-    result = await db.execute(select(Question).order_by(Question.sort_order))
-    return result.scalars().all()
+    questions = (await db.execute(select(Question).order_by(Question.sort_order))).scalars().all()
+    assignments = (await db.execute(select(EmployeeQuestion))).scalars().all()
+    assigned_by_question: dict[int, list[int]] = {}
+    for assignment in assignments:
+        assigned_by_question.setdefault(assignment.question_id, []).append(assignment.employee_id)
+    return [
+        {**{column.name: getattr(question, column.name) for column in Question.__table__.columns},
+         "employee_ids": assigned_by_question.get(question.id, [])}
+        for question in questions
+    ]
 
 
 @router.post("", response_model=QuestionOut, status_code=status.HTTP_201_CREATED)
 async def create_question(data: QuestionCreate, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
-    q = Question(**data.model_dump())
+    employee_ids = data.employee_ids
+    if employee_ids:
+        existing_ids = set((await db.execute(select(Employee.id).where(Employee.id.in_(employee_ids)))).scalars().all())
+        missing_ids = set(employee_ids) - existing_ids
+        if missing_ids:
+            raise HTTPException(status_code=400, detail="One or more workers were not found")
+    q = Question(**data.model_dump(exclude={"employee_ids"}))
     db.add(q)
+    await db.flush()
+    for employee_id in dict.fromkeys(employee_ids):
+        db.add(EmployeeQuestion(employee_id=employee_id, question_id=q.id))
     await db.commit()
     await db.refresh(q)
-    return q
+    return {**{column.name: getattr(q, column.name) for column in Question.__table__.columns}, "employee_ids": employee_ids}
 
 
 @router.put("/reorder", status_code=status.HTTP_200_OK)
@@ -92,11 +112,19 @@ async def update_question(question_id: int, data: QuestionUpdate, db: AsyncSessi
     q = result.scalar_one_or_none()
     if not q:
         raise HTTPException(status_code=404, detail="Not found")
-    for k, v in data.model_dump(exclude_none=True).items():
+    employee_ids = data.employee_ids
+    if employee_ids is not None:
+        existing_ids = set((await db.execute(select(Employee.id).where(Employee.id.in_(employee_ids)))).scalars().all()) if employee_ids else set()
+        if set(employee_ids) - existing_ids:
+            raise HTTPException(status_code=400, detail="One or more workers were not found")
+        await db.execute(EmployeeQuestion.__table__.delete().where(EmployeeQuestion.question_id == question_id))
+        for employee_id in dict.fromkeys(employee_ids):
+            db.add(EmployeeQuestion(employee_id=employee_id, question_id=question_id))
+    for k, v in data.model_dump(exclude_none=True, exclude={"employee_ids"}).items():
         setattr(q, k, v)
     await db.commit()
     await db.refresh(q)
-    return q
+    return {**{column.name: getattr(q, column.name) for column in Question.__table__.columns}, "employee_ids": employee_ids if employee_ids is not None else [row.employee_id for row in (await db.execute(select(EmployeeQuestion).where(EmployeeQuestion.question_id == question_id))).scalars().all()]}
 
 
 @router.delete("/{question_id}", status_code=status.HTTP_204_NO_CONTENT)

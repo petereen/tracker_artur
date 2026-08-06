@@ -1,6 +1,13 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Make check-in questions deletable and targetable to all or selected workers (`backend/app/routers/questions.py`, `frontend/src/pages/QuestionsPage.tsx`, `backend/app/bot/db.py`)
+- [x] Repair JSONB event serialization and all affected POST creation flows (`backend/app/services/enterprise_events.py`)
+- [x] Add approval-based member project requests and management review (`backend/app/routers/enterprise.py`)
+- [x] Add persistent OYUNS web conversations using shared assistant tooling (`backend/app/routers/enterprise.py`)
+- [x] Build universal private/company calendar, holiday sync, and Today agenda (`backend/app/routers/enterprise.py`, `frontend/src/pages`)
+- [x] Add shared employee profiles, Telegram pairing, and worker drawer access (`backend/app/routers/enterprise_auth.py`, `frontend/src`)
+- [x] Correct employee-scoped analytics, worktime exclusion, heatmap, and responsive stats UI (`backend/app/routers/enterprise.py`, `frontend/src/pages/StatsWorkspacePage.tsx`)
 - [x] Add employee-section access role management matched by Telegram ID (`frontend/src/pages/EmployeesPage.tsx`, `backend/app/routers/enterprise_auth.py`)
 - [x] Expose linked account Telegram IDs and allow employee-linked account creation (`frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise_auth.py`)
 - [x] Prevent duplicate employee-to-account links during employee access provisioning (`backend/app/routers/enterprise_auth.py`)
@@ -22,6 +29,7 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Make check-in questions deletable and targetable to all or selected workers (`backend/app/routers/questions.py`, `frontend/src/pages/QuestionsPage.tsx`, `backend/app/bot/db.py`)
 - [x] Validate one Alembic head, backend syntax, clean diffs, frontend production build, and frontend tests (2 passed)
 - [x] Prevent project/task form failures from surfacing as unhandled Axios promises (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/pages/EnterpriseTasksPage.tsx`)
 - [x] Surface account role/status/password API failures with server details and no unhandled password promise (`frontend/src/api/enterprise.ts`, `frontend/src/pages/AdministrationHubPage.tsx`)

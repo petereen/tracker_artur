@@ -9,6 +9,8 @@ from decimal import Decimal
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+import aiohttp
+
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -20,12 +22,17 @@ from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
 from app.models.models import (
     CalendarConnection,
+    CalendarEntry,
+    HolidayRecord,
+    AssistantConversation,
+    AssistantMessage,
     Attachment,
     CheckinQuestion,
     CheckinTemplate,
     Checkin,
     CheckinAnswer,
     Client,
+    CompanyKnowledge,
     Employee,
     ExchangeRateSnapshot,
     IdempotencyRecord,
@@ -35,6 +42,7 @@ from app.models.models import (
     Objective,
     PersonalTimeBlock,
     Project,
+    ProjectRequest,
     ProjectMember,
     ProjectRate,
     Question,
@@ -53,6 +61,8 @@ from app.models.models import (
     WorkReport,
     WorkReportRevision,
     WorkTimeEntry,
+    Organization,
+    UserAccount,
 )
 from app.services.enterprise_events import record_change
 from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
@@ -60,6 +70,8 @@ from app.core.config import settings
 from app.services.voice_service import transcribe
 from app.services.google_calendar import account_from_state, authorization_url as google_authorization_url, exchange_code as google_exchange_code, is_configured as google_is_configured
 from app.services.secret_box import encrypt_secret
+from app.services import assistant_ai, exchange_rate_service
+from app.services.knowledge_service import rank_knowledge
 
 
 router = APIRouter()
@@ -350,6 +362,32 @@ class AssistantDraftInput(BaseModel):
     kind: Literal["task", "report"] = "task"
 
 
+class AssistantChatInput(BaseModel):
+    text: str = Field(min_length=1, max_length=6000)
+    conversation_id: int | None = None
+
+
+class ProjectRequestReview(BaseModel):
+    action: Literal["approved", "rejected"]
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class CalendarEntryInput(BaseModel):
+    kind: Literal["reminder", "event"]
+    visibility: Literal["private", "company"] = "private"
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=6000)
+    starts_at: datetime
+    ends_at: datetime
+    remind_at: datetime | None = None
+
+
+class HolidayOverrideInput(BaseModel):
+    holiday_date: date
+    name: str = Field(min_length=1, max_length=500)
+    is_active: bool = True
+
+
 class CalendarSyncInput(BaseModel):
     task_id: int
 
@@ -489,7 +527,19 @@ async def list_projects(status_filter: str | None = Query(default=None, alias="s
 
 
 @router.post("/projects", status_code=status.HTTP_201_CREATED)
-async def create_project(data: ProjectInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "manager"))):
+async def create_project(data: ProjectInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if not actor.has_any_role("admin", "manager"):
+        request = ProjectRequest(
+            organization_id=actor.organization_id,
+            requested_by_account_id=actor.account_id,
+            requested_by_employee_id=actor.employee_id,
+            payload=data.model_dump(mode="json"),
+        )
+        db.add(request)
+        await db.flush()
+        await record_change(db, actor=actor, topic="projects", aggregate_type="project_request", aggregate_id=request.id, operation="requested", after={"status": request.status, "name": data.name, "code": data.code})
+        await db.commit()
+        return {"request_id": request.id, "status": "pending", "requires_approval": True}
     payload = data.model_dump(exclude={"member_ids"})
     employee_ids = set(data.member_ids)
     if data.manager_id:
@@ -513,6 +563,42 @@ async def create_project(data: ProjectInput, db: AsyncSession = Depends(get_db),
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Project code already exists") from exc
+
+
+@router.get("/project-requests")
+async def list_project_requests(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    query = select(ProjectRequest).where(ProjectRequest.organization_id == actor.organization_id)
+    if not actor.has_any_role(*MANAGEMENT_ROLES):
+        query = query.where(ProjectRequest.requested_by_account_id == actor.account_id)
+    rows = (await db.execute(query.order_by(ProjectRequest.created_at.desc()))).scalars().all()
+    return [{"id": row.id, "status": row.status, "payload": row.payload, "review_note": row.review_note, "project_id": row.project_id, "created_at": row.created_at, "reviewed_at": row.reviewed_at} for row in rows]
+
+
+@router.post("/project-requests/{request_id}/review")
+async def review_project_request(request_id: int, data: ProjectRequestReview, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
+    request = await db.get(ProjectRequest, request_id, with_for_update=True)
+    if not request or request.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Project request not found")
+    if request.status != "pending":
+        raise HTTPException(status_code=409, detail="Project request has already been reviewed")
+    request.status, request.reviewer_account_id, request.review_note, request.reviewed_at = data.action, actor.account_id, data.note, datetime.now(timezone.utc)
+    if data.action == "approved":
+        payload = ProjectInput.model_validate(request.payload)
+        member_ids = set(payload.member_ids)
+        if request.requested_by_employee_id:
+            member_ids.add(request.requested_by_employee_id)
+        manager_id = payload.manager_id or request.requested_by_employee_id
+        if manager_id:
+            member_ids.add(manager_id)
+        project = Project(organization_id=actor.organization_id, **payload.model_dump(exclude={"member_ids", "manager_id"}), manager_id=manager_id)
+        db.add(project)
+        await db.flush()
+        for employee_id in member_ids:
+            db.add(ProjectMember(project_id=project.id, employee_id=employee_id, project_role="owner" if employee_id == manager_id else "member"))
+        request.project_id = project.id
+    await record_change(db, actor=actor, topic="projects", aggregate_type="project_request", aggregate_id=request.id, operation=data.action, after={"status": request.status, "project_id": request.project_id})
+    await db.commit()
+    return {"id": request.id, "status": request.status, "project_id": request.project_id}
 
 
 @router.post("/projects/{project_id}/members", status_code=status.HTTP_201_CREATED)
@@ -756,6 +842,10 @@ def _time_block_out(item: PersonalTimeBlock) -> dict:
     return {"id": item.id, "title": item.title, "starts_at": item.starts_at, "ends_at": item.ends_at, "task_id": item.task_id, "version": item.version}
 
 
+def _calendar_entry_out(item: CalendarEntry) -> dict:
+    return {"id": item.id, "kind": item.kind, "visibility": item.visibility, "title": item.title, "description": item.description, "starts_at": item.starts_at, "ends_at": item.ends_at, "remind_at": item.remind_at, "version": item.version, "can_edit": item.created_by_account_id is None or item.created_by_account_id == item.account_id}
+
+
 @router.get("/calendar/events")
 async def calendar_events(scope: Literal["private", "corporate"] = "private", date_from: date | None = None, date_to: date | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     period_start = date_from or date.today() - timedelta(days=14)
@@ -763,14 +853,93 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
     task_rows = await list_tasks(date_from=period_start, date_to=period_end, db=db, actor=actor)
     if scope == "private":
         task_rows = [row for row in task_rows if actor.employee_id and actor.employee_id in row.get("assignee_ids", [])]
-    task_events = [{"kind": "task", **row} for row in task_rows if row.get("start_at") or row.get("deadline_at")]
+    task_events = [{"kind": "task", "visibility": "company" if scope == "corporate" else "private", "can_edit": actor.has_any_role(*MANAGEMENT_ROLES) or actor.employee_id in row.get("assignee_ids", []), **row} for row in task_rows if row.get("start_at") or row.get("deadline_at")]
     blocks: list[dict] = []
+    entries: list[dict] = []
+    holidays: list[dict] = []
+    start = datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc)
+    end = datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
     if scope == "private":
-        start = datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc)
-        end = datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
         rows = (await db.execute(select(PersonalTimeBlock).where(PersonalTimeBlock.account_id == actor.account_id, PersonalTimeBlock.starts_at < end, PersonalTimeBlock.ends_at > start).order_by(PersonalTimeBlock.starts_at))).scalars().all()
         blocks = [{"kind": "time_block", **_time_block_out(row)} for row in rows]
-    return {"scope": scope, "tasks": task_events, "time_blocks": blocks}
+    entry_query = select(CalendarEntry).where(CalendarEntry.organization_id == actor.organization_id, CalendarEntry.starts_at < end, CalendarEntry.ends_at > start)
+    if scope == "private":
+        entry_query = entry_query.where(CalendarEntry.account_id == actor.account_id)
+    else:
+        entry_query = entry_query.where(CalendarEntry.visibility == "company")
+    entry_rows = (await db.execute(entry_query.order_by(CalendarEntry.starts_at))).scalars().all()
+    entries = [{**_calendar_entry_out(row), "can_edit": row.created_by_account_id == actor.account_id or (row.visibility == "company" and actor.has_any_role(*MANAGEMENT_ROLES))} for row in entry_rows]
+    if scope == "corporate":
+        organization = await db.get(Organization, actor.organization_id)
+        country = str((organization.settings or {}).get("holiday_country", "MN")).upper()
+        holiday_rows = (await db.execute(select(HolidayRecord).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.country_code == country, HolidayRecord.is_active.is_(True), HolidayRecord.holiday_date >= period_start, HolidayRecord.holiday_date <= period_end))).scalars().all()
+        holidays = [{"id": row.id, "kind": "holiday", "visibility": "company", "title": row.local_name or row.name, "starts_at": datetime.combine(row.holiday_date, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(row.holiday_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": actor.has_any_role(*MANAGEMENT_ROLES)} for row in holiday_rows]
+        birthdays = (await db.execute(select(Employee).where(Employee.is_active.is_(True), Employee.birthday.isnot(None)))).scalars().all()
+        for employee in birthdays:
+            birthday = employee.birthday.replace(year=period_start.year)
+            if period_start <= birthday <= period_end:
+                holidays.append({"id": f"birthday-{employee.id}", "kind": "birthday", "visibility": "company", "title": f"{employee.name}-ийн төрсөн өдөр", "starts_at": datetime.combine(birthday, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(birthday + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": False})
+    return {"scope": scope, "tasks": task_events, "time_blocks": blocks, "entries": entries, "holidays": holidays}
+
+
+@router.post("/calendar/entries", status_code=status.HTTP_201_CREATED)
+async def create_calendar_entry(data: CalendarEntryInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if data.ends_at <= data.starts_at:
+        raise HTTPException(status_code=400, detail="Calendar entry must end after it starts")
+    if data.visibility == "company" and not actor.has_any_role(*MANAGEMENT_ROLES):
+        raise HTTPException(status_code=403, detail="Only supervisors can publish company events")
+    entry = CalendarEntry(organization_id=actor.organization_id, account_id=None if data.visibility == "company" else actor.account_id, created_by_account_id=actor.account_id, **data.model_dump())
+    db.add(entry)
+    await db.flush()
+    await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="created", after=_calendar_entry_out(entry))
+    await db.commit()
+    return _calendar_entry_out(entry)
+
+
+@router.post("/calendar/holidays/sync")
+async def sync_holidays(year: int = Query(default_factory=lambda: date.today().year), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
+    organization = await db.get(Organization, actor.organization_id)
+    country = str((organization.settings or {}).get("holiday_country", "MN")).upper()
+    if len(country) != 2:
+        raise HTTPException(status_code=400, detail="Set a two-letter holiday country first")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://date.nager.at/api/v3/PublicHolidays/{year}/{country}", timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    raise HTTPException(status_code=502, detail="Holiday provider is unavailable")
+                payload = await response.json()
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail="Holiday provider is unavailable") from exc
+    added = 0
+    for item in payload:
+        holiday_day = date.fromisoformat(item["date"])
+        exists = await db.scalar(select(HolidayRecord.id).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.country_code == country, HolidayRecord.holiday_date == holiday_day, HolidayRecord.name == item["name"]))
+        if not exists:
+            db.add(HolidayRecord(organization_id=actor.organization_id, country_code=country, holiday_date=holiday_day, name=item["name"], local_name=item.get("localName")))
+            added += 1
+    await db.commit()
+    return {"country": country, "year": year, "added": added}
+
+
+@router.put("/calendar/holiday-country")
+async def set_holiday_country(country_code: str, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin"))):
+    country = country_code.strip().upper()
+    if len(country) != 2 or not country.isalpha():
+        raise HTTPException(status_code=400, detail="Country must be a two-letter code")
+    organization = await db.get(Organization, actor.organization_id, with_for_update=True)
+    organization.settings = {**(organization.settings or {}), "holiday_country": country}
+    await db.commit()
+    return {"country": country}
+
+
+@router.post("/calendar/holidays/overrides", status_code=status.HTTP_201_CREATED)
+async def create_holiday_override(data: HolidayOverrideInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
+    organization = await db.get(Organization, actor.organization_id)
+    country = str((organization.settings or {}).get("holiday_country", "MN")).upper()
+    holiday = HolidayRecord(organization_id=actor.organization_id, country_code=country, holiday_date=data.holiday_date, name=data.name, local_name=data.name, is_active=data.is_active, is_override=True)
+    db.add(holiday)
+    await db.commit()
+    return {"id": holiday.id, "kind": "holiday", "title": holiday.name, "date": holiday.holiday_date}
 
 
 @router.post("/calendar/time-blocks", status_code=status.HTTP_201_CREATED)
@@ -785,6 +954,23 @@ async def create_time_block(data: PersonalTimeBlockInput, db: AsyncSession = Dep
     await record_change(db, actor=actor, topic="calendar", aggregate_type="personal_time_block", aggregate_id=block.id, operation="created", after=_time_block_out(block))
     await db.commit()
     return _time_block_out(block)
+
+
+@router.get("/today/agenda")
+async def today_agenda(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    start_day = date.today()
+    end_day = start_day + timedelta(days=6)
+    start = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
+    end = datetime.combine(end_day + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    task_query = select(Task).where(Task.organization_id == actor.organization_id, Task.is_archived.is_(False), or_(Task.start_at < end, Task.deadline_at < end), or_(Task.start_at.is_(None), Task.start_at >= start, Task.deadline_at >= start))
+    # Today is personal even for supervisors; company aggregation belongs in Stats.
+    if actor.employee_id:
+        task_query = task_query.where(_task_employee_scope(actor.employee_id))
+    else:
+        task_query = task_query.where(Task.id == -1)
+    tasks = (await db.execute(task_query.order_by(Task.start_at.nulls_last(), Task.deadline_at.nulls_last()))).scalars().all()
+    entries = (await db.execute(select(CalendarEntry).where(CalendarEntry.organization_id == actor.organization_id, CalendarEntry.starts_at < end, CalendarEntry.ends_at > start, or_(CalendarEntry.account_id == actor.account_id, CalendarEntry.visibility == "company")).order_by(CalendarEntry.starts_at))).scalars().all()
+    return {"date_from": start_day, "date_to": end_day, "tasks": [{"kind": "task", **_task_out(task)} for task in tasks], "entries": [_calendar_entry_out(entry) for entry in entries]}
 
 
 @router.patch("/calendar/time-blocks/{block_id}")
@@ -1543,20 +1729,23 @@ async def _performance_summary(db: AsyncSession, actor: ActorContext, employee_i
 
     work_conditions = [
         WorkTimeEntry.entry_type == "work",
+        WorkTimeEntry.employee_id.isnot(None),
         WorkTimeEntry.ended_at.isnot(None),
         WorkTimeEntry.local_work_date >= date_from,
         WorkTimeEntry.local_work_date <= date_to,
+        UserAccount.organization_id == actor.organization_id,
+        UserAccount.status == "active",
     ]
     if employee_id is not None:
         work_conditions.append(WorkTimeEntry.employee_id == employee_id)
-    worked = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).where(*work_conditions)) or 0
-    billable = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).where(*work_conditions, WorkTimeEntry.is_billable.is_(True), WorkTimeEntry.approval_status == "approved")) or 0
+    worked = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).join(UserAccount, UserAccount.employee_id == WorkTimeEntry.employee_id).where(*work_conditions)) or 0
+    billable = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).join(UserAccount, UserAccount.employee_id == WorkTimeEntry.employee_id).where(*work_conditions, WorkTimeEntry.is_billable.is_(True), WorkTimeEntry.approval_status == "approved")) or 0
 
-    report_conditions = [WorkReport.period_date >= date_from, WorkReport.period_date <= date_to]
+    report_conditions = [WorkReport.period_date >= date_from, WorkReport.period_date <= date_to, UserAccount.organization_id == actor.organization_id, UserAccount.status == "active"]
     if employee_id is not None:
         report_conditions.append(WorkReport.employee_id == employee_id)
-    report_total = await db.scalar(select(func.count()).select_from(WorkReport).where(*report_conditions)) or 0
-    submitted_reports = await db.scalar(select(func.count()).select_from(WorkReport).where(*report_conditions, WorkReport.status.in_(("submitted", "approved")))) or 0
+    report_total = await db.scalar(select(func.count()).select_from(WorkReport).join(UserAccount, UserAccount.employee_id == WorkReport.employee_id).where(*report_conditions)) or 0
+    submitted_reports = await db.scalar(select(func.count()).select_from(WorkReport).join(UserAccount, UserAccount.employee_id == WorkReport.employee_id).where(*report_conditions, WorkReport.status.in_(("submitted", "approved")))) or 0
     return {
         "task_total": task_total,
         "completed_tasks": completed,
@@ -1616,12 +1805,13 @@ async def analytics_daily(
         WorkTimeEntry.local_work_date,
         func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0),
     ).where(
-        WorkTimeEntry.entry_type == "work", WorkTimeEntry.ended_at.isnot(None),
+        WorkTimeEntry.entry_type == "work", WorkTimeEntry.employee_id.isnot(None), WorkTimeEntry.ended_at.isnot(None),
         WorkTimeEntry.local_work_date >= date_from, WorkTimeEntry.local_work_date <= date_to,
+        UserAccount.organization_id == actor.organization_id, UserAccount.status == "active",
     )
     if target is not None:
         work_query = work_query.where(WorkTimeEntry.employee_id == target)
-    work_rows = (await db.execute(work_query.group_by(WorkTimeEntry.local_work_date))).all()
+    work_rows = (await db.execute(work_query.join(UserAccount, UserAccount.employee_id == WorkTimeEntry.employee_id).group_by(WorkTimeEntry.local_work_date))).all()
     work_by_day = {row[0]: round(float(row[1])) for row in work_rows}
     task_query = select(Task.completed_at).where(
         Task.organization_id == actor.organization_id, Task.workflow_status == "done", Task.completed_at.isnot(None),
@@ -1683,10 +1873,77 @@ async def worker_performance(
     }
 
 
-@router.post("/assistant/drafts")
-async def assistant_draft(data: AssistantDraftInput, actor: ActorContext = Depends(get_actor)):
+async def _assistant_web_tool(db: AsyncSession, decision, actor: ActorContext) -> tuple[dict, dict | None, list[dict]]:
+    """Async web adapter for the same classified OYUNS tools Telegram uses."""
+    tool = decision.selected_tool
+    arguments = decision.tool_arguments
+    if tool == assistant_ai.AssistantToolName.CREATE_TASK_DRAFT:
+        draft = {"title": arguments.get("title") or "Шинэ даалгавар", "description": None, "priority": arguments.get("priority", 2)}
+        if arguments.get("due_date"):
+            draft["deadline_at"] = arguments["due_date"]
+        return draft, {"type": "task_draft", "payload": draft}, []
+    if tool == assistant_ai.AssistantToolName.GET_USER_TASKS:
+        if not actor.employee_id:
+            return {"count": 0, "tasks": []}, None, []
+        tasks = (await db.execute(select(Task).where(Task.organization_id == actor.organization_id, _task_employee_scope(actor.employee_id), Task.is_archived.is_(False)).order_by(Task.deadline_at.nulls_last()).limit(50))).scalars().all()
+        return {"count": len(tasks), "tasks": [{"title": task.title, "description": task.description, "status": task.workflow_status, "deadline_at": task.deadline_at} for task in tasks]}, None, []
+    if tool == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE:
+        rows = (await db.execute(select(CompanyKnowledge).where(CompanyKnowledge.is_active.is_(True)).order_by(CompanyKnowledge.updated_at.desc()))).scalars().all()
+        records = [{"id": row.id, "title": row.title, "category": row.category, "content": row.content, "is_active": row.is_active} for row in rows]
+        matches = rank_knowledge(records, [arguments.get("query", "")], limit=5)
+        return {"query": arguments.get("query"), "count": len(matches), "documents": matches}, None, [{"id": item["id"], "title": item["title"]} for item in matches]
+    if tool == assistant_ai.AssistantToolName.GET_EXCHANGE_RATE:
+        result = await exchange_rate_service.get_exchange_rate(provider=arguments["provider"], pair=arguments["pair"], force_refresh=arguments.get("force_refresh", False), request_type=arguments.get("request_type", "single"))
+        return result, None, []
+    return {}, None, []
+
+
+@router.post("/assistant/conversations")
+async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    conversation = await db.get(AssistantConversation, data.conversation_id) if data.conversation_id else None
+    if conversation and (conversation.account_id != actor.account_id or conversation.organization_id != actor.organization_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not conversation:
+        conversation = AssistantConversation(account_id=actor.account_id, organization_id=actor.organization_id, title=data.text.strip()[:120])
+        db.add(conversation)
+        await db.flush()
+    history_rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation.id).order_by(AssistantMessage.id.desc()).limit(12))).scalars().all()
+    history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
     text = data.text.strip()
-    return {"kind": data.kind, "requires_confirmation": True, "draft": {"title": text[:120] if data.kind == "task" else "AI-assisted report", "description": text if data.kind == "task" else None, "markdown": text if data.kind == "report" else None}, "actor_employee_id": actor.employee_id}
+    db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
+    workers = [{"id": employee.id, "name": employee.name, "timezone": employee.timezone, "is_active": employee.is_active} for employee in (await db.execute(select(Employee).where(Employee.is_active.is_(True)))).scalars().all()]
+    decision = await assistant_ai.classify_intent(text, now=datetime.now(ZoneInfo("Asia/Ulaanbaatar")), timezone_name="Asia/Ulaanbaatar", is_manager=actor.has_any_role(*MANAGEMENT_ROLES), workers=workers, voice_mode=False, chat_history=history, learned_contexts=[])
+    raw, action, sources = await _assistant_web_tool(db, decision, actor) if decision.selected_tool else ({}, None, [])
+    if action:
+        answer = f"“{action['payload']['title']}” даалгаврын ноорог бэлэн. Үүсгэхээс өмнө шалгана уу."
+    elif decision.selected_tool and decision.react_messages and decision.assistant_tool_message and decision.tool_call_id:
+        answer = await assistant_ai.synthesize_tool_result(request_messages=decision.react_messages, assistant_message=decision.assistant_tool_message, tool_call_id=decision.tool_call_id, raw_result=raw, voice_mode=False)
+    else:
+        answer = decision.direct_answer or "Асуултаа арай дэлгэрэнгүй асууна уу."
+    if not answer:
+        answer = "Одоогоор хариулт боловсруулж чадсангүй. Түр хүлээгээд дахин оролдоно уу."
+    assistant_message = AssistantMessage(conversation_id=conversation.id, role="assistant", content=answer, action=action, sources=sources)
+    db.add(assistant_message)
+    conversation.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"conversation_id": conversation.id, "message": {"id": assistant_message.id, "role": "assistant", "content": answer, "action": action, "sources": sources}}
+
+
+@router.get("/assistant/conversations/{conversation_id}")
+async def assistant_conversation(conversation_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    conversation = await db.get(AssistantConversation, conversation_id)
+    if not conversation or conversation.account_id != actor.account_id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation_id).order_by(AssistantMessage.id))).scalars().all()
+    return {"id": conversation.id, "messages": [{"id": row.id, "role": row.role, "content": row.content, "action": row.action, "sources": row.sources, "created_at": row.created_at} for row in rows]}
+
+
+@router.post("/assistant/drafts")
+async def assistant_draft(data: AssistantDraftInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Compatibility endpoint for clients not yet migrated to conversations."""
+    response = await assistant_chat(AssistantChatInput(text=data.text), db, actor)
+    action = response["message"].get("action") or {"type": "report_draft", "payload": {"title": "AI-assisted report", "markdown": data.text}}
+    return {"kind": data.kind, "requires_confirmation": action["type"] == "task_draft", "draft": action["payload"], "conversation_id": response["conversation_id"]}
 
 
 @router.post("/voice/transcriptions")

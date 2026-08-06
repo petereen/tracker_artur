@@ -35,6 +35,10 @@ class Employee(Base):
     email = Column(Text, unique=True)
     manager_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
     job_title = Column(Text)
+    phone_number = Column(Text)
+    birthday = Column(Date)
+    work_direction = Column(Text)
+    work_branch = Column(Text)
     primary_language = Column(String(8), nullable=False, server_default="mn", default="mn")
     employment_type = Column(String(24), nullable=False, server_default="member", default="member")
     weekly_capacity_minutes = Column(Integer, nullable=False, server_default="2400", default=2400)
@@ -711,8 +715,23 @@ class ProjectMember(Base):
     project_role = Column(Text)
     allocation_percent = Column(Numeric(5, 2), nullable=False, server_default="0", default=0)
     is_billable = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
-    starts_on = Column(Date)
-    ends_on = Column(Date)
+
+
+class ProjectRequest(Base):
+    __tablename__ = "project_requests"
+    __table_args__ = (Index("ix_project_requests_org_status", "organization_id", "status"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    requested_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    requested_by_employee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    payload = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    status = Column(Text, nullable=False, server_default="pending", default="pending")
+    reviewer_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    review_note = Column(Text)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    reviewed_at = Column(DateTime(timezone=True))
 
 
 class ProjectRate(Base):
@@ -876,6 +895,69 @@ class PersonalTimeBlock(Base):
     version = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class CalendarEntry(Base):
+    __tablename__ = "calendar_entries"
+    __table_args__ = (
+        Index("ix_calendar_entries_org_period", "organization_id", "starts_at"),
+        Index("ix_calendar_entries_account_period", "account_id", "starts_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=True)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    kind = Column(Text, nullable=False)  # reminder | event
+    visibility = Column(Text, nullable=False, server_default="private", default="private")
+    title = Column(Text, nullable=False)
+    description = Column(Text)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    remind_at = Column(DateTime(timezone=True))
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class HolidayRecord(Base):
+    __tablename__ = "holiday_records"
+    __table_args__ = (UniqueConstraint("organization_id", "country_code", "holiday_date", "name", name="uq_holiday_record"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    country_code = Column(String(2), nullable=False)
+    holiday_date = Column(Date, nullable=False)
+    name = Column(Text, nullable=False)
+    local_name = Column(Text)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    is_override = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AssistantConversation(Base):
+    __tablename__ = "assistant_conversations"
+    __table_args__ = (Index("ix_assistant_conversations_account_updated", "account_id", "updated_at"),)
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(Text)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class AssistantMessage(Base):
+    __tablename__ = "assistant_messages"
+    __table_args__ = (Index("ix_assistant_messages_conversation_id", "conversation_id", "id"),)
+
+    id = Column(Integer, primary_key=True)
+    conversation_id = Column(Integer, ForeignKey("assistant_conversations.id", ondelete="CASCADE"), nullable=False)
+    role = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)
+    action = Column(JSONB)
+    sources = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class CheckinTemplate(Base):

@@ -1,4 +1,6 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
+from uuid import uuid4
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +18,7 @@ from app.main import app
 from app.models.models import Base
 from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _task_out
 from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE
-from app.services.enterprise_events import _redact
+from app.services.enterprise_events import _json_safe, _redact
 from app.services.work_report_service import summarize_work_time
 
 
@@ -49,12 +51,22 @@ def test_audit_redaction_is_recursive():
     assert _redact(value) == {"title": "Safe", "password": "[REDACTED]", "nested": [{"access_token": "[REDACTED]"}]}
 
 
+def test_event_payloads_serialize_datetime_date_uuid_and_decimal_before_jsonb_write():
+    value = {"at": datetime(2026, 8, 6, tzinfo=timezone.utc), "day": date(2026, 8, 6), "id": uuid4(), "amount": Decimal("12.50")}
+    payload = _json_safe(value)
+    assert payload["at"].endswith("+00:00")
+    assert payload["day"] == "2026-08-06"
+    assert isinstance(payload["id"], str)
+    assert payload["amount"] == 12.5
+
+
 def test_enterprise_schema_registers_required_foundation_tables():
     required = {
         "organizations", "user_accounts", "role_assignments", "teams", "clients", "projects",
         "task_assignees", "task_dependencies", "task_check_items", "checkin_templates", "checkins",
         "objectives", "key_results", "milestones", "audit_logs", "domain_events", "job_queue",
-        "calendar_connections", "calendar_event_links", "personal_time_blocks",
+        "calendar_connections", "calendar_event_links", "personal_time_blocks", "project_requests",
+        "calendar_entries", "holiday_records", "assistant_conversations", "assistant_messages",
     }
     assert required.issubset(Base.metadata.tables)
 
