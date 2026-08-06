@@ -13,7 +13,7 @@ const CalendarWorkspacePage = lazy(() => import('./pages/CalendarWorkspacePage')
 const StatsWorkspacePage = lazy(() => import('./pages/StatsWorkspacePage').then((module) => ({ default: module.StatsWorkspacePage })))
 const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
-const OkrsWorkspacePage = lazy(() => import('./pages/OkrsWorkspacePage').then((module) => ({ default: module.OkrsWorkspacePage })))
+const PlansPage = lazy(() => import('./pages/PlansPage').then((module) => ({ default: module.PlansPage })))
 const AdministrationHubPage = lazy(() => import('./pages/AdministrationHubPage').then((module) => ({ default: module.AdministrationHubPage })))
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })))
 const TgMiniAppPage = lazy(() => import('./pages/TgMiniAppPage').then((module) => ({ default: module.TgMiniAppPage })))
@@ -47,7 +47,8 @@ function AuthenticatedApp() {
         <Route path="calendar" element={<CalendarWorkspacePage />} />
         <Route path="reports" element={<EnterpriseReportsPage />} />
         <Route path="capacity" element={<CapacityWorkspacePage />} />
-        <Route path="okrs" element={<OkrsWorkspacePage />} />
+        <Route path="plans" element={<PlansPage />} />
+        <Route path="okrs" element={<Navigate to="/plans" replace />} />
         <Route path="analytics" element={<StatsWorkspacePage />} />
         <Route path="administration" element={<AdministrationHubPage />} />
         <Route path="profile" element={<ProfilePage />} />

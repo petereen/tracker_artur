@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { api } from './client'
+import { acceptSession, api, refreshAccessToken } from './client'
 import { useAuthStore, Actor } from '../store/auth'
 
 export type WorkflowStatus = 'backlog' | 'to_do' | 'in_progress' | 'review' | 'done' | 'cancelled'
@@ -48,6 +48,8 @@ export interface Project {
   currency: string
   default_billable: boolean
   version: number
+  archived_at?: string | null
+  can_archive?: boolean
 }
 
 export interface ClockEntry {
@@ -62,18 +64,16 @@ export interface ClockEntry {
 }
 
 export function useEnterpriseLogin() {
-  const setToken = useAuthStore((state) => state.setToken)
   return useMutation({
     mutationFn: (input: { email: string; password: string }) => api.post('/v1/auth/login', input).then((response) => response.data),
-    onSuccess: (data) => setToken(data.access_token),
+    onSuccess: acceptSession,
   })
 }
 
 export function useTelegramWidgetLogin() {
-  const setToken = useAuthStore((state) => state.setToken)
   return useMutation({
     mutationFn: (payload: Record<string, string | number>) => api.post('/v1/auth/telegram-widget', payload).then((response) => response.data),
-    onSuccess: (data) => setToken(data.access_token),
+    onSuccess: acceptSession,
   })
 }
 
@@ -135,8 +135,7 @@ export function useInviteAccount() {
 export async function bootstrapSession() {
   const store = useAuthStore.getState()
   try {
-    const { data } = await api.post('/v1/auth/refresh')
-    store.setToken(data.access_token)
+    await refreshAccessToken()
   } catch {
     store.setToken(null)
   } finally {
@@ -189,8 +188,27 @@ export function useCreateProject() {
   })
 }
 
-export function useEnterpriseTasks(projectId?: number, period?: DateRange) {
-  return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId, period], queryFn: () => api.get('/v1/tasks', { params: { ...(projectId ? { project_id: projectId } : {}), ...period } }).then((response) => response.data) })
+export function useProject(id?: number) {
+  return useQuery<Project>({ queryKey: ['v1', 'projects', id], queryFn: () => api.get(`/v1/projects/${id}`).then((response) => response.data), enabled: Boolean(id) })
+}
+
+export function useUpdateProject() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: ({ id, ...input }: { id: number } & Record<string, unknown>) => api.patch(`/v1/projects/${id}`, input).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл хадгалагдсангүй') })
+}
+
+export function useArchiveProject() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (id: number) => api.delete(`/v1/projects/${id}`), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл архивлагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл архивлагдсангүй') })
+}
+
+export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' }
+export function useEnterpriseTasks(projectId?: number, period?: DateRange, filters: TaskFilters = {}) {
+  return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId, period, filters], queryFn: () => api.get('/v1/tasks', { params: { ...(projectId ? { project_id: projectId } : {}), ...period, ...filters } }).then((response) => response.data) })
+}
+
+export function useDeadlines(enabled = true) {
+  return useQuery<any[]>({ queryKey: ['v1', 'deadlines'], queryFn: () => api.get('/v1/deadlines').then((response) => response.data), enabled })
 }
 
 export function useCreateEnterpriseTask() {
@@ -254,6 +272,15 @@ export interface PersonalTimeBlock { id: number; title: string; starts_at: strin
 
 export function useCalendarEvents(scope: 'private' | 'corporate', period: DateRange) {
   return useQuery<any>({ queryKey: ['v1', 'calendar', scope, period], queryFn: () => api.get('/v1/calendar/events', { params: { scope, ...period } }).then((response) => response.data) })
+}
+
+export function useHolidaySettings() {
+  return useQuery<{ country: string; countries: { countryCode: string; name: string }[] }>({ queryKey: ['v1', 'calendar', 'holiday-settings'], queryFn: () => api.get('/v1/calendar/holiday-settings').then((response) => response.data) })
+}
+
+export function useSetHolidayCountry() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: async (country_code: string) => { await api.put('/v1/calendar/holiday-country', { country_code }); const year = new Date().getFullYear(); await Promise.all([api.post('/v1/calendar/holidays/sync', null, { params: { year } }), api.post('/v1/calendar/holidays/sync', null, { params: { year: year + 1 } })]) }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success('Амралтын өдрийн улс шинэчлэгдлээ') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Улс шинэчлэгдсэнгүй') })
 }
 
 export function useCreateCalendarEntry() {

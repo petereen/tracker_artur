@@ -194,7 +194,7 @@ export function useWorkReport(reportId: number | null) {
 export type PlanHorizon = 'long_term' | 'mid_term' | 'short_term'
 export interface CompanyPlanItem {
   id: number; plan_month: string; title: string; content: string | null; horizon: PlanHorizon; position: number
-  status: 'approved'; source_employee_id: number | null; source_employee_name: string | null; source_report_id: number | null
+  status: 'approved' | 'archived'; due_date: string | null; source_employee_id: number | null; source_employee_name: string | null; source_report_id: number | null; source_idea_ids: number[]
   approved_at: string; created_at: string; updated_at: string
 }
 export interface PlanSuggestion {
@@ -210,10 +210,19 @@ export function useCompanyPlan(month: string) {
 export function useCreateCompanyPlanItem() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: { source_report_id: number; title: string; content?: string; plan_month: string; horizon: PlanHorizon }) => api.post('/company-plans/items', data).then((r) => r.data),
+    mutationFn: (data: { source_report_id?: number; title: string; content?: string; plan_month: string; horizon: PlanHorizon; due_date?: string | null }) => api.post('/company-plans/items', data).then((r) => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['company-plan'] }); qc.invalidateQueries({ queryKey: ['company-plan-suggestions'] }); toast.success('Компанийн төлөвлөгөөнд нэмэгдлээ') },
   })
 }
+
+export interface PlanIdea { id: number; plan_month: string; title: string; content: string | null; suggested_due_date: string | null; status: 'pending' | 'approved' | 'rejected' | 'merged'; submitted_by_name: string | null; merged_into_plan_item_id: number | null; created_at: string; updated_at: string }
+export function usePlanIdeas(month: string) { return useQuery<PlanIdea[]>({ queryKey: ['plan-ideas', month], queryFn: () => api.get('/company-plans/ideas', { params: { month } }).then((r) => r.data) }) }
+export function useCreatePlanIdea() { const qc = useQueryClient(); return useMutation({ mutationFn: (data: { plan_month: string; title: string; content?: string; suggested_due_date?: string | null }) => api.post('/company-plans/ideas', data).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['plan-ideas'] }); toast.success('Санаа илгээгдлээ') } }) }
+export function useUpdatePlanIdea() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...data }: { id: number; title?: string; content?: string; suggested_due_date?: string | null; status?: string }) => api.patch(`/company-plans/ideas/${id}`, data).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['plan-ideas'] }) }) }
+export function useDeletePlanIdea() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/company-plans/ideas/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['plan-ideas'] }) }) }
+export function useMergePlanIdeas() { const qc = useQueryClient(); return useMutation({ mutationFn: (data: { idea_ids: number[]; plan_month: string; title: string; content?: string; horizon: PlanHorizon; due_date?: string | null }) => api.post('/company-plans/ideas/merge', data).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['plan-ideas'] }); qc.invalidateQueries({ queryKey: ['company-plan'] }); toast.success('Санаанууд нэг төлөвлөгөө боллоо') } }) }
+export function useUpdateCompanyPlanItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...data }: { id: number; title?: string; content?: string; horizon?: PlanHorizon; due_date?: string | null }) => api.patch(`/company-plans/items/${id}`, data).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['company-plan'] }) }) }
+export function useDeleteCompanyPlanItem() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/company-plans/items/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['company-plan'] }) }) }
 export function useReorderCompanyPlan() {
   const qc = useQueryClient()
   return useMutation({

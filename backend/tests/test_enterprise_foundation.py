@@ -16,7 +16,7 @@ from app.core.security import (
 from app.core.enterprise_deps import ActorContext
 from app.main import app
 from app.models.models import Base
-from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _task_out
+from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _task_out
 from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE
 from app.services.enterprise_events import _json_safe, _redact
 from app.services.work_report_service import summarize_work_time
@@ -35,6 +35,11 @@ def test_enterprise_access_token_carries_account_and_organization():
     assert payload["sub"] == "17"
     assert payload["organization_id"] == 1
     assert payload["kind"] == "enterprise"
+
+
+def test_birthdays_repeat_across_year_boundaries_and_handle_leap_day():
+    assert _birthday_occurrences(date(1992, 2, 29), date(2025, 12, 1), date(2026, 3, 1)) == [date(2026, 2, 28)]
+    assert _birthday_occurrences(date(1990, 1, 10), date(2025, 12, 1), date(2026, 2, 1)) == [date(2026, 1, 10)]
 
 
 def test_refresh_tokens_are_random_and_only_hash_is_persisted():

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMiniMe, useMiniTasks, useMiniCreateTask, useMiniUpdateTask, MiniTaskOut, TaskScope } from '../api/miniapp'
-import { api } from '../api/client'
-import { useAuthStore } from '../store/auth'
+import { acceptSession, api } from '../api/client'
 
 const PRIORITY_BAR: Record<number, string> = { 1: 'bg-red-500', 2: 'bg-amber-400', 3: 'bg-green-500' }
 
@@ -90,7 +89,6 @@ export function TgMiniAppPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ done: true })
-  const setToken = useAuthStore((state) => state.setToken)
 
   useEffect(() => {
     try {
@@ -107,11 +105,11 @@ export function TgMiniAppPage() {
     if (!initData) return
     api.post('/v1/auth/telegram', undefined, {
       headers: { 'X-Telegram-Init-Data': initData },
-    }).then(({ data }) => setToken(data.access_token)).catch(() => {
+    }).then(({ data }) => acceptSession(data)).catch(() => {
       // Preserve the existing Mini App UX when an employee has not yet been
       // provisioned for enterprise access.
     })
-  }, [initData, setToken])
+  }, [initData])
 
   const meQuery = useMiniMe()
   const tasksQuery = useMiniTasks(scope, true)

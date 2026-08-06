@@ -484,7 +484,7 @@ class WorkTimeEntry(Base):
 # ─── Компанийн сарын төлөвлөгөө ─────────────────────────────────────────────
 
 COMPANY_PLAN_HORIZONS = ("long_term", "mid_term", "short_term")
-COMPANY_PLAN_STATUSES = ("approved",)
+COMPANY_PLAN_STATUSES = ("approved", "archived")
 
 
 class CompanyPlanItem(Base):
@@ -496,24 +496,50 @@ class CompanyPlanItem(Base):
             "horizon IN ('long_term','mid_term','short_term')",
             name="ck_company_plan_items_horizon",
         ),
-        CheckConstraint("status IN ('approved')", name="ck_company_plan_items_status"),
+        CheckConstraint("status IN ('approved','archived')", name="ck_company_plan_items_status"),
     )
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     plan_month = Column(Date, nullable=False, index=True)
     title = Column(Text, nullable=False)
     content = Column(Text)
     horizon = Column(Text, nullable=False, server_default="short_term", default="short_term")
     position = Column(Integer, nullable=False, server_default="0", default=0)
     status = Column(Text, nullable=False, server_default="approved", default="approved")
+    due_date = Column(Date)
     source_employee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
     source_report_id = Column(Integer, ForeignKey("work_reports.id", ondelete="SET NULL"))
+    approved_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     approved_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     source_employee = relationship("Employee", foreign_keys=[source_employee_id])
     source_report = relationship("WorkReport", foreign_keys=[source_report_id])
+
+
+class PlanIdea(Base):
+    __tablename__ = "plan_ideas"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','approved','rejected','merged')", name="ck_plan_ideas_status"),
+        Index("ix_plan_ideas_org_month_status", "organization_id", "plan_month", "status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    submitted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    submitted_by_employee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    plan_month = Column(Date, nullable=False)
+    title = Column(Text, nullable=False)
+    content = Column(Text)
+    suggested_due_date = Column(Date)
+    status = Column(Text, nullable=False, server_default="pending", default="pending")
+    reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    merged_into_plan_item_id = Column(Integer, ForeignKey("company_plan_items.id", ondelete="SET NULL"))
+    reviewed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 # ─── Enterprise PM / PSA foundation ─────────────────────────────────────────
@@ -700,6 +726,8 @@ class Project(Base):
     budget_amount = Column(Numeric(18, 4))
     currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
     default_billable = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    archived_at = Column(DateTime(timezone=True))
+    archived_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     version = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

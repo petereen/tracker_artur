@@ -32,6 +32,7 @@ from app.models.models import (
     Checkin,
     CheckinAnswer,
     Client,
+    CompanyPlanItem,
     CompanyKnowledge,
     Employee,
     ExchangeRateSnapshot,
@@ -87,6 +88,18 @@ def _decimal(value: Decimal | None) -> float | None:
     return float(value) if value is not None else None
 
 
+def _birthday_occurrences(birthday: date, period_start: date, period_end: date) -> list[date]:
+    occurrences = []
+    for year in range(period_start.year, period_end.year + 1):
+        try:
+            occurrence = birthday.replace(year=year)
+        except ValueError:
+            occurrence = date(year, 2, 28)
+        if period_start <= occurrence <= period_end:
+            occurrences.append(occurrence)
+    return occurrences
+
+
 def _project_out(item: Project) -> dict:
     return {
         "id": item.id, "public_id": str(item.public_id), "client_id": item.client_id,
@@ -96,6 +109,7 @@ def _project_out(item: Project) -> dict:
         "budget_minutes": item.budget_minutes, "budget_amount": _decimal(item.budget_amount),
         "currency": item.currency, "default_billable": item.default_billable,
         "version": item.version, "updated_at": item.updated_at,
+        "archived_at": item.archived_at,
     }
 
 
@@ -154,6 +168,21 @@ class ProjectInput(BaseModel):
     budget_amount: Decimal | None = Field(default=None, ge=0)
     currency: str = Field(default="MNT", min_length=3, max_length=3)
     default_billable: bool = False
+
+
+class ProjectPatch(BaseModel):
+    code: str | None = Field(default=None, min_length=1, max_length=40)
+    name: str | None = Field(default=None, min_length=1, max_length=240)
+    client_id: int | None = None
+    manager_id: int | None = None
+    member_ids: list[int] | None = None
+    description: str | None = None
+    status: Literal["draft", "planned", "active", "on_hold", "completed", "cancelled"] | None = None
+    starts_on: date | None = None
+    ends_on: date | None = None
+    budget_minutes: int | None = Field(default=None, ge=0)
+    budget_amount: Decimal | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
 
 
 class ProjectMemberInput(BaseModel):
@@ -388,6 +417,10 @@ class HolidayOverrideInput(BaseModel):
     is_active: bool = True
 
 
+class HolidayCountryInput(BaseModel):
+    country_code: str = Field(min_length=2, max_length=2)
+
+
 class CalendarSyncInput(BaseModel):
     task_id: int
 
@@ -504,7 +537,7 @@ async def create_client(data: ClientInput, db: AsyncSession = Depends(get_db), a
 
 @router.get("/projects")
 async def list_projects(status_filter: str | None = Query(default=None, alias="status"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    query = select(Project).where(Project.organization_id == actor.organization_id)
+    query = select(Project).where(Project.organization_id == actor.organization_id, Project.archived_at.is_(None))
     if status_filter:
         query = query.where(Project.status == status_filter)
     if actor.roles == {"client_auditor"}:
@@ -524,6 +557,63 @@ async def list_projects(status_filter: str | None = Query(default=None, alias="s
     for member in member_rows:
         members_by_project.setdefault(member.project_id, []).append(member.employee_id)
     return [{**_project_out(row), "manager_name": people.get(row.manager_id), "member_ids": members_by_project.get(row.id, [])} for row in rows]
+
+
+@router.get("/projects/{project_id}")
+async def get_project(project_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    project = await db.get(Project, project_id)
+    if not project or project.organization_id != actor.organization_id or project.archived_at:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not actor.has_any_role(*MANAGEMENT_ROLES):
+        member = actor.employee_id and await db.scalar(select(ProjectMember.id).where(ProjectMember.project_id == project.id, ProjectMember.employee_id == actor.employee_id))
+        if not member: raise HTTPException(status_code=404, detail="Project not found")
+    members = (await db.execute(select(ProjectMember.employee_id).where(ProjectMember.project_id == project.id))).scalars().all()
+    manager = await db.get(Employee, project.manager_id) if project.manager_id else None
+    return {**_project_out(project), "manager_name": manager.name if manager else None, "member_ids": sorted(set(members)), "can_archive": actor.has_any_role(*MANAGEMENT_ROLES) or project.manager_id == actor.employee_id}
+
+
+@router.patch("/projects/{project_id}")
+async def update_project(project_id: int, data: ProjectPatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    project = await db.get(Project, project_id, with_for_update=True)
+    if not project or project.organization_id != actor.organization_id or project.archived_at:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not actor.has_any_role(*MANAGEMENT_ROLES) and project.manager_id != actor.employee_id:
+        raise HTTPException(status_code=403, detail="Only management or the project owner can edit this project")
+    patch = data.model_dump(exclude_unset=True)
+    member_ids = patch.pop("member_ids", None)
+    before = _project_out(project)
+    for field, value in patch.items():
+        setattr(project, field, value)
+    if member_ids is not None:
+        requested = set(member_ids)
+        if project.manager_id:
+            requested.add(project.manager_id)
+        valid = set((await db.execute(select(Employee.id).where(Employee.id.in_(requested), Employee.is_active.is_(True)))).scalars().all()) if requested else set()
+        if valid != requested:
+            raise HTTPException(status_code=400, detail="Project member is invalid")
+        await db.execute(ProjectMember.__table__.delete().where(ProjectMember.project_id == project.id))
+        for employee_id in requested:
+            db.add(ProjectMember(project_id=project.id, employee_id=employee_id, project_role="owner" if employee_id == project.manager_id else "member"))
+    project.version += 1
+    await record_change(db, actor=actor, topic="projects", aggregate_type="project", aggregate_id=project.id, operation="updated", version=project.version, before=before, after=_project_out(project))
+    await db.commit()
+    return await get_project(project.id, db, actor)
+
+
+@router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_project(project_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    project = await db.get(Project, project_id, with_for_update=True)
+    if not project or project.organization_id != actor.organization_id or project.archived_at:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not actor.has_any_role(*MANAGEMENT_ROLES) and project.manager_id != actor.employee_id:
+        raise HTTPException(status_code=403, detail="Only management or the project owner can archive this project")
+    project.archived_at = datetime.now(timezone.utc)
+    project.archived_by_account_id = actor.account_id
+    project.status = "cancelled"
+    project.version += 1
+    await record_change(db, actor=actor, topic="projects", aggregate_type="project", aggregate_id=project.id, operation="archived", version=project.version, after={"archived_at": project.archived_at})
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/projects", status_code=status.HTTP_201_CREATED)
@@ -679,6 +769,9 @@ async def project_budget_burn(project_id: int, db: AsyncSession = Depends(get_db
 async def list_tasks(
     project_id: int | None = None,
     workflow_status: str | None = None,
+    scope: Literal["mine", "organization", "project"] = "mine",
+    kind: Literal["all", "standalone", "project", "subtask"] = "all",
+    overdue: bool = False,
     date_from: date | None = None,
     date_to: date | None = None,
     db: AsyncSession = Depends(get_db),
@@ -689,6 +782,14 @@ async def list_tasks(
         query = query.where(Task.project_id == project_id)
     if workflow_status:
         query = query.where(Task.workflow_status == workflow_status)
+    if kind == "standalone":
+        query = query.where(Task.project_id.is_(None), Task.parent_task_id.is_(None))
+    elif kind == "project":
+        query = query.where(Task.project_id.isnot(None), Task.parent_task_id.is_(None))
+    elif kind == "subtask":
+        query = query.where(Task.parent_task_id.isnot(None))
+    if overdue:
+        query = query.where(Task.deadline_at < datetime.now(timezone.utc), Task.workflow_status.notin_({"done", "cancelled"}))
     if date_from:
         query = query.where(or_(Task.deadline_at.is_(None), Task.deadline_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)))
     if date_to:
@@ -704,7 +805,15 @@ async def list_tasks(
         )
         client_projects = select(Project.id).where(Project.client_id.in_(scoped_clients))
         query = query.where(or_(Task.project_id.in_(scoped_projects), Task.project_id.in_(client_projects)))
-    elif not actor.has_any_role(*MANAGEMENT_ROLES):
+    elif scope == "organization" and not actor.has_any_role(*MANAGEMENT_ROLES):
+        raise HTTPException(status_code=403, detail="Organization task scope requires management access")
+    elif scope == "project":
+        if not project_id:
+            raise HTTPException(status_code=400, detail="Project scope requires a project")
+        if not actor.has_any_role(*MANAGEMENT_ROLES):
+            member = actor.employee_id and await db.scalar(select(ProjectMember.id).where(ProjectMember.project_id == project_id, ProjectMember.employee_id == actor.employee_id))
+            if not member: raise HTTPException(status_code=403, detail="Project task scope requires project membership")
+    elif scope == "mine" or not actor.has_any_role(*MANAGEMENT_ROLES):
         if not actor.employee_id:
             return []
         contributor_tasks = select(TaskAssignee.task_id).where(TaskAssignee.employee_id == actor.employee_id)
@@ -737,8 +846,21 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
             if existing.request_hash != request_hash:
                 raise HTTPException(status_code=409, detail="Idempotency key was used with different input")
             return existing.response_body
-    if data.project_id:
-        project = await db.get(Project, data.project_id)
+    project_id = data.project_id
+    if data.parent_task_id:
+        parent = await db.get(Task, data.parent_task_id)
+        if not parent or parent.organization_id != actor.organization_id:
+            raise HTTPException(status_code=404, detail="Parent task not found")
+        if not actor.has_any_role(*MANAGEMENT_ROLES):
+            project_member = actor.employee_id and parent.project_id and await db.scalar(select(ProjectMember.id).where(ProjectMember.project_id == parent.project_id, ProjectMember.employee_id == actor.employee_id))
+            assigned = actor.employee_id and (parent.assignee_id == actor.employee_id or await db.scalar(select(TaskAssignee.id).where(TaskAssignee.task_id == parent.id, TaskAssignee.employee_id == actor.employee_id)))
+            if not project_member and not assigned:
+                raise HTTPException(status_code=404, detail="Parent task not found")
+        if project_id is not None and project_id != parent.project_id:
+            raise HTTPException(status_code=400, detail="A subtask must belong to the same project as its parent")
+        project_id = parent.project_id
+    if project_id:
+        project = await db.get(Project, project_id)
         if not project or project.organization_id != actor.organization_id:
             raise HTTPException(status_code=400, detail="Project is invalid")
     requested_assignees = set(data.assignee_ids)
@@ -748,9 +870,9 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         valid = set((await db.execute(select(Employee.id).where(Employee.id.in_(requested_assignees), Employee.is_active.is_(True)))).scalars().all())
         if valid != requested_assignees:
             raise HTTPException(status_code=400, detail="Task assignee is invalid")
-    owner_id = data.primary_owner_id
+    owner_id = data.primary_owner_id or (actor.employee_id if not actor.has_any_role(*MANAGEMENT_ROLES) else None)
     task = Task(
-        organization_id=actor.organization_id, project_id=data.project_id, parent_task_id=data.parent_task_id,
+        organization_id=actor.organization_id, project_id=project_id, parent_task_id=data.parent_task_id,
         title=data.title, description=data.description, workflow_status=data.workflow_status,
         status=LEGACY_STATUS[data.workflow_status], priority=data.priority, assignee_id=owner_id,
         start_at=data.start_at, deadline_at=data.deadline_at, estimate_minutes=data.estimate_minutes,
@@ -797,6 +919,14 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
             raise HTTPException(status_code=403, detail="Only managers can change task delegation")
     if patch.get("workflow_status") and patch["workflow_status"] not in WORKFLOW_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid workflow status")
+    if "parent_task_id" in patch and patch["parent_task_id"]:
+        if patch["parent_task_id"] == task.id:
+            raise HTTPException(status_code=400, detail="A task cannot be its own parent")
+        parent = await _task_for_actor(db, patch["parent_task_id"], actor, write=True)
+        target_project = patch.get("project_id", task.project_id)
+        if target_project is not None and target_project != parent.project_id:
+            raise HTTPException(status_code=400, detail="A subtask must belong to the same project as its parent")
+        patch["project_id"] = parent.project_id
     before = _task_out(task)
     assignee_ids = patch.pop("assignee_ids", None)
     if assignee_ids is not None:
@@ -822,6 +952,32 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before=before, after=output)
     await db.commit()
     return output
+
+
+@router.get("/deadlines")
+async def list_deadlines(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
+    now = datetime.now(timezone.utc)
+    projects = (await db.execute(select(Project).where(Project.organization_id == actor.organization_id, Project.archived_at.is_(None)))).scalars().all()
+    tasks = (await db.execute(select(Task).where(Task.organization_id == actor.organization_id, Task.is_archived.is_(False)))).scalars().all()
+    plan_items = (await db.execute(select(CompanyPlanItem).where(CompanyPlanItem.organization_id == actor.organization_id, CompanyPlanItem.status == "approved"))).scalars().all()
+    project_names = {project.id: project.name for project in projects}
+    employee_ids = {task.assignee_id for task in tasks if task.assignee_id} | {project.manager_id for project in projects if project.manager_id}
+    people = {employee.id: employee.name for employee in (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all()} if employee_ids else {}
+    items = []
+    for project in projects:
+        items.append({"id": f"project-{project.id}", "entity_id": project.id, "type": "project", "title": project.name, "due_date": str(project.ends_on) if project.ends_on else None, "status": project.status, "owner": people.get(project.manager_id), "project_id": project.id, "project_name": project.name})
+    for task in tasks:
+        items.append({"id": f"task-{task.id}", "entity_id": task.id, "type": "subtask" if task.parent_task_id else "task", "title": task.title, "due_date": task.deadline_at.isoformat() if task.deadline_at else None, "status": task.workflow_status, "owner": people.get(task.assignee_id), "project_id": task.project_id, "project_name": project_names.get(task.project_id)})
+    for item in plan_items:
+        items.append({"id": f"plan-{item.id}", "entity_id": item.id, "type": "plan", "title": item.title, "due_date": str(item.due_date) if item.due_date else None, "status": item.status, "owner": None, "project_id": None, "project_name": None})
+    for item in items:
+        if not item["due_date"]:
+            item["bucket"] = "none"
+            continue
+        due = datetime.fromisoformat(item["due_date"].replace("Z", "+00:00")) if "T" in item["due_date"] else datetime.combine(date.fromisoformat(item["due_date"]), datetime.max.time(), tzinfo=timezone.utc)
+        item["bucket"] = "overdue" if due < now else "soon" if due <= now + timedelta(days=7) else "later"
+    order = {"overdue": 0, "soon": 1, "later": 2, "none": 3}
+    return sorted(items, key=lambda item: (order[item["bucket"]], item["due_date"] or "9999", item["title"]))
 
 
 @router.put("/tasks/{task_id}/assignees")
@@ -850,7 +1006,8 @@ def _calendar_entry_out(item: CalendarEntry) -> dict:
 async def calendar_events(scope: Literal["private", "corporate"] = "private", date_from: date | None = None, date_to: date | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     period_start = date_from or date.today() - timedelta(days=14)
     period_end = date_to or period_start + timedelta(days=41)
-    task_rows = await list_tasks(date_from=period_start, date_to=period_end, db=db, actor=actor)
+    task_scope = "organization" if scope == "corporate" and actor.has_any_role(*MANAGEMENT_ROLES) else "mine"
+    task_rows = await list_tasks(scope=task_scope, date_from=period_start, date_to=period_end, db=db, actor=actor)
     if scope == "private":
         task_rows = [row for row in task_rows if actor.employee_id and actor.employee_id in row.get("assignee_ids", [])]
     task_events = [{"kind": "task", "visibility": "company" if scope == "corporate" else "private", "can_edit": actor.has_any_role(*MANAGEMENT_ROLES) or actor.employee_id in row.get("assignee_ids", []), **row} for row in task_rows if row.get("start_at") or row.get("deadline_at")]
@@ -869,16 +1026,14 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
         entry_query = entry_query.where(CalendarEntry.visibility == "company")
     entry_rows = (await db.execute(entry_query.order_by(CalendarEntry.starts_at))).scalars().all()
     entries = [{**_calendar_entry_out(row), "can_edit": row.created_by_account_id == actor.account_id or (row.visibility == "company" and actor.has_any_role(*MANAGEMENT_ROLES))} for row in entry_rows]
-    if scope == "corporate":
-        organization = await db.get(Organization, actor.organization_id)
-        country = str((organization.settings or {}).get("holiday_country", "MN")).upper()
-        holiday_rows = (await db.execute(select(HolidayRecord).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.country_code == country, HolidayRecord.is_active.is_(True), HolidayRecord.holiday_date >= period_start, HolidayRecord.holiday_date <= period_end))).scalars().all()
-        holidays = [{"id": row.id, "kind": "holiday", "visibility": "company", "title": row.local_name or row.name, "starts_at": datetime.combine(row.holiday_date, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(row.holiday_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": actor.has_any_role(*MANAGEMENT_ROLES)} for row in holiday_rows]
-        birthdays = (await db.execute(select(Employee).where(Employee.is_active.is_(True), Employee.birthday.isnot(None)))).scalars().all()
-        for employee in birthdays:
-            birthday = employee.birthday.replace(year=period_start.year)
-            if period_start <= birthday <= period_end:
-                holidays.append({"id": f"birthday-{employee.id}", "kind": "birthday", "visibility": "company", "title": f"{employee.name}-ийн төрсөн өдөр", "starts_at": datetime.combine(birthday, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(birthday + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": False})
+    organization = await db.get(Organization, actor.organization_id)
+    country = str((organization.settings or {}).get("holiday_country", "MN")).upper()
+    holiday_rows = (await db.execute(select(HolidayRecord).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.country_code == country, HolidayRecord.is_active.is_(True), HolidayRecord.holiday_date >= period_start, HolidayRecord.holiday_date <= period_end))).scalars().all()
+    holidays = [{"id": row.id, "kind": "holiday", "visibility": "company", "title": row.local_name or row.name, "starts_at": datetime.combine(row.holiday_date, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(row.holiday_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": actor.has_any_role(*MANAGEMENT_ROLES)} for row in holiday_rows]
+    birthdays = (await db.execute(select(Employee).where(Employee.is_active.is_(True), Employee.birthday.isnot(None)))).scalars().all()
+    for employee in birthdays:
+        for birthday in _birthday_occurrences(employee.birthday, period_start, period_end):
+            holidays.append({"id": f"birthday-{employee.id}-{birthday.year}", "kind": "birthday", "visibility": "company", "title": f"{employee.name}-ийн төрсөн өдөр", "starts_at": datetime.combine(birthday, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(birthday + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": False})
     return {"scope": scope, "tasks": task_events, "time_blocks": blocks, "entries": entries, "holidays": holidays}
 
 
@@ -921,11 +1076,36 @@ async def sync_holidays(year: int = Query(default_factory=lambda: date.today().y
     return {"country": country, "year": year, "added": added}
 
 
+@router.get("/calendar/holiday-settings")
+async def get_holiday_settings(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    organization = await db.get(Organization, actor.organization_id)
+    current = str((organization.settings or {}).get("holiday_country", "MN")).upper()
+    countries = [{"countryCode": "MN", "name": "Mongolia"}]
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://date.nager.at/api/v3/AvailableCountries", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    countries = await response.json()
+    except aiohttp.ClientError:
+        pass
+    return {"country": current, "countries": countries}
+
+
 @router.put("/calendar/holiday-country")
-async def set_holiday_country(country_code: str, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin"))):
-    country = country_code.strip().upper()
+async def set_holiday_country(data: HolidayCountryInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin"))):
+    country = data.country_code.strip().upper()
     if len(country) != 2 or not country.isalpha():
         raise HTTPException(status_code=400, detail="Country must be a two-letter code")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://date.nager.at/api/v3/AvailableCountries", timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    supported = {item["countryCode"] for item in await response.json()}
+                    if country not in supported:
+                        raise HTTPException(status_code=400, detail="Holiday country is not supported")
+    except aiohttp.ClientError:
+        if country != "MN":
+            raise HTTPException(status_code=502, detail="Holiday provider is unavailable")
     organization = await db.get(Organization, actor.organization_id, with_for_update=True)
     organization.settings = {**(organization.settings or {}), "holiday_country": country}
     await db.commit()

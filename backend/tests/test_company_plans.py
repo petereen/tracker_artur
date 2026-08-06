@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from app.routers.company_plans import CompanyPlanItemCreate, CompanyPlanReorder, _month_start
+from app.routers.company_plans import CompanyPlanItemCreate, CompanyPlanReorder, PlanIdeaInput, PlanIdeaMerge, _month_start
 
 
 def test_company_plan_month_is_normalized_to_first_day():
@@ -26,3 +26,13 @@ def test_reorder_requires_each_horizon_and_unique_item_ids():
     assert CompanyPlanReorder(plan_month=date(2026, 8, 1), columns=columns).columns == columns
     with pytest.raises(ValidationError):
         CompanyPlanReorder(plan_month=date(2026, 8, 1), columns={"long_term": [1], "mid_term": [], "short_term": [1]})
+
+
+def test_member_plan_idea_accepts_optional_due_date():
+    idea = PlanIdeaInput(plan_month=date(2026, 8, 1), title="Better onboarding", suggested_due_date=date(2026, 8, 20))
+    assert idea.suggested_due_date == date(2026, 8, 20)
+
+
+def test_plan_merge_requires_at_least_one_source_idea():
+    with pytest.raises(ValidationError):
+        PlanIdeaMerge(idea_ids=[], plan_month=date(2026, 8, 1), title="Merged")

@@ -29,6 +29,15 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Build project detail drawer, editing, project tasks/subtasks, and recoverable archival (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `backend/app/routers/enterprise.py`)
+- [x] Make Tasks personal by default with filters, accessible Kanban drag/drop, subtask styling, and management deadline tracking (`frontend/src/pages/EnterpriseTasksPage.tsx`, `backend/app/routers/enterprise.py`)
+- [x] Replace Goals navigation with member idea intake and management Plan review/edit/merge workflows (`frontend/src/pages/PlansPage.tsx`, `backend/app/routers/company_plans.py`)
+- [x] Replace the Stats heatmap and repair responsive analytics layout (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/components/HeatmapCalendar.tsx`)
+- [x] Add Telegram chat actions to worker profiles (`frontend/src/components/EnterpriseShell.tsx`, `backend/app/routers/enterprise_auth.py`)
+- [x] Add holiday-country settings, recurring birthdays, red holiday/weekend labels, and calendar separators (`frontend/src/pages/CalendarWorkspacePage.tsx`, `backend/app/routers/enterprise.py`)
+- [x] Replace the Today seven-day strip with an Apple-style month calendar (`frontend/src/pages/EnterpriseDashboardPage.tsx`)
+- [x] Add reliable access-token refresh/retry and cross-tab session coordination (`frontend/src/api/client.ts`, `frontend/src/api/enterprise.ts`)
+- [x] Add additive schema migration and regression coverage for the workspace milestone (`backend/alembic/versions`, `backend/tests`, `frontend/src/pages`)
 - [x] Make check-in questions deletable and targetable to all or selected workers (`backend/app/routers/questions.py`, `frontend/src/pages/QuestionsPage.tsx`, `backend/app/bot/db.py`)
 - [x] Validate one Alembic head, backend syntax, clean diffs, frontend production build, and frontend tests (2 passed)
 - [x] Prevent project/task form failures from surfacing as unhandled Axios promises (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/pages/EnterpriseTasksPage.tsx`)
