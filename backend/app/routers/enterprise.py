@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import mimetypes
@@ -1002,6 +1003,25 @@ def _calendar_entry_out(item: CalendarEntry) -> dict:
     return {"id": item.id, "kind": item.kind, "visibility": item.visibility, "title": item.title, "description": item.description, "starts_at": item.starts_at, "ends_at": item.ends_at, "remind_at": item.remind_at, "version": item.version, "can_edit": item.created_by_account_id is None or item.created_by_account_id == item.account_id}
 
 
+async def _sync_holiday_year(db: AsyncSession, organization_id: int, country: str, year: int) -> int:
+    """Populate a missing holiday year without making calendar viewers need admin access."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"https://date.nager.at/api/v3/PublicHolidays/{year}/{country}", timeout=aiohttp.ClientTimeout(total=10)) as response:
+            if response.status != 200:
+                raise HTTPException(status_code=502, detail="Holiday provider is unavailable")
+            payload = await response.json()
+    added = 0
+    for item in payload:
+        holiday_day = date.fromisoformat(item["date"])
+        exists = await db.scalar(select(HolidayRecord.id).where(HolidayRecord.organization_id == organization_id, HolidayRecord.country_code == country, HolidayRecord.holiday_date == holiday_day, HolidayRecord.name == item["name"]))
+        if not exists:
+            db.add(HolidayRecord(organization_id=organization_id, country_code=country, holiday_date=holiday_day, name=item["name"], local_name=item.get("localName")))
+            added += 1
+    if added:
+        await db.flush()
+    return added
+
+
 @router.get("/calendar/events")
 async def calendar_events(scope: Literal["private", "corporate"] = "private", date_from: date | None = None, date_to: date | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     period_start = date_from or date.today() - timedelta(days=14)
@@ -1028,6 +1048,16 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
     entries = [{**_calendar_entry_out(row), "can_edit": row.created_by_account_id == actor.account_id or (row.visibility == "company" and actor.has_any_role(*MANAGEMENT_ROLES))} for row in entry_rows]
     organization = await db.get(Organization, actor.organization_id)
     country = str((organization.settings or {}).get("holiday_country", "MN")).upper()
+    # A fresh organization used to show an empty calendar until an administrator
+    # manually pressed sync.  Load each visible year on demand, then cache it.
+    for year in range(period_start.year, period_end.year + 1):
+        has_year = await db.scalar(select(HolidayRecord.id).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.country_code == country, HolidayRecord.holiday_date >= date(year, 1, 1), HolidayRecord.holiday_date <= date(year, 12, 31)))
+        if not has_year:
+            try:
+                await _sync_holiday_year(db, actor.organization_id, country, year)
+                await db.commit()
+            except (aiohttp.ClientError, asyncio.TimeoutError, HTTPException):
+                await db.rollback()
     holiday_rows = (await db.execute(select(HolidayRecord).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.country_code == country, HolidayRecord.is_active.is_(True), HolidayRecord.holiday_date >= period_start, HolidayRecord.holiday_date <= period_end))).scalars().all()
     holidays = [{"id": row.id, "kind": "holiday", "visibility": "company", "title": row.local_name or row.name, "starts_at": datetime.combine(row.holiday_date, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(row.holiday_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": actor.has_any_role(*MANAGEMENT_ROLES)} for row in holiday_rows]
     birthdays = (await db.execute(select(Employee).where(Employee.is_active.is_(True), Employee.birthday.isnot(None)))).scalars().all()
@@ -1058,20 +1088,9 @@ async def sync_holidays(year: int = Query(default_factory=lambda: date.today().y
     if len(country) != 2:
         raise HTTPException(status_code=400, detail="Set a two-letter holiday country first")
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://date.nager.at/api/v3/PublicHolidays/{year}/{country}", timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status != 200:
-                    raise HTTPException(status_code=502, detail="Holiday provider is unavailable")
-                payload = await response.json()
+        added = await _sync_holiday_year(db, actor.organization_id, country, year)
     except aiohttp.ClientError as exc:
         raise HTTPException(status_code=502, detail="Holiday provider is unavailable") from exc
-    added = 0
-    for item in payload:
-        holiday_day = date.fromisoformat(item["date"])
-        exists = await db.scalar(select(HolidayRecord.id).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.country_code == country, HolidayRecord.holiday_date == holiday_day, HolidayRecord.name == item["name"]))
-        if not exists:
-            db.add(HolidayRecord(organization_id=actor.organization_id, country_code=country, holiday_date=holiday_day, name=item["name"], local_name=item.get("localName")))
-            added += 1
     await db.commit()
     return {"country": country, "year": year, "added": added}
 

@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import {
   BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal,
-  LayoutDashboard, LogOut, Menu, Search, Send, Settings2, Sparkles, Users2, X,
+  LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X,
 } from 'lucide-react'
 import { useActor, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
@@ -80,9 +80,11 @@ export function EnterpriseShell() {
   const [workersOpen, setWorkersOpen] = useState(false)
   const [workerSearch, setWorkerSearch] = useState('')
   const [selectedWorker, setSelectedWorker] = useState<number>()
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('oyuns-theme') as 'light' | 'dark') || 'light')
   const workers = useWorkerDirectory()
 
   useEffect(() => setMobileOpen(false), [location.pathname])
+  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('oyuns-theme', theme) }, [theme])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -131,6 +133,7 @@ export function EnterpriseShell() {
           <header className="workspace-header">
             <div><span className="eyebrow">OYUNS / Workspace</span><h1>{title}</h1></div>
             <div className="header-actions">
+              <button className="theme-toggle" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={theme === 'light' ? 'Dark mode идэвхжүүлэх' : 'Light mode идэвхжүүлэх'} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
               <button className="search-trigger" onClick={() => setCommandOpen(true)}><Search size={16} /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
               <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>
             </div>

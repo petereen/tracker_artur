@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Polish task planning, calendars, timeline, profile avatars, theme, and responsive workspace UI (`frontend/src/pages`, `frontend/src/components`, `frontend/src/index.css`, `backend/app/routers/enterprise.py`)
 - [x] Make check-in questions deletable and targetable to all or selected workers (`backend/app/routers/questions.py`, `frontend/src/pages/QuestionsPage.tsx`, `backend/app/bot/db.py`)
 - [x] Repair JSONB event serialization and all affected POST creation flows (`backend/app/services/enterprise_events.py`)
 - [x] Add approval-based member project requests and management review (`backend/app/routers/enterprise.py`)
