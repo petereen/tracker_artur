@@ -29,6 +29,9 @@ async def realtime(websocket: WebSocket, token: str, cursor: int = 0):
                     )
                 ).scalars().all()
             for event in events:
+                if event.topic == "notifications" and event.payload.get("recipient_account_id") != actor.account_id:
+                    last_id = event.id
+                    continue
                 await websocket.send_json(
                     {
                         "id": event.id,

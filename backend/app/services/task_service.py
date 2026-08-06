@@ -5,16 +5,19 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
 import pytz
-from sqlalchemy import case, or_, select
+from sqlalchemy import case, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.db import get_session
 from app.models.models import (
     DEFAULT_REMINDER_INTERVALS_MIN,
     Employee,
+    DomainEvent,
     NotificationOutbox,
     Task,
     TaskComment,
+    UserNotification,
+    UserAccount,
 )
 
 ACTIVE_STATUSES = ("open", "in_progress", "overdue")
@@ -355,9 +358,36 @@ def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, 
     if not recipient_tg:
         return
     with get_session() as s:
+        employee = s.execute(select(Employee).where(Employee.telegram_id == str(recipient_tg))).scalar_one_or_none()
+        account = s.execute(select(UserAccount).where(UserAccount.employee_id == employee.id, UserAccount.status == "active")).scalar_one_or_none() if employee else None
+        user_notification_id = None
+        if account:
+            web_key = f"legacy:{dedup_key}:account:{account.id}"
+            notification = s.execute(select(UserNotification).where(UserNotification.dedup_key == web_key)).scalar_one_or_none()
+            if not notification:
+                title = "Шинэ даалгавар" if kind == "task_assigned" else "Даалгаврын хугацаа хэтэрлээ" if kind == "task_overdue" else "Мэдэгдэл"
+                body = payload.get("text") or (f"“{payload.get('title', 'Даалгавар')}” даалгаврын мэдээлэл шинэчлэгдлээ.")
+                notification = UserNotification(
+                    organization_id=account.organization_id, recipient_account_id=account.id,
+                    recipient_employee_id=employee.id, kind=kind, title=title, body=body,
+                    target_url=f"/tasks?task={task_id}" if task_id else "/tasks", payload=payload,
+                    telegram_status="queued", dedup_key=web_key,
+                )
+                s.add(notification)
+                s.flush()
+                event = DomainEvent(
+                    organization_id=account.organization_id, topic="notifications",
+                    aggregate_type="user_notification", aggregate_id=notification.id,
+                    operation="created", payload={"recipient_account_id": account.id},
+                )
+                s.add(event)
+                s.flush()
+                s.execute(text("SELECT pg_notify('oyuns_events', :event_id)"), {"event_id": str(event.id)})
+            user_notification_id = notification.id
         stmt = (
             pg_insert(NotificationOutbox)
             .values(
+                user_notification_id=user_notification_id,
                 task_id=task_id, recipient_tg=str(recipient_tg), kind=kind,
                 payload=payload, not_before=not_before, status="pending", dedup_key=dedup_key,
             )
@@ -384,6 +414,7 @@ def fetch_due_outbox(limit: int = 25) -> list[dict]:
             task = s.get(Task, r.task_id) if r.task_id else None
             out.append({
                 "id": r.id, "recipient_tg": r.recipient_tg, "kind": r.kind,
+                "user_notification_id": r.user_notification_id,
                 "payload": r.payload or {}, "task_id": r.task_id,
                 "task_title": task.title if task else None,
                 "task_description": task.description if task else None,
@@ -400,6 +431,10 @@ def mark_outbox(outbox_id: int, status: str) -> None:
             r.status = status
             if status == "sent":
                 r.sent_at = datetime.now(timezone.utc)
+            if r.user_notification_id:
+                notification = s.get(UserNotification, r.user_notification_id)
+                if notification:
+                    notification.telegram_status = status
             s.commit()
 
 

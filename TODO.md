@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Polish Calendar navigation and Today task/calendar layout (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`)
+- [x] Add persistent web notifications mirrored through the Telegram outbox (`backend/app/models/models.py`, `backend/app/services`, `backend/app/routers/enterprise.py`, `frontend/src`)
+- [x] Add local memoji choices and validated custom avatar uploads (`emojis`, `frontend/public/emojis`, `backend/app/routers/enterprise_auth.py`)
+- [x] Add ClamAV-backed malware scanning for attachments and avatars (`backend/app/services`, deployment configuration)
+- [x] Add notification/avatar migrations, automated coverage, documentation, and validation (`backend/alembic/versions`, `backend/tests`, `frontend/src`)
 - [x] Polish task planning, calendars, timeline, profile avatars, theme, and responsive workspace UI (`frontend/src/pages`, `frontend/src/components`, `frontend/src/index.css`, `backend/app/routers/enterprise.py`)
 - [x] Make check-in questions deletable and targetable to all or selected workers (`backend/app/routers/questions.py`, `frontend/src/pages/QuestionsPage.tsx`, `backend/app/bot/db.py`)
 - [x] Repair JSONB event serialization and all affected POST creation flows (`backend/app/services/enterprise_events.py`)
@@ -16,7 +21,7 @@
 - [x] Fix production React render-depth error and suppress employee-unlinked clock polling (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Phase 1 foundation: Add enterprise schema, identity, RBAC, shared events, and real-time infrastructure
 - [x] Phase 2 foundation: Build the responsive Apple-style application shell and design system
-- [ ] Phase 3 completion: Add external malware scanning plus editable task calendar/timeline and collaboration UI
+- [ ] Phase 3 completion: Finish remaining task collaboration UI; malware scanning and editable calendar/timeline are delivered
 - [ ] Phase 4 completion: Finish check-in/report authoring UI, side-by-side revisions, inline review UI, and timer recovery UX
 - [ ] Phase 5 completion: Add permission-safe financial and KPI analytical drill-downs
 - [ ] Phase 6 completion: Add inbound Google push synchronization and run production hardening exercises
@@ -30,6 +35,7 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Reorder the workspace menu into grouped Today, work, planning, and analytics sections and add a subtle profile hover state (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
 - [x] Build project detail drawer, editing, project tasks/subtasks, and recoverable archival (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `backend/app/routers/enterprise.py`)
 - [x] Make Tasks personal by default with filters, accessible Kanban drag/drop, subtask styling, and management deadline tracking (`frontend/src/pages/EnterpriseTasksPage.tsx`, `backend/app/routers/enterprise.py`)
 - [x] Replace Goals navigation with member idea intake and management Plan review/edit/merge workflows (`frontend/src/pages/PlansPage.tsx`, `backend/app/routers/company_plans.py`)

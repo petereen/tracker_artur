@@ -5,24 +5,25 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import {
   BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal,
-  LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X,
+  LayoutDashboard, LogOut, Menu, Moon, Search, Send, Sparkles, Sun, Users2, X,
 } from 'lucide-react'
 import { useActor, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { periodFromPreset } from './TimePeriodFilter'
 import { OyunsAssistant } from './OyunsAssistant'
+import { NotificationCenter } from './NotificationCenter'
 
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
-  { to: '/projects', label: 'nav.projects', icon: BriefcaseBusiness, roles: [] },
-  { to: '/tasks', label: 'nav.tasks', icon: CheckSquare2, roles: [] },
   { to: '/calendar', label: 'nav.calendar', icon: CalendarDays, roles: [] },
+  { to: '/tasks', label: 'nav.tasks', icon: CheckSquare2, roles: [] },
   { to: '/reports', label: 'nav.reports', icon: FileCheck2, roles: [] },
-  { to: '/capacity', label: 'nav.capacity', icon: Users2, roles: ['admin', 'manager', 'team_lead'] },
+  { to: '/projects', label: 'nav.projects', icon: BriefcaseBusiness, roles: [] },
   { to: '/plans', label: 'nav.plans', icon: Goal, roles: [] },
   { to: '/analytics', label: 'nav.analytics', icon: BarChart3, roles: [] },
-  { to: '/administration', label: 'nav.settings', icon: Settings2, roles: ['admin'] },
 ]
+
+const NAV_GROUP_BREAKS = new Set(['/calendar', '/projects', '/analytics'])
 
 const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
@@ -50,7 +51,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         const event = JSON.parse(message.data)
         cursor = event.id
         sessionStorage.setItem('oyuns-event-cursor', String(cursor))
-        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', okrs: 'objectives' }
+        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', okrs: 'objectives', notifications: 'notifications' }
         const key = topicMap[event.topic]
         if (key) queryClient.invalidateQueries({ queryKey: ['v1', key] })
       }
@@ -117,9 +118,11 @@ export function EnterpriseShell() {
           <div className="sidebar-brand"><img src="/oyuns-aio-logo.png" alt="OYUNS" /><button onClick={() => setMobileOpen(false)} aria-label="Цэс хаах"><X /></button></div>
           <nav aria-label="Үндсэн цэс">
             {nav.map(({ to, label, icon: Icon }) => (
-              <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                <Icon size={18} strokeWidth={1.8} aria-hidden /><span>{t(label)}</span>
-              </NavLink>
+              <div className={NAV_GROUP_BREAKS.has(to) ? 'nav-group nav-group-break' : 'nav-group'} key={to}>
+                <NavLink to={to} end={to === '/'} className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                  <Icon size={18} strokeWidth={1.8} aria-hidden /><span>{t(label)}</span>
+                </NavLink>
+              </div>
             ))}
           </nav>
           <div className="sidebar-profile">
@@ -133,6 +136,7 @@ export function EnterpriseShell() {
           <header className="workspace-header">
             <div><span className="eyebrow">OYUNS / Workspace</span><h1>{title}</h1></div>
             <div className="header-actions">
+              <NotificationCenter />
               <button className="theme-toggle" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={theme === 'light' ? 'Dark mode идэвхжүүлэх' : 'Light mode идэвхжүүлэх'} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
               <button className="search-trigger" onClick={() => setCommandOpen(true)}><Search size={16} /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
               <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>
@@ -140,7 +144,7 @@ export function EnterpriseShell() {
           </header>
           <div className="workspace-content"><Outlet /></div>
         </main>
-        <aside className={`workers-drawer ${workersOpen ? 'open' : ''}`} aria-label="Ажилтны төлөв"><button className="workers-toggle" onClick={() => setWorkersOpen((value) => !value)} aria-label={workersOpen ? 'Ажилтны жагсаалт хаах' : 'Ажилтны жагсаалт нээх'}>{workersOpen ? <ChevronRight /> : <><ChevronLeft /><Users2 /></>}</button>{workersOpen && <div className="workers-content"><header><div><span className="eyebrow">Live presence</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)}><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={worker.avatar_url} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Салбар оруулаагүй'}</p>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer"><Send size={14} />Telegram-аар чатлах</a>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div>}</aside>
+        <aside className={`workers-drawer ${workersOpen ? 'open' : ''}`} aria-label="Ажилтны төлөв"><button className="workers-toggle" onClick={() => setWorkersOpen((value) => !value)} aria-label={workersOpen ? 'Ажилтны жагсаалт хаах' : 'Ажилтны жагсаалт нээх'}>{workersOpen ? <ChevronRight /> : <><ChevronLeft /><Users2 /></>}</button>{workersOpen && <div className="workers-content"><header><div><span className="eyebrow">Live presence</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)}><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={worker.avatar_url} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Ажлын алба оруулаагүй'}</p>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer"><Send size={14} />Telegram-аар чатлах</a>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div>}</aside>
         <OyunsAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
         <AnimatePresence>
           {commandOpen && (

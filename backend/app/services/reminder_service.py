@@ -141,6 +141,14 @@ async def send_task_reminder(task_id: int, minutes_before: int) -> None:
     bot = _make_bot()
     try:
         await bot.send_message(task["assignee_tg"], text, reply_markup=task_reminder_kb(task["id"]))
+        from app.services.user_notifications import mirror_existing_telegram_notification
+        mirror_existing_telegram_notification(
+            employee_id=task["assignee_id"], kind="task_deadline", title="Даалгаврын сануулга",
+            body=f"“{task['title']}” даалгаврын хугацаа: {_fmt_deadline(task['deadline_at'])}.",
+            target_url=f"/tasks?task={task['id']}",
+            dedup_key=f"task-reminder:{task['id']}:{minutes_before}",
+            payload={"task_id": task["id"]},
+        )
     finally:
         await bot.session.close()
 
@@ -225,4 +233,4 @@ def _render_outbox(item: dict):
         text = (f"🔴 #{tid} даалгаврын хугацаа хэтэрлээ: {title}\n"
                 f"/done {tid} гэж дуусгах эсвэл /snooze {tid} <цаг> гэж хугацааг хойшлуулна уу.")
         return text, (task_actions_kb(tid) if tid else None)
-    return p.get("text", "🔔 Мэдэгдэл"), None
+    return p.get("text") or f"🔔 <b>{p.get('title', 'Мэдэгдэл')}</b>\n\n{p.get('body', '')}", None

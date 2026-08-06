@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     ATTACHMENT_STORAGE_BACKEND: str = "local"
     ATTACHMENT_UPLOAD_DIR: str = "/app/uploads/attachments"
     ATTACHMENT_MAX_BYTES: int = 25 * 1024 * 1024
+    AVATAR_UPLOAD_DIR: str = "/app/uploads/avatars"
+    AVATAR_MAX_BYTES: int = 2 * 1024 * 1024
+    AVATAR_MAX_PIXELS: int = 256
+    CLAMAV_ENABLED: bool = False
+    CLAMAV_HOST: str = "clamav"
+    CLAMAV_PORT: int = 3310
+    CLAMAV_TIMEOUT_SECONDS: float = 10.0
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = ""

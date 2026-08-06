@@ -337,6 +337,7 @@ class NotificationOutbox(Base):
     __tablename__ = "notification_outbox"
 
     id = Column(Integer, primary_key=True)
+    user_notification_id = Column(Integer, ForeignKey("user_notifications.id", ondelete="CASCADE"))
     event_id = Column(Integer, ForeignKey("domain_events.id", ondelete="SET NULL"))
     task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"))
     recipient_tg = Column(Text, nullable=False)
@@ -352,6 +353,29 @@ class NotificationOutbox(Base):
     dedup_key = Column(Text, unique=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     sent_at = Column(DateTime(timezone=True))
+
+
+class UserNotification(Base):
+    __tablename__ = "user_notifications"
+    __table_args__ = (
+        Index("ix_user_notifications_account_unread", "recipient_account_id", "read_at", "id"),
+        UniqueConstraint("dedup_key", name="uq_user_notifications_dedup_key"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    recipient_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    recipient_employee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    event_id = Column(Integer, ForeignKey("domain_events.id", ondelete="SET NULL"))
+    kind = Column(Text, nullable=False)
+    title = Column(Text, nullable=False)
+    body = Column(Text, nullable=False)
+    target_url = Column(Text)
+    payload = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    telegram_status = Column(Text, nullable=False, server_default="unavailable", default="unavailable")
+    dedup_key = Column(Text, nullable=False)
+    read_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 # ─── Ажлын тайлангууд ────────────────────────────────────────────────────────

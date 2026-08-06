@@ -97,9 +97,12 @@ Widget is included. The Mini App itself does not require the Login Widget.
 ## 5. Deployment order
 
 1. Back up PostgreSQL.
-2. Deploy the new image and run `alembic upgrade s7t8u9v0w1x2` once.
-3. Start `backend`, `worker`, `bot`, and `frontend`; verify `/api/health`.
+2. Deploy the new image and run `alembic upgrade head` once (current head: `x2y3z4a5b6c7`).
+3. Start `clamav`, then `backend`, `worker`, `bot`, and `frontend`; verify `/api/health` and one clean test upload.
 4. Test admin login, create a second account from Administration, change its
    password/status, private attachment access, Google connection, and one task
    sync with a pilot account.
 5. Review failed `job_queue` records and provider dashboards before broad rollout.
+# Malware scanning and profile avatars
+
+Production compose deployments run the official `clamav/clamav:1.4` LTS image and set `CLAMAV_ENABLED=true`. Attachment and avatar uploads fail closed with HTTP 503 while the scanner is unavailable, and infected files are rejected before storage. Custom avatars use the persistent `avatar_uploads` volume, accept PNG/JPEG/WebP up to 2 MB, and reject dimensions over 256×256 pixels. Budget roughly 4 GB of RAM for the ClamAV service and persist `/var/lib/clamav` so signature updates survive restarts.

@@ -1,4 +1,10 @@
 services:
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    volumes:
+      - clamav_data:/var/lib/clamav
+
   db:
     image: postgres:15
     restart: unless-stopped
@@ -20,6 +26,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      clamav:
+        condition: service_started
     environment:
       DATABASE_URL: ${DATABASE_URL}
       SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
@@ -51,6 +59,12 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
       ATTACHMENT_STORAGE_BACKEND: ${ATTACHMENT_STORAGE_BACKEND:-local}
+      CLAMAV_ENABLED: ${CLAMAV_ENABLED:-true}
+      CLAMAV_HOST: ${CLAMAV_HOST:-clamav}
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+      CLAMAV_TIMEOUT_SECONDS: ${CLAMAV_TIMEOUT_SECONDS:-10}
+      AVATAR_MAX_BYTES: ${AVATAR_MAX_BYTES:-2097152}
+      AVATAR_MAX_PIXELS: ${AVATAR_MAX_PIXELS:-256}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
@@ -60,6 +74,7 @@ services:
     volumes:
       - knowledge_uploads:/app/uploads/knowledge
       - attachment_uploads:/app/uploads/attachments
+      - avatar_uploads:/app/uploads/avatars
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 5s
@@ -147,6 +162,8 @@ volumes:
   pgdata:
   knowledge_uploads:
   attachment_uploads:
+  avatar_uploads:
+  clamav_data:
 
 networks:
   web-edge:

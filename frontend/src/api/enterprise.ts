@@ -383,3 +383,44 @@ export function useTelegramProfileLink() {
   const queryClient = useQueryClient()
   return useMutation({ mutationFn: (init_data: string) => api.post('/v1/auth/profile/telegram-link', null, { params: { init_data } }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); toast.success('Telegram холбогдлоо') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Telegram холбогдсонгүй') })
 }
+
+export interface UserNotification {
+  id: number
+  kind: string
+  title: string
+  body: string
+  target_url: string | null
+  payload: Record<string, unknown>
+  created_at: string
+  read_at: string | null
+  telegram_status: 'queued' | 'sent' | 'failed' | 'unavailable'
+}
+
+export interface NotificationPage {
+  items: UserNotification[]
+  unread_count: number
+  next_cursor: number | null
+}
+
+export function useNotifications() {
+  return useQuery<NotificationPage>({ queryKey: ['v1', 'notifications'], queryFn: () => api.get('/v1/notifications').then((response) => response.data) })
+}
+
+export function useReadNotification() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (id: number) => api.post(`/v1/notifications/${id}/read`).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'notifications'] }) })
+}
+
+export function useReadAllNotifications() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: () => api.post('/v1/notifications/read-all').then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'notifications'] }) })
+}
+
+export function useUploadAvatar() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => { const body = new FormData(); body.append('file', file); return api.post('/v1/auth/profile/avatar', body).then((response) => response.data) },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success('Профайл зураг хадгалагдлаа') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Зураг хадгалагдсангүй'),
+  })
+}

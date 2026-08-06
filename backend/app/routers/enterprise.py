@@ -65,6 +65,7 @@ from app.models.models import (
     WorkTimeEntry,
     Organization,
     UserAccount,
+    UserNotification,
 )
 from app.services.enterprise_events import record_change
 from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
@@ -74,6 +75,8 @@ from app.services.google_calendar import account_from_state, authorization_url a
 from app.services.secret_box import encrypt_secret
 from app.services import assistant_ai, exchange_rate_service
 from app.services.knowledge_service import rank_knowledge
+from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
+from app.services.user_notifications import create_notifications
 
 
 router = APIRouter()
@@ -83,6 +86,63 @@ LEGACY_STATUS = {
     "backlog": "open", "to_do": "open", "in_progress": "in_progress",
     "review": "open", "done": "done", "cancelled": "cancelled",
 }
+
+
+async def _management_account_ids(db: AsyncSession, organization_id: int) -> set[int]:
+    return set((await db.execute(
+        select(RoleAssignment.account_id).join(UserAccount, UserAccount.id == RoleAssignment.account_id).where(
+            UserAccount.organization_id == organization_id,
+            UserAccount.status == "active",
+            RoleAssignment.role.in_(MANAGEMENT_ROLES),
+        )
+    )).scalars().all())
+
+
+@router.get("/notifications")
+async def list_notifications(
+    cursor: int | None = None,
+    limit: int = Query(default=20, ge=1, le=50),
+    unread_only: bool = False,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    query = select(UserNotification).where(UserNotification.recipient_account_id == actor.account_id)
+    if cursor:
+        query = query.where(UserNotification.id < cursor)
+    if unread_only:
+        query = query.where(UserNotification.read_at.is_(None))
+    rows = (await db.execute(query.order_by(UserNotification.id.desc()).limit(limit + 1))).scalars().all()
+    page = rows[:limit]
+    unread_count = await db.scalar(select(func.count()).select_from(UserNotification).where(UserNotification.recipient_account_id == actor.account_id, UserNotification.read_at.is_(None)))
+    return {
+        "items": [{
+            "id": item.id, "kind": item.kind, "title": item.title, "body": item.body,
+            "target_url": item.target_url, "payload": item.payload, "created_at": item.created_at,
+            "read_at": item.read_at, "telegram_status": item.telegram_status,
+        } for item in page],
+        "unread_count": unread_count or 0,
+        "next_cursor": page[-1].id if len(rows) > limit and page else None,
+    }
+
+
+@router.post("/notifications/{notification_id:int}/read")
+async def read_notification(notification_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    item = await db.get(UserNotification, notification_id, with_for_update=True)
+    if not item or item.recipient_account_id != actor.account_id:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    item.read_at = item.read_at or datetime.now(timezone.utc)
+    await db.commit()
+    return {"id": item.id, "read_at": item.read_at}
+
+
+@router.post("/notifications/read-all")
+async def read_all_notifications(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    now = datetime.now(timezone.utc)
+    rows = (await db.execute(select(UserNotification).where(UserNotification.recipient_account_id == actor.account_id, UserNotification.read_at.is_(None)))).scalars().all()
+    for item in rows:
+        item.read_at = now
+    await db.commit()
+    return {"updated": len(rows), "read_at": now}
 
 
 def _decimal(value: Decimal | None) -> float | None:
@@ -628,7 +688,13 @@ async def create_project(data: ProjectInput, db: AsyncSession = Depends(get_db),
         )
         db.add(request)
         await db.flush()
-        await record_change(db, actor=actor, topic="projects", aggregate_type="project_request", aggregate_id=request.id, operation="requested", after={"status": request.status, "name": data.name, "code": data.code})
+        source_event = await record_change(db, actor=actor, topic="projects", aggregate_type="project_request", aggregate_id=request.id, operation="requested", after={"status": request.status, "name": data.name, "code": data.code})
+        await create_notifications(
+            db, organization_id=actor.organization_id, account_ids=await _management_account_ids(db, actor.organization_id),
+            kind="project_approval_requested", title="Төслийн хүсэлт", body=f"“{data.name}” төслийн хүсэлт ирлээ.",
+            target_url="/projects", payload={"request_id": request.id}, source_event_id=source_event.id,
+            dedup_key=f"project-request:{request.id}",
+        )
         await db.commit()
         return {"request_id": request.id, "status": "pending", "requires_approval": True}
     payload = data.model_dump(exclude={"member_ids"})
@@ -648,7 +714,14 @@ async def create_project(data: ProjectInput, db: AsyncSession = Depends(get_db),
         await db.flush()
         manager = await db.get(Employee, data.manager_id) if data.manager_id else None
         output = {**_project_out(project), "manager_name": manager.name if manager else None, "member_ids": sorted(employee_ids)}
-        await record_change(db, actor=actor, topic="projects", aggregate_type="project", aggregate_id=project.id, operation="created", version=project.version, after=output)
+        source_event = await record_change(db, actor=actor, topic="projects", aggregate_type="project", aggregate_id=project.id, operation="created", version=project.version, after=output)
+        await create_notifications(
+            db, organization_id=actor.organization_id, employee_ids=employee_ids,
+            exclude_employee_id=actor.employee_id, kind="project_member_added",
+            title="Шинэ төсөл", body=f"Та “{project.name}” төсөлд нэмэгдлээ.",
+            target_url=f"/projects?project={project.id}", payload={"project_id": project.id},
+            source_event_id=source_event.id, dedup_key=f"project-created:{project.id}",
+        )
         await db.commit()
         return output
     except IntegrityError as exc:
@@ -687,7 +760,23 @@ async def review_project_request(request_id: int, data: ProjectRequestReview, db
         for employee_id in member_ids:
             db.add(ProjectMember(project_id=project.id, employee_id=employee_id, project_role="owner" if employee_id == manager_id else "member"))
         request.project_id = project.id
-    await record_change(db, actor=actor, topic="projects", aggregate_type="project_request", aggregate_id=request.id, operation=data.action, after={"status": request.status, "project_id": request.project_id})
+    source_event = await record_change(db, actor=actor, topic="projects", aggregate_type="project_request", aggregate_id=request.id, operation=data.action, after={"status": request.status, "project_id": request.project_id})
+    await create_notifications(
+        db, organization_id=actor.organization_id, account_ids={request.requested_by_account_id},
+        kind="project_request_reviewed", title="Төслийн хүсэлт шийдэгдлээ",
+        body=f"Таны төслийн хүсэлт {('зөвшөөрөгдлөө' if data.action == 'approved' else 'татгалзагдлаа')}.",
+        target_url=f"/projects{f'?project={request.project_id}' if request.project_id else ''}",
+        payload={"request_id": request.id, "project_id": request.project_id, "status": request.status},
+        source_event_id=source_event.id, dedup_key=f"project-request-reviewed:{request.id}",
+    )
+    if data.action == "approved" and request.project_id:
+        await create_notifications(
+            db, organization_id=actor.organization_id, employee_ids=member_ids,
+            exclude_employee_id=actor.employee_id, kind="project_member_added", title="Шинэ төсөл",
+            body=f"Та “{payload.name}” төсөлд нэмэгдлээ.", target_url=f"/projects?project={request.project_id}",
+            payload={"project_id": request.project_id}, source_event_id=source_event.id,
+            dedup_key=f"project-created:{request.project_id}",
+        )
     await db.commit()
     return {"id": request.id, "status": request.status, "project_id": request.project_id}
 
@@ -700,7 +789,14 @@ async def add_project_member(project_id: int, data: ProjectMemberInput, db: Asyn
     member = ProjectMember(project_id=project_id, **data.model_dump())
     db.add(member)
     await db.flush()
-    await record_change(db, actor=actor, topic="capacity", aggregate_type="project_member", aggregate_id=member.id, operation="created", after=data.model_dump(mode="json"))
+    source_event = await record_change(db, actor=actor, topic="capacity", aggregate_type="project_member", aggregate_id=member.id, operation="created", after=data.model_dump(mode="json"))
+    await create_notifications(
+        db, organization_id=actor.organization_id, employee_ids={data.employee_id},
+        exclude_employee_id=actor.employee_id, kind="project_member_added", title="Төсөлд нэмэгдлээ",
+        body=f"Та “{project.name}” төсөлд нэмэгдлээ.", target_url=f"/projects?project={project.id}",
+        payload={"project_id": project.id}, source_event_id=source_event.id,
+        dedup_key=f"project-member:{project.id}:{data.employee_id}",
+    )
     await db.commit()
     return {"id": member.id, **data.model_dump()}
 
@@ -889,7 +985,14 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         db.add(TaskAssignee(task_id=task.id, employee_id=employee_id, assignment_role="primary" if employee_id == owner_id else "contributor"))
     owner = await db.get(Employee, owner_id) if owner_id else None
     output = {**_task_out(task), "assignee_ids": sorted(assignees), "primary_owner_name": owner.name if owner else None}
-    await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after=output)
+    source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after=output)
+    await create_notifications(
+        db, organization_id=actor.organization_id, employee_ids=assignees,
+        exclude_employee_id=actor.employee_id, kind="task_assigned", title="Шинэ даалгавар",
+        body=f"Танд “{task.title}” даалгавар оноолоо.", target_url=f"/tasks?task={task.id}",
+        payload={"task_id": task.id, "title": task.title, "deadline_iso": task.deadline_at.isoformat() if task.deadline_at else None},
+        source_event_id=source_event.id, task_id=task.id, dedup_key=f"task-created:{task.id}",
+    )
     if idempotency_key:
         db.add(IdempotencyRecord(account_id=actor.account_id, operation="create_task", key=idempotency_key, request_hash=request_hash, response_status=201, response_body=json.loads(json.dumps(output, default=str)), expires_at=datetime.now(timezone.utc) + timedelta(days=1)))
     await db.commit()
@@ -1310,10 +1413,16 @@ async def upload_attachment(object_type: Literal["task", "report"], object_id: i
     blocked = {"application/x-msdownload", "application/x-sh", "application/x-executable"}
     if content_type in blocked or filename.lower().endswith((".exe", ".dll", ".bat", ".cmd", ".sh")):
         raise HTTPException(status_code=415, detail="Executable attachments are not allowed")
+    try:
+        scan_status = await scan_upload(content)
+    except MalwareDetected as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MalwareScanUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     storage_key = f"{actor.organization_id}/{object_type}/{object_id}/{uuid.uuid4().hex}"
     checksum = hashlib.sha256(content).hexdigest()
     await put_attachment(storage_key, content, content_type)
-    attachment = Attachment(organization_id=actor.organization_id, object_type=object_type, object_id=object_id, storage_key=storage_key, filename=filename, content_type=content_type, size=len(content), checksum=checksum, uploaded_by_account_id=actor.account_id, scan_status="accepted")
+    attachment = Attachment(organization_id=actor.organization_id, object_type=object_type, object_id=object_id, storage_key=storage_key, filename=filename, content_type=content_type, size=len(content), checksum=checksum, uploaded_by_account_id=actor.account_id, scan_status=scan_status)
     db.add(attachment)
     try:
         await db.flush()
@@ -1592,7 +1701,14 @@ async def submit_report(report_id: int, db: AsyncSession = Depends(get_db), acto
     report.submitted_by_account_id = actor.account_id
     report.submitted_at = datetime.now(timezone.utc)
     report.version += 1
-    await record_change(db, actor=actor, topic="reports", aggregate_type="work_report", aggregate_id=report.id, operation="submitted", version=report.version, after={"status": report.status})
+    source_event = await record_change(db, actor=actor, topic="reports", aggregate_type="work_report", aggregate_id=report.id, operation="submitted", version=report.version, after={"status": report.status})
+    employee = await db.get(Employee, report.employee_id)
+    await create_notifications(
+        db, organization_id=actor.organization_id, account_ids=await _management_account_ids(db, actor.organization_id),
+        kind="report_submitted", title="Шинэ тайлан", body=f"{employee.name if employee else 'Ажилтан'} тайлангаа илгээлээ.",
+        target_url=f"/reports?report={report.id}", payload={"report_id": report.id}, source_event_id=source_event.id,
+        dedup_key=f"report-submitted:{report.id}:v{report.version}",
+    )
     await db.commit()
     return {"id": report.id, "status": report.status, "version": report.version}
 
@@ -1674,7 +1790,15 @@ async def _review_report(report_id: int, target_status: str, operation: str, db:
         if revision:
             revision.status = "approved"
             report.approved_revision_id = revision.id
-    await record_change(db, actor=actor, topic="reports", aggregate_type="work_report", aggregate_id=report.id, operation=operation, version=report.version, after={"status": report.status})
+    source_event = await record_change(db, actor=actor, topic="reports", aggregate_type="work_report", aggregate_id=report.id, operation=operation, version=report.version, after={"status": report.status})
+    await create_notifications(
+        db, organization_id=actor.organization_id, employee_ids={report.employee_id},
+        exclude_employee_id=actor.employee_id, kind=f"report_{operation}",
+        title="Тайлангийн төлөв шинэчлэгдлээ",
+        body="Таны тайлан батлагдлаа." if target_status == "approved" else "Таны тайланд засвар хүссэн байна.",
+        target_url=f"/reports?report={report.id}", payload={"report_id": report.id, "status": report.status},
+        source_event_id=source_event.id, dedup_key=f"report-{operation}:{report.id}:v{report.version}",
+    )
     return {"id": report.id, "status": report.status, "version": report.version}
 
 

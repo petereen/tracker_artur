@@ -211,6 +211,12 @@ async def send_survey(employee_id: int):
             telegram_chat_id=telegram_id,
             local_day=local_day,
         )
+        from app.services.user_notifications import mirror_existing_telegram_notification
+        mirror_existing_telegram_notification(
+            employee_id=employee_id, kind="daily_checkin", title="Өдрийн check-in",
+            body="Өнөөдрийн check-in болон өдрийн тайлангаа бөглөнө үү.",
+            target_url="/", dedup_key=f"daily-checkin:{employee_id}:{local_day}",
+        )
     finally:
         await bot.session.close()
 
@@ -247,7 +253,14 @@ async def send_reminder(employee_id: int, num: int):
         if not report_complete:
             missing.append("өдрийн тайлан")
         if missing:
-            await bot.send_message(telegram_id, f"⚠️ Сануулга #{num}: " + " болон ".join(missing) + "-аа бөглөхөө бүү мартаарай!")
+            reminder_text = f"⚠️ Сануулга #{num}: " + " болон ".join(missing) + "-аа бөглөхөө бүү мартаарай!"
+            await bot.send_message(telegram_id, reminder_text)
+            from app.services.user_notifications import mirror_existing_telegram_notification
+            mirror_existing_telegram_notification(
+                employee_id=employee_id, kind="daily_reminder", title="Өдрийн сануулга",
+                body=" болон ".join(missing) + "-аа бөглөнө үү.", target_url="/",
+                dedup_key=f"daily-reminder:{employee_id}:{local_day}:{num}",
+            )
     finally:
         await bot.session.close()
 
@@ -289,6 +302,12 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str):
                 f"Дуусгахдаа <b>{end_command}</b> командыг ашиглана уу."
             )
         await bot.send_message(telegram_id, message, parse_mode="HTML")
+        from app.services.user_notifications import mirror_existing_telegram_notification
+        mirror_existing_telegram_notification(
+            employee_id=employee_id, kind="worktime_reminder", title="Ажлын цагийн сануулга",
+            body="Ажлын цагаа эхлүүлэх эсвэл дуусгахаа мартсан эсэхээ шалгана уу.", target_url="/",
+            dedup_key=f"worktime-reminder:{employee_id}:{local_day}:{reminder_type}",
+        )
     finally:
         await bot.session.close()
 
@@ -351,6 +370,12 @@ async def send_monthly_report_prompt(employee_id: int):
             telegram_chat_id=telegram_id,
             prompt_type="monthly_report",
             local_day=local_day,
+        )
+        from app.services.user_notifications import mirror_existing_telegram_notification
+        mirror_existing_telegram_notification(
+            employee_id=employee_id, kind="monthly_report", title="Сарын тайлан",
+            body="Энэ сарын тайлангаа илгээнэ үү.", target_url="/reports",
+            dedup_key=f"monthly-report:{employee_id}:{local_day.strftime('%Y-%m')}",
         )
     finally:
         await bot.session.close()

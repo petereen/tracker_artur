@@ -4,7 +4,7 @@ import hmac
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Response, UploadFile, status
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -25,6 +25,8 @@ from app.core.telegram_auth import verify_init_data
 from app.models.models import Employee, JobQueue, Organization, PasswordResetToken, RefreshSession, RoleAssignment, UserAccount
 from app.services.email_service import email_is_configured
 from app.services.secret_box import encrypt_secret
+from app.services.avatar_storage import InvalidAvatar, read_avatar, save_avatar
+from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable
 
 
 router = APIRouter()
@@ -137,8 +139,11 @@ class ProfilePatch(BaseModel):
     @classmethod
     def validate_avatar_url(cls, value: str | None) -> str | None:
         value = value.strip() if value else None
-        if value and not value.startswith("https://"):
-            raise ValueError("Avatar URL must use HTTPS")
+        memoji_paths = {f"/emojis/memoji-{index:02d}.png" for index in range(1, 11)}
+        uploaded = value and value.startswith("/api/v1/auth/avatars/") and value.endswith(".png")
+        allowed = value and (value in memoji_paths or uploaded)
+        if value and not allowed:
+            raise ValueError("Choose a supplied memoji or upload a custom avatar")
         return value
 
 
@@ -434,6 +439,42 @@ async def profile(db: AsyncSession = Depends(get_db), actor: ActorContext = Depe
         "telegram_connected": bool(employee and employee.telegram_id),
         "roles": sorted(actor.roles),
     }
+
+
+@router.get("/avatars/{token}.png")
+async def avatar_media(token: str):
+    try:
+        content = await read_avatar(token)
+    except (FileNotFoundError, OSError):
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    return Response(content, media_type="image/png", headers={
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+    })
+
+
+@router.post("/profile/avatar")
+async def upload_profile_avatar(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    if not actor.employee_id:
+        raise HTTPException(status_code=400, detail="An employee profile is required")
+    content = await file.read(settings.AVATAR_MAX_BYTES + 1)
+    try:
+        token, width, height, size = await save_avatar(content, file.content_type or "application/octet-stream")
+    except InvalidAvatar as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MalwareDetected as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MalwareScanUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    employee = await db.get(Employee, actor.employee_id, with_for_update=True)
+    avatar_url = f"/api/v1/auth/avatars/{token}.png"
+    employee.metadata_json = {**(employee.metadata_json or {}), "avatar_url": avatar_url}
+    await db.commit()
+    return {"avatar_url": avatar_url, "content_type": "image/png", "width": width, "height": height, "size": size}
 
 
 @router.patch("/profile")
