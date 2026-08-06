@@ -184,6 +184,7 @@ def _task_out(item: Task) -> dict:
         "estimate_minutes": item.estimate_minutes, "sort_position": _decimal(item.sort_position),
         "work_location_type": item.work_location_type, "work_location": item.work_location,
         "version": item.version, "is_archived": item.is_archived,
+        "created_by_id": item.created_by_id,
         "created_at": item.created_at, "completed_at": item.completed_at,
         "is_overdue": bool(item.deadline_at and item.deadline_at < datetime.now(timezone.utc) and item.workflow_status not in {"done", "cancelled"}),
     }
@@ -866,7 +867,7 @@ async def project_budget_burn(project_id: int, db: AsyncSession = Depends(get_db
 async def list_tasks(
     project_id: int | None = None,
     workflow_status: str | None = None,
-    scope: Literal["mine", "organization", "project"] = "mine",
+    scope: Literal["mine", "organization", "project", "delegated"] = "mine",
     kind: Literal["all", "standalone", "project", "subtask"] = "all",
     overdue: bool = False,
     date_from: date | None = None,
@@ -902,6 +903,10 @@ async def list_tasks(
         )
         client_projects = select(Project.id).where(Project.client_id.in_(scoped_clients))
         query = query.where(or_(Task.project_id.in_(scoped_projects), Task.project_id.in_(client_projects)))
+    elif scope == "delegated":
+        if not actor.employee_id:
+            return []
+        query = query.where(Task.created_by_id == actor.employee_id)
     elif scope == "organization" and not actor.has_any_role(*MANAGEMENT_ROLES):
         raise HTTPException(status_code=403, detail="Organization task scope requires management access")
     elif scope == "project":
@@ -921,11 +926,11 @@ async def list_tasks(
     assignees: dict[int, list[int]] = {}
     for assignment in assignment_rows:
         assignees.setdefault(assignment.task_id, []).append(assignment.employee_id)
-    employee_ids = {row.assignee_id for row in rows if row.assignee_id} | {item.employee_id for item in assignment_rows}
+    employee_ids = {row.assignee_id for row in rows if row.assignee_id} | {row.created_by_id for row in rows if row.created_by_id} | {item.employee_id for item in assignment_rows}
     people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all()} if employee_ids else {}
     project_ids = {row.project_id for row in rows if row.project_id}
     projects = {row.id: row.name for row in (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()} if project_ids else {}
-    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id)} for row in rows]
+    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "creator_name": people.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id)} for row in rows]
 
 
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)
@@ -1004,7 +1009,8 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     task = await db.get(Task, task_id, with_for_update=True)
     if not task or task.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Task not found")
-    if not actor.has_any_role(*MANAGEMENT_ROLES):
+    can_manage = actor.has_any_role(*MANAGEMENT_ROLES) or (actor.employee_id is not None and task.created_by_id == actor.employee_id)
+    if not can_manage:
         is_contributor = actor.employee_id is not None and bool(await db.scalar(select(TaskAssignee.id).where(TaskAssignee.task_id == task.id, TaskAssignee.employee_id == actor.employee_id)))
         if task.assignee_id != actor.employee_id and not is_contributor:
             raise HTTPException(status_code=403, detail="Task is outside your scope")
@@ -1016,7 +1022,7 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
         if task.version != expected:
             raise HTTPException(status_code=409, detail={"message": "Task changed", "latest": _task_out(task)})
     patch = data.model_dump(exclude_unset=True)
-    if not actor.has_any_role(*MANAGEMENT_ROLES):
+    if not can_manage:
         current = set((await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all())
         changed = (("primary_owner_id" in patch and patch["primary_owner_id"] != task.assignee_id) or ("project_id" in patch and patch["project_id"] != task.project_id) or ("assignee_ids" in patch and set(patch["assignee_ids"] or []) != current))
         if changed:
@@ -1056,6 +1062,20 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before=before, after=output)
     await db.commit()
     return output
+
+
+@router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task(task_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    task = await db.get(Task, task_id, with_for_update=True)
+    if not task or task.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    can_manage = actor.has_any_role(*MANAGEMENT_ROLES) or (actor.employee_id is not None and task.created_by_id == actor.employee_id)
+    if not can_manage:
+        raise HTTPException(status_code=403, detail="Only the task creator or management can delete this task")
+    before = _task_out(task)
+    await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="deleted", version=task.version, before=before)
+    await db.delete(task)
+    await db.commit()
 
 
 @router.get("/deadlines")

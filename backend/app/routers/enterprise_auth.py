@@ -302,6 +302,7 @@ async def _telegram_session(response: Response, db: AsyncSession, telegram_id: s
             password_hash=hash_account_password(secrets.token_urlsafe(48)),
             status="active",
             locale=employee.primary_language or "mn",
+            must_change_password=True,
         )
         db.add(account)
         await db.flush()
@@ -424,7 +425,9 @@ async def me(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(g
 
 @router.get("/profile")
 async def profile(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    account = await db.get(UserAccount, actor.account_id)
     employee = await db.get(Employee, actor.employee_id) if actor.employee_id else None
+    password_setup_required = bool(account and account.must_change_password) or bool(await db.scalar(select(RefreshSession.id).where(RefreshSession.account_id == actor.account_id, RefreshSession.auth_method == "telegram", RefreshSession.revoked_at.is_(None)).limit(1)))
     return {
         "username": actor.email,
         "locale": actor.locale,
@@ -437,6 +440,7 @@ async def profile(db: AsyncSession = Depends(get_db), actor: ActorContext = Depe
         "work_direction": employee.work_direction if employee else None,
         "work_branch": employee.work_branch if employee else None,
         "telegram_connected": bool(employee and employee.telegram_id),
+        "requires_password_setup": password_setup_required,
         "roles": sorted(actor.roles),
     }
 
@@ -481,7 +485,10 @@ async def upload_profile_avatar(
 async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     account = await db.get(UserAccount, actor.account_id, with_for_update=True)
     employee = await db.get(Employee, actor.employee_id, with_for_update=True) if actor.employee_id else None
+    password_setup_required = account.must_change_password or bool(await db.scalar(select(RefreshSession.id).where(RefreshSession.account_id == account.id, RefreshSession.auth_method == "telegram", RefreshSession.revoked_at.is_(None)).limit(1)))
     if data.username and data.username != account.email:
+        if password_setup_required:
+            raise HTTPException(status_code=400, detail="Set a password before changing the username")
         if not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]:
             raise HTTPException(status_code=400, detail="Current password is required to change username")
         duplicate = await db.scalar(select(UserAccount.id).where(func.lower(UserAccount.email) == data.username, UserAccount.id != account.id))
@@ -489,7 +496,7 @@ async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db),
             raise HTTPException(status_code=409, detail="Username already exists")
         account.email = data.username
     if data.new_password:
-        if not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]:
+        if not password_setup_required and (not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]):
             raise HTTPException(status_code=400, detail="Current password is incorrect")
         account.password_hash = hash_account_password(data.new_password)
         account.must_change_password = False
@@ -505,7 +512,7 @@ async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db),
             if field in data.model_fields_set:
                 setattr(employee, field, getattr(data, field))
     await db.commit()
-    return {"username": account.email, "locale": account.locale, "employee_id": actor.employee_id, "name": employee.name if employee else account.email, "telegram_username": employee.telegram_username if employee else None, "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None, "phone_number": employee.phone_number if employee else None, "birthday": employee.birthday if employee else None, "work_direction": employee.work_direction if employee else None, "work_branch": employee.work_branch if employee else None, "telegram_connected": bool(employee and employee.telegram_id), "roles": sorted(actor.roles), "password_changed": bool(data.new_password)}
+    return {"username": account.email, "locale": account.locale, "employee_id": actor.employee_id, "name": employee.name if employee else account.email, "telegram_username": employee.telegram_username if employee else None, "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None, "phone_number": employee.phone_number if employee else None, "birthday": employee.birthday if employee else None, "work_direction": employee.work_direction if employee else None, "work_branch": employee.work_branch if employee else None, "telegram_connected": bool(employee and employee.telegram_id), "requires_password_setup": account.must_change_password, "roles": sorted(actor.roles), "password_changed": bool(data.new_password)}
 
 
 @router.get("/workers/{employee_id}/profile")

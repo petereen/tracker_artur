@@ -35,6 +35,7 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Add Telegram-first password setup, creator-managed task archive/delete APIs, Today delegated-task tracking, and stronger profile affordance (`backend/app/routers/enterprise.py`, `backend/app/routers/enterprise_auth.py`, `frontend/src`)
 - [x] Reorder the workspace menu into grouped Today, work, planning, and analytics sections and add a subtle profile hover state (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
 - [x] Build project detail drawer, editing, project tasks/subtasks, and recoverable archival (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `backend/app/routers/enterprise.py`)
 - [x] Make Tasks personal by default with filters, accessible Kanban drag/drop, subtask styling, and management deadline tracking (`frontend/src/pages/EnterpriseTasksPage.tsx`, `backend/app/routers/enterprise.py`)

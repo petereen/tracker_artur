@@ -28,6 +28,8 @@ export interface EnterpriseTask {
   version: number
   is_archived: boolean
   is_overdue: boolean
+  created_by_id: number | null
+  creator_name?: string | null
 }
 
 export interface Project {
@@ -202,7 +204,7 @@ export function useArchiveProject() {
   return useMutation({ mutationFn: (id: number) => api.delete(`/v1/projects/${id}`), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл архивлагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл архивлагдсангүй') })
 }
 
-export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' }
+export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' | 'delegated' }
 export function useEnterpriseTasks(projectId?: number, period?: DateRange, filters: TaskFilters = {}) {
   return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId, period, filters], queryFn: () => api.get('/v1/tasks', { params: { ...(projectId ? { project_id: projectId } : {}), ...period, ...filters } }).then((response) => response.data) })
 }
@@ -235,6 +237,15 @@ export function useUpdateEnterpriseTask() {
       toast.error(error.response?.status === 409 ? 'Даалгаврыг өөр хүн шинэчилсэн. Хамгийн сүүлийн хувилбарыг авлаа.' : 'Шинэчлэлт хадгалагдсангүй')
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }),
+  })
+}
+
+export function useDeleteEnterpriseTask() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/v1/tasks/${id}`),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); toast.success('Даалгавар устгагдлаа') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Даалгавар устгагдсангүй'),
   })
 }
 
@@ -364,6 +375,7 @@ export interface UserProfile {
   work_direction: string | null
   work_branch: string | null
   telegram_connected: boolean
+  requires_password_setup: boolean
 }
 
 export function useProfile() {
