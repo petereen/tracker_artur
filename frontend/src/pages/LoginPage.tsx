@@ -47,12 +47,12 @@ export function LoginPage() {
     <main className="login-stage">
       <section className="login-card" aria-labelledby="login-title">
         <img src="/oyuns-aio-logo.png" alt="OYUNS All-in-One" className="login-logo" />
-        <div className="eyebrow">Enterprise workspace</div>
-        <h1 id="login-title">Ажлаа нэг хэмнэлд оруул.</h1>
-        <p>Төсөл, даалгавар, цаг, тайлан болон багийн ачааллаа нэг орчноос удирдана.</p>
+        <div className="eyebrow">OYUNS WORKSPACE</div>
+        <h1 id="login-title">Илүү хурдах. Илүү хялбар.</h1>
+        <p>Төсөл, даалгавар, цагийн бүртгэл, тайлан болон багийн ачааллаа нэг платформоос удирдана.</p>
         <form onSubmit={submit} className="login-form">
           <label>
-            <span>Username</span>
+            <span>Нэвтрэх нэр</span>
             <div className="field-with-icon"><Mail size={16} aria-hidden /><input value={username} onChange={(event) => setUsername(event.target.value)} type="text" autoComplete="username" required /></div>
           </label>
           <label>

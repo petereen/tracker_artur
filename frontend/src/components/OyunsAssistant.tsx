@@ -9,7 +9,7 @@ export function OyunsAssistant({ open, onClose }: { open: boolean; onClose: () =
   const createTask = useCreateEnterpriseTask()
   const [input, setInput] = useState('')
   const [conversationId, setConversationId] = useState<number>()
-  const [history, setHistory] = useState<Message[]>([{ role: 'assistant', text: 'Сайн байна уу. Би компанийн мэдлэгээс хариулж, таны ажил болон даалгаврыг ойлгож тусална. Үйлдэл хийхийн өмнө заавал баталгаажуулна.' }])
+  const [history, setHistory] = useState<Message[]>([{ role: 'assistant', text: 'Сайн байна уу. Би компаний мэдлэгээс хариулж, таны ажил болон даалгаврыг ойлгож тусална. Үйлдэл хийхийн өмнө заавал баталгаажуулна.' }])
   if (!open) return null
 
   const submit = async (event: React.FormEvent) => {
