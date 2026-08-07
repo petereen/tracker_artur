@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Bell, CheckCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useNotifications, useReadAllNotifications, useReadNotification, UserNotification } from '../api/enterprise'
+import { InlinePending, QueryRegion, Skeleton } from './Loading'
 
 function relativeTime(value: string) {
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000))
@@ -40,9 +41,9 @@ export function NotificationCenter() {
       <Bell size={17} />{unread > 0 && <span>{unread > 9 ? '9+' : unread}</span>}
     </button>
     {open && <section className="notification-popover" role="dialog" aria-label="Мэдэгдлүүд">
-      <header><div><span className="eyebrow">Activity</span><h2>Мэдэгдэл</h2></div>{unread > 0 && <button onClick={() => readAll.mutate()} disabled={readAll.isPending}><CheckCheck size={15} />Бүгдийг унших</button>}</header>
+      <header><div><span className="eyebrow">Activity</span><h2>Мэдэгдэл</h2></div>{unread > 0 && <button onClick={() => readAll.mutate()} disabled={readAll.isPending}><CheckCheck size={15} />Бүгдийг унших{readAll.isPending && <InlinePending label="Мэдэгдлүүдийг уншсан болгож байна…" />}</button>}</header>
       <div className="notification-list">
-        {notifications.isLoading && <p>Мэдэгдэл ачаалж байна…</p>}
+        {notifications.isLoading && <QueryRegion pending={notifications.isLoading} skeleton={<Skeleton variant="table-row" count={4} />}>{null}</QueryRegion>}
         {notifications.isError && <p>Мэдэгдэл ачаалж чадсангүй.</p>}
         {!notifications.isLoading && !notifications.data?.items.length && <p>Шинэ мэдэгдэл алга.</p>}
         {notifications.data?.items.map((item) => <button key={item.id} className={item.read_at ? '' : 'unread'} onClick={() => openItem(item)}>

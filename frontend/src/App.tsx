@@ -5,6 +5,7 @@ import { EnterpriseShell } from './components/EnterpriseShell'
 import { useAuthStore } from './store/auth'
 import { LoginPage } from './pages/LoginPage'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordResetPages'
+import { WorkspaceSkeleton } from './components/Loading'
 
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
 const ProjectsWorkspacePage = lazy(() => import('./pages/ProjectsWorkspacePage').then((module) => ({ default: module.ProjectsWorkspacePage })))
@@ -68,7 +69,7 @@ function AuthenticatedApp() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Suspense fallback={<div className="app-loading"><img src="/oyuns-aio-logo.png" alt="OYUNS" /><span>Ачаалж байна…</span></div>}>
+      <Suspense fallback={<WorkspaceSkeleton />}>
         <Routes>
           <Route path="/tg" element={<TgMiniAppPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />

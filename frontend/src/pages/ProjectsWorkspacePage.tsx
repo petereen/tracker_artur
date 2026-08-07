@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Archive, BriefcaseBusiness, CalendarDays, Check, Plus, Save, Users2, X } from 'lucide-react'
 import { EnterpriseTask, WorkflowStatus, useArchiveProject, useCreateEnterpriseTask, useCreateProject, useEnterpriseTasks, useProject, useProjects, useUpdateProject, useWorkerDirectory } from '../api/enterprise'
+import { QueryRegion, Skeleton } from '../components/Loading'
 
 const EMPTY = { code: '', name: '', description: '', status: 'active', manager_id: '', member_ids: [] as number[], starts_on: '', ends_on: '', budget_minutes: '', budget_amount: '', currency: 'MNT' }
 
@@ -13,8 +14,10 @@ export function ProjectsWorkspacePage() {
   const ongoing = projects.data?.filter((project) => project.status !== 'completed') ?? []; const completed = projects.data?.filter((project) => project.status === 'completed') ?? []
   const cards = (items: typeof ongoing) => <div className="project-grid">{items.map((project) => <button className="project-card panel project-card-button" key={project.id} onClick={() => setSelectedId(project.id)}><div className="project-card-top"><div className="project-icon"><BriefcaseBusiness /></div><span className={`status-pill ${project.status}`}>{project.status}</span></div><span className="eyebrow">{project.code}</span><h3>{project.name}</h3><p>{project.description || 'Тайлбаргүй'}</p><div className="project-stats"><div className="project-stat"><CalendarDays size={16} /><span>Хугацаа</span><strong>{project.ends_on || 'Тодорхойгүй'}</strong></div><div className="project-stat"><Users2 size={16} /><span>Хариуцагч</span><strong>{project.manager_name || 'Томилоогүй'}</strong></div></div><footer><span>{project.member_ids?.length || 0} гишүүн</span><strong>Нээх</strong></footer></button>)}</div>
   return <div className="projects-workspace"><div className="view-toolbar"><div><h2>Төслийн портфолио</h2><p>Төсөл, баг, хугацаа, даалгаврыг нэг дор удирдана.</p></div><button className="primary-action" onClick={() => { setForm(EMPTY); setCreating(true) }}><Plus size={17} />Шинэ төсөл</button></div>
-    {cards(ongoing)}
-    {completed.length > 0 && <section className="completed-projects"><header><h3>Дууссан төслүүд</h3><span>{completed.length}</span></header>{cards(completed)}</section>}
+    <QueryRegion pending={projects.isLoading || projects.isFetching} skeleton={<div className="project-grid"><Skeleton variant="card" count={6} /></div>}>
+      {cards(ongoing)}
+      {completed.length > 0 && <section className="completed-projects"><header><h3>Дууссан төслүүд</h3><span>{completed.length}</span></header>{cards(completed)}</section>}
+    </QueryRegion>
     <AnimatePresence>{creating && <Sheet onClose={() => setCreating(false)} title="Шинэ төсөл" eyebrow="New project"><form className="sheet-form" onSubmit={submit}><ProjectFields form={form} setForm={setForm} workers={workers.data || []} toggleMember={toggleMember} /><button className="primary-action" disabled={createProject.isPending}>Төсөл үүсгэх</button></form></Sheet>}</AnimatePresence>
     <AnimatePresence>{selectedId && <ProjectDrawer id={selectedId} onClose={() => setSelectedId(undefined)} />}</AnimatePresence>
   </div>

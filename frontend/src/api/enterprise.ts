@@ -469,12 +469,32 @@ export function useNotifications() {
 
 export function useReadNotification() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: (id: number) => api.post(`/v1/notifications/${id}/read`).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'notifications'] }) })
+  return useMutation({
+    mutationFn: (id: number) => api.post(`/v1/notifications/${id}/read`).then((response) => response.data),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['v1', 'notifications'] })
+      const previous = queryClient.getQueryData<NotificationPage>(['v1', 'notifications'])
+      queryClient.setQueryData<NotificationPage>(['v1', 'notifications'], (page) => !page ? page : { ...page, unread_count: Math.max(0, page.unread_count - (page.items.some((item) => item.id === id && !item.read_at) ? 1 : 0)), items: page.items.map((item) => item.id === id ? { ...item, read_at: item.read_at ?? new Date().toISOString() } : item) })
+      return { previous }
+    },
+    onError: (_error, _id, context) => queryClient.setQueryData(['v1', 'notifications'], context?.previous),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['v1', 'notifications'] }),
+  })
 }
 
 export function useReadAllNotifications() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: () => api.post('/v1/notifications/read-all').then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'notifications'] }) })
+  return useMutation({
+    mutationFn: () => api.post('/v1/notifications/read-all').then((response) => response.data),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['v1', 'notifications'] })
+      const previous = queryClient.getQueryData<NotificationPage>(['v1', 'notifications'])
+      queryClient.setQueryData<NotificationPage>(['v1', 'notifications'], (page) => !page ? page : { ...page, unread_count: 0, items: page.items.map((item) => ({ ...item, read_at: item.read_at ?? new Date().toISOString() })) })
+      return { previous }
+    },
+    onError: (_error, _variables, context) => queryClient.setQueryData(['v1', 'notifications'], context?.previous),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['v1', 'notifications'] }),
+  })
 }
 
 export function useUploadAvatar() {

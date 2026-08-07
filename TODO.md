@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Adapt the existing ERP workspace for Telegram Mini App and small-screen use; retire the separate `/tg` task board (`frontend/src/pages/TgMiniAppPage.tsx`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
+- [x] Implement seamless loading, delayed pending feedback, and safe optimistic UI across the React workspace (`frontend/src`)
 - [x] Switch the Today companion between the supplied working and sleeping GIFs (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/public/oyuns-working.gif`, `frontend/public/oyuns-sleeping.gif`)
 - [x] Deduplicate calendar event rendering and remove the calendar-loading status panel (`frontend/src/pages/CalendarWorkspacePage.tsx`)
 - [x] Prevent private-calendar task lookups from sending FastAPI query markers to PostgreSQL (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
