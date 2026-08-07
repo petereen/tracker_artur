@@ -434,9 +434,18 @@ export function useProfile() {
 export function useUpdateProfile() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { username?: string; avatar_url?: string | null; locale?: string; phone_number?: string | null; birthday?: string | null; work_direction?: string | null; work_branch?: string | null; current_password?: string; new_password?: string }) => api.patch('/v1/auth/profile', input).then((response) => response.data),
+    mutationFn: (input: { username?: string; avatar_url?: string | null; locale?: string; phone_number?: string | null; birthday?: string | null; work_direction?: string | null; work_branch?: string | null; current_password?: string }) => api.patch('/v1/auth/profile', input).then((response) => response.data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success('Профайл хадгалагдлаа') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Профайл хадгалагдсангүй'),
+  })
+}
+
+export function useChangeProfilePassword() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { current_password?: string; new_password: string }) => api.patch('/v1/auth/profile/password', input).then((response) => response.data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); toast.success('Нууц үг хадгалагдлаа') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Нууц үг хадгалагдсангүй'),
   })
 }
 
@@ -504,4 +513,87 @@ export function useUploadAvatar() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success('Профайл зураг хадгалагдлаа') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Зураг хадгалагдсангүй'),
   })
+}
+
+export interface CompanyLibraryItem {
+  id: number
+  parent_id: number | null
+  kind: 'folder' | 'file'
+  name: string
+  content_type: string | null
+  size: number | null
+  checksum: string | null
+  uploaded_by_account_id: number | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+}
+
+export interface CompanyFilesPageData {
+  current_folder: CompanyLibraryItem | null
+  breadcrumbs: { id: number; name: string }[]
+  items: CompanyLibraryItem[]
+  folders: { id: number; parent_id: number | null; name: string }[]
+  can_manage: boolean
+  is_search: boolean
+  is_trash: boolean
+}
+
+export function useCompanyFiles(input: { parentId?: number; search?: string; sort?: string; trash?: boolean }) {
+  return useQuery<CompanyFilesPageData>({
+    queryKey: ['v1', 'company-files', input],
+    queryFn: () => api.get('/v1/company-files', { params: { parent_id: input.parentId, q: input.search || undefined, sort: input.sort || 'name', trash: input.trash || undefined } }).then((response) => response.data),
+  })
+}
+
+function useCompanyFilesMutation<T>(mutationFn: (input: T) => Promise<unknown>, successMessage: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'company-files'] }); toast.success(successMessage) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Үйлдэл амжилтгүй боллоо'),
+  })
+}
+
+export function useCreateCompanyFolder() {
+  return useCompanyFilesMutation((input: { name: string; parent_id: number | null }) => api.post('/v1/company-files/folders', input).then((response) => response.data), 'Хавтас үүслээ')
+}
+
+export function useUploadCompanyFile() {
+  return useCompanyFilesMutation((input: { file: File; parent_id: number | null; onProgress?: (percent: number) => void }) => {
+    const body = new FormData()
+    body.append('file', input.file)
+    return api.post('/v1/company-files/upload', body, {
+      params: { parent_id: input.parent_id ?? undefined },
+      onUploadProgress: (event) => input.onProgress?.(event.total ? Math.round((event.loaded / event.total) * 100) : 0),
+    }).then((response) => response.data)
+  }, 'Файл байршлаа')
+}
+
+export function useUpdateCompanyItem() {
+  return useCompanyFilesMutation((input: { id: number; name?: string; parent_id?: number; move_to_root?: boolean }) => api.patch(`/v1/company-files/${input.id}`, { name: input.name, parent_id: input.parent_id, move_to_root: input.move_to_root || false }).then((response) => response.data), 'Файл сан шинэчлэгдлээ')
+}
+
+export function useTrashCompanyItem() {
+  return useCompanyFilesMutation((id: number) => api.delete(`/v1/company-files/${id}`), 'Хогийн сав руу зөөлөө')
+}
+
+export function useRestoreCompanyItem() {
+  return useCompanyFilesMutation((id: number) => api.post(`/v1/company-files/${id}/restore`).then((response) => response.data), 'Сэргээлээ')
+}
+
+export function useDeleteCompanyItemPermanently() {
+  return useCompanyFilesMutation((id: number) => api.delete(`/v1/company-files/${id}/permanent`), 'Бүрмөсөн устгалаа')
+}
+
+export async function downloadCompanyFile(item: CompanyLibraryItem) {
+  const response = await api.get(`/v1/company-files/${item.id}/download`, { responseType: 'blob' })
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = item.name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }

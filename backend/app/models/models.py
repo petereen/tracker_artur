@@ -917,6 +917,45 @@ class Attachment(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class CompanyLibraryItem(Base):
+    __tablename__ = "company_library_items"
+    __table_args__ = (
+        CheckConstraint("kind IN ('folder','file')", name="ck_company_library_items_kind"),
+        CheckConstraint(
+            "(kind = 'folder' AND storage_key IS NULL AND content_type IS NULL AND size IS NULL AND checksum IS NULL) "
+            "OR (kind = 'file' AND storage_key IS NOT NULL AND content_type IS NOT NULL AND size IS NOT NULL AND checksum IS NOT NULL)",
+            name="ck_company_library_items_file_metadata",
+        ),
+        Index("ix_company_library_items_parent", "organization_id", "parent_id"),
+        Index("ix_company_library_items_deleted", "organization_id", "deleted_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("company_library_items.id", ondelete="CASCADE"))
+    kind = Column(String(12), nullable=False)
+    name = Column(Text, nullable=False)
+    storage_key = Column(Text, unique=True)
+    content_type = Column(Text)
+    size = Column(Integer)
+    checksum = Column(String(64))
+    uploaded_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    deleted_at = Column(DateTime(timezone=True))
+    deleted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+
+
+Index(
+    "uq_company_library_items_active_sibling_name",
+    CompanyLibraryItem.organization_id,
+    func.coalesce(CompanyLibraryItem.parent_id, 0),
+    func.lower(CompanyLibraryItem.name),
+    unique=True,
+    postgresql_where=CompanyLibraryItem.deleted_at.is_(None),
+)
+
+
 class SavedView(Base):
     __tablename__ = "saved_views"
 

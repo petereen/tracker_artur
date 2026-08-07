@@ -122,7 +122,7 @@ def test_enterprise_schema_registers_required_foundation_tables():
 
 def test_versioned_routes_include_auth_clock_tasks_reports_and_realtime():
     paths = {route.path for route in app.routes}
-    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime", "/v1/checkins/today", "/v1/calendar/events", "/v1/analytics/daily"}.issubset(paths)
+    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/auth/profile", "/v1/auth/profile/password", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime", "/v1/checkins/today", "/v1/calendar/events", "/v1/analytics/daily"}.issubset(paths)
 
 
 def test_refresh_sessions_record_the_authentication_method():

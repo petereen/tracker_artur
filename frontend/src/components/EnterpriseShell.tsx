@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import {
   BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal,
-  LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X,
+  FolderArchive, LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X,
 } from 'lucide-react'
 import { useActor, useBrandingSettings, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
@@ -32,6 +32,7 @@ const TITLES: Record<string, string> = {
   '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
   '/profile': 'Миний профайл',
+  '/company-files': 'Компанийн файлууд',
 }
 
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
@@ -53,7 +54,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         const event = JSON.parse(message.data)
         cursor = event.id
         sessionStorage.setItem('oyuns-event-cursor', String(cursor))
-        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', okrs: 'objectives', notifications: 'notifications' }
+        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', okrs: 'objectives', notifications: 'notifications', company_files: 'company-files' }
         const key = topicMap[event.topic]
         if (key) queryClient.invalidateQueries({ queryKey: ['v1', key] })
       }
@@ -129,10 +130,13 @@ export function EnterpriseShell() {
               </div>
             ))}
           </nav>
-          <div className="sidebar-profile">
-            <button className="avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{actorQuery.data?.avatar_url ? <img src={actorQuery.data.avatar_url} alt="" /> : actorQuery.data?.name?.[0]?.toUpperCase() ?? actorQuery.data?.email?.[0]?.toUpperCase() ?? 'O'}</button>
-            <button className="profile-identity" onClick={() => navigate('/profile')}><strong>{actorQuery.data?.name ?? actorQuery.data?.email ?? '…'}</strong><span>{roles[0] ?? 'member'}</span></button>
-            <button onClick={() => logout.mutate()} aria-label={t('action.logout')}><LogOut size={17} /></button>
+          <div className="sidebar-footer">
+            <NavLink to="/company-files" className={({ isActive }) => isActive ? 'sidebar-library-link active' : 'sidebar-library-link'}><FolderArchive size={17} /><span>{t('nav.companyFiles')}</span></NavLink>
+            <div className="sidebar-profile">
+              <button className="avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{actorQuery.data?.avatar_url ? <img src={actorQuery.data.avatar_url} alt="" /> : actorQuery.data?.name?.[0]?.toUpperCase() ?? actorQuery.data?.email?.[0]?.toUpperCase() ?? 'O'}</button>
+              <button className="profile-identity" onClick={() => navigate('/profile')}><strong>{actorQuery.data?.name ?? actorQuery.data?.email ?? '…'}</strong><span>{roles[0] ?? 'member'}</span></button>
+              <button onClick={() => logout.mutate()} aria-label={t('action.logout')}><LogOut size={17} /></button>
+            </div>
           </div>
         </aside>
         {mobileOpen && <button className="sidebar-scrim" onClick={() => setMobileOpen(false)} aria-label="Цэс хаах" />}
@@ -167,7 +171,7 @@ export function EnterpriseShell() {
             <motion.div className="command-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setCommandOpen(false)}>
               <motion.div className="command-panel" role="dialog" aria-modal="true" aria-label="Шуурхай навигаци" initial={{ opacity: 0, scale: .96, y: -12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .96, y: -12 }} transition={{ type: 'spring', bounce: 0, duration: .35 }} onMouseDown={(event) => event.stopPropagation()}>
                 <div className="command-input"><Search size={18} /><input autoFocus placeholder="Төсөл, даалгавар эсвэл хэсэг хайх…" /></div>
-                <div className="command-list">{nav.map(({ to, label, icon: Icon }) => <button key={to} onClick={() => { navigate(to); setCommandOpen(false) }}><Icon size={17} />{t(label)}<span>{t('action.open')}</span></button>)}</div>
+                <div className="command-list">{[...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }].map(({ to, label, icon: Icon }) => <button key={to} onClick={() => { navigate(to); setCommandOpen(false) }}><Icon size={17} />{t(label)}<span>{t('action.open')}</span></button>)}</div>
               </motion.div>
             </motion.div>
           )}

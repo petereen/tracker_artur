@@ -123,7 +123,6 @@ class ProfilePatch(BaseModel):
     work_direction: str | None = Field(default=None, max_length=240)
     work_branch: str | None = Field(default=None, max_length=240)
     current_password: str | None = None
-    new_password: str | None = Field(default=None, min_length=10, max_length=128)
 
     @field_validator("username")
     @classmethod
@@ -495,12 +494,6 @@ async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db),
         if duplicate:
             raise HTTPException(status_code=409, detail="Username already exists")
         account.email = data.username
-    if data.new_password:
-        if not password_setup_required and (not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]):
-            raise HTTPException(status_code=400, detail="Current password is incorrect")
-        account.password_hash = hash_account_password(data.new_password)
-        account.must_change_password = False
-        await db.execute(RefreshSession.__table__.update().where(RefreshSession.account_id == account.id, RefreshSession.revoked_at.is_(None)).values(revoked_at=datetime.now(timezone.utc)))
     if data.locale:
         account.locale = data.locale
         if employee:
@@ -512,7 +505,25 @@ async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db),
             if field in data.model_fields_set:
                 setattr(employee, field, getattr(data, field))
     await db.commit()
-    return {"username": account.email, "locale": account.locale, "employee_id": actor.employee_id, "name": employee.name if employee else account.email, "telegram_username": employee.telegram_username if employee else None, "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None, "phone_number": employee.phone_number if employee else None, "birthday": employee.birthday if employee else None, "work_direction": employee.work_direction if employee else None, "work_branch": employee.work_branch if employee else None, "telegram_connected": bool(employee and employee.telegram_id), "requires_password_setup": account.must_change_password, "roles": sorted(actor.roles), "password_changed": bool(data.new_password)}
+    return {"username": account.email, "locale": account.locale, "employee_id": actor.employee_id, "name": employee.name if employee else account.email, "telegram_username": employee.telegram_username if employee else None, "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None, "phone_number": employee.phone_number if employee else None, "birthday": employee.birthday if employee else None, "work_direction": employee.work_direction if employee else None, "work_branch": employee.work_branch if employee else None, "telegram_connected": bool(employee and employee.telegram_id), "requires_password_setup": account.must_change_password, "roles": sorted(actor.roles)}
+
+
+class ProfilePasswordChange(BaseModel):
+    current_password: str | None = None
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+@router.patch("/profile/password")
+async def change_profile_password(data: ProfilePasswordChange, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    account = await db.get(UserAccount, actor.account_id, with_for_update=True)
+    password_setup_required = account.must_change_password or bool(await db.scalar(select(RefreshSession.id).where(RefreshSession.account_id == account.id, RefreshSession.auth_method == "telegram", RefreshSession.revoked_at.is_(None)).limit(1)))
+    if not password_setup_required and (not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    account.password_hash = hash_account_password(data.new_password)
+    account.must_change_password = False
+    await db.execute(RefreshSession.__table__.update().where(RefreshSession.account_id == account.id, RefreshSession.revoked_at.is_(None)).values(revoked_at=datetime.now(timezone.utc)))
+    await db.commit()
+    return {"password_changed": True, "requires_password_setup": False}
 
 
 @router.get("/workers/{employee_id}/profile")

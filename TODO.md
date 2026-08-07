@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add the organization-scoped company file library schema and migration (`backend/app/models/models.py`, `backend/alembic/versions`)
+- [x] Add company file browsing, upload, organization, trash, restore, and download APIs (`backend/app/routers/company_files.py`)
+- [x] Build the responsive company file library and sidebar entry (`frontend/src/pages/CompanyFilesPage.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
+- [x] Add company file library regression coverage and complete validation (`backend/tests`, `frontend/src`)
+- [x] Save employee profile fields independently from password changes with a dedicated password endpoint and protected username updates (`frontend/src/pages/ProfilePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise_auth.py`)
 - [x] Establish a 320px-first responsive layout for the ERP workspace and expand progressively through phone, tablet, and desktop breakpoints (`frontend/src/index.css`)
 - [x] Add a Today control beside calendar month navigation (`frontend/src/pages/CalendarWorkspacePage.tsx`)
 - [x] Stop all-day holidays and birthdays from rendering on their exclusive end date (`frontend/src/pages/CalendarWorkspacePage.tsx`)
