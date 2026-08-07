@@ -191,6 +191,33 @@ async def _show_report_draft(message: Message, report: WorkReport, state: FSMCon
     await message.answer(_draft_text(report, revision.text), parse_mode="HTML", reply_markup=draft_keyboard(report.id))
 
 
+async def claim_report_text(message: Message, state: FSMContext, employee=None) -> bool:
+    """Claim report text before the general assistant can process it.
+
+    The report router normally claims these messages through ``ReportPromptReply``.
+    This explicit entry point is also used by the assistant router as a safety
+    net for Telegram updates where reply metadata is missing or the nested
+    router did not run. It uses the same DB lookup and never guesses from text.
+    """
+    if not employee or not message.text or message.text.startswith("/"):
+        return False
+    if message.reply_to_message:
+        report = work_report_service.report_for_reply(
+            employee.id, str(message.chat.id), message.reply_to_message.message_id
+        )
+    else:
+        report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id))
+    if report:
+        await _show_report_draft(message, report, state)
+        return True
+
+    editing = work_report_service.editing_report_for_employee(employee.id)
+    if editing:
+        await _show_report_draft(message, editing, state)
+        return True
+    return False
+
+
 @router.message(StateFilter(TestReportFlow.daily_report), F.text & ~F.text.startswith("/"))
 async def test_daily_report_text(message: Message, state: FSMContext, employee=None):
     report = work_report_service.awaiting_report_for_employee_type(employee.id, "daily_test") if employee else None

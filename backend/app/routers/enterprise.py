@@ -377,7 +377,7 @@ class ReportDraftInput(BaseModel):
 
 
 class ReportCreateInput(BaseModel):
-    report_type: Literal["daily", "monthly", "next_month_plan"] = "daily"
+    report_type: Literal["daily", "monthly"] = "daily"
     period_date: date
 
 
@@ -1043,8 +1043,8 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     if not can_manage:
         current = set((await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all())
         changed = (("primary_owner_id" in patch and patch["primary_owner_id"] != task.assignee_id) or ("project_id" in patch and patch["project_id"] != task.project_id) or ("assignee_ids" in patch and set(patch["assignee_ids"] or []) != current))
-        if changed:
-            raise HTTPException(status_code=403, detail="Only managers can change task delegation")
+        if changed and not await actor_can_assign_tasks(db, organization_id=actor.organization_id, employee_id=actor.employee_id, roles=actor.roles):
+            raise HTTPException(status_code=403, detail="Your role cannot assign work to other workers")
     if patch.get("workflow_status") and patch["workflow_status"] not in WORKFLOW_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid workflow status")
     if "parent_task_id" in patch and patch["parent_task_id"]:
@@ -1123,10 +1123,12 @@ async def list_deadlines(db: AsyncSession = Depends(get_db), actor: ActorContext
 
 
 @router.put("/tasks/{task_id}/assignees")
-async def replace_assignees(task_id: int, data: AssigneesInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
+async def replace_assignees(task_id: int, data: AssigneesInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     task = await db.get(Task, task_id)
     if not task or task.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Task not found")
+    if not await actor_can_assign_tasks(db, organization_id=actor.organization_id, employee_id=actor.employee_id, roles=actor.roles):
+        raise HTTPException(status_code=403, detail="Your role cannot assign work to other workers")
     await db.execute(TaskAssignee.__table__.delete().where(TaskAssignee.task_id == task_id))
     for employee_id in sorted(set(data.employee_ids)):
         db.add(TaskAssignee(task_id=task_id, employee_id=employee_id, assignment_role="primary" if employee_id == task.assignee_id else "contributor"))
@@ -1802,7 +1804,11 @@ async def save_report_draft(report_id: int, data: ReportDraftInput, if_match: st
     revision = WorkReportRevision(report_id=report_id, text=data.markdown, author_account_id=actor.account_id, status="draft")
     db.add(revision)
     report.title = data.title
-    report.status = "draft"
+    # A submitted report remains submitted while its author makes follow-up
+    # edits. This preserves the one-time submit action and keeps monthly reports
+    # available for review until they are approved.
+    if report.status != "submitted":
+        report.status = "draft"
     report.version += 1
     await db.flush()
     await record_change(db, actor=actor, topic="reports", aggregate_type="work_report", aggregate_id=report.id, operation="draft_saved", version=report.version, after={"title": report.title, "revision_id": revision.id, "status": report.status})
@@ -1845,6 +1851,8 @@ async def _review_report(report_id: int, target_status: str, operation: str, db:
     report = await db.get(WorkReport, report_id, with_for_update=True)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    if report.report_type != "monthly":
+        raise HTTPException(status_code=409, detail="Only monthly reports require approval")
     if report.status != "submitted":
         raise HTTPException(status_code=409, detail="Only submitted reports can be reviewed")
     report.status = target_status
@@ -1927,6 +1935,8 @@ async def reopen_report(
     report = await db.get(WorkReport, report_id, with_for_update=True)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    if report.report_type != "monthly":
+        raise HTTPException(status_code=409, detail="Only monthly reports can be reopened")
     if report.status not in {"submitted", "approved"}:
         raise HTTPException(status_code=409, detail="Only sent reports can be reopened")
     before = {"status": report.status, "version": report.version}

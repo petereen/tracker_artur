@@ -264,7 +264,7 @@ export function useEnterpriseReports(status?: string, period?: DateRange) {
 export function useCreateReport() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { report_type: 'daily' | 'monthly' | 'next_month_plan'; period_date: string }) => api.post('/v1/reports', input).then((response) => response.data),
+    mutationFn: (input: { report_type: 'daily' | 'monthly'; period_date: string }) => api.post('/v1/reports', input).then((response) => response.data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'reports'] }); toast.success('Тайлан үүслээ') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Тайлан үүссэнгүй'),
   })

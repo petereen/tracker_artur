@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Ensure Telegram daily report replies always bypass the AI assistant and enter report draft flow (`backend/app/bot/work_report_handlers.py`, `backend/app/bot/assistant_handlers.py`)
+- [x] Unify next-month planning with Plans, refine report submission/approval rules, streamline project tasks/completion, highlight calendar today, and open task delegation to all members (`backend/app/routers/enterprise.py`, `frontend/src/pages`)
 - [x] Make check-ins configuration-dependent and add platform report creation with submission-aware reminders (`backend/app/bot`, `backend/app/routers/enterprise.py`, `frontend/src/pages/EnterpriseReportsPage.tsx`)
 - [x] Replace project approval requests with direct member project creation and member notifications (`backend/app/routers/enterprise.py`, `frontend/src/api/enterprise.ts`)
 - [x] Add configurable cross-channel task assignment permissions with all workers enabled by default (`backend/app/routers/enterprise.py`, `backend/app/bot`, `frontend/src/pages/AdministrationHubPage.tsx`)
@@ -40,6 +42,7 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Add the animated office-wolf companion to the Today tab at the flush bottom-right edge (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/public/today-office-wolf.png`)
 - [x] Restore the Settings menu entry for administrator and supervisor roles (`frontend/src/components/EnterpriseShell.tsx`)
 - [x] Deliver task/project creation and deadline notifications to all selected recipients across web and Telegram (`backend/app/routers/enterprise.py`, `backend/app/services`)
 - [x] Add Telegram-first password setup, creator-managed task archive/delete APIs, Today delegated-task tracking, and stronger profile affordance (`backend/app/routers/enterprise.py`, `backend/app/routers/enterprise_auth.py`, `frontend/src`)

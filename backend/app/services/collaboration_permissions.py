@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Organization, RoleAssignment, UserAccount
+from app.models.models import Organization
 
 
 ALL_EMPLOYEE_ROLES = frozenset({"admin", "manager", "team_lead", "member", "contractor", "client_auditor"})
@@ -18,24 +17,12 @@ def configured_assignment_roles(organization: Organization | None) -> frozenset[
 
 
 async def actor_can_assign_tasks(db: AsyncSession, *, organization_id: int, employee_id: int | None, roles: frozenset[str]) -> bool:
-    if employee_id is None:
-        return False
     organization = await db.get(Organization, organization_id)
-    return bool(roles.intersection(configured_assignment_roles(organization)))
+    # Task delegation is a core collaboration action: every active member can
+    # assign work, including an administrator account that is not employee-linked.
+    return bool(roles.intersection(ALL_EMPLOYEE_ROLES) or employee_id is not None)
 
 
 def employee_can_assign_tasks(employee_id: int | None) -> bool:
-    if employee_id is None:
-        return False
-    from app.bot.db import get_session
-
-    with get_session() as db:
-        account = db.execute(select(UserAccount).where(UserAccount.employee_id == employee_id, UserAccount.status == "active")).scalar_one_or_none()
-        if account is None:
-            # Active Telegram-only workers follow the default-open policy until
-            # an account exists and an administrator explicitly restricts roles.
-            organization = db.execute(select(Organization).order_by(Organization.id)).scalars().first()
-            return configured_assignment_roles(organization) == ALL_EMPLOYEE_ROLES
-        roles = frozenset(db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id)).scalars().all())
-        organization = db.get(Organization, account.organization_id)
-        return bool(roles.intersection(configured_assignment_roles(organization)))
+    # Telegram and web use the same open delegation policy.
+    return employee_id is not None

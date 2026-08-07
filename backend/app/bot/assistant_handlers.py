@@ -13,6 +13,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, Message
 
+from app.bot.work_report_handlers import claim_report_text
 from app.bot.tasks_handlers import TaskDraft, begin_task_draft, task_draft_keyboard, task_draft_text
 from app.services import (
     assistant_ai,
@@ -526,6 +527,11 @@ async def msg_assistant_text(
     is_manager: bool = False,
     tg_id: str | None = None,
 ):
+    # Report replies are workflow input, not conversational prompts. Keep this
+    # guard immediately before AI routing as a fallback for updates that were
+    # not claimed by the report router above.
+    if await claim_report_text(message, state, employee=employee):
+        return
     await route_and_respond(
         message,
         state,
