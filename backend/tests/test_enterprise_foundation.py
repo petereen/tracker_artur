@@ -16,6 +16,7 @@ from app.core.security import (
 from app.core.enterprise_deps import ActorContext
 from app.main import app
 from app.models.models import Base
+from app.routers import enterprise
 from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _holiday_provider_rows, _task_out
 from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE
 from app.services.enterprise_events import _json_safe, _redact
@@ -54,6 +55,35 @@ def test_holiday_provider_errors_are_rejected_before_the_calendar_feed_fails():
             assert exc.status_code == 502
         else:
             raise AssertionError("Malformed holiday-provider data must be rejected")
+
+
+def test_calendar_internal_task_query_uses_a_concrete_empty_priority():
+    captured: dict[str, object] = {}
+
+    async def fake_list_tasks(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    class EmptyRows:
+        def scalars(self): return self
+        def all(self): return []
+
+    class CalendarDb:
+        async def execute(self, *_args): return EmptyRows()
+        async def get(self, *_args): return SimpleNamespace(settings={})
+        async def scalar(self, *_args): return 1
+
+    original = enterprise.list_tasks
+    enterprise.list_tasks = fake_list_tasks
+    try:
+        import asyncio
+        asyncio.run(enterprise.calendar_events(
+            scope="private", date_from=date(2026, 7, 27), date_to=date(2026, 9, 6), db=CalendarDb(),
+            actor=ActorContext(account_id=1, organization_id=1, employee_id=2, email="member@example.com", locale="mn", roles=frozenset({"member"})),
+        ))
+    finally:
+        enterprise.list_tasks = original
+    assert captured["priority"] is None
 
 
 def test_refresh_tokens_are_random_and_only_hash_is_persisted():

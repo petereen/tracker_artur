@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Prevent private-calendar task lookups from sending FastAPI query markers to PostgreSQL (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Keep private calendar feeds available when holiday cache writes conflict (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Keep calendar feeds available when holiday-provider data is unavailable or malformed (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Make the worktime heatmap update only when the Stats tab is opened (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)

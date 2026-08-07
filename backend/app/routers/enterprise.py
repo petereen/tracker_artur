@@ -1259,7 +1259,10 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
     period_start = date_from or date.today() - timedelta(days=14)
     period_end = date_to or period_start + timedelta(days=41)
     task_scope = "organization" if scope == "corporate" and actor.has_any_role(*MANAGEMENT_ROLES) else "mine"
-    task_rows = await list_tasks(scope=task_scope, date_from=period_start, date_to=period_end, db=db, actor=actor)
+    # ``list_tasks`` is also a FastAPI endpoint, whose priority default is a
+    # Query marker until FastAPI resolves an HTTP request.  This internal call
+    # must provide the concrete value rather than passing that marker to SQL.
+    task_rows = await list_tasks(scope=task_scope, priority=None, date_from=period_start, date_to=period_end, db=db, actor=actor)
     if scope == "private":
         task_rows = [row for row in task_rows if actor.employee_id and actor.employee_id in row.get("assignee_ids", [])]
     task_events = [{"kind": "task", "visibility": "company" if scope == "corporate" else "private", "can_edit": actor.has_any_role(*MANAGEMENT_ROLES) or actor.employee_id in row.get("assignee_ids", []), **row} for row in task_rows if row.get("start_at") or row.get("deadline_at")]
