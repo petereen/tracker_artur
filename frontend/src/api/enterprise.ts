@@ -57,6 +57,7 @@ export interface Project {
 export interface ClockEntry {
   id: number
   employee_id: number
+  local_work_date: string
   project_id: number | null
   task_id: number | null
   entry_type: 'work' | 'break'
@@ -324,7 +325,7 @@ export function useSubmitCheckin() {
 }
 
 export function useDailyAnalytics(period: DateRange, employeeId?: number) {
-  return useQuery<any>({ queryKey: ['v1', 'analytics', 'daily', period, employeeId], queryFn: () => api.get('/v1/analytics/daily', { params: { ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data) })
+  return useQuery<any>({ queryKey: ['v1', 'analytics', 'daily', period, employeeId], queryFn: () => api.get('/v1/analytics/daily', { params: { ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data), refetchOnMount: 'always', refetchOnWindowFocus: false })
 }
 
 export interface PersonalTimeBlock { id: number; title: string; starts_at: string; ends_at: string; task_id: number | null; version: number }

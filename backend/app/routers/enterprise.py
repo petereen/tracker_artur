@@ -2308,11 +2308,12 @@ async def analytics_daily(
     if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
         raise HTTPException(status_code=403, detail="Worker analytics are outside your scope")
     target = employee_id if actor.has_any_role(*MANAGEMENT_ROLES) else actor.employee_id
+    analytics_now = datetime.now(timezone.utc)
     work_query = select(
         WorkTimeEntry.local_work_date,
-        func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0),
+        func.coalesce(func.sum(func.extract("epoch", func.coalesce(WorkTimeEntry.ended_at, analytics_now) - WorkTimeEntry.started_at) / 60), 0),
     ).where(
-        WorkTimeEntry.entry_type == "work", WorkTimeEntry.employee_id.isnot(None), WorkTimeEntry.ended_at.isnot(None),
+        WorkTimeEntry.entry_type == "work", WorkTimeEntry.employee_id.isnot(None),
         WorkTimeEntry.local_work_date >= date_from, WorkTimeEntry.local_work_date <= date_to,
         UserAccount.organization_id == actor.organization_id, UserAccount.status == "active",
     )

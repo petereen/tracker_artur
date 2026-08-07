@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Make the worktime heatmap update only when the Stats tab is opened (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
+- [x] Keep the Stats worktime heatmap current while today’s work session is active (`backend/app/routers/enterprise.py`, `frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
+- [x] Repair calendar event date normalization and surface calendar loading failures (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Refine workspace task creation, filtering, report totals, and Telegram-to-Plans intake (`backend/app`, `frontend/src/pages`)
 - [x] Repair Stats metric spacing and heatmap month alignment (`frontend/src/components/HeatmapCalendar.tsx`, `frontend/src/index.css`)
 - [x] Ensure Telegram daily report replies always bypass the AI assistant and enter report draft flow (`backend/app/bot/work_report_handlers.py`, `backend/app/bot/assistant_handlers.py`)
@@ -44,6 +47,8 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Limit worktime heatmap refreshes to Stats tab opens while preserving active-session elapsed time at fetch time (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
+- [x] Include active work sessions in daily analytics and refresh today’s personal heatmap continuously (`backend/app/routers/enterprise.py`, `frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Show project, plan, and task dates in the shared private/company calendar and refresh it after task mutations (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Add organization logo branding settings with legacy presets, uploads, and light/dark theme usage (`backend/app/routers/enterprise.py`, `frontend/src/pages/AdministrationHubPage.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
 - [x] Add the animated office-wolf companion to the Today tab at the flush bottom-right edge (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/public/today-office-wolf.png`)
