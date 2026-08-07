@@ -217,7 +217,7 @@ export function useCreateEnterpriseTask() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: Record<string, unknown>) => api.post('/v1/tasks', input, { headers: { 'Idempotency-Key': crypto.randomUUID() } }).then((response) => response.data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); toast.success('Даалгавар үүслээ') },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success('Даалгавар үүслээ') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Даалгавар үүссэнгүй'),
   })
 }
@@ -236,7 +236,7 @@ export function useUpdateEnterpriseTask() {
       context?.snapshots.forEach(([key, tasks]) => queryClient.setQueryData(key, tasks))
       toast.error(error.response?.status === 409 ? 'Даалгаврыг өөр хүн шинэчилсэн. Хамгийн сүүлийн хувилбарыг авлаа.' : 'Шинэчлэлт хадгалагдсангүй')
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }),
+    onSettled: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }) },
   })
 }
 
@@ -244,7 +244,7 @@ export function useDeleteEnterpriseTask() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/v1/tasks/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); toast.success('Даалгавар устгагдлаа') },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success('Даалгавар устгагдлаа') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Даалгавар устгагдсангүй'),
   })
 }

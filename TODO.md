@@ -44,6 +44,7 @@
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
 
 ## Completed Tasks
+- [x] Show project, plan, and task dates in the shared private/company calendar and refresh it after task mutations (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Add organization logo branding settings with legacy presets, uploads, and light/dark theme usage (`backend/app/routers/enterprise.py`, `frontend/src/pages/AdministrationHubPage.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
 - [x] Add the animated office-wolf companion to the Today tab at the flush bottom-right edge (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/public/today-office-wolf.png`)
 - [x] Restore the Settings menu entry for administrator and supervisor roles (`frontend/src/components/EnterpriseShell.tsx`)
