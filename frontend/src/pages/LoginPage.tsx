@@ -48,7 +48,7 @@ export function LoginPage() {
       <section className="login-card" aria-labelledby="login-title">
         <img src="/oyuns-aio-logo.png" alt="OYUNS All-in-One" className="login-logo" />
         <div className="eyebrow">OYUNS WORKSPACE</div>
-        <h1 id="login-title">Илүү хурдах. Илүү хялбар.</h1>
+        <h1 id="login-title">Илүү хурдан. Илүү хялбар.</h1>
         <p>Төсөл, даалгавар, цагийн бүртгэл, тайлан болон багийн ачааллаа нэг платформоос удирдана.</p>
         <form onSubmit={submit} className="login-form">
           <label>
