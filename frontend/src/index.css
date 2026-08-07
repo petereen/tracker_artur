@@ -247,9 +247,9 @@ a { color: inherit; text-decoration: none; }
 /* Today companion stays outside the dashboard flow, so interval details remain readable. */
 .today-companion { bottom: 0; height: clamp(130px, 19vw, 230px); pointer-events: none; position: fixed; right: 0; z-index: 2; }
 .clock-panel { overflow: hidden; position: relative; }
-.clock-panel .today-companion { bottom: 0; height: 135px; position: absolute; right: 0; }
+.clock-panel .today-companion { bottom: 0; height: 135px; position: absolute; right: 0; width: 100%; }
 .clock-actions { padding-right: clamp(110px, 22%, 170px); }
-.today-companion img { display: block; height: 100%; object-fit: contain; width: auto; }
+.today-companion img { display: block; height: 100%; object-fit: contain; object-position: right bottom; width: auto; margin-left: auto; }
 @media (max-width: 540px) { .today-companion { height: 122px; } }
 @media (prefers-reduced-motion: reduce) { .today-companion img { animation: none; } }
 
