@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Keep calendar feeds available when holiday-provider data is unavailable or malformed (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Make the worktime heatmap update only when the Stats tab is opened (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Keep the Stats worktime heatmap current while today’s work session is active (`backend/app/routers/enterprise.py`, `frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Repair calendar event date normalization and surface calendar loading failures (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`)
@@ -45,6 +46,7 @@
 - [x] Make the OYUNS header action open an actionable assistant conversation (`frontend/src/components/OyunsAssistant.tsx`)
 - [x] Add employee self-service profile customization for avatar, username, and password (`frontend/src/pages/ProfilePage.tsx`)
 - [x] Let administrators change every existing account's access roles and default newly linked Telegram accounts to member (`frontend/src/pages/AdministrationHubPage.tsx`)
+- [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
 - [x] Limit worktime heatmap refreshes to Stats tab opens while preserving active-session elapsed time at fetch time (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)

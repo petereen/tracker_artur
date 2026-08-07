@@ -16,7 +16,7 @@ from app.core.security import (
 from app.core.enterprise_deps import ActorContext
 from app.main import app
 from app.models.models import Base
-from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _task_out
+from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _holiday_provider_rows, _task_out
 from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE
 from app.services.enterprise_events import _json_safe, _redact
 from app.services.work_report_service import summarize_work_time
@@ -40,6 +40,19 @@ def test_enterprise_access_token_carries_account_and_organization():
 def test_birthdays_repeat_across_year_boundaries_and_handle_leap_day():
     assert _birthday_occurrences(date(1992, 2, 29), date(2025, 12, 1), date(2026, 3, 1)) == [date(2026, 2, 28)]
     assert _birthday_occurrences(date(1990, 1, 10), date(2025, 12, 1), date(2026, 2, 1)) == [date(2026, 1, 10)]
+
+
+def test_holiday_provider_errors_are_rejected_before_the_calendar_feed_fails():
+    from fastapi import HTTPException
+
+    assert _holiday_provider_rows([{"date": "2026-07-11", "name": "National Day", "localName": "\u0411\u0430\u044f\u0440"}]) == [(date(2026, 7, 11), "National Day", "\u0411\u0430\u044f\u0440")]
+    for payload in ({"error": "upstream unavailable"}, [{"date": "not-a-date", "name": "Broken"}], ["not a holiday"]):
+        try:
+            _holiday_provider_rows(payload)
+        except HTTPException as exc:
+            assert exc.status_code == 502
+        else:
+            raise AssertionError("Malformed holiday-provider data must be rejected")
 
 
 def test_refresh_tokens_are_random_and_only_hash_is_persisted():

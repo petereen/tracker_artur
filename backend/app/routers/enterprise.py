@@ -1214,6 +1214,23 @@ def _calendar_entry_out(item: CalendarEntry) -> dict:
     return {"id": item.id, "kind": item.kind, "visibility": item.visibility, "title": item.title, "description": item.description, "starts_at": item.starts_at, "ends_at": item.ends_at, "remind_at": item.remind_at, "version": item.version, "can_edit": item.created_by_account_id is None or item.created_by_account_id == item.account_id}
 
 
+def _holiday_provider_rows(payload: object) -> list[tuple[date, str, str | None]]:
+    """Validate the public-holidays response before it reaches the calendar feed."""
+    if not isinstance(payload, list):
+        raise HTTPException(status_code=502, detail="Holiday provider returned an invalid response")
+    rows: list[tuple[date, str, str | None]] = []
+    for item in payload:
+        if not isinstance(item, dict) or not isinstance(item.get("date"), str) or not isinstance(item.get("name"), str):
+            raise HTTPException(status_code=502, detail="Holiday provider returned an invalid response")
+        try:
+            holiday_day = date.fromisoformat(item["date"])
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail="Holiday provider returned an invalid response") from exc
+        local_name = item.get("localName")
+        rows.append((holiday_day, item["name"], local_name if isinstance(local_name, str) else None))
+    return rows
+
+
 async def _sync_holiday_year(db: AsyncSession, organization_id: int, country: str, year: int) -> int:
     """Populate a missing holiday year without making calendar viewers need admin access."""
     async with aiohttp.ClientSession() as session:
@@ -1222,11 +1239,10 @@ async def _sync_holiday_year(db: AsyncSession, organization_id: int, country: st
                 raise HTTPException(status_code=502, detail="Holiday provider is unavailable")
             payload = await response.json()
     added = 0
-    for item in payload:
-        holiday_day = date.fromisoformat(item["date"])
-        exists = await db.scalar(select(HolidayRecord.id).where(HolidayRecord.organization_id == organization_id, HolidayRecord.country_code == country, HolidayRecord.holiday_date == holiday_day, HolidayRecord.name == item["name"]))
+    for holiday_day, name, local_name in _holiday_provider_rows(payload):
+        exists = await db.scalar(select(HolidayRecord.id).where(HolidayRecord.organization_id == organization_id, HolidayRecord.country_code == country, HolidayRecord.holiday_date == holiday_day, HolidayRecord.name == name))
         if not exists:
-            db.add(HolidayRecord(organization_id=organization_id, country_code=country, holiday_date=holiday_day, name=item["name"], local_name=item.get("localName")))
+            db.add(HolidayRecord(organization_id=organization_id, country_code=country, holiday_date=holiday_day, name=name, local_name=local_name))
             added += 1
     if added:
         await db.flush()
@@ -1267,7 +1283,7 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
             try:
                 await _sync_holiday_year(db, actor.organization_id, country, year)
                 await db.commit()
-            except (aiohttp.ClientError, asyncio.TimeoutError, HTTPException):
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, HTTPException):
                 await db.rollback()
     holiday_rows = (await db.execute(select(HolidayRecord).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.country_code == country, HolidayRecord.is_active.is_(True), HolidayRecord.holiday_date >= period_start, HolidayRecord.holiday_date <= period_end))).scalars().all()
     holidays = [{"id": row.id, "kind": "holiday", "visibility": "company", "title": row.local_name or row.name, "starts_at": datetime.combine(row.holiday_date, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(row.holiday_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": actor.has_any_role(*MANAGEMENT_ROLES)} for row in holiday_rows]
