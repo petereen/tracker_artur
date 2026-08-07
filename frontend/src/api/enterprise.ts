@@ -551,7 +551,11 @@ function useCompanyFilesMutation<T>(mutationFn: (input: T) => Promise<unknown>, 
   return useMutation({
     mutationFn,
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'company-files'] }); toast.success(successMessage) },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Үйлдэл амжилтгүй боллоо'),
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail
+      const message = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Үйлдэл амжилтгүй боллоо'
+      toast.error(message)
+    },
   })
 }
 
@@ -563,7 +567,7 @@ export function useUploadCompanyFile() {
   return useCompanyFilesMutation((input: { files: File[]; parent_id: number | null; onProgress?: (percent: number) => void }) => {
     const body = new FormData()
     const totalBytes = input.files.reduce((sum, file) => sum + file.size, 0)
-    input.files.forEach((file) => body.append('file', file))
+    input.files.forEach((file) => body.append('files', file))
     return api.post('/v1/company-files/upload', body, {
       params: { parent_id: input.parent_id ?? undefined },
       onUploadProgress: (event) => {

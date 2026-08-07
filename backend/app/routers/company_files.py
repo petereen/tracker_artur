@@ -212,19 +212,19 @@ async def upload_company_file(
     uploaded_items: list[CompanyLibraryItem] = []
     storage_keys: list[str] = []
     try:
-        for file in files:
-            name = _clean_name(file.filename or "file")
+        for upload in files:
+            name = _clean_name(upload.filename or "file")
             lower_name = name.casefold()
             if lower_name in seen_names:
                 raise HTTPException(status_code=409, detail="An item with this name already exists in the folder")
             seen_names.add(lower_name)
             await _ensure_name_available(db, actor, name, parent_id)
-            content = await file.read(settings.ATTACHMENT_MAX_BYTES + 1)
+            content = await upload.read(settings.ATTACHMENT_MAX_BYTES + 1)
             if len(content) > settings.ATTACHMENT_MAX_BYTES:
                 raise HTTPException(status_code=413, detail="File exceeds configured size limit")
             if not content:
                 raise HTTPException(status_code=400, detail="File is empty")
-            content_type = file.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+            content_type = upload.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
             if content_type in BLOCKED_CONTENT_TYPES or name.lower().endswith(BLOCKED_EXTENSIONS):
                 raise HTTPException(status_code=415, detail="Executable files are not allowed")
             try:
