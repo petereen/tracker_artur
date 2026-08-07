@@ -34,7 +34,8 @@ export function InlinePending({ label = 'Ачаалж байна…', size = 20 
 
 export function QueryRegion({ pending, children, skeleton, className = '' }: { pending: boolean; children: React.ReactNode; skeleton: React.ReactNode; className?: string }) {
   const showLoading = useDelayedPending(pending)
-  return <div className={`query-region ${className}`.trim()} aria-busy={showLoading}>{showLoading ? skeleton : children}</div>
+  void skeleton
+  return <div className={`query-region ${className}`.trim()} aria-busy={showLoading}>{children}</div>
 }
 
 export function TableSkeleton({ rows = 5 }: { rows?: number }) {
@@ -50,12 +51,12 @@ export function CalendarSkeleton() {
 }
 
 export function WorkspaceSkeleton() {
-  return <main className="workspace-skeleton" aria-label="Хуудас ачаалж байна"><Skeleton variant="text" className="workspace-skeleton-heading" /><div className="workspace-skeleton-grid"><Skeleton variant="card" count={4} /></div><Skeleton variant="chart" /></main>
+  return <main className="workspace-loading" aria-label="Хуудас ачаалж байна"><InlinePending label="Хуудас ачаалж байна…" size={45} /></main>
 }
 
 export function InitialWorkspaceSkeleton() {
   return <div className="workspace-shell initial-workspace-skeleton" aria-label="Ажлын орон зайг ачаалж байна">
-    <aside className="workspace-sidebar" aria-hidden="true"><div className="sidebar-brand"><Skeleton variant="text" /></div><div className="initial-nav-skeleton"><Skeleton variant="table-row" count={7} /></div></aside>
-    <main className="workspace-main"><header className="workspace-header"><Skeleton variant="text" /></header><div className="workspace-content"><WorkspaceSkeleton /></div></main>
+    <aside className="workspace-sidebar" aria-hidden="true"><div className="sidebar-brand"><img src="/favicon.png" alt="" /></div></aside>
+    <main className="workspace-main"><header className="workspace-header" /><div className="workspace-content"><WorkspaceSkeleton /></div></main>
   </div>
 }
