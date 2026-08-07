@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Establish a 320px-first responsive layout for the ERP workspace and expand progressively through phone, tablet, and desktop breakpoints (`frontend/src/index.css`)
+- [x] Add a Today control beside calendar month navigation (`frontend/src/pages/CalendarWorkspacePage.tsx`)
+- [x] Stop all-day holidays and birthdays from rendering on their exclusive end date (`frontend/src/pages/CalendarWorkspacePage.tsx`)
 - [x] Adapt the existing ERP workspace for Telegram Mini App and small-screen use; retire the separate `/tg` task board (`frontend/src/pages/TgMiniAppPage.tsx`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
 - [x] Implement seamless loading, delayed pending feedback, and safe optimistic UI across the React workspace (`frontend/src`)
 - [x] Switch the Today companion between the supplied working and sleeping GIFs (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/public/oyuns-working.gif`, `frontend/public/oyuns-sleeping.gif`)
