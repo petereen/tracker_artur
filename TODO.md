@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Switch the Today companion between the supplied working and sleeping GIFs (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/public/oyuns-working.gif`, `frontend/public/oyuns-sleeping.gif`)
+- [x] Deduplicate calendar event rendering and remove the calendar-loading status panel (`frontend/src/pages/CalendarWorkspacePage.tsx`)
 - [x] Prevent private-calendar task lookups from sending FastAPI query markers to PostgreSQL (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Keep private calendar feeds available when holiday cache writes conflict (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Keep calendar feeds available when holiday-provider data is unavailable or malformed (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
@@ -51,6 +53,7 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Switch the Today companion between the supplied working and sleeping GIFs based on the active clock entry (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/public/oyuns-working.gif`, `frontend/public/oyuns-sleeping.gif`)
 - [x] Limit worktime heatmap refreshes to Stats tab opens while preserving active-session elapsed time at fetch time (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Include active work sessions in daily analytics and refresh today’s personal heatmap continuously (`backend/app/routers/enterprise.py`, `frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Show project, plan, and task dates in the shared private/company calendar and refresh it after task mutations (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)

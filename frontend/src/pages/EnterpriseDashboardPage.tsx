@@ -63,6 +63,7 @@ export function EnterpriseDashboardPage() {
   const active = clock.data?.active
   const working = active?.entry_type === 'work'
   const onBreak = active?.entry_type === 'break'
+  const companionSrc = working ? '/oyuns-working.gif' : '/oyuns-sleeping.gif'
   const todayEntries = clock.data?.today_entries ?? []
   const todayWorkSeconds = todayEntries.reduce((total, entry) => {
     if (entry.entry_type !== 'work') return total
@@ -113,7 +114,7 @@ export function EnterpriseDashboardPage() {
           {onBreak && <><button className="clock-button office" onClick={() => action.mutate({ action: 'resume' })}><Play />Үргэлжлүүлэх</button><button className="clock-button stop" onClick={() => action.mutate({ action: 'stop' })}><Pause />Өдөр дуусгах</button></>}
         </div>
         <div className="today-companion" aria-hidden="true">
-          <img src="/today-office-wolf.gif" alt="" />
+          <img src={companionSrc} alt="" />
         </div>
       </section>
       <section className="daily-focus panel"><span className="eyebrow">Өнөөдрийн төвлөрөл</span><h2>Хамгийн чухал ажлаа тодорхой болго.</h2>{todayCheckin.data?.template?.questions?.slice(0, 2).map((question: any, index: number) => <div className="focus-question" key={question.id}><span>{index + 1}</span><div><strong>{question.prompt?.mn || question.prompt?.en}</strong><p>{question.is_required ? 'Заавал хариулна' : 'Сонголттой'}</p></div></div>)}{!todayCheckin.data?.template && <p>Check-in асуулт тохируулаагүй байна.</p>}<button className="secondary-action" onClick={openCheckin} disabled={!todayCheckin.data?.template || todayCheckin.data?.checkin?.status === 'submitted'}>{todayCheckin.data?.checkin?.status === 'submitted' ? 'Өнөөдрийн check-in бөглөгдсөн' : 'Өдрийн check-in бөглөх'}</button>{checkinOpen && <form className="checkin-form" onSubmit={saveCheckin}>{todayCheckin.data.template.questions.map((question: any) => <label key={question.id}><strong>{question.prompt?.mn || question.prompt?.en}</strong>{question.choices?.length ? <select required={question.is_required} value={answers[question.id] || ''} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}><option value="">Сонгох</option>{question.choices.map((choice: any) => <option key={String(choice)}>{String(choice)}</option>)}</select> : <textarea required={question.is_required} value={answers[question.id] || ''} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} />}</label>)}<div><button type="button" className="secondary-action compact" onClick={() => setCheckinOpen(false)}>Цуцлах</button><button className="primary-action compact" disabled={submitCheckin.isPending}>Хадгалах</button></div></form>}</section>
