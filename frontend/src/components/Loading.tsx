@@ -52,3 +52,10 @@ export function CalendarSkeleton() {
 export function WorkspaceSkeleton() {
   return <main className="workspace-skeleton" aria-label="Хуудас ачаалж байна"><Skeleton variant="text" className="workspace-skeleton-heading" /><div className="workspace-skeleton-grid"><Skeleton variant="card" count={4} /></div><Skeleton variant="chart" /></main>
 }
+
+export function InitialWorkspaceSkeleton() {
+  return <div className="workspace-shell initial-workspace-skeleton" aria-label="Ажлын орон зайг ачаалж байна">
+    <aside className="workspace-sidebar" aria-hidden="true"><div className="sidebar-brand"><Skeleton variant="text" /></div><div className="initial-nav-skeleton"><Skeleton variant="table-row" count={7} /></div></aside>
+    <main className="workspace-main"><header className="workspace-header"><Skeleton variant="text" /></header><div className="workspace-content"><WorkspaceSkeleton /></div></main>
+  </div>
+}

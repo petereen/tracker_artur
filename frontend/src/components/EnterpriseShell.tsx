@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
@@ -12,6 +12,7 @@ import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { periodFromPreset } from './TimePeriodFilter'
 import { OyunsAssistant } from './OyunsAssistant'
 import { NotificationCenter } from './NotificationCenter'
+import { WorkspaceSkeleton } from './Loading'
 
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
@@ -145,7 +146,7 @@ export function EnterpriseShell() {
               <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>
             </div>
           </header>
-          <div className="workspace-content"><Outlet /></div>
+          <div className="workspace-content"><Suspense fallback={<WorkspaceSkeleton />}><Outlet /></Suspense></div>
         </main>
         <nav className="mobile-tabbar" aria-label="Шуурхай цэс">
           {nav.slice(0, 4).map(({ to, label, icon: Icon }) => (
