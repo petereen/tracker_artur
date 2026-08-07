@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Keep private calendar feeds available when holiday cache writes conflict (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Keep calendar feeds available when holiday-provider data is unavailable or malformed (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Make the worktime heatmap update only when the Stats tab is opened (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Keep the Stats worktime heatmap current while today’s work session is active (`backend/app/routers/enterprise.py`, `frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)

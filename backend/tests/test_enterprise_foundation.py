@@ -46,6 +46,7 @@ def test_holiday_provider_errors_are_rejected_before_the_calendar_feed_fails():
     from fastapi import HTTPException
 
     assert _holiday_provider_rows([{"date": "2026-07-11", "name": "National Day", "localName": "\u0411\u0430\u044f\u0440"}]) == [(date(2026, 7, 11), "National Day", "\u0411\u0430\u044f\u0440")]
+    assert _holiday_provider_rows([{"date": "2026-07-11", "name": "National Day"}, {"date": "2026-07-11", "name": "National Day"}]) == [(date(2026, 7, 11), "National Day", None)]
     for payload in ({"error": "upstream unavailable"}, [{"date": "not-a-date", "name": "Broken"}], ["not a holiday"]):
         try:
             _holiday_provider_rows(payload)

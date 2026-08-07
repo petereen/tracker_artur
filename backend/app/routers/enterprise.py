@@ -1219,6 +1219,7 @@ def _holiday_provider_rows(payload: object) -> list[tuple[date, str, str | None]
     if not isinstance(payload, list):
         raise HTTPException(status_code=502, detail="Holiday provider returned an invalid response")
     rows: list[tuple[date, str, str | None]] = []
+    seen: set[tuple[date, str]] = set()
     for item in payload:
         if not isinstance(item, dict) or not isinstance(item.get("date"), str) or not isinstance(item.get("name"), str):
             raise HTTPException(status_code=502, detail="Holiday provider returned an invalid response")
@@ -1227,6 +1228,10 @@ def _holiday_provider_rows(payload: object) -> list[tuple[date, str, str | None]
         except ValueError as exc:
             raise HTTPException(status_code=502, detail="Holiday provider returned an invalid response") from exc
         local_name = item.get("localName")
+        identity = (holiday_day, item["name"])
+        if identity in seen:
+            continue
+        seen.add(identity)
         rows.append((holiday_day, item["name"], local_name if isinstance(local_name, str) else None))
     return rows
 
@@ -1283,7 +1288,9 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
             try:
                 await _sync_holiday_year(db, actor.organization_id, country, year)
                 await db.commit()
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, HTTPException):
+            # Holiday data is a supplemental cache.  Do not fail a calendar
+            # request if a second viewer wins the same cache insert race.
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, HTTPException, IntegrityError):
                 await db.rollback()
     holiday_rows = (await db.execute(select(HolidayRecord).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.country_code == country, HolidayRecord.is_active.is_(True), HolidayRecord.holiday_date >= period_start, HolidayRecord.holiday_date <= period_end))).scalars().all()
     holidays = [{"id": row.id, "kind": "holiday", "visibility": "company", "title": row.local_name or row.name, "starts_at": datetime.combine(row.holiday_date, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(row.holiday_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": actor.has_any_role(*MANAGEMENT_ROLES)} for row in holiday_rows]
