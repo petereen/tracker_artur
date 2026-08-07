@@ -560,12 +560,17 @@ export function useCreateCompanyFolder() {
 }
 
 export function useUploadCompanyFile() {
-  return useCompanyFilesMutation((input: { file: File; parent_id: number | null; onProgress?: (percent: number) => void }) => {
+  return useCompanyFilesMutation((input: { files: File[]; parent_id: number | null; onProgress?: (percent: number) => void }) => {
     const body = new FormData()
-    body.append('file', input.file)
+    const totalBytes = input.files.reduce((sum, file) => sum + file.size, 0)
+    input.files.forEach((file) => body.append('file', file))
     return api.post('/v1/company-files/upload', body, {
       params: { parent_id: input.parent_id ?? undefined },
-      onUploadProgress: (event) => input.onProgress?.(event.total ? Math.round((event.loaded / event.total) * 100) : 0),
+      onUploadProgress: (event) => {
+        const total = event.total || totalBytes || 1
+        const percent = Math.min(100, Math.round((event.loaded / total) * 100))
+        input.onProgress?.(percent)
+      },
     }).then((response) => response.data)
   }, 'Файл байршлаа')
 }

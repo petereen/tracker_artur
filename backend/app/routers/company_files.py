@@ -200,56 +200,76 @@ async def create_folder(
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_company_file(
-    file: UploadFile = File(...),
+    files: list[UploadFile] = File(...),
     parent_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
 ):
     await _active_folder(db, parent_id, actor)
-    name = _clean_name(file.filename or "file")
-    await _ensure_name_available(db, actor, name, parent_id)
-    content = await file.read(settings.ATTACHMENT_MAX_BYTES + 1)
-    if len(content) > settings.ATTACHMENT_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="File exceeds configured size limit")
-    if not content:
-        raise HTTPException(status_code=400, detail="File is empty")
-    content_type = file.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
-    if content_type in BLOCKED_CONTENT_TYPES or name.lower().endswith(BLOCKED_EXTENSIONS):
-        raise HTTPException(status_code=415, detail="Executable files are not allowed")
+    if not files:
+        raise HTTPException(status_code=400, detail="No files were uploaded")
+    seen_names: set[str] = set()
+    uploaded_items: list[CompanyLibraryItem] = []
+    storage_keys: list[str] = []
     try:
-        scan_status = await scan_upload(content)
-    except MalwareDetected as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except MalwareScanUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    storage_key = f"{actor.organization_id}/library/{uuid.uuid4().hex}"
-    checksum = hashlib.sha256(content).hexdigest()
-    await put_attachment(storage_key, content, content_type)
-    item = CompanyLibraryItem(
-        organization_id=actor.organization_id,
-        parent_id=parent_id,
-        kind="file",
-        name=name,
-        storage_key=storage_key,
-        content_type=content_type,
-        size=len(content),
-        checksum=checksum,
-        uploaded_by_account_id=actor.account_id,
-    )
-    db.add(item)
-    try:
+        for file in files:
+            name = _clean_name(file.filename or "file")
+            lower_name = name.casefold()
+            if lower_name in seen_names:
+                raise HTTPException(status_code=409, detail="An item with this name already exists in the folder")
+            seen_names.add(lower_name)
+            await _ensure_name_available(db, actor, name, parent_id)
+            content = await file.read(settings.ATTACHMENT_MAX_BYTES + 1)
+            if len(content) > settings.ATTACHMENT_MAX_BYTES:
+                raise HTTPException(status_code=413, detail="File exceeds configured size limit")
+            if not content:
+                raise HTTPException(status_code=400, detail="File is empty")
+            content_type = file.content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+            if content_type in BLOCKED_CONTENT_TYPES or name.lower().endswith(BLOCKED_EXTENSIONS):
+                raise HTTPException(status_code=415, detail="Executable files are not allowed")
+            try:
+                scan_status = await scan_upload(content)
+            except MalwareDetected as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except MalwareScanUnavailable as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            storage_key = f"{actor.organization_id}/library/{uuid.uuid4().hex}"
+            checksum = hashlib.sha256(content).hexdigest()
+            await put_attachment(storage_key, content, content_type)
+            storage_keys.append(storage_key)
+            item = CompanyLibraryItem(
+                organization_id=actor.organization_id,
+                parent_id=parent_id,
+                kind="file",
+                name=name,
+                storage_key=storage_key,
+                content_type=content_type,
+                size=len(content),
+                checksum=checksum,
+                uploaded_by_account_id=actor.account_id,
+            )
+            db.add(item)
+            uploaded_items.append((item, scan_status, name, checksum))
         await db.flush()
-        await record_change(db, actor=actor, topic="company_files", aggregate_type="company_library_item", aggregate_id=item.id, operation="uploaded", after={"name": name, "parent_id": parent_id, "size": len(content), "checksum": checksum, "scan_status": scan_status})
+        for item, scan_status, name, checksum in uploaded_items:
+            await record_change(db, actor=actor, topic="company_files", aggregate_type="company_library_item", aggregate_id=item.id, operation="uploaded", after={"name": name, "parent_id": parent_id, "size": item.size, "checksum": checksum, "scan_status": scan_status})
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        await delete_attachment(storage_key)
+        for key in storage_keys:
+            await delete_attachment(key)
         raise HTTPException(status_code=409, detail="An item with this name already exists in the folder") from exc
+    except HTTPException:
+        await db.rollback()
+        for key in storage_keys:
+            await delete_attachment(key)
+        raise
     except Exception:
         await db.rollback()
-        await delete_attachment(storage_key)
+        for key in storage_keys:
+            await delete_attachment(key)
         raise
-    return _item_out(item)
+    return [_item_out(item) for item, _, _, _ in uploaded_items]
 
 
 @router.patch("/{item_id}")

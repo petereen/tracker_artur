@@ -56,11 +56,11 @@ export function CompanyFilesPage() {
     if (dialog.mode === 'move') await updateItem.mutateAsync({ id: dialog.item.id, parent_id: dialogValue ? Number(dialogValue) : undefined, move_to_root: !dialogValue })
     setDialog(null)
   }
-  const upload = async (file?: globalThis.File) => {
-    if (!file) return
+  const upload = async (files?: FileList | null) => {
+    if (!files?.length) return
     setUploadProgress(0)
     try {
-      await uploadFile.mutateAsync({ file, parent_id: parentId ?? null, onProgress: setUploadProgress })
+      await uploadFile.mutateAsync({ files: Array.from(files), parent_id: parentId ?? null, onProgress: setUploadProgress })
     } finally {
       setUploadProgress(null)
       if (uploadInput.current) uploadInput.current.value = ''
@@ -82,7 +82,7 @@ export function CompanyFilesPage() {
       {files.data?.can_manage && !trashOpen && <div className="company-files-primary-actions">
         <button className="secondary-action" onClick={() => openDialog({ mode: 'create' })}><FolderPlus size={16} />{t('files.newFolder')}</button>
         <button className="primary-action" onClick={() => uploadInput.current?.click()} disabled={uploadFile.isPending}><Upload size={16} />{t('files.upload')}</button>
-        <input ref={uploadInput} className="sr-only" type="file" onChange={(event) => upload(event.target.files?.[0])} />
+        <input ref={uploadInput} className="sr-only" type="file" multiple onChange={(event) => upload(event.target.files)} />
       </div>}
     </div>
 
