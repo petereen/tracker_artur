@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Make check-ins configuration-dependent and add platform report creation with submission-aware reminders (`backend/app/bot`, `backend/app/routers/enterprise.py`, `frontend/src/pages/EnterpriseReportsPage.tsx`)
+- [x] Replace project approval requests with direct member project creation and member notifications (`backend/app/routers/enterprise.py`, `frontend/src/api/enterprise.ts`)
+- [x] Add configurable cross-channel task assignment permissions with all workers enabled by default (`backend/app/routers/enterprise.py`, `backend/app/bot`, `frontend/src/pages/AdministrationHubPage.tsx`)
+- [x] Complete project, plan, calendar, and report Telegram notification coverage (`backend/app/services`, `backend/app/routers`)
+- [x] Add leased Telegram outbox retries, regression coverage, and full validation (`backend/app/services/task_service.py`, `backend/tests`, `frontend/src`)
 - [x] Polish Calendar navigation and Today task/calendar layout (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`)
 - [x] Add persistent web notifications mirrored through the Telegram outbox (`backend/app/models/models.py`, `backend/app/services`, `backend/app/routers/enterprise.py`, `frontend/src`)
 - [x] Add local memoji choices and validated custom avatar uploads (`emojis`, `frontend/public/emojis`, `backend/app/routers/enterprise_auth.py`)

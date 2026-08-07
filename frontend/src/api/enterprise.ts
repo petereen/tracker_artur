@@ -185,7 +185,7 @@ export function useCreateProject() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: Record<string, unknown>) => api.post('/v1/projects', input).then((response) => response.data),
-    onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success(data.requires_approval ? 'Төслийн хүсэлтийг хяналтад илгээлээ' : 'Төсөл үүслээ') },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл үүслээ') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл үүссэнгүй'),
   })
 }
@@ -259,6 +259,24 @@ export function useObjectives() {
 
 export function useEnterpriseReports(status?: string, period?: DateRange) {
   return useQuery<any[]>({ queryKey: ['v1', 'reports', status, period], queryFn: () => api.get('/v1/reports', { params: { ...(status ? { status } : {}), ...period } }).then((response) => response.data) })
+}
+
+export function useCreateReport() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { report_type: 'daily' | 'monthly' | 'next_month_plan'; period_date: string }) => api.post('/v1/reports', input).then((response) => response.data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'reports'] }); toast.success('Тайлан үүслээ') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Тайлан үүссэнгүй'),
+  })
+}
+
+export interface PermissionSettings { task_assignment_roles: string[]; available_roles: string[] }
+export function usePermissionSettings() {
+  return useQuery<PermissionSettings>({ queryKey: ['v1', 'settings', 'permissions'], queryFn: () => api.get('/v1/settings/permissions').then((response) => response.data) })
+}
+export function useUpdatePermissionSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (task_assignment_roles: string[]) => api.put('/v1/settings/permissions', { task_assignment_roles }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'settings', 'permissions'] }); toast.success('Даалгаврын эрх хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Эрх хадгалагдсангүй') })
 }
 
 export function useTodayCheckin() {

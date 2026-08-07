@@ -46,11 +46,15 @@ def get_all_active_employees() -> list[Employee]:
 
 def get_questions(employee_id: int | None = None) -> list[Question]:
     with get_session() as s:
-        query = select(Question).order_by(Question.sort_order)
-        if employee_id is not None:
-            assigned = select(EmployeeQuestion.question_id).where(EmployeeQuestion.employee_id == employee_id)
-            query = query.where(~Question.id.in_(assigned) | Question.id.not_in(select(EmployeeQuestion.question_id)))
-        return list(s.execute(query).scalars())
+        return _get_questions_in_session(s, employee_id)
+
+
+def _get_questions_in_session(s: Session, employee_id: int | None = None) -> list[Question]:
+    query = select(Question).order_by(Question.sort_order, Question.id)
+    if employee_id is not None:
+        assigned = select(EmployeeQuestion.question_id).where(EmployeeQuestion.employee_id == employee_id)
+        query = query.where(Question.id.in_(assigned) | Question.id.not_in(select(EmployeeQuestion.question_id)))
+    return list(s.execute(query).scalars())
 
 
 def get_schedule(employee_id: int) -> Schedule | None:
@@ -107,9 +111,32 @@ def mirror_completed_session(session_id: int, source: str = "telegram") -> None:
         account = s.execute(select(UserAccount).where(UserAccount.employee_id == session.employee_id)).scalar_one_or_none()
         if not account:
             return
-        template = s.execute(select(CheckinTemplate).where(CheckinTemplate.organization_id == account.organization_id, CheckinTemplate.is_active.is_(True)).order_by(CheckinTemplate.id)).scalars().first()
-        if not template:
+        legacy_questions = _get_questions_in_session(s, session.employee_id)
+        if not legacy_questions:
             return
+        template_name = f"Daily check-in [employee:{session.employee_id}]"
+        template = s.execute(select(CheckinTemplate).where(CheckinTemplate.organization_id == account.organization_id, CheckinTemplate.name == template_name)).scalar_one_or_none()
+        if not template:
+            template = CheckinTemplate(organization_id=account.organization_id, name=template_name, cadence="daily")
+            s.add(template)
+            s.flush()
+        canonical = s.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == template.id)).scalars().all()
+        by_source = {
+            int(item.prompt["source_question_id"]): item
+            for item in canonical
+            if isinstance(item.prompt, dict) and item.prompt.get("source_question_id") is not None
+        }
+        for position, question in enumerate(legacy_questions):
+            canonical_question = by_source.get(question.id)
+            if canonical_question is None:
+                canonical_question = CheckinQuestion(template_id=template.id)
+                s.add(canonical_question)
+            canonical_question.prompt = {"mn": question.text, "source_question_id": question.id}
+            canonical_question.answer_type = question.answer_type
+            canonical_question.choices = question.options or []
+            canonical_question.is_required = bool(question.is_required)
+            canonical_question.position = position
+        s.flush()
         checkin = s.execute(select(Checkin).where(Checkin.employee_id == session.employee_id, Checkin.template_id == template.id, Checkin.local_date == session.date)).scalar_one_or_none()
         if not checkin:
             checkin = Checkin(employee_id=session.employee_id, template_id=template.id, local_date=session.date, source=source, started_at=session.started_at)
@@ -119,7 +146,11 @@ def mirror_completed_session(session_id: int, source: str = "telegram") -> None:
             return
         legacy_answers = s.execute(select(Answer).where(Answer.session_id == session.id).order_by(Answer.id)).scalars().all()
         questions = s.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == template.id).order_by(CheckinQuestion.position)).scalars().all()
-        for question, answer in zip(questions, legacy_answers):
+        current_by_source = {question.prompt.get("source_question_id"): question for question in questions if isinstance(question.prompt, dict)}
+        for legacy_question, answer in zip(legacy_questions, legacy_answers):
+            question = current_by_source.get(legacy_question.id)
+            if question is None:
+                continue
             existing = s.execute(select(CheckinAnswer).where(CheckinAnswer.checkin_id == checkin.id, CheckinAnswer.question_id == question.id)).scalar_one_or_none()
             if not existing:
                 s.add(CheckinAnswer(checkin_id=checkin.id, question_id=question.id, value_text=answer.value_text, value_numeric=answer.value_numeric))

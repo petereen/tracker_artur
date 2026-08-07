@@ -115,9 +115,6 @@ def _fmt_deadline(dt: datetime | None) -> str:
 
 
 async def send_task_reminder(task_id: int, minutes_before: int) -> None:
-    from app.bot.keyboards import task_reminder_kb
-    from app.bot.scheduler import _make_bot
-
     task = task_service.get_task(task_id)
     if not task or task["status"] in ("done", "cancelled"):
         return
@@ -134,41 +131,19 @@ async def send_task_reminder(task_id: int, minutes_before: int) -> None:
     else:
         when = f"{minutes_before} минутын дараа"
 
-    text = (
-        f"⏰ <b>Даалгаврын сануулга</b>\n\n"
-        f"#{task['id']} {task['title']}\n"
-        f"Хугацаа: <b>{_fmt_deadline(task['deadline_at'])}</b> ({when})"
-    )
-    from app.services.user_notifications import mirror_existing_telegram_notification
-
-    bot = None
-    try:
-        for recipient in recipients:
-            dedup_key = f"task-reminder:{task['id']}:{minutes_before}:employee:{recipient['id']}"
-            telegram_id = recipient.get("telegram_id")
-            mirror_existing_telegram_notification(
-                employee_id=recipient["id"], kind="task_deadline", title="Даалгаврын сануулга",
-                body=f"“{task['title']}” даалгаврын хугацаа: {_fmt_deadline(task['deadline_at'])}.",
-                target_url=f"/tasks?task={task['id']}", dedup_key=dedup_key,
-                payload={"task_id": task["id"]}, telegram_status="queued" if telegram_id else "unavailable",
-            )
-            if not telegram_id:
-                continue
-            if bot is None:
-                bot = _make_bot()
-            try:
-                await bot.send_message(telegram_id, text, reply_markup=task_reminder_kb(task["id"]))
-                mirror_existing_telegram_notification(
-                    employee_id=recipient["id"], kind="task_deadline", title="Даалгаврын сануулга",
-                    body=f"“{task['title']}” даалгаврын хугацаа: {_fmt_deadline(task['deadline_at'])}.",
-                    target_url=f"/tasks?task={task['id']}", dedup_key=dedup_key,
-                    payload={"task_id": task["id"]}, telegram_status="sent",
-                )
-            except Exception:  # noqa: BLE001
-                log.exception("deadline reminder failed for task=%s employee=%s", task_id, recipient["id"])
-    finally:
-        if bot is not None:
-            await bot.session.close()
+    for recipient in recipients:
+        telegram_id = recipient.get("telegram_id")
+        if not telegram_id:
+            continue
+        task_service.enqueue_notification(
+            task_id=task["id"], recipient_tg=telegram_id, kind="task_deadline",
+            payload={
+                "title": task["title"], "deadline_iso": _iso(task["deadline_at"]),
+                "when": when, "timezone_name": recipient.get("timezone") or DEFAULT_TZ,
+            },
+            not_before=datetime.now(timezone.utc),
+            dedup_key=f"task-reminder:{task['id']}:{minutes_before}:employee:{recipient['id']}",
+        )
 
 
 def escalate_overdue(task_id: int) -> None:
@@ -220,9 +195,9 @@ async def drain_notification_outbox() -> None:
                 text, kb = _render_outbox(item)
                 await bot.send_message(item["recipient_tg"], text, reply_markup=kb)
                 task_service.mark_outbox(item["id"], "sent")
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 log.exception("drain: ошибка отправки outbox id=%s", item["id"])
-                task_service.mark_outbox(item["id"], "failed")
+                task_service.mark_outbox(item["id"], "failed", str(exc))
     finally:
         await bot.session.close()
 
@@ -250,5 +225,8 @@ def _render_outbox(item: dict):
     if item["kind"] == "task_overdue":
         text = (f"🔴 #{tid} даалгаврын хугацаа хэтэрлээ: {title}\n"
                 f"/done {tid} гэж дуусгах эсвэл /snooze {tid} <цаг> гэж хугацааг хойшлуулна уу.")
+        return text, (task_actions_kb(tid) if tid else None)
+    if item["kind"] == "task_deadline":
+        text = f"⏰ <b>Даалгаврын сануулга</b>\n\n#{tid} {title}\nХугацаа: <b>{dl_h}</b> ({p.get('when', 'удахгүй')})"
         return text, (task_actions_kb(tid) if tid else None)
     return p.get("text") or f"🔔 <b>{p.get('title', 'Мэдэгдэл')}</b>\n\n{p.get('body', '')}", None

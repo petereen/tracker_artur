@@ -16,6 +16,7 @@ from app.bot.keyboards import task_actions_kb
 from app.services import reminder_service, task_ai, task_service
 from app.services.notification_policy import load_policy, next_allowed
 from app.services.task_parser import parse_task_text, parse_when
+from app.services.collaboration_permissions import employee_can_assign_tasks
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -81,6 +82,7 @@ async def _create_task_from_text(
     """Парсит фразу, резолвит исполнителя, создаёт задачу, планирует напоминания и
     уведомляет исполнителя. Используется и /task, и голосовым вводом."""
     tz = employee.timezone if employee else "Asia/Ulaanbaatar"
+    can_assign_others = is_manager or employee_can_assign_tasks(employee.id if employee else None)
     parsed = parse_task_text(text, now=_now_tz(tz), tz=tz)
 
     assignee_id = None
@@ -90,8 +92,8 @@ async def _create_task_from_text(
         if not target:
             await message.answer(f"❌ @{parsed.assignee_username} хэрэглэгчтэй ажилтан олдсонгүй. Username-ийг шалгана уу.")
             return
-        if not is_manager and (not employee or target.id != employee.id):
-            await message.answer("❌ Бусдад даалгавар өгөх эрх зөвхөн удирдлагад бий.")
+        if not can_assign_others and (not employee or target.id != employee.id):
+            await message.answer("❌ Таны одоогийн эрх бусдад даалгавар өгөхийг зөвшөөрөхгүй байна.")
             return
         assignee_id = target.id
         assignee_label = target.name
@@ -449,6 +451,7 @@ async def begin_task_draft(
     else:
         self_emp = None
     tz = (self_emp.get("timezone") if self_emp else None) or "Asia/Ulaanbaatar"
+    can_assign_others = is_manager or employee_can_assign_tasks(employee.id if employee else None)
 
     roster = _roster()
     all_active_assignee_ids = [row["id"] for row in roster]
@@ -488,7 +491,7 @@ async def begin_task_draft(
         # Explicit stored names are more reliable than a model selection and
         # can intentionally name more than one recipient.
         assignee_id = exact_name_ids[0]
-    elif is_manager:
+    elif can_assign_others:
         ambiguous_names = _ambiguous_roster_names(text, roster)
         if ambiguous_names:
             options = "\n".join(f"• {name}" for name in ambiguous_names)
@@ -498,12 +501,12 @@ async def begin_task_draft(
                 "Аль ажилтныг сонгохоо бүтэн нэрээр бичнэ үү.",
                 candidates=ambiguous_names,
             )
-    assign_to_all = is_manager and (
+    assign_to_all = can_assign_others and (
         bool(structured.get("assign_to_all")) or _targets_all_workers(text)
     )
     # Самоназначение: рядовой сотрудник всегда себе; явное «мне/себе» — себе у любого.
     if self_emp and (
-        not is_manager
+        not can_assign_others
         or structured.get("assign_to_self")
         or (not assignee_id and _SELF_RE.search(text or ""))
     ):

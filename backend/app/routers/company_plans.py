@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
-from app.models.models import COMPANY_PLAN_HORIZONS, CompanyPlanItem, Employee, PlanIdea, WorkReport, WorkReportRevision
+from app.models.models import COMPANY_PLAN_HORIZONS, CompanyPlanItem, Employee, PlanIdea, UserAccount, WorkReport, WorkReportRevision
+from app.services.enterprise_events import record_change
+from app.services.user_notifications import create_notifications
 
 router = APIRouter()
 MANAGEMENT_ROLES = ("admin", "manager", "team_lead")
@@ -170,9 +172,25 @@ async def _create_item(data: CompanyPlanItemCreate, db: AsyncSession, actor: Act
     return item
 
 
+async def _notify_item_created(db: AsyncSession, actor: ActorContext, item: CompanyPlanItem) -> None:
+    event = await record_change(db, actor=actor, topic="plans", aggregate_type="company_plan_item", aggregate_id=item.id, operation="created", after={"title": item.title, "plan_month": str(item.plan_month), "due_date": str(item.due_date) if item.due_date else None})
+    employee_ids = set((await db.execute(select(UserAccount.employee_id).where(
+        UserAccount.organization_id == actor.organization_id,
+        UserAccount.status == "active",
+        UserAccount.employee_id.isnot(None),
+    ))).scalars().all())
+    await create_notifications(
+        db, organization_id=actor.organization_id, employee_ids=employee_ids,
+        kind="company_plan_created", title="Шинэ компанийн төлөвлөгөө",
+        body=f"“{item.title}” төлөвлөгөө нэмэгдлээ.", target_url="/plans",
+        payload={"plan_item_id": item.id, "plan_month": str(item.plan_month)},
+        source_event_id=event.id, dedup_key=f"company-plan-created:{item.id}",
+    )
+
+
 @router.post("/items", status_code=201)
 async def approve_company_plan_item(data: CompanyPlanItemCreate, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
-    item = await _create_item(data, db, actor); await db.commit(); return await _serialize_item(db, item)
+    item = await _create_item(data, db, actor); await _notify_item_created(db, actor, item); await db.commit(); return await _serialize_item(db, item)
 
 
 @router.post("/ideas/merge", status_code=201)
@@ -184,6 +202,7 @@ async def merge_ideas(data: PlanIdeaMerge, db: AsyncSession = Depends(get_db), a
     now = datetime.now(timezone.utc)
     for idea in ideas:
         idea.status, idea.merged_into_plan_item_id, idea.reviewed_by_account_id, idea.reviewed_at = "merged", item.id, actor.account_id, now
+    await _notify_item_created(db, actor, item)
     await db.commit(); return await _serialize_item(db, item)
 
 

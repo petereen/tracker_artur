@@ -504,3 +504,20 @@ def report_is_approved(employee_id: int, report_type: str, local_day: date) -> b
                 WorkReport.status == "approved",
             )
         ).scalar_one_or_none())
+
+
+def report_needs_submission(employee_id: int, report_type: str, local_day: date) -> bool:
+    """Return whether the owner still needs to submit this reporting period.
+
+    Scheduler-created awaiting rows and saved drafts remain actionable. Only a
+    formal submission (or its approved successor) suppresses reminders.
+    """
+    with get_session() as s:
+        report = s.execute(
+            select(WorkReport.status).where(
+                WorkReport.employee_id == employee_id,
+                WorkReport.report_type == report_type,
+                WorkReport.period_date == period_for(report_type, local_day),
+            )
+        ).scalar_one_or_none()
+        return report not in {"submitted", "approved"}

@@ -18,6 +18,7 @@ from app.core.telegram_auth import verify_init_data
 from app.models.models import DEFAULT_REMINDER_INTERVALS_MIN, Employee, ManagerSettings, NotificationOutbox, Task, TaskComment
 from app.services.notification_policy import load_policy, next_allowed
 from app.services.manager_recipients import manager_telegram_ids
+from app.services.collaboration_permissions import employee_can_assign_tasks
 
 router = APIRouter()          # admin, mount /tasks
 miniapp_router = APIRouter()  # Mini App, mount /miniapp
@@ -290,8 +291,9 @@ async def miniapp_create(
 ):
     emp, is_manager = await _miniapp_actor(db, x_telegram_init_data)
     assignee_id = data.assignee_id
-    if assignee_id and assignee_id != (emp.id if emp else None) and not is_manager:
-        raise HTTPException(status_code=403, detail="only manager can assign to others")
+    can_assign_others = is_manager or employee_can_assign_tasks(emp.id if emp else None)
+    if assignee_id and assignee_id != (emp.id if emp else None) and not can_assign_others:
+        raise HTTPException(status_code=403, detail="your role cannot assign to others")
     if not assignee_id:
         assignee_id = emp.id if emp else None
     task = Task(

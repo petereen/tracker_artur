@@ -36,6 +36,7 @@ from app.models.models import (
     CompanyPlanItem,
     CompanyKnowledge,
     Employee,
+    EmployeeQuestion,
     ExchangeRateSnapshot,
     IdempotencyRecord,
     JobQueue,
@@ -77,6 +78,7 @@ from app.services import assistant_ai, exchange_rate_service
 from app.services.knowledge_service import rank_knowledge
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
+from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
 
 
 router = APIRouter()
@@ -86,6 +88,10 @@ LEGACY_STATUS = {
     "backlog": "open", "to_do": "open", "in_progress": "in_progress",
     "review": "open", "done": "done", "cancelled": "cancelled",
 }
+
+
+class PermissionSettingsInput(BaseModel):
+    task_assignment_roles: list[Literal["admin", "manager", "team_lead", "member", "contractor", "client_auditor"]]
 
 
 async def _management_account_ids(db: AsyncSession, organization_id: int) -> set[int]:
@@ -143,6 +149,22 @@ async def read_all_notifications(db: AsyncSession = Depends(get_db), actor: Acto
         item.read_at = now
     await db.commit()
     return {"updated": len(rows), "read_at": now}
+
+
+@router.get("/settings/permissions")
+async def get_permission_settings(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    organization = await db.get(Organization, actor.organization_id)
+    return {"task_assignment_roles": sorted(configured_assignment_roles(organization)), "available_roles": sorted(ALL_EMPLOYEE_ROLES)}
+
+
+@router.put("/settings/permissions")
+async def update_permission_settings(data: PermissionSettingsInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "manager"))):
+    organization = await db.get(Organization, actor.organization_id, with_for_update=True)
+    roles = sorted(set(data.task_assignment_roles))
+    organization.settings = {**(organization.settings or {}), SETTINGS_KEY: roles}
+    await record_change(db, actor=actor, topic="settings", aggregate_type="organization_permissions", aggregate_id=organization.id, operation="updated", after={SETTINGS_KEY: roles})
+    await db.commit()
+    return {"task_assignment_roles": roles, "available_roles": sorted(ALL_EMPLOYEE_ROLES)}
 
 
 def _decimal(value: Decimal | None) -> float | None:
@@ -354,6 +376,11 @@ class ReportDraftInput(BaseModel):
     markdown: str = Field(min_length=1, max_length=100_000)
 
 
+class ReportCreateInput(BaseModel):
+    report_type: Literal["daily", "monthly", "next_month_plan"] = "daily"
+    period_date: date
+
+
 class CheckinAnswerInput(BaseModel):
     question_id: int
     value_text: str | None = None
@@ -362,7 +389,7 @@ class CheckinAnswerInput(BaseModel):
 
 
 class CheckinSubmitInput(BaseModel):
-    answers: list[CheckinAnswerInput] = Field(min_length=1, max_length=100)
+    answers: list[CheckinAnswerInput] = Field(default_factory=list, max_length=100)
 
 
 class CheckinStartInput(BaseModel):
@@ -680,28 +707,15 @@ async def archive_project(project_id: int, db: AsyncSession = Depends(get_db), a
 
 @router.post("/projects", status_code=status.HTTP_201_CREATED)
 async def create_project(data: ProjectInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    if not actor.has_any_role("admin", "manager"):
-        request = ProjectRequest(
-            organization_id=actor.organization_id,
-            requested_by_account_id=actor.account_id,
-            requested_by_employee_id=actor.employee_id,
-            payload=data.model_dump(mode="json"),
-        )
-        db.add(request)
-        await db.flush()
-        source_event = await record_change(db, actor=actor, topic="projects", aggregate_type="project_request", aggregate_id=request.id, operation="requested", after={"status": request.status, "name": data.name, "code": data.code})
-        await create_notifications(
-            db, organization_id=actor.organization_id, account_ids=await _management_account_ids(db, actor.organization_id),
-            kind="project_approval_requested", title="Төслийн хүсэлт", body=f"“{data.name}” төслийн хүсэлт ирлээ.",
-            target_url="/projects", payload={"request_id": request.id}, source_event_id=source_event.id,
-            dedup_key=f"project-request:{request.id}",
-        )
-        await db.commit()
-        return {"request_id": request.id, "status": "pending", "requires_approval": True}
-    payload = data.model_dump(exclude={"member_ids"})
+    if not actor.has_any_role(*MANAGEMENT_ROLES) and not actor.employee_id:
+        raise HTTPException(status_code=409, detail="Account is not linked to an employee")
+    manager_id = data.manager_id or (actor.employee_id if not actor.has_any_role(*MANAGEMENT_ROLES) else None)
+    payload = data.model_dump(exclude={"member_ids", "manager_id"}) | {"manager_id": manager_id}
     employee_ids = set(data.member_ids)
-    if data.manager_id:
-        employee_ids.add(data.manager_id)
+    if manager_id:
+        employee_ids.add(manager_id)
+    if actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
+        employee_ids.add(actor.employee_id)
     if employee_ids:
         valid = set((await db.execute(select(Employee.id).where(Employee.id.in_(employee_ids), Employee.is_active.is_(True)))).scalars().all())
         if valid != employee_ids:
@@ -711,9 +725,9 @@ async def create_project(data: ProjectInput, db: AsyncSession = Depends(get_db),
     try:
         await db.flush()
         for employee_id in employee_ids:
-            db.add(ProjectMember(project_id=project.id, employee_id=employee_id, project_role="owner" if employee_id == data.manager_id else "member"))
+            db.add(ProjectMember(project_id=project.id, employee_id=employee_id, project_role="owner" if employee_id == manager_id else "member"))
         await db.flush()
-        manager = await db.get(Employee, data.manager_id) if data.manager_id else None
+        manager = await db.get(Employee, manager_id) if manager_id else None
         output = {**_project_out(project), "manager_name": manager.name if manager else None, "member_ids": sorted(employee_ids)}
         source_event = await record_change(db, actor=actor, topic="projects", aggregate_type="project", aggregate_id=project.id, operation="created", version=project.version, after=output)
         await create_notifications(
@@ -937,8 +951,12 @@ async def list_tasks(
 async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if data.workflow_status not in WORKFLOW_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid workflow status")
-    if not actor.has_any_role(*MANAGEMENT_ROLES) and data.primary_owner_id not in {None, actor.employee_id}:
-        raise HTTPException(status_code=403, detail="Only managers can assign work to others")
+    can_assign = await actor_can_assign_tasks(db, organization_id=actor.organization_id, employee_id=actor.employee_id, roles=actor.roles)
+    requested_targets = set(data.assignee_ids)
+    if data.primary_owner_id:
+        requested_targets.add(data.primary_owner_id)
+    if any(target != actor.employee_id for target in requested_targets) and not can_assign:
+        raise HTTPException(status_code=403, detail="Your role cannot assign work to other workers")
     request_hash = hashlib.sha256(data.model_dump_json().encode()).hexdigest()
     if idempotency_key:
         existing = (
@@ -1733,6 +1751,34 @@ async def submit_report(report_id: int, db: AsyncSession = Depends(get_db), acto
     return {"id": report.id, "status": report.status, "version": report.version}
 
 
+@router.post("/reports", status_code=status.HTTP_201_CREATED)
+async def create_report(data: ReportCreateInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if not actor.employee_id:
+        raise HTTPException(status_code=409, detail="Account is not linked to an employee")
+    period_date = data.period_date if data.report_type == "daily" else data.period_date.replace(day=1)
+    report = (await db.execute(select(WorkReport).where(
+        WorkReport.employee_id == actor.employee_id,
+        WorkReport.report_type == data.report_type,
+        WorkReport.period_date == period_date,
+    ))).scalar_one_or_none()
+    if report is None:
+        report = WorkReport(employee_id=actor.employee_id, report_type=data.report_type, period_date=period_date, status="awaiting")
+        db.add(report)
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            report = (await db.execute(select(WorkReport).where(
+                WorkReport.employee_id == actor.employee_id,
+                WorkReport.report_type == data.report_type,
+                WorkReport.period_date == period_date,
+            ))).scalar_one()
+        else:
+            await record_change(db, actor=actor, topic="reports", aggregate_type="work_report", aggregate_id=report.id, operation="created", after={"report_type": report.report_type, "period_date": str(report.period_date), "status": report.status})
+            await db.commit()
+    return {"id": report.id, "employee_id": report.employee_id, "report_type": report.report_type, "period_date": report.period_date, "status": report.status, "title": report.title, "version": report.version}
+
+
 @router.get("/reports/{report_id}")
 async def report_detail(report_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     report = await db.get(WorkReport, report_id)
@@ -1925,7 +1971,7 @@ async def list_checkin_templates(db: AsyncSession = Depends(get_db), actor: Acto
             db.add(template)
             await db.flush()
             for position, question in enumerate(legacy_questions):
-                db.add(CheckinQuestion(template_id=template.id, prompt={"mn": question.text}, answer_type=question.answer_type, choices=question.options or [], is_required=True, position=position))
+                db.add(CheckinQuestion(template_id=template.id, prompt={"mn": question.text, "source_question_id": question.id}, answer_type=question.answer_type, choices=question.options or [], is_required=bool(question.is_required), position=position))
             await db.commit()
             templates = [template]
     output = []
@@ -1946,26 +1992,61 @@ async def list_checkins(local_date: date | None = None, db: AsyncSession = Depen
     return [{"id": row.id, "template_id": row.template_id, "local_date": row.local_date, "status": row.status, "source": row.source, "started_at": row.started_at, "submitted_at": row.submitted_at} for row in rows]
 
 
+async def _applicable_legacy_questions(db: AsyncSession, employee_id: int) -> list[Question]:
+    assigned_to_employee = select(EmployeeQuestion.question_id).where(EmployeeQuestion.employee_id == employee_id)
+    assigned_to_anyone = select(EmployeeQuestion.question_id)
+    return list((await db.execute(
+        select(Question).where(or_(Question.id.in_(assigned_to_employee), Question.id.not_in(assigned_to_anyone))).order_by(Question.sort_order, Question.id)
+    )).scalars().all())
+
+
+async def _employee_checkin_template(db: AsyncSession, organization_id: int, employee_id: int, questions: list[Question]) -> CheckinTemplate:
+    template_name = f"Daily check-in [employee:{employee_id}]"
+    template = (await db.execute(select(CheckinTemplate).where(
+        CheckinTemplate.organization_id == organization_id,
+        CheckinTemplate.name == template_name,
+    ))).scalar_one_or_none()
+    if template is None:
+        template = CheckinTemplate(organization_id=organization_id, name=template_name, cadence="daily")
+        db.add(template)
+        await db.flush()
+    canonical = (await db.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == template.id))).scalars().all()
+    by_source = {
+        int(item.prompt["source_question_id"]): item
+        for item in canonical
+        if isinstance(item.prompt, dict) and item.prompt.get("source_question_id") is not None
+    }
+    for position, question in enumerate(questions):
+        prompt = {"mn": question.text, "source_question_id": question.id}
+        item = by_source.get(question.id)
+        if item is None:
+            item = CheckinQuestion(template_id=template.id)
+            db.add(item)
+        item.prompt = prompt
+        item.answer_type = question.answer_type
+        item.choices = question.options or []
+        item.is_required = bool(question.is_required)
+        item.position = position
+    await db.flush()
+    return template
+
+
 @router.get("/checkins/today")
 async def today_checkin(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if not actor.employee_id:
         return {"template": None, "checkin": None, "answers": []}
     employee = await db.get(Employee, actor.employee_id)
     local_day = datetime.now(timezone.utc).astimezone(ZoneInfo(employee.timezone)).date()
-    templates = (await db.execute(select(CheckinTemplate).where(CheckinTemplate.organization_id == actor.organization_id, CheckinTemplate.is_active.is_(True)).order_by(CheckinTemplate.id))).scalars().all()
-    if not templates:
-        legacy_questions = (await db.execute(select(Question).order_by(Question.sort_order))).scalars().all()
-        if not legacy_questions:
-            return {"template": None, "checkin": None, "answers": []}
-        template = CheckinTemplate(organization_id=actor.organization_id, name="Daily check-in", cadence="daily")
-        db.add(template)
-        await db.flush()
-        for position, question in enumerate(legacy_questions):
-            db.add(CheckinQuestion(template_id=template.id, prompt={"mn": question.text}, answer_type=question.answer_type, choices=question.options or [], is_required=question.is_required, position=position))
-        await db.commit()
-        templates = [template]
-    template = templates[0]
-    questions = (await db.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == template.id).order_by(CheckinQuestion.position))).scalars().all()
+    legacy_questions = await _applicable_legacy_questions(db, actor.employee_id)
+    if not legacy_questions:
+        return {"template": None, "checkin": None, "answers": []}
+    template = await _employee_checkin_template(db, actor.organization_id, actor.employee_id, legacy_questions)
+    source_ids = {question.id for question in legacy_questions}
+    questions = [
+        question for question in (await db.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == template.id).order_by(CheckinQuestion.position))).scalars().all()
+        if isinstance(question.prompt, dict) and question.prompt.get("source_question_id") in source_ids
+    ]
+    await db.commit()
     checkin = (await db.execute(select(Checkin).where(Checkin.employee_id == actor.employee_id, Checkin.template_id == template.id, Checkin.local_date == local_day))).scalar_one_or_none()
     answers = (await db.execute(select(CheckinAnswer).where(CheckinAnswer.checkin_id == checkin.id))).scalars().all() if checkin else []
     return {
@@ -2000,7 +2081,12 @@ async def submit_checkin(checkin_id: int, data: CheckinSubmitInput, db: AsyncSes
     checkin = await db.get(Checkin, checkin_id, with_for_update=True)
     if not checkin or checkin.employee_id != actor.employee_id:
         raise HTTPException(status_code=404, detail="Check-in not found")
-    questions = (await db.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == checkin.template_id))).scalars().all()
+    applicable = await _applicable_legacy_questions(db, checkin.employee_id)
+    source_ids = {question.id for question in applicable}
+    questions = [
+        question for question in (await db.execute(select(CheckinQuestion).where(CheckinQuestion.template_id == checkin.template_id))).scalars().all()
+        if isinstance(question.prompt, dict) and question.prompt.get("source_question_id") in source_ids
+    ]
     by_id = {answer.question_id: answer for answer in data.answers}
     question_ids = {question.id for question in questions}
     if not set(by_id).issubset(question_ids) or any(question.is_required and question.id not in by_id for question in questions):

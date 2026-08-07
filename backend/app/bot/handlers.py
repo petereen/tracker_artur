@@ -41,12 +41,14 @@ def mini_app_keyboard() -> InlineKeyboardMarkup | None:
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
-def _numeric_keyboard(question_text: str) -> InlineKeyboardMarkup:
+def _numeric_keyboard(question_text: str, *, optional: bool = False) -> InlineKeyboardMarkup:
     """Кнопки 0–15 для числовых вопросов."""
     rows = []
     for row_start in range(0, 16, 5):
         rows.append([InlineKeyboardButton(text=str(i), callback_data=f"ans:{i}") for i in range(row_start, min(row_start + 5, 16))])
     rows.append([InlineKeyboardButton(text="Өөр тоо ✏️", callback_data="ans:custom")])
+    if optional:
+        rows.append([InlineKeyboardButton(text="Алгасах", callback_data="ans:skip")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -55,8 +57,10 @@ async def _ask_question(message_or_cb, question, state: FSMContext, session_id: 
     target_message = message_or_cb.message if isinstance(message_or_cb, CallbackQuery) else message_or_cb
 
     if question.answer_type in ("integer", "decimal"):
-        kb = _numeric_keyboard(question.text)
+        kb = _numeric_keyboard(question.text, optional=not question.is_required)
         await target_message.answer(text, reply_markup=kb, parse_mode="HTML")
+    elif not question.is_required:
+        await target_message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Алгасах", callback_data="ans:skip")]]), parse_mode="HTML")
     else:
         await target_message.answer(text, parse_mode="HTML")
 
@@ -131,7 +135,17 @@ async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMConte
 
     questions = get_questions(emp.id)
     if not questions:
-        await target.answer("⚠️ Асуултууд тохируулагдаагүй байна.")
+        from app.bot.work_report_handlers import send_report_prompt
+        from app.services import work_report_service
+
+        local_day = datetime.now(ZoneInfo(emp.timezone)).date()
+        report_type = "daily_test" if session_type == "daily_test" else "daily"
+        report = work_report_service.get_or_create_report(emp.id, report_type, local_day)
+        await send_report_prompt(
+            target.bot, report, telegram_chat_id=str(target.chat.id),
+            prompt_type="test_daily_report" if report_type == "daily_test" else "daily_report",
+            local_day=local_day,
+        )
         return
 
     local_day = datetime.now(ZoneInfo(emp.timezone)).date()
@@ -185,7 +199,9 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
 
     value_text = None
     value_numeric = None
-    if q.answer_type in ("integer", "decimal"):
+    if value == "skip" and not q.is_required:
+        pass
+    elif q.answer_type in ("integer", "decimal"):
         try:
             value_numeric = float(value.replace(",", "."))
         except ValueError:

@@ -77,15 +77,12 @@ def _rebuild_jobs_unlocked():
                 hour=hour, minute=0, timezone=tz,
                 id=f"work_time_end_{hour}_{emp.id}", replace_existing=True,
                 args=[emp.id, "end"])
-        if not sch:
-            continue
-
-        weekdays = sch.weekdays or [1, 2, 3, 4, 5]
+        weekdays = (sch.weekdays if sch else None) or [1, 2, 3, 4, 5]
         dow = ",".join(str(d - 1) for d in weekdays)
 
-        evening: time = sch.evening_time or time(17, 30)
-        deadline: time = sch.deadline_time or time(23, 0)
-        reminders: list[int] = sch.reminder_intervals or [60, 120]
+        evening: time = (sch.evening_time if sch else None) or time(17, 30)
+        deadline: time = (sch.deadline_time if sch else None) or time(23, 0)
+        reminders: list[int] = (sch.reminder_intervals if sch else None) or [60, 120]
 
         scheduler.add_job(send_survey, "cron",
             hour=evening.hour, minute=evening.minute, day_of_week=dow, timezone=tz,
@@ -136,6 +133,12 @@ def _rebuild_jobs_unlocked():
     scheduler.add_job(drain_notification_outbox, "interval", minutes=1,
         id="drain_outbox", replace_existing=True)
 
+    from app.services.collaboration_reminders import reconcile_calendar_reminders, reconcile_project_deadlines
+    scheduler.add_job(reconcile_calendar_reminders, "interval", minutes=1,
+        id="reconcile_calendar_reminders", replace_existing=True)
+    scheduler.add_job(reconcile_project_deadlines, "interval", minutes=15,
+        id="reconcile_project_deadlines", replace_existing=True)
+
     # The job checks completion rather than assuming a fixed submission day;
     # it therefore sends as soon as the final previous-month report is approved.
     from app.services.monthly_report_digest_service import try_send_monthly_report_digest
@@ -184,8 +187,8 @@ def rebuild_jobs():
 
 async def send_survey(employee_id: int):
     from app.models.models import Employee
-    from app.bot.db import canonical_checkin_complete, create_session, get_session
-    from app.bot.work_report_handlers import send_daily_prompts
+    from app.bot.db import canonical_checkin_complete, create_session, get_questions, get_session
+    from app.bot.work_report_handlers import send_daily_prompts, send_report_prompt
     from app.services import work_report_service
 
     bot = _make_bot()
@@ -197,12 +200,34 @@ async def send_survey(employee_id: int):
             telegram_id = emp.telegram_id
             timezone_name = emp.timezone
         local_day = _local_today(timezone_name)
+        report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
+        if not get_questions(employee_id):
+            await send_report_prompt(
+                bot, report, telegram_chat_id=telegram_id,
+                prompt_type="daily_report", local_day=local_day,
+            )
+            from app.services.user_notifications import mirror_existing_telegram_notification
+            mirror_existing_telegram_notification(
+                employee_id=employee_id, kind="daily_report", title="Өдрийн тайлан",
+                body="Өнөөдрийн ажлын тайлангаа илгээнэ үү.", target_url="/reports",
+                dedup_key=f"daily-report:{employee_id}:{local_day}",
+            )
+            return
         if canonical_checkin_complete(employee_id, local_day):
+            await send_report_prompt(
+                bot, report, telegram_chat_id=telegram_id,
+                prompt_type="daily_report", local_day=local_day,
+            )
+            from app.services.user_notifications import mirror_existing_telegram_notification
+            mirror_existing_telegram_notification(
+                employee_id=employee_id, kind="daily_report", title="Өдрийн тайлан",
+                body="Өнөөдрийн ажлын тайлангаа илгээнэ үү.", target_url="/reports",
+                dedup_key=f"daily-report:{employee_id}:{local_day}",
+            )
             return
         session = create_session(employee_id, local_day=local_day)
         if session.status == "completed":
             return
-        report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
         # Keep the questionnaire, raw-text report, and work-time questions as
         # separate messages, in the same order used by /test_reports.
         await send_daily_prompts(
@@ -246,7 +271,7 @@ async def send_reminder(employee_id: int, num: int):
             telegram_id = emp.telegram_id
             timezone_name = emp.timezone
         checkin_complete = canonical_checkin_complete(employee_id, local_day) or sess is None
-        report_complete = work_report_service.report_is_approved(employee_id, "daily", local_day)
+        report_complete = not work_report_service.report_needs_submission(employee_id, "daily", local_day)
         missing = []
         if not checkin_complete:
             missing.append("чек-ин (/today)")

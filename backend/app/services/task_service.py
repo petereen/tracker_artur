@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+import os
+import socket
 from typing import Optional
 
 import pytz
@@ -366,7 +368,7 @@ def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, 
             web_key = f"legacy:{dedup_key}:account:{account.id}"
             notification = s.execute(select(UserNotification).where(UserNotification.dedup_key == web_key)).scalar_one_or_none()
             if not notification:
-                title = "Шинэ даалгавар" if kind == "task_assigned" else "Даалгаврын хугацаа хэтэрлээ" if kind == "task_overdue" else "Мэдэгдэл"
+                title = "Шинэ даалгавар" if kind == "task_assigned" else "Даалгаврын сануулга" if kind == "task_deadline" else "Даалгаврын хугацаа хэтэрлээ" if kind == "task_overdue" else "Мэдэгдэл"
                 body = payload.get("text") or (f"“{payload.get('title', 'Даалгавар')}” даалгаврын мэдээлэл шинэчлэгдлээ.")
                 notification = UserNotification(
                     organization_id=account.organization_id, recipient_account_id=account.id,
@@ -400,22 +402,38 @@ def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, 
 
 def fetch_due_outbox(limit: int = 25) -> list[dict]:
     now = datetime.now(timezone.utc)
+    lease_owner = f"bot:{socket.gethostname()}:{os.getpid()}"
     with get_session() as s:
-        rows = s.execute(
+        query = (
             select(NotificationOutbox)
             .where(
-                NotificationOutbox.status == "pending",
+                or_(
+                    NotificationOutbox.status == "pending",
+                    (NotificationOutbox.status == "running") & (NotificationOutbox.lease_expires_at < now),
+                ),
                 or_(NotificationOutbox.not_before.is_(None), NotificationOutbox.not_before <= now),
+                or_(NotificationOutbox.next_attempt_at.is_(None), NotificationOutbox.next_attempt_at <= now),
+                NotificationOutbox.attempt_count < 5,
             )
             .order_by(NotificationOutbox.id)
             .limit(limit)
-        ).scalars().all()
+        )
+        if s.bind and s.bind.dialect.name == "postgresql":
+            query = query.with_for_update(skip_locked=True)
+        rows = s.execute(query).scalars().all()
+        for row in rows:
+            row.status = "running"
+            row.lease_owner = lease_owner
+            row.lease_expires_at = now + timedelta(minutes=5)
+            row.attempt_count = (row.attempt_count or 0) + 1
+        s.commit()
         out = []
         for r in rows:
             task = s.get(Task, r.task_id) if r.task_id else None
             out.append({
                 "id": r.id, "recipient_tg": r.recipient_tg, "kind": r.kind,
                 "user_notification_id": r.user_notification_id,
+                "attempt_count": r.attempt_count,
                 "payload": r.payload or {}, "task_id": r.task_id,
                 "task_title": task.title if task else None,
                 "task_description": task.description if task else None,
@@ -425,17 +443,29 @@ def fetch_due_outbox(limit: int = 25) -> list[dict]:
         return out
 
 
-def mark_outbox(outbox_id: int, status: str) -> None:
+def mark_outbox(outbox_id: int, status: str, error: str | None = None) -> None:
     with get_session() as s:
         r = s.get(NotificationOutbox, outbox_id)
         if r:
-            r.status = status
+            now = datetime.now(timezone.utc)
+            if status == "failed" and (r.attempt_count or 0) < 5:
+                delays = (60, 300, 900, 3600, 21600)
+                r.status = "pending"
+                r.next_attempt_at = now + timedelta(seconds=delays[min((r.attempt_count or 1) - 1, len(delays) - 1)])
+            else:
+                r.status = status
             if status == "sent":
-                r.sent_at = datetime.now(timezone.utc)
+                r.sent_at = now
+                r.next_attempt_at = None
+                r.last_error = None
+            elif error:
+                r.last_error = error[:2000]
+            r.lease_owner = None
+            r.lease_expires_at = None
             if r.user_notification_id:
                 notification = s.get(UserNotification, r.user_notification_id)
                 if notification:
-                    notification.telegram_status = status
+                    notification.telegram_status = r.status if r.status in {"sent", "failed"} else "queued"
             s.commit()
 
 
