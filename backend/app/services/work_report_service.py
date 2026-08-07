@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.bot.db import get_session
-from app.models.models import Employee, WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
+from app.models.models import Employee, PlanIdea, UserAccount, WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
 
 
 TEST_REPORT_TYPES = frozenset({"daily_test", "monthly_test", "next_month_plan_test"})
@@ -319,6 +319,61 @@ def approve_draft(report_id: int) -> WorkReport | None:
         s.refresh(report)
         s.expunge(report)
         return report
+
+
+def plan_idea_fields(text: str) -> tuple[str, str | None] | None:
+    lines = [line.strip() for line in text.strip().splitlines()]
+    first_index = next((index for index, line in enumerate(lines) if line), None)
+    if first_index is None:
+        return None
+    return lines[first_index][:1000], "\n".join(lines[first_index + 1:]).strip() or None
+
+
+def create_plan_idea_from_report(report_id: int) -> PlanIdea | None:
+    """Mirror an approved Telegram next-month plan into the web Plans inbox once."""
+    with get_session() as s:
+        report = s.get(WorkReport, report_id)
+        if not report or report.report_type != "next_month_plan" or report.status != "approved":
+            return None
+        existing = s.execute(select(PlanIdea).where(PlanIdea.source_report_id == report.id)).scalar_one_or_none()
+        if existing:
+            s.expunge(existing)
+            return existing
+        revision = s.get(WorkReportRevision, report.approved_revision_id) if report.approved_revision_id else None
+        text = (revision.text if revision else "").strip()
+        if not text:
+            return None
+        account = s.get(UserAccount, report.submitted_by_account_id) if report.submitted_by_account_id else None
+        if not account:
+            account = s.execute(
+                select(UserAccount).where(UserAccount.employee_id == report.employee_id, UserAccount.status == "active").order_by(UserAccount.id)
+            ).scalars().first()
+        if not account or not account.organization_id:
+            return None
+        fields = plan_idea_fields(text)
+        if not fields:
+            return None
+        title, content = fields
+        idea = PlanIdea(
+            organization_id=account.organization_id,
+            submitted_by_account_id=account.id,
+            submitted_by_employee_id=report.employee_id,
+            source_report_id=report.id,
+            plan_month=report.period_date,
+            title=title,
+            content=content,
+        )
+        s.add(idea)
+        try:
+            s.commit()
+        except IntegrityError:
+            s.rollback()
+            idea = s.execute(select(PlanIdea).where(PlanIdea.source_report_id == report.id)).scalar_one_or_none()
+            if not idea:
+                return None
+        s.refresh(idea)
+        s.expunge(idea)
+        return idea
 
 
 def set_work_time(report_id: int, field: str, at: datetime | None = None) -> datetime | None:

@@ -215,7 +215,7 @@ export function useCreateCompanyPlanItem() {
   })
 }
 
-export interface PlanIdea { id: number; plan_month: string; title: string; content: string | null; suggested_due_date: string | null; status: 'pending' | 'approved' | 'rejected' | 'merged'; submitted_by_name: string | null; merged_into_plan_item_id: number | null; created_at: string; updated_at: string }
+export interface PlanIdea { id: number; plan_month: string; title: string; content: string | null; suggested_due_date: string | null; status: 'pending' | 'approved' | 'rejected' | 'merged'; submitted_by_name: string | null; merged_into_plan_item_id: number | null; source_report_id: number | null; created_at: string; updated_at: string }
 export function usePlanIdeas(month: string) { return useQuery<PlanIdea[]>({ queryKey: ['plan-ideas', month], queryFn: () => api.get('/company-plans/ideas', { params: { month } }).then((r) => r.data) }) }
 export function useCreatePlanIdea() { const qc = useQueryClient(); return useMutation({ mutationFn: (data: { plan_month: string; title: string; content?: string; suggested_due_date?: string | null }) => api.post('/company-plans/ideas', data).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['plan-ideas'] }); toast.success('Санаа илгээгдлээ') } }) }
 export function useUpdatePlanIdea() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...data }: { id: number; title?: string; content?: string; suggested_due_date?: string | null; status?: string }) => api.patch(`/company-plans/ideas/${id}`, data).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['plan-ideas'] }) }) }

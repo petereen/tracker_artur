@@ -6,3 +6,8 @@ test('merges duplicate worktime dates and exposes an accessible tooltip', () => 
   render(<HeatmapCalendar endDate={new Date('2026-08-06T12:00:00')} rangeDays={7} data={[{ date: '2026-08-06', value: 60 }, { date: '2026-08-06', value: 30 }]} />)
   expect(screen.getByRole('button', { name: /1.5 цаг/ })).toBeInTheDocument()
 })
+
+test('labels the final visible month in its own heatmap column', () => {
+  render(<HeatmapCalendar endDate={new Date('2026-08-07T12:00:00')} rangeDays={14} data={[]} />)
+  expect(screen.getByText('8-р сар')).toBeInTheDocument()
+})

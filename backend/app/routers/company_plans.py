@@ -35,7 +35,7 @@ async def _serialize_item(db: AsyncSession, item: CompanyPlanItem) -> dict:
 
 async def _serialize_idea(db: AsyncSession, idea: PlanIdea) -> dict:
     employee = await db.get(Employee, idea.submitted_by_employee_id) if idea.submitted_by_employee_id else None
-    return {"id": idea.id, "plan_month": str(idea.plan_month), "title": idea.title, "content": idea.content, "suggested_due_date": str(idea.suggested_due_date) if idea.suggested_due_date else None, "status": idea.status, "submitted_by_employee_id": idea.submitted_by_employee_id, "submitted_by_name": employee.name if employee else None, "merged_into_plan_item_id": idea.merged_into_plan_item_id, "created_at": idea.created_at, "updated_at": idea.updated_at}
+    return {"id": idea.id, "plan_month": str(idea.plan_month), "title": idea.title, "content": idea.content, "suggested_due_date": str(idea.suggested_due_date) if idea.suggested_due_date else None, "status": idea.status, "submitted_by_employee_id": idea.submitted_by_employee_id, "submitted_by_name": employee.name if employee else None, "merged_into_plan_item_id": idea.merged_into_plan_item_id, "source_report_id": idea.source_report_id, "created_at": idea.created_at, "updated_at": idea.updated_at}
 
 
 class CompanyPlanItemCreate(BaseModel):

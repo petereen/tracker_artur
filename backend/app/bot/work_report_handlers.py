@@ -422,6 +422,8 @@ async def report_draft_action(cb: CallbackQuery, state: FSMContext, employee=Non
         return
     await cb.answer("Тайлан батлагдлаа.")
     await cb.message.answer("✅ Тайлан хадгалагдлаа.")
+    if approved.report_type == "next_month_plan":
+        work_report_service.create_plan_idea_from_report(approved.id)
     if approved.report_type in {"monthly", "monthly_test"}:
         local_day = _local_now(employee.timezone).date()
         plan_type = "next_month_plan_test" if approved.report_type == "monthly_test" else "next_month_plan"

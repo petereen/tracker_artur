@@ -7,7 +7,7 @@ import {
   BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal,
   LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X,
 } from 'lucide-react'
-import { useActor, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
+import { useActor, useBrandingSettings, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { periodFromPreset } from './TimePeriodFilter'
 import { OyunsAssistant } from './OyunsAssistant'
@@ -84,6 +84,7 @@ export function EnterpriseShell() {
   const [selectedWorker, setSelectedWorker] = useState<number>()
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('oyuns-theme') as 'light' | 'dark') || 'light')
   const workers = useWorkerDirectory()
+  const branding = useBrandingSettings()
 
   useEffect(() => setMobileOpen(false), [location.pathname])
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('oyuns-theme', theme) }, [theme])
@@ -110,13 +111,14 @@ export function EnterpriseShell() {
   const workerProfile = useWorkerProfile(selectedWorker)
   const visibleWorkers = useMemo(() => (workers.data ?? []).filter((worker) => worker.name.toLowerCase().includes(workerSearch.toLowerCase())), [workerSearch, workers.data])
   const title = TITLES[location.pathname] ?? 'OYUNS Workspace'
+  const logo = theme === 'dark' ? branding.data?.dark_logo : branding.data?.light_logo
 
   return (
     <RealtimeProvider>
       <div className="workspace-shell">
         <button className="mobile-menu-button" onClick={() => setMobileOpen(true)} aria-label="Цэс нээх"><Menu /></button>
         <aside className={`workspace-sidebar ${mobileOpen ? 'is-open' : ''}`}>
-          <div className="sidebar-brand"><img src="/oyuns-aio-logo.png" alt="OYUNS" /><button onClick={() => setMobileOpen(false)} aria-label="Цэс хаах"><X /></button></div>
+          <div className="sidebar-brand"><img src={logo || (theme === 'dark' ? '/oyuns-aio-logo.png' : '/favicon.png')} alt="OYUNS" /><button onClick={() => setMobileOpen(false)} aria-label="Цэс хаах"><X /></button></div>
           <nav aria-label="Үндсэн цэс">
             {nav.map(({ to, label, icon: Icon }) => (
               <div className={NAV_GROUP_BREAKS.has(to) ? 'nav-group nav-group-break' : 'nav-group'} key={to}>

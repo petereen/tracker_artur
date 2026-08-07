@@ -80,7 +80,7 @@ export function ManagerSettingsPage() {
 
   return (
     <div>
-      <PageHeader title="Удирдлагын тохиргоо" sub="Telegram холболт ба мэдэгдлийн тохиргоо" />
+      <PageHeader title="Удирдлагын телеграм мэдэгдлийн тохиргоо" sub="Telegram холболт ба мэдэгдлийн тохиргоо" />
       <div className="flex flex-col gap-4 max-w-[700px]">
         <Card>
           <div className="font-semibold text-[15px] mb-4">Telegram</div>

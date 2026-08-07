@@ -204,8 +204,8 @@ export function useArchiveProject() {
   return useMutation({ mutationFn: (id: number) => api.delete(`/v1/projects/${id}`), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл архивлагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл архивлагдсангүй') })
 }
 
-export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' | 'delegated' }
-export function useEnterpriseTasks(projectId?: number, period?: DateRange, filters: TaskFilters = {}) {
+export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; priority?: 1 | 2 | 3; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' | 'delegated' }
+export function useEnterpriseTasks(projectId?: number, period?: Partial<DateRange>, filters: TaskFilters = {}) {
   return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId, period, filters], queryFn: () => api.get('/v1/tasks', { params: { ...(projectId ? { project_id: projectId } : {}), ...period, ...filters } }).then((response) => response.data) })
 }
 
@@ -277,6 +277,36 @@ export function usePermissionSettings() {
 export function useUpdatePermissionSettings() {
   const queryClient = useQueryClient()
   return useMutation({ mutationFn: (task_assignment_roles: string[]) => api.put('/v1/settings/permissions', { task_assignment_roles }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'settings', 'permissions'] }); toast.success('Даалгаврын эрх хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Эрх хадгалагдсангүй') })
+}
+
+export interface BrandingSettings {
+  light_logo: string
+  dark_logo: string
+  light_source: string
+  dark_source: string
+  legacy_options: { value: 'legacy-aio' | 'legacy-icon'; label: string; url: string }[]
+}
+
+export function useBrandingSettings() {
+  return useQuery<BrandingSettings>({ queryKey: ['v1', 'settings', 'branding'], queryFn: () => api.get('/v1/settings/branding').then((response) => response.data) })
+}
+
+export function useUpdateBrandingSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { theme: 'light' | 'dark'; source: 'legacy-aio' | 'legacy-icon' | 'default' }) => api.put('/v1/settings/branding', input).then((response) => response.data),
+    onSuccess: (data) => { queryClient.setQueryData(['v1', 'settings', 'branding'], data); toast.success('Лого хадгалагдлаа') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Лого хадгалагдсангүй'),
+  })
+}
+
+export function useUploadBrandingLogo() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ theme, file }: { theme: 'light' | 'dark'; file: File }) => { const form = new FormData(); form.append('file', file); return api.post('/v1/settings/branding/logo', form, { params: { theme } }).then((response) => response.data) },
+    onSuccess: (data) => { queryClient.setQueryData(['v1', 'settings', 'branding'], data); toast.success('Лого байршууллаа') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Лого байршуулсангүй'),
+  })
 }
 
 export function useTodayCheckin() {

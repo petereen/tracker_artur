@@ -548,6 +548,7 @@ class PlanIdea(Base):
     __table_args__ = (
         CheckConstraint("status IN ('pending','approved','rejected','merged')", name="ck_plan_ideas_status"),
         Index("ix_plan_ideas_org_month_status", "organization_id", "plan_month", "status"),
+        UniqueConstraint("source_report_id", name="uq_plan_ideas_source_report"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -561,6 +562,7 @@ class PlanIdea(Base):
     status = Column(Text, nullable=False, server_default="pending", default="pending")
     reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     merged_into_plan_item_id = Column(Integer, ForeignKey("company_plan_items.id", ondelete="SET NULL"))
+    source_report_id = Column(Integer, ForeignKey("work_reports.id", ondelete="SET NULL"))
     reviewed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

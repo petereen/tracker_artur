@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import mimetypes
@@ -94,6 +95,33 @@ class PermissionSettingsInput(BaseModel):
     task_assignment_roles: list[Literal["admin", "manager", "team_lead", "member", "contractor", "client_auditor"]]
 
 
+BRANDING_KEY = "branding"
+LEGACY_LOGOS = {
+    "legacy-aio": "/oyuns-aio-logo.png",
+    "legacy-icon": "/favicon.png",
+}
+BRANDING_THEMES = ("light", "dark")
+BRANDING_MAX_BYTES = 2 * 1024 * 1024
+BRANDING_TYPES = {"image/png", "image/jpeg", "image/webp"}
+
+
+class BrandingSelectionInput(BaseModel):
+    theme: Literal["light", "dark"]
+    source: Literal["legacy-aio", "legacy-icon", "default"]
+
+
+def _branding_out(organization: Organization) -> dict:
+    branding = (organization.settings or {}).get(BRANDING_KEY, {})
+    sources = {theme: branding.get(theme, "default") for theme in BRANDING_THEMES}
+    return {
+        "light_logo": LEGACY_LOGOS.get(sources["light"], sources["light"] if sources["light"].startswith("data:image/") else LEGACY_LOGOS["legacy-icon"]),
+        "dark_logo": LEGACY_LOGOS.get(sources["dark"], sources["dark"] if sources["dark"].startswith("data:image/") else LEGACY_LOGOS["legacy-aio"]),
+        "light_source": sources["light"],
+        "dark_source": sources["dark"],
+        "legacy_options": [{"value": "legacy-aio", "label": "OYUNS All-in-One", "url": LEGACY_LOGOS["legacy-aio"]}, {"value": "legacy-icon", "label": "OYUNS icon", "url": LEGACY_LOGOS["legacy-icon"]}],
+    }
+
+
 async def _management_account_ids(db: AsyncSession, organization_id: int) -> set[int]:
     return set((await db.execute(
         select(RoleAssignment.account_id).join(UserAccount, UserAccount.id == RoleAssignment.account_id).where(
@@ -165,6 +193,43 @@ async def update_permission_settings(data: PermissionSettingsInput, db: AsyncSes
     await record_change(db, actor=actor, topic="settings", aggregate_type="organization_permissions", aggregate_id=organization.id, operation="updated", after={SETTINGS_KEY: roles})
     await db.commit()
     return {"task_assignment_roles": roles, "available_roles": sorted(ALL_EMPLOYEE_ROLES)}
+
+
+@router.get("/settings/branding")
+async def get_branding_settings(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    organization = await db.get(Organization, actor.organization_id)
+    return _branding_out(organization)
+
+
+@router.put("/settings/branding")
+async def update_branding_settings(data: BrandingSelectionInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "manager"))):
+    organization = await db.get(Organization, actor.organization_id, with_for_update=True)
+    branding = {**((organization.settings or {}).get(BRANDING_KEY) or {}), data.theme: data.source}
+    organization.settings = {**(organization.settings or {}), BRANDING_KEY: branding}
+    await record_change(db, actor=actor, topic="settings", aggregate_type="organization_branding", aggregate_id=organization.id, operation="updated", after={data.theme: data.source})
+    await db.commit()
+    return _branding_out(organization)
+
+
+@router.post("/settings/branding/logo")
+async def upload_branding_logo(theme: Literal["light", "dark"], file: UploadFile = File(...), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "manager"))):
+    content = await file.read(BRANDING_MAX_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="Logo is empty")
+    if len(content) > BRANDING_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Logo exceeds the 2 MB limit")
+    content_type = (file.content_type or "").lower()
+    if content_type not in BRANDING_TYPES:
+        raise HTTPException(status_code=415, detail="Logo must be PNG, JPEG, or WebP")
+    if (content_type == "image/png" and not content.startswith(b"\x89PNG\r\n\x1a\n")) or (content_type == "image/jpeg" and not content.startswith(b"\xff\xd8\xff")) or (content_type == "image/webp" and (not content.startswith(b"RIFF") or content[8:12] != b"WEBP")):
+        raise HTTPException(status_code=415, detail="Logo content does not match its image type")
+    organization = await db.get(Organization, actor.organization_id, with_for_update=True)
+    data_url = f"data:{content_type};base64,{base64.b64encode(content).decode('ascii')}"
+    branding = {**((organization.settings or {}).get(BRANDING_KEY) or {}), theme: data_url}
+    organization.settings = {**(organization.settings or {}), BRANDING_KEY: branding}
+    await record_change(db, actor=actor, topic="settings", aggregate_type="organization_branding", aggregate_id=organization.id, operation="uploaded", after={theme: "uploaded"})
+    await db.commit()
+    return _branding_out(organization)
 
 
 def _decimal(value: Decimal | None) -> float | None:
@@ -291,7 +356,7 @@ class EnterpriseTaskInput(BaseModel):
     project_id: int | None = None
     parent_task_id: int | None = None
     workflow_status: str = "to_do"
-    priority: int = Field(default=2, ge=1, le=4)
+    priority: int = Field(default=2, ge=1, le=3)
     primary_owner_id: int | None = None
     assignee_ids: list[int] = Field(default_factory=list)
     start_at: datetime | None = None
@@ -308,7 +373,7 @@ class EnterpriseTaskPatch(BaseModel):
     project_id: int | None = None
     parent_task_id: int | None = None
     workflow_status: str | None = None
-    priority: int | None = Field(default=None, ge=1, le=4)
+    priority: int | None = Field(default=None, ge=1, le=3)
     primary_owner_id: int | None = None
     assignee_ids: list[int] | None = None
     start_at: datetime | None = None
@@ -881,6 +946,7 @@ async def project_budget_burn(project_id: int, db: AsyncSession = Depends(get_db
 async def list_tasks(
     project_id: int | None = None,
     workflow_status: str | None = None,
+    priority: int | None = Query(default=None, ge=1, le=3),
     scope: Literal["mine", "organization", "project", "delegated"] = "mine",
     kind: Literal["all", "standalone", "project", "subtask"] = "all",
     overdue: bool = False,
@@ -894,6 +960,8 @@ async def list_tasks(
         query = query.where(Task.project_id == project_id)
     if workflow_status:
         query = query.where(Task.workflow_status == workflow_status)
+    if priority:
+        query = query.where(Task.priority == priority)
     if kind == "standalone":
         query = query.where(Task.project_id.is_(None), Task.parent_task_id.is_(None))
     elif kind == "project":
