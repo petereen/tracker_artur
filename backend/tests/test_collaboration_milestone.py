@@ -36,3 +36,23 @@ def test_deadline_outbox_contract_is_retry_capable_and_renderable():
     assert "Ship release" in text
     assert "1 хоногийн дараа" in text
     assert keyboard is not None
+
+
+def test_review_outbox_contains_assignee_link_and_action_button():
+    text, keyboard = _render_outbox({
+        "kind": "task_review_requested",
+        "task_id": 12,
+        "task_title": "Approve invoice",
+        "task_description": None,
+        "task_deadline_at": None,
+        "payload": {
+            "title": "Approve invoice",
+            "assignee_name": "Ariunaa",
+            "task_url": "https://erp.example.test/tasks?task=12",
+        },
+    })
+    assert "Approve invoice" in text
+    assert "Ariunaa" in text
+    assert "https://erp.example.test/tasks?task=12" in text
+    assert keyboard is not None
+    assert any(button.url == "https://erp.example.test/tasks?task=12" for row in keyboard.inline_keyboard for button in row)

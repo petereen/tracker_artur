@@ -874,6 +874,16 @@ class TaskAssignee(Base):
     assigned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class TaskReviewer(Base):
+    __tablename__ = "task_reviewers"
+    __table_args__ = (UniqueConstraint("task_id", "employee_id", name="uq_task_reviewers"),)
+
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    assigned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class TaskDependency(Base):
     __tablename__ = "task_dependencies"
     __table_args__ = (

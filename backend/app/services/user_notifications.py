@@ -32,6 +32,7 @@ async def create_notifications(
     payload: dict | None = None,
     source_event_id: int | None = None,
     task_id: int | None = None,
+    immediate: bool = False,
 ) -> list[UserNotification]:
     employee_set = {int(value) for value in employee_ids if value is not None}
     if exclude_employee_id is not None:
@@ -73,7 +74,7 @@ async def create_notifications(
         db.add(notification)
         await db.flush()
         if telegram_available:
-            not_before = next_allowed(datetime.now(timezone.utc), employee.timezone, policy)
+            not_before = datetime.now(timezone.utc) if immediate else next_allowed(datetime.now(timezone.utc), employee.timezone, policy)
             db.add(NotificationOutbox(
                 user_notification_id=notification.id,
                 event_id=source_event_id,
@@ -110,7 +111,7 @@ async def create_notifications(
             exists = await db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedup_key == scoped_key))
             if exists:
                 continue
-            not_before = next_allowed(datetime.now(timezone.utc), employee.timezone, policy)
+            not_before = datetime.now(timezone.utc) if immediate else next_allowed(datetime.now(timezone.utc), employee.timezone, policy)
             db.add(NotificationOutbox(
                 event_id=source_event_id, task_id=task_id, recipient_tg=str(employee.telegram_id),
                 kind=kind, payload={"title": title, "body": body, "target_url": target_url, **(payload or {})},

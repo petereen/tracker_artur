@@ -94,7 +94,7 @@ export function StatsWorkspacePage() {
             }
           />
           <select aria-label="KPI дэлгэрэнгүй" value={metric} onChange={(event) => setMetric(event.target.value as AnalyticsMetric)}>
-            <option value="utilization">Ашиглалт</option><option value="billable_ratio">Billable харьцаа</option><option value="task_completion">Даалгаврын гүйцэтгэл</option><option value="deadline_health">Хугацааны эрүүл мэнд</option><option value="report_compliance">Тайлангийн сахилга</option>{canSeeFinancials && <option value="budget_burn">Төсвийн зарцуулалт</option>}
+            <option value="utilization">Ашиглалт</option><option value="billable_ratio">Billable ratio</option><option value="task_completion">Даалгаврын гүйцэтгэл</option><option value="deadline_health">Deadline Health</option><option value="report_compliance">Тайлангийн биелэлт</option>{canSeeFinancials && <option value="budget_burn">Төсвийн зарцуулалт</option>}
           </select>
         </div>
       </div>

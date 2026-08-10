@@ -19,6 +19,8 @@ export interface EnterpriseTask {
   primary_owner_name: string | null
   reviewer_id: number | null
   reviewer_name: string | null
+  reviewer_ids: number[]
+  reviewer_names: string[]
   assignee_ids: number[]
   assignee_names: string[]
   project_name: string | null

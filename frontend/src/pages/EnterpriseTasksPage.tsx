@@ -64,6 +64,7 @@ import {
   QueryRegion,
   TableSkeleton,
 } from "../components/Loading";
+import { UserTagPicker } from "../components/UserTagPicker";
 
 const COLUMNS: { key: WorkflowStatus; label: string }[] = [
   { key: "backlog", label: "Backlog" },
@@ -79,7 +80,7 @@ const EMPTY = {
   parent_task_id: "",
   primary_owner_id: "",
   assignee_ids: [] as number[],
-  reviewer_id: "",
+  reviewer_ids: [] as number[],
   workflow_status: "to_do" as WorkflowStatus,
   priority: "2",
   start_at: "",
@@ -625,7 +626,7 @@ export function EnterpriseTasksPage() {
       ? Number(form.primary_owner_id)
       : null,
     assignee_ids: form.assignee_ids,
-    reviewer_id: form.reviewer_id ? Number(form.reviewer_id) : null,
+    reviewer_ids: form.reviewer_ids,
     workflow_status: form.workflow_status,
     priority: Number(form.priority),
     start_at: form.start_at ? new Date(form.start_at).toISOString() : null,
@@ -668,7 +669,7 @@ export function EnterpriseTasksPage() {
         ? String(task.primary_owner_id)
         : "",
       assignee_ids: task.assignee_ids || [],
-      reviewer_id: task.reviewer_id ? String(task.reviewer_id) : "",
+      reviewer_ids: task.reviewer_ids || (task.reviewer_id ? [task.reviewer_id] : []),
       workflow_status: task.workflow_status,
       priority: String(task.priority),
       start_at: task.start_at?.slice(0, 16) || "",
@@ -845,34 +846,7 @@ export function EnterpriseTasksPage() {
           ))}
         </select>
       </label>
-      <fieldset className="member-picker">
-        <legend>Оролцогчид</legend>
-        <label>
-          <input
-            type="checkbox"
-            checked={
-              Boolean(workers.data?.length) &&
-              form.assignee_ids.length === workers.data?.length
-            }
-            onChange={(event) =>
-              event.target.checked
-                ? assignAll()
-                : setForm({ ...form, assignee_ids: [] })
-            }
-          />
-          Бүгд
-        </label>
-        {workers.data?.map((worker) => (
-          <label key={worker.id}>
-            <input
-              type="checkbox"
-              checked={form.assignee_ids.includes(worker.id)}
-              onChange={() => toggleAssignee(worker.id)}
-            />
-            {worker.name}
-          </label>
-        ))}
-      </fieldset>
+      <UserTagPicker label="Оролцогчид" value={form.assignee_ids} users={workers.data || []} allLabel="Бүгдийг сонгох" onChange={(assignee_ids) => setForm({ ...form, assignee_ids })} />
       <div className="form-row">
         <label>
           Эхлэх
@@ -1171,8 +1145,7 @@ export function EnterpriseTasksPage() {
               {COLUMNS.map((column) => {
                 const isAssignedReviewer = (task: EnterpriseTask) =>
                   employeeId != null &&
-                  task.reviewer_id != null &&
-                  Number(task.reviewer_id) === Number(employeeId);
+                  (task.reviewer_ids || [task.reviewer_id]).some((id) => id != null && Number(id) === Number(employeeId));
                 const reviewQueue =
                   column.key === "review"
                     ? grouped.review.filter(isAssignedReviewer)
@@ -1317,22 +1290,7 @@ export function EnterpriseTasksPage() {
               </div>
               <form className="sheet-form" onSubmit={selected ? save : submit}>
                 {formFields}
-                <label>
-                  Хянагч
-                  <select
-                    value={form.reviewer_id}
-                    onChange={(event) =>
-                      setForm({ ...form, reviewer_id: event.target.value })
-                    }
-                  >
-                    <option value="">Сонгоогүй</option>
-                    {workers.data?.map((worker) => (
-                      <option key={worker.id} value={worker.id}>
-                        {worker.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <UserTagPicker label="Хянагч" value={form.reviewer_ids} users={workers.data || []} onChange={(reviewer_ids) => setForm({ ...form, reviewer_ids })} />
                 <button
                   className="primary-action"
                   disabled={createTask.isPending || updateTask.isPending}

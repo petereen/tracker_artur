@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 import { useQuestions, useCreateQuestion, useDeleteQuestion, useEmployees, useReorderQuestions, useUpdateQuestion } from '../api/hooks'
+import { UserTagPicker } from '../components/UserTagPicker'
 
 const TYPE_OPTIONS = [
   { value: 'integer', label: 'Бүхэл тоо' },
@@ -126,24 +127,7 @@ export function QuestionsPage() {
             <div className="flex flex-col gap-2">
               <div className="text-xs text-muted font-medium">Хэн хариулах вэ?</div>
               <div className="text-[12px] text-muted">Ажилтан сонгохгүй бол бүх ажилтанд асууна.</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto">
-                {employees.filter((employee: any) => employee.is_active).map((employee: any) => (
-                  <label key={employee.id} className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={form.employee_ids.includes(employee.id)}
-                      onChange={(event) => setForm((current) => ({
-                        ...current,
-                        employee_ids: event.target.checked
-                          ? [...current.employee_ids, employee.id]
-                          : current.employee_ids.filter((id) => id !== employee.id),
-                      }))}
-                      className="accent-accent"
-                    />
-                    {employee.name}
-                  </label>
-                ))}
-              </div>
+              <UserTagPicker label="Ажилтнууд" value={form.employee_ids} users={employees.filter((employee: any) => employee.is_active)} onChange={(employee_ids) => setForm((current) => ({ ...current, employee_ids }))} />
             </div>
             <div className="flex gap-2.5 justify-end pt-1">
               <Btn onClick={() => { setShowModal(false); setEditingQuestion(null) }}>Цуцлах</Btn>

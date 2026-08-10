@@ -60,6 +60,7 @@ from app.models.models import (
     Task,
     TaskComment,
     TaskAssignee,
+    TaskReviewer,
     TaskCheckItem,
     TaskDependency,
     Team,
@@ -269,7 +270,7 @@ def _task_out(item: Task) -> dict:
         "id": item.id, "public_id": str(item.public_id), "project_id": item.project_id,
         "parent_task_id": item.parent_task_id, "title": item.title,
         "description": item.description, "workflow_status": item.workflow_status,
-        "priority": item.priority, "primary_owner_id": item.assignee_id, "reviewer_id": getattr(item, "reviewer_id", None),
+        "priority": item.priority, "primary_owner_id": item.assignee_id, "reviewer_id": getattr(item, "reviewer_id", None), "reviewer_ids": [],
         "start_at": item.start_at, "deadline_at": item.deadline_at,
         "estimate_minutes": item.estimate_minutes, "sort_position": _decimal(item.sort_position),
         "work_location_type": item.work_location_type, "work_location": item.work_location,
@@ -363,6 +364,7 @@ class EnterpriseTaskInput(BaseModel):
     primary_owner_id: int | None = None
     assignee_ids: list[int] = Field(default_factory=list)
     reviewer_id: int | None = None
+    reviewer_ids: list[int] = Field(default_factory=list)
     start_at: datetime | None = None
     deadline_at: datetime | None = None
     estimate_minutes: int | None = Field(default=None, ge=0)
@@ -381,6 +383,7 @@ class EnterpriseTaskPatch(BaseModel):
     primary_owner_id: int | None = None
     assignee_ids: list[int] | None = None
     reviewer_id: int | None = None
+    reviewer_ids: list[int] | None = None
     start_at: datetime | None = None
     deadline_at: datetime | None = None
     estimate_minutes: int | None = Field(default=None, ge=0)
@@ -1021,19 +1024,23 @@ async def list_tasks(
         query = query.where(or_(
             Task.assignee_id == actor.employee_id,
             Task.id.in_(contributor_tasks),
-            and_(Task.reviewer_id == actor.employee_id, Task.workflow_status == "review"),
+            or_(and_(Task.reviewer_id == actor.employee_id, Task.workflow_status == "review"), and_(Task.workflow_status == "review", Task.id.in_(select(TaskReviewer.task_id).where(TaskReviewer.employee_id == actor.employee_id)))),
         ))
     rows = (await db.execute(query.order_by(Task.workflow_status, Task.sort_position, Task.id))).scalars().all()
     task_ids = [row.id for row in rows]
     assignment_rows = (await db.execute(select(TaskAssignee).where(TaskAssignee.task_id.in_(task_ids)))).scalars().all() if task_ids else []
+    reviewer_rows = (await db.execute(select(TaskReviewer).where(TaskReviewer.task_id.in_(task_ids)))).scalars().all() if task_ids else []
     assignees: dict[int, list[int]] = {}
     for assignment in assignment_rows:
         assignees.setdefault(assignment.task_id, []).append(assignment.employee_id)
-    employee_ids = {row.assignee_id for row in rows if row.assignee_id} | {row.reviewer_id for row in rows if row.reviewer_id} | {row.created_by_id for row in rows if row.created_by_id} | {item.employee_id for item in assignment_rows}
+    reviewers: dict[int, list[int]] = {}
+    for reviewer in reviewer_rows:
+        reviewers.setdefault(reviewer.task_id, []).append(reviewer.employee_id)
+    employee_ids = {row.assignee_id for row in rows if row.assignee_id} | {row.reviewer_id for row in rows if row.reviewer_id} | {row.created_by_id for row in rows if row.created_by_id} | {item.employee_id for item in assignment_rows} | {item.employee_id for item in reviewer_rows}
     people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all()} if employee_ids else {}
     project_ids = {row.project_id for row in rows if row.project_id}
     projects = {row.id: row.name for row in (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()} if project_ids else {}
-    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "reviewer_name": people.get(row.reviewer_id), "creator_name": people.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id)} for row in rows]
+    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "reviewer_name": people.get(row.reviewer_id), "reviewer_ids": reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])), "reviewer_names": [people[employee_id] for employee_id in reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])) if employee_id in people], "creator_name": people.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id)} for row in rows]
 
 
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)
@@ -1079,18 +1086,19 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         valid = set((await db.execute(select(Employee.id).where(Employee.id.in_(requested_assignees), Employee.is_active.is_(True)))).scalars().all())
         if valid != requested_assignees:
             raise HTTPException(status_code=400, detail="Task assignee is invalid")
-    if data.reviewer_id is not None:
-        reviewer = await db.get(Employee, data.reviewer_id)
-        if not reviewer or not reviewer.is_active:
+    reviewer_ids = list(dict.fromkeys(data.reviewer_ids + ([data.reviewer_id] if data.reviewer_id else [])))
+    if reviewer_ids:
+        valid_reviewers = set((await db.execute(select(Employee.id).where(Employee.id.in_(reviewer_ids), Employee.is_active.is_(True)))).scalars().all())
+        if valid_reviewers != set(reviewer_ids):
             raise HTTPException(status_code=400, detail="Task reviewer is invalid")
     owner_id = data.primary_owner_id or (actor.employee_id if not actor.has_any_role(*MANAGEMENT_ROLES) else None)
     task = Task(
         organization_id=actor.organization_id, project_id=project_id, parent_task_id=data.parent_task_id,
         title=data.title, description=data.description, workflow_status=data.workflow_status,
-        status=LEGACY_STATUS[data.workflow_status], priority=data.priority, assignee_id=owner_id, reviewer_id=data.reviewer_id,
+        status=LEGACY_STATUS[data.workflow_status], priority=data.priority, assignee_id=owner_id,
         start_at=data.start_at, deadline_at=data.deadline_at, estimate_minutes=data.estimate_minutes,
         work_location_type=data.work_location_type, work_location=data.work_location,
-        sort_position=data.sort_position, created_by_id=actor.employee_id,
+        sort_position=data.sort_position, created_by_id=actor.employee_id, reviewer_id=reviewer_ids[0] if reviewer_ids else None,
     )
     db.add(task)
     await db.flush()
@@ -1099,8 +1107,10 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         assignees.add(owner_id)
     for employee_id in assignees:
         db.add(TaskAssignee(task_id=task.id, employee_id=employee_id, assignment_role="primary" if employee_id == owner_id else "contributor"))
+    for employee_id in reviewer_ids:
+        db.add(TaskReviewer(task_id=task.id, employee_id=employee_id))
     owner = await db.get(Employee, owner_id) if owner_id else None
-    output = {**_task_out(task), "assignee_ids": sorted(assignees), "primary_owner_name": owner.name if owner else None}
+    output = {**_task_out(task), "assignee_ids": sorted(assignees), "reviewer_ids": reviewer_ids, "primary_owner_name": owner.name if owner else None}
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after=output)
     await create_notifications(
         db, organization_id=actor.organization_id, employee_ids=assignees,
@@ -1109,13 +1119,15 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         payload={"task_id": task.id, "title": task.title, "deadline_iso": task.deadline_at.isoformat() if task.deadline_at else None},
         source_event_id=source_event.id, task_id=task.id, dedup_key=f"task-created:{task.id}",
     )
-    if task.workflow_status == "review" and task.reviewer_id is not None and task.reviewer_id != actor.employee_id:
+    if task.workflow_status == "review" and reviewer_ids:
+        assignee = await db.get(Employee, task.assignee_id) if task.assignee_id else None
+        task_url = f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"
         await create_notifications(
-            db, organization_id=actor.organization_id, employee_ids=[task.reviewer_id],
+            db, organization_id=actor.organization_id, employee_ids=reviewer_ids,
             kind="task_review_requested", title="Хянах шаардлагатай",
-            body=f"“{task.title}” даалгаврыг хянахаар илгээлээ.", target_url=f"/tasks?task={task.id}",
-            payload={"task_id": task.id, "title": task.title}, source_event_id=source_event.id,
-            task_id=task.id, dedup_key=f"task-review-requested:{task.id}:v{task.version}",
+            body=f"“{task.title}” даалгаврыг хянахаар илгээлээ. Хариуцагч: {assignee.name if assignee else 'Хариуцагчгүй'}.", target_url=f"/tasks?task={task.id}",
+            payload={"task_id": task.id, "title": task.title, "assignee_name": assignee.name if assignee else None, "task_url": task_url}, source_event_id=source_event.id,
+            task_id=task.id, dedup_key=f"task-review-requested:{task.id}:v{task.version}", immediate=True,
         )
     if idempotency_key:
         db.add(IdempotencyRecord(account_id=actor.account_id, operation="create_task", key=idempotency_key, request_hash=request_hash, response_status=201, response_body=json.loads(json.dumps(output, default=str)), expires_at=datetime.now(timezone.utc) + timedelta(days=1)))
@@ -1130,7 +1142,7 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
         raise HTTPException(status_code=404, detail="Task not found")
     can_manage = actor.has_any_role(*MANAGEMENT_ROLES) or (actor.employee_id is not None and task.created_by_id == actor.employee_id)
     is_contributor = actor.employee_id is not None and bool(await db.scalar(select(TaskAssignee.id).where(TaskAssignee.task_id == task.id, TaskAssignee.employee_id == actor.employee_id)))
-    is_reviewer = actor.employee_id is not None and task.reviewer_id == actor.employee_id
+    is_reviewer = actor.employee_id is not None and (task.reviewer_id == actor.employee_id or bool(await db.scalar(select(TaskReviewer.id).where(TaskReviewer.task_id == task.id, TaskReviewer.employee_id == actor.employee_id))))
     if not can_manage:
         if task.assignee_id != actor.employee_id and not is_contributor and not (is_reviewer and task.workflow_status == "review"):
             raise HTTPException(status_code=403, detail="Task is outside your scope")
@@ -1150,10 +1162,16 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
             raise HTTPException(status_code=403, detail="Your role cannot assign work to other workers")
     if patch.get("workflow_status") and patch["workflow_status"] not in WORKFLOW_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid workflow status")
-    if "reviewer_id" in patch and patch["reviewer_id"] is not None:
-        reviewer = await db.get(Employee, patch["reviewer_id"])
-        if not reviewer or not reviewer.is_active:
+    reviewer_ids = patch.pop("reviewer_ids", None)
+    if reviewer_ids is not None:
+        reviewer_ids = list(dict.fromkeys(reviewer_ids + ([patch.get("reviewer_id")] if patch.get("reviewer_id") else [])))
+        valid_reviewers = set((await db.execute(select(Employee.id).where(Employee.id.in_(reviewer_ids), Employee.is_active.is_(True)))).scalars().all()) if reviewer_ids else set()
+        if valid_reviewers != set(reviewer_ids):
             raise HTTPException(status_code=400, detail="Task reviewer is invalid")
+        await db.execute(TaskReviewer.__table__.delete().where(TaskReviewer.task_id == task.id))
+        for employee_id in reviewer_ids:
+            db.add(TaskReviewer(task_id=task.id, employee_id=employee_id))
+        patch["reviewer_id"] = reviewer_ids[0] if reviewer_ids else None
     if "parent_task_id" in patch and patch["parent_task_id"]:
         if patch["parent_task_id"] == task.id:
             raise HTTPException(status_code=400, detail="A task cannot be its own parent")
@@ -1183,15 +1201,20 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     task.version += 1
     await db.flush()
     current_assignees = (await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all()
-    output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees))}
+    current_reviewers = (await db.execute(select(TaskReviewer.employee_id).where(TaskReviewer.task_id == task.id))).scalars().all()
+    if task.reviewer_id and task.reviewer_id not in current_reviewers:
+        current_reviewers.append(task.reviewer_id)
+    output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees)), "reviewer_ids": sorted(set(current_reviewers))}
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before=before, after=output)
-    if next_workflow == "review" and before["workflow_status"] != "review" and task.reviewer_id is not None and task.reviewer_id != actor.employee_id:
+    if next_workflow == "review" and before["workflow_status"] != "review" and current_reviewers:
+        assignee = await db.get(Employee, task.assignee_id) if task.assignee_id else None
+        task_url = f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"
         await create_notifications(
-            db, organization_id=actor.organization_id, employee_ids=[task.reviewer_id],
+            db, organization_id=actor.organization_id, employee_ids=current_reviewers,
             kind="task_review_requested", title="Хянах шаардлагатай",
-            body=f"“{task.title}” даалгаврыг хянахаар илгээлээ.", target_url=f"/tasks?task={task.id}",
-            payload={"task_id": task.id, "title": task.title}, source_event_id=source_event.id,
-            task_id=task.id, dedup_key=f"task-review-requested:{task.id}:v{task.version}",
+            body=f"“{task.title}” даалгаврыг хянахаар илгээлээ. Хариуцагч: {assignee.name if assignee else 'Хариуцагчгүй'}.", target_url=f"/tasks?task={task.id}",
+            payload={"task_id": task.id, "title": task.title, "assignee_name": assignee.name if assignee else None, "task_url": task_url}, source_event_id=source_event.id,
+            task_id=task.id, dedup_key=f"task-review-requested:{task.id}:v{task.version}", immediate=True,
         )
     await db.commit()
     return output
@@ -1313,6 +1336,30 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
     if scope == "private":
         task_rows = [row for row in task_rows if actor.employee_id and actor.employee_id in row.get("assignee_ids", [])]
     task_events = [{"kind": "task", "visibility": "company" if scope == "corporate" else "private", "can_edit": actor.has_any_role(*MANAGEMENT_ROLES) or actor.employee_id in row.get("assignee_ids", []), **row} for row in task_rows if row.get("start_at") or row.get("deadline_at")]
+    project_query = select(Project).where(
+        Project.organization_id == actor.organization_id,
+        Project.archived_at.is_(None),
+        Project.starts_on.isnot(None),
+        Project.ends_on.isnot(None),
+        Project.starts_on <= period_end,
+        Project.ends_on >= period_start,
+    )
+    if scope == "private" and not actor.has_any_role(*MANAGEMENT_ROLES):
+        member_projects = select(ProjectMember.project_id).where(ProjectMember.employee_id == actor.employee_id) if actor.employee_id else select(ProjectMember.project_id).where(ProjectMember.id == -1)
+        project_query = project_query.where(or_(Project.manager_id == actor.employee_id, Project.id.in_(member_projects)))
+    projects = (await db.execute(project_query.order_by(Project.starts_on, Project.ends_on, Project.id))).scalars().all()
+    project_events = [{"kind": "project", "visibility": "company" if scope == "corporate" else "private", "title": project.name, "description": project.description, "starts_on": project.starts_on, "ends_on": project.ends_on, "project_id": project.id, "code": project.code, "status": project.status, "can_edit": actor.has_any_role(*MANAGEMENT_ROLES)} for project in projects]
+    plan_events: list[dict] = []
+    if scope == "corporate":
+        plan_query = select(CompanyPlanItem).where(
+            CompanyPlanItem.organization_id == actor.organization_id,
+            CompanyPlanItem.status == "approved",
+            CompanyPlanItem.due_date.isnot(None),
+            CompanyPlanItem.plan_month <= period_end,
+            CompanyPlanItem.due_date >= period_start,
+        )
+        plans = (await db.execute(plan_query.order_by(CompanyPlanItem.plan_month, CompanyPlanItem.due_date, CompanyPlanItem.id))).scalars().all()
+        plan_events = [{"kind": "plan", "visibility": "company", "title": plan.title, "description": plan.content, "plan_month": plan.plan_month, "due_date": plan.due_date, "horizon": plan.horizon, "plan_id": plan.id, "can_edit": actor.has_any_role(*MANAGEMENT_ROLES)} for plan in plans]
     blocks: list[dict] = []
     entries: list[dict] = []
     holidays: list[dict] = []
@@ -1348,7 +1395,7 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
     for employee in birthdays:
         for birthday in _birthday_occurrences(employee.birthday, period_start, period_end):
             holidays.append({"id": f"birthday-{employee.id}-{birthday.year}", "kind": "birthday", "visibility": "company", "title": f"{employee.name}-ийн төрсөн өдөр", "starts_at": datetime.combine(birthday, datetime.min.time(), tzinfo=timezone.utc), "ends_at": datetime.combine(birthday + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), "can_edit": False})
-    return {"scope": scope, "tasks": task_events, "time_blocks": blocks, "entries": entries, "holidays": holidays}
+    return {"scope": scope, "tasks": task_events, "projects": project_events, "plans": plan_events, "time_blocks": blocks, "entries": entries, "holidays": holidays}
 
 
 @router.post("/calendar/entries", status_code=status.HTTP_201_CREATED)

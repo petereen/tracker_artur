@@ -37,6 +37,7 @@ import {
   TimePeriodFilter,
 } from "../components/TimePeriodFilter";
 import { EMPTY_ROLES, useAuthStore } from "../store/auth";
+import { UserTagPicker } from "../components/UserTagPicker";
 
 function formatDuration(seconds: number) {
   seconds = Math.max(0, Math.floor(seconds));
@@ -246,26 +247,7 @@ function DelegatedTaskSheet({
               ))}
             </select>
           </label>
-          <fieldset className="task-worker-picker">
-            <legend>Хариуцагчид</legend>
-            {workers?.map((worker) => (
-              <label key={worker.id}>
-                <input
-                  type="checkbox"
-                  checked={form.assignee_ids.includes(worker.id)}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      assignee_ids: event.target.checked
-                        ? [...form.assignee_ids, worker.id]
-                        : form.assignee_ids.filter((id) => id !== worker.id),
-                    })
-                  }
-                />
-                {worker.name}
-              </label>
-            ))}
-          </fieldset>
+          <UserTagPicker label="Хариуцагчид" value={form.assignee_ids} users={workers || []} allLabel="Бүгдийг сонгох" onChange={(assignee_ids) => setForm({ ...form, assignee_ids })} />
           <label>
             Байршил
             <input

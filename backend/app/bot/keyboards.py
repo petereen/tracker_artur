@@ -62,15 +62,16 @@ def task_actions_kb(
     description: str | None = None,
     timezone_name: str | None = None,
     include_submit_for_review: bool = True,
+    task_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     actions = [InlineKeyboardButton(text="✅ Дууссан", callback_data=f"task:done:{task_id}")]
     if include_submit_for_review:
         actions.append(InlineKeyboardButton(text="🔎 Хянахад илгээх", callback_data=f"task:review:{task_id}"))
     actions.append(InlineKeyboardButton(text="⏰ 1 өдрөөр хойшлуулах", callback_data=f"task:snooze:{task_id}:1440"))
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            actions,
-            [InlineKeyboardButton(
+    rows = [actions]
+    if task_url:
+        rows.append([InlineKeyboardButton(text="📋 Даалгаврыг нээх", url=task_url)])
+    rows.append([InlineKeyboardButton(
                 text="📅 Google Calendar-д нэмэх",
                 url=google_calendar_task_url(
                     task_id,
@@ -79,6 +80,5 @@ def task_actions_kb(
                     description=description,
                     timezone_name=timezone_name,
                 ),
-            )],
-        ]
-    )
+            )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
