@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import axios from 'axios'
 import toast from 'react-hot-toast'
 import { acceptSession, api, refreshAccessToken } from './client'
 import { useAuthStore, Actor } from '../store/auth'
@@ -613,6 +614,7 @@ function useCompanyFilesMutation<T>(mutationFn: (input: T) => Promise<unknown>, 
     mutationFn,
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'company-files'] }); toast.success(successMessage) },
     onError: (error: any) => {
+      if (axios.isCancel(error)) return
       const detail = error?.response?.data?.detail
       const message = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Үйлдэл амжилтгүй боллоо'
       toast.error(message)
@@ -625,12 +627,14 @@ export function useCreateCompanyFolder() {
 }
 
 export function useUploadCompanyFile() {
-  return useCompanyFilesMutation((input: { files: File[]; parent_id: number | null; onProgress?: (percent: number) => void }) => {
+  return useCompanyFilesMutation((input: { files: File[]; parent_id: number | null; onProgress?: (percent: number) => void; signal?: AbortSignal }) => {
     const body = new FormData()
     const totalBytes = input.files.reduce((sum, file) => sum + file.size, 0)
     input.files.forEach((file) => body.append('files', file))
     return api.post('/v1/company-files/upload', body, {
       params: { parent_id: input.parent_id ?? undefined },
+      signal: input.signal,
+      timeout: 5 * 60 * 1000,
       onUploadProgress: (event) => {
         const total = event.total || totalBytes || 1
         const percent = Math.min(100, Math.round((event.loaded / total) * 100))

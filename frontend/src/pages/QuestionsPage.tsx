@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
-import { useQuestions, useCreateQuestion, useDeleteQuestion, useEmployees, useReorderQuestions } from '../api/hooks'
+import { useQuestions, useCreateQuestion, useDeleteQuestion, useEmployees, useReorderQuestions, useUpdateQuestion } from '../api/hooks'
 
 const TYPE_OPTIONS = [
   { value: 'integer', label: 'Бүхэл тоо' },
@@ -15,10 +15,12 @@ export function QuestionsPage() {
   const { data: questions = [] } = useQuestions()
   const { data: employees = [] } = useEmployees()
   const create = useCreateQuestion()
+  const update = useUpdateQuestion()
   const del = useDeleteQuestion()
   const reorder = useReorderQuestions()
 
   const [showModal, setShowModal] = useState(false)
+  const [editingQuestion, setEditingQuestion] = useState<any | null>(null)
   const [form, setForm] = useState({ text: '', answer_type: 'integer', is_required: true, employee_ids: [] as number[] })
 
   const required = questions.filter((q: any) => q.is_required).length
@@ -32,15 +34,37 @@ export function QuestionsPage() {
   }
 
   const submit = async () => {
-    await create.mutateAsync({ ...form, sort_order: questions.length })
+    if (editingQuestion) {
+      await update.mutateAsync({ id: editingQuestion.id, ...form })
+    } else {
+      await create.mutateAsync({ ...form, sort_order: questions.length })
+    }
     setShowModal(false)
+    setEditingQuestion(null)
     setForm({ text: '', answer_type: 'integer', is_required: true, employee_ids: [] })
+  }
+
+  const openCreate = () => {
+    setEditingQuestion(null)
+    setForm({ text: '', answer_type: 'integer', is_required: true, employee_ids: [] })
+    setShowModal(true)
+  }
+
+  const openEdit = (question: any) => {
+    setEditingQuestion(question)
+    setForm({
+      text: question.text,
+      answer_type: question.answer_type,
+      is_required: question.is_required,
+      employee_ids: question.employee_ids || [],
+    })
+    setShowModal(true)
   }
 
   return (
     <div>
       <PageHeader title="Асуултууд" sub="Оройн чек-иний үндсэн асуултууд">
-        <Btn variant="primary" onClick={() => setShowModal(true)}>+ Асуулт нэмэх</Btn>
+        <Btn variant="primary" onClick={openCreate}>+ Асуулт нэмэх</Btn>
       </PageHeader>
 
       {required >= 5 && (
@@ -70,6 +94,7 @@ export function QuestionsPage() {
                 </div>
               </div>
               <div className="flex gap-1.5 flex-shrink-0">
+                <Btn onClick={() => openEdit(q)}>Засах</Btn>
                 <Btn variant="danger" onClick={() => {
                   if (window.confirm('Энэ check-in асуултыг устгах уу?')) del.mutate(q.id)
                 }}>Устгах</Btn>
@@ -90,7 +115,7 @@ export function QuestionsPage() {
       </div>
 
       {showModal && (
-        <Modal title="Шинэ асуулт" onClose={() => setShowModal(false)}>
+        <Modal title={editingQuestion ? 'Асуулт засах' : 'Шинэ асуулт'} onClose={() => { setShowModal(false); setEditingQuestion(null) }}>
           <div className="flex flex-col gap-3.5">
             <Input label="Асуултын текст" value={form.text} onChange={(v) => setForm((f) => ({ ...f, text: v }))} placeholder="Хэдэн дуудлага хийсэн бэ?" fullWidth />
             <Select label="Хариултын төрөл" value={form.answer_type} onChange={(v) => setForm((f) => ({ ...f, answer_type: v }))} options={TYPE_OPTIONS} fullWidth />
@@ -99,7 +124,7 @@ export function QuestionsPage() {
               <label htmlFor="req" className="text-[13px] text-muted cursor-pointer">Заавал хариулах</label>
             </div>
             <div className="flex flex-col gap-2">
-              <div className="text-xs text-muted font-medium">Хэнд харагдах вэ?</div>
+              <div className="text-xs text-muted font-medium">Хэн хариулах вэ?</div>
               <div className="text-[12px] text-muted">Ажилтан сонгохгүй бол бүх ажилтанд асууна.</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto">
                 {employees.filter((employee: any) => employee.is_active).map((employee: any) => (
@@ -121,8 +146,8 @@ export function QuestionsPage() {
               </div>
             </div>
             <div className="flex gap-2.5 justify-end pt-1">
-              <Btn onClick={() => setShowModal(false)}>Цуцлах</Btn>
-              <Btn variant="primary" onClick={submit} disabled={!form.text || create.isPending}>Нэмэх</Btn>
+              <Btn onClick={() => { setShowModal(false); setEditingQuestion(null) }}>Цуцлах</Btn>
+              <Btn variant="primary" onClick={submit} disabled={!form.text || create.isPending || update.isPending}>{editingQuestion ? 'Хадгалах' : 'Нэмэх'}</Btn>
             </div>
           </div>
         </Modal>

@@ -34,6 +34,7 @@ export function CompanyFilesPage() {
   const [dialogValue, setDialogValue] = useState('')
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const uploadInput = useRef<HTMLInputElement>(null)
+  const uploadAbort = useRef<AbortController | null>(null)
   const files = useCompanyFiles({ parentId: trashOpen ? undefined : parentId, search: trashOpen ? '' : deferredSearch, sort, trash: trashOpen })
   const createFolder = useCreateCompanyFolder()
   const uploadFile = useUploadCompanyFile()
@@ -58,14 +59,24 @@ export function CompanyFilesPage() {
   }
   const upload = async (files?: FileList | null) => {
     if (!files?.length) return
+    uploadAbort.current?.abort()
+    const controller = new AbortController()
+    uploadAbort.current = controller
     setUploadProgress(0)
     try {
-      await uploadFile.mutateAsync({ files: Array.from(files), parent_id: parentId ?? null, onProgress: setUploadProgress })
+      await uploadFile.mutateAsync({ files: Array.from(files), parent_id: parentId ?? null, onProgress: setUploadProgress, signal: controller.signal })
+    } catch {
+      // The mutation displays the server error. This prevents the input-change
+      // handler from creating an unhandled rejected promise.
     } finally {
-      setUploadProgress(null)
+      if (uploadAbort.current === controller) {
+        uploadAbort.current = null
+        setUploadProgress(null)
+      }
       if (uploadInput.current) uploadInput.current.value = ''
     }
   }
+  const cancelUpload = () => uploadAbort.current?.abort()
   const download = async (item: CompanyLibraryItem) => {
     try { await downloadCompanyFile(item) } catch (error: any) { toast.error(error.response?.data?.detail || t('files.downloadError')) }
   }
@@ -100,7 +111,7 @@ export function CompanyFilesPage() {
         </div>
       </div>
 
-      {uploadProgress !== null && <div className="file-upload-progress"><span style={{ width: `${uploadProgress}%` }} /><small>{t('files.uploading')} {uploadProgress}%</small></div>}
+      {uploadProgress !== null && <div className="file-upload-progress"><span style={{ width: `${uploadProgress}%` }} /><small>{uploadProgress === 100 ? t('files.processing') : `${t('files.uploading')} ${uploadProgress}%`}</small><button type="button" onClick={cancelUpload}>{t('files.cancelUpload')}</button></div>}
       {files.isLoading && <div className="company-files-state">{t('files.loading')}</div>}
       {files.isError && <div className="company-files-state error"><p>{t('files.loadError')}</p><button className="secondary-action" onClick={() => files.refetch()}>{t('files.retry')}</button></div>}
       {!files.isLoading && !files.isError && files.data?.items.length === 0 && <div className="company-files-state"><Folder size={42} strokeWidth={1.3} /><h3>{trashOpen ? t('files.emptyTrash') : search ? t('files.noResults') : t('files.emptyFolder')}</h3><p>{trashOpen ? t('files.emptyTrashHelp') : t('files.emptyHelp')}</p></div>}

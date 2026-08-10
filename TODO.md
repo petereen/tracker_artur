@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Place the separate “Хянах шаардлагатай” box below regular tasks in the “Хянах” column (`frontend/src/pages/EnterpriseTasksPage.tsx`)
+- [x] Render “Хянах шаардлагатай” as a separate boxed status within the “Хянах” column (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
+- [x] Keep the reviewer task queue visible under “Хянах” and robust to reviewer ID type differences (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
+- [x] Allow editing check-in questions and changing which employees answer them (`frontend/src/pages/QuestionsPage.tsx`)
+- [x] Fix company-file uploads blocked by the proxy size limit and make stalled uploads recoverable (`frontend/nginx.conf`, `frontend/src/pages/CompanyFilesPage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Stabilize the existing dirty-worktree baseline, test expectations, Node typings, and deployment documentation
 - [x] Phase 3: Complete task collaboration APIs, detail UI, saved views, conflict recovery, undo, and cross-channel coverage
 - [x] Phase 4: Complete typed check-ins, collaborative report review, attachments, comparisons, and timer recovery UX
@@ -84,6 +89,11 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Make calendar tasks clickable with detail views and continuous multi-day date-range bars (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`)
+- [x] Place the separate “Хянах шаардлагатай” box below regular tasks in the “Хянах” column (`frontend/src/pages/EnterpriseTasksPage.tsx`)
+- [x] Render “Хянах шаардлагатай” as a separate boxed status within the “Хянах” column (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
+- [x] Keep the reviewer task queue visible under “Хянах” and robust to reviewer ID type differences (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
+- [x] Simplify the admin report approval UI to one clear approve action and remove the glitch-prone batch approval controls (`frontend/src/pages/EnterpriseReportsPage.tsx`, `frontend/src/index.css`)
 - [x] Match the Plans “Төлөвлөгөө нэмэх” button to the smaller create-action sizing (`frontend/src/pages/PlansPage.tsx`)
 - [x] Increase the vertical gap between Stats metric cards and the worktime heatmap panel (`frontend/src/index.css`)
 - [x] Center OYUNS assistant voice/send controls and auto-grow the message textarea with a maximum scroll height (`frontend/src/components/OyunsAssistant.tsx`, `frontend/src/index.css`)
