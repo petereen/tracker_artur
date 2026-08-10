@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Render task, project, and plan date ranges as continuous calendar blocks across intermediate dates and day separators (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Merge the two Alembic migration heads so Dokploy backend startup can run `alembic upgrade head` (`backend/alembic/versions`)
 - [x] Send immediate multi-channel review notifications to every assigned reviewer with assignee context, direct task links, and Telegram actions (`backend/app/routers/enterprise.py`, `backend/app/services/user_notifications.py`, `backend/app/services/reminder_service.py`, `backend/app/bot/keyboards.py`)
 - [x] Standardize multi-user task/settings selectors with removable user tags and support multiple task reviewers (`backend/app`, `frontend/src`)
@@ -92,6 +93,7 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Add a square task Delete button beside the full-width Save button in task settings (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
 - [x] Merge the two Alembic migration heads so Dokploy backend startup can run `alembic upgrade head` (`backend/alembic/versions`)
 - [x] Send immediate multi-channel review notifications to every assigned reviewer with assignee context, direct task links, and Telegram actions (`backend/app/routers/enterprise.py`, `backend/app/services/user_notifications.py`, `backend/app/services/reminder_service.py`, `backend/app/bot/keyboards.py`)
 - [x] Add continuous calendar range blocks for scheduled tasks, projects, and plans (`backend/app/routers/enterprise.py`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`)

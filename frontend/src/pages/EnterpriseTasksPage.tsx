@@ -38,6 +38,7 @@ import {
   useAttachments,
   useCreateEnterpriseTask,
   useCreateSavedView,
+  useDeleteEnterpriseTask,
   useDeadlines,
   useDeleteAttachment,
   useDeleteSavedView,
@@ -589,6 +590,7 @@ export function EnterpriseTasksPage() {
   const workers = useWorkerDirectory();
   const createTask = useCreateEnterpriseTask();
   const updateTask = useUpdateEnterpriseTask();
+  const deleteTask = useDeleteEnterpriseTask();
   const grouped = useMemo(
     () =>
       Object.fromEntries(
@@ -696,6 +698,16 @@ export function EnterpriseTasksPage() {
       const latest = error.response?.data?.detail?.latest;
       if (error.response?.status === 409 && latest)
         setConflict({ ...selected, ...latest });
+    }
+  };
+  const remove = async () => {
+    if (!selected || !window.confirm("Энэ даалгаврыг устгах уу?")) return;
+    try {
+      await deleteTask.mutateAsync(selected.id);
+      setConflict(null);
+      setSelected(null);
+    } catch {
+      /* hook reports */
     }
   };
   const onDragEnd = (event: DragEndEvent) => {
@@ -1291,19 +1303,34 @@ export function EnterpriseTasksPage() {
               <form className="sheet-form" onSubmit={selected ? save : submit}>
                 {formFields}
                 <UserTagPicker label="Хянагч" value={form.reviewer_ids} users={workers.data || []} onChange={(reviewer_ids) => setForm({ ...form, reviewer_ids })} />
-                <button
-                  className="primary-action"
-                  disabled={createTask.isPending || updateTask.isPending}
-                >
-                  {selected ? (
-                    <>
+                {selected ? (
+                  <div className="task-settings-actions">
+                    <button
+                      type="button"
+                      className="danger-action task-delete-action"
+                      aria-label="Даалгавар устгах"
+                      title="Даалгавар устгах"
+                      onClick={remove}
+                      disabled={deleteTask.isPending || updateTask.isPending}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    <button
+                      className="primary-action task-save-action"
+                      disabled={deleteTask.isPending || updateTask.isPending}
+                    >
                       <Save size={16} />
                       Хадгалах
-                    </>
-                  ) : (
-                    "Үүсгэх"
-                  )}
-                </button>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="primary-action"
+                    disabled={createTask.isPending}
+                  >
+                    Үүсгэх
+                  </button>
+                )}
               </form>
               {selected && (
                 <TaskCollaboration
