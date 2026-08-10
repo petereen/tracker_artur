@@ -15,17 +15,16 @@ const StatsWorkspacePage = lazy(() => import('./pages/StatsWorkspacePage').then(
 const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
 const PlansPage = lazy(() => import('./pages/PlansPage').then((module) => ({ default: module.PlansPage })))
-const AdministrationHubPage = lazy(() => import('./pages/AdministrationHubPage').then((module) => ({ default: module.AdministrationHubPage })))
+const AdministrationHubPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdministrationHubPage })))
+const WorkspaceIdentitySettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.WorkspaceIdentitySettingsPage })))
+const CollaborationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.CollaborationSettingsPage })))
+const AccessControlSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AccessControlSettingsPage })))
+const AutomationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AutomationSettingsPage })))
+const AdminAccessSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdminAccessSettingsPage })))
+const OyunsAssistantSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.OyunsAssistantSettingsPage })))
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })))
 const CompanyFilesPage = lazy(() => import('./pages/CompanyFilesPage').then((module) => ({ default: module.CompanyFilesPage })))
 const TgMiniAppPage = lazy(() => import('./pages/TgMiniAppPage').then((module) => ({ default: module.TgMiniAppPage })))
-const EmployeesPage = lazy(() => import('./pages/EmployeesPage').then((module) => ({ default: module.EmployeesPage })))
-const QuestionsPage = lazy(() => import('./pages/QuestionsPage').then((module) => ({ default: module.QuestionsPage })))
-const SchedulePage = lazy(() => import('./pages/SchedulePage').then((module) => ({ default: module.SchedulePage })))
-const ManagerSettingsPage = lazy(() => import('./pages/ManagerSettingsPage').then((module) => ({ default: module.ManagerSettingsPage })))
-const KnowledgePage = lazy(() => import('./pages/KnowledgePage').then((module) => ({ default: module.KnowledgePage })))
-const OnboardingPage = lazy(() => import('./pages/OnboardingPage').then((module) => ({ default: module.OnboardingPage })))
-const DeveloperPage = lazy(() => import('./pages/DeveloperPage').then((module) => ({ default: module.DeveloperPage })))
 const PrivacyPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.PrivacyPage })))
 const TermsPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.TermsPage })))
 
@@ -53,15 +52,21 @@ function AuthenticatedApp() {
         <Route path="okrs" element={<Navigate to="/plans" replace />} />
         <Route path="analytics" element={<StatsWorkspacePage />} />
         <Route path="administration" element={<AdministrationHubPage />} />
+        <Route path="administration/workspace" element={<WorkspaceIdentitySettingsPage />} />
+        <Route path="administration/collaboration" element={<CollaborationSettingsPage />} />
+        <Route path="administration/access" element={<AccessControlSettingsPage />} />
+        <Route path="administration/automation" element={<AutomationSettingsPage />} />
+        <Route path="administration/admin-access" element={<AdminAccessSettingsPage />} />
+        <Route path="administration/oyuns" element={<OyunsAssistantSettingsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="company-files" element={<CompanyFilesPage />} />
-        <Route path="legacy/employees" element={<EmployeesPage />} />
-        <Route path="legacy/questions" element={<QuestionsPage />} />
-        <Route path="legacy/schedule" element={<SchedulePage />} />
-        <Route path="legacy/manager" element={<ManagerSettingsPage />} />
-        <Route path="legacy/knowledge" element={<KnowledgePage />} />
-        <Route path="legacy/onboarding" element={<OnboardingPage />} />
-        <Route path="legacy/developer" element={<DeveloperPage />} />
+        <Route path="legacy/employees" element={<Navigate to="/administration/access" replace />} />
+        <Route path="legacy/questions" element={<Navigate to="/administration/collaboration" replace />} />
+        <Route path="legacy/schedule" element={<Navigate to="/administration/collaboration" replace />} />
+        <Route path="legacy/manager" element={<Navigate to="/administration/automation" replace />} />
+        <Route path="legacy/knowledge" element={<Navigate to="/administration/oyuns" replace />} />
+        <Route path="legacy/onboarding" element={<Navigate to="/administration/automation" replace />} />
+        <Route path="legacy/developer" element={<Navigate to="/administration/oyuns" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

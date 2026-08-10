@@ -211,7 +211,7 @@ export function useCreateCompanyPlanItem() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: { source_report_id?: number; title: string; content?: string; plan_month: string; horizon: PlanHorizon; due_date?: string | null }) => api.post('/company-plans/items', data).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['company-plan'] }); qc.invalidateQueries({ queryKey: ['company-plan-suggestions'] }); toast.success('Компанийн төлөвлөгөөнд нэмэгдлээ') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['company-plan'] }); qc.invalidateQueries({ queryKey: ['company-plan-suggestions'] }); toast.success('Компаний төлөвлөгөөнд нэмэгдлээ') },
   })
 }
 
@@ -290,7 +290,7 @@ export function useCreateKnowledge() {
     mutationFn: (data: KnowledgeInput) => api.post('/knowledge', data).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge'] })
-      toast.success('Мэдлэгийн мэдээлэл нэмэгдлээ')
+      toast.success('Өгөгдлийн санд мэдээлэл нэмэгдлээ')
     },
     onError: () => toast.error('Мэдээлэл нэмэхэд алдаа гарлаа'),
   })
@@ -310,7 +310,7 @@ export function useCreateKnowledgeWithAttachment() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge'] })
-      toast.success('Файлтай мэдлэгийн мэдээлэл нэмэгдлээ')
+      toast.success('Файлтай өгөгдлийн санд мэдээлэл нэмэгдлээ')
     },
     onError: () => toast.error('Файл хавсаргах үед алдаа гарлаа'),
   })

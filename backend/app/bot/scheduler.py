@@ -17,6 +17,12 @@ jobstores = {"default": SQLAlchemyJobStore(url=settings.SYNC_DATABASE_URL)}
 scheduler = AsyncIOScheduler(jobstores=jobstores, timezone=DEFAULT_TIMEZONE)
 _last_schedule_fingerprint: str | None = None
 _REBUILD_LOCK_KEY = 67129841
+_DEFAULT_SCHEDULE_WEEKDAYS = (1, 2, 3, 4, 5)
+
+
+def _schedule_weekdays(schedule) -> tuple[int, ...]:
+    """Return configured ISO weekdays, defaulting to the normal workweek."""
+    return tuple((schedule.weekdays if schedule else None) or _DEFAULT_SCHEDULE_WEEKDAYS)
 
 
 def _make_bot():
@@ -66,19 +72,20 @@ def _rebuild_jobs_unlocked():
             hour=morning.hour, minute=morning.minute, timezone=tz,
             id=f"monthly_report_{emp.id}", replace_existing=True, args=[emp.id])
 
+        weekdays = _schedule_weekdays(sch)
+        dow = ",".join(str(d - 1) for d in weekdays)
+
         # Work-time reminders are fixed local-time guardrails and apply even
         # when an employee has no legacy Schedule row.
         scheduler.add_job(send_work_time_reminder, "cron",
-            hour=12, minute=0, timezone=tz,
+            hour=12, minute=0, day_of_week=dow, timezone=tz,
             id=f"work_time_start_{emp.id}", replace_existing=True,
             args=[emp.id, "start"])
         for hour in (19, 23):
             scheduler.add_job(send_work_time_reminder, "cron",
-                hour=hour, minute=0, timezone=tz,
+                hour=hour, minute=0, day_of_week=dow, timezone=tz,
                 id=f"work_time_end_{hour}_{emp.id}", replace_existing=True,
                 args=[emp.id, "end"])
-        weekdays = (sch.weekdays if sch else None) or [1, 2, 3, 4, 5]
-        dow = ",".join(str(d - 1) for d in weekdays)
 
         evening: time = (sch.evening_time if sch else None) or time(17, 30)
         deadline: time = (sch.deadline_time if sch else None) or time(23, 0)
@@ -293,7 +300,7 @@ async def send_reminder(employee_id: int, num: int):
 async def send_work_time_reminder(employee_id: int, reminder_type: str):
     """Nudge a worker only when today's work interval needs attention."""
     from app.bot.db import get_session
-    from app.models.models import Employee
+    from app.models.models import Employee, Schedule
     from app.services import work_report_service
 
     bot = _make_bot()
@@ -304,8 +311,12 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str):
                 return
             telegram_id = emp.telegram_id
             timezone_name = emp.timezone
+            schedule = s.query(Schedule).filter(Schedule.employee_id == employee_id).one_or_none()
 
         local_day = _local_today(timezone_name)
+        active_weekdays = set(_schedule_weekdays(schedule))
+        if local_day.isoweekday() not in active_weekdays:
+            return
         state = work_report_service.work_time_status(employee_id, local_day)
         if reminder_type == "start":
             if state["started"]:

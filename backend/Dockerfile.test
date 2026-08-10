@@ -10,9 +10,11 @@ RUN pip install --no-cache-dir -r requirements.txt pytest
 
 COPY . .
 
+ARG PYTEST_ARGS="-q"
+
 ENV DATABASE_URL=postgresql+asyncpg://u:p@localhost/db \
     SYNC_DATABASE_URL=postgresql+psycopg2://u:p@localhost/db \
     SECRET_KEY=test-secret \
     BOT_TOKEN=test-token-123:ABC
 
-RUN python -m pytest -q
+RUN python -m pytest ${PYTEST_ARGS}

@@ -20,6 +20,11 @@ def test_followup_schema_and_routes_are_registered():
         "/v1/saved-views",
         "/v1/integrations/google-calendar/callback",
         "/v1/integrations/google-calendar/sync",
+        "/v1/integrations/google-calendar/status",
+        "/v1/integrations/google-calendar/sync-mode",
+        "/v1/integrations/google-calendar/webhook",
+        "/v1/analytics/drilldown",
+        "/v1/tasks/{task_id}/activity",
     }.issubset(paths)
 
 
@@ -39,6 +44,17 @@ def test_google_oauth_url_uses_signed_state_and_minimal_offline_scope(monkeypatc
     assert query["scope"] == [google_calendar.SCOPE]
     assert query["redirect_uri"] == [settings.GOOGLE_REDIRECT_URI]
     assert google_calendar.account_from_state(query["state"][0]) == 27
+
+
+def test_google_webhook_url_defaults_to_public_dokploy_domain(monkeypatch):
+    monkeypatch.setattr(settings, "PUBLIC_APP_URL", "https://erp.oyuns.mn")
+    monkeypatch.setattr(settings, "GOOGLE_WEBHOOK_URL", "")
+    assert google_calendar.webhook_url() == "https://erp.oyuns.mn/api/v1/integrations/google-calendar/webhook"
+
+
+def test_google_event_datetime_requires_timed_events():
+    assert google_calendar._event_datetime({"date": "2026-08-10"}) is None
+    assert google_calendar._event_datetime({"dateTime": "2026-08-10T09:30:00Z"}).isoformat() == "2026-08-10T09:30:00+00:00"
 
 
 def test_local_attachment_storage_never_uses_user_filenames(tmp_path, monkeypatch):

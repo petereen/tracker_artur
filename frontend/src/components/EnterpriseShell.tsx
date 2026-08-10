@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import {
-  BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal,
+  BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal, KeyRound,
   FolderArchive, LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X,
 } from 'lucide-react'
 import { useActor, useBrandingSettings, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
@@ -31,8 +31,14 @@ const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
   '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
+  '/administration/workspace': 'Logo оруулах',
+  '/administration/collaboration': 'Чек ин тохиргоо',
+  '/administration/access': 'Хандалтын удирдлага',
+  '/administration/automation': 'Автоматжуулалт ба интеграци',
+  '/administration/admin-access': 'Админ хандалт',
+  '/administration/oyuns': 'OYUNS agent-ын тохиргоо',
   '/profile': 'Миний профайл',
-  '/company-files': 'Компанийн файлууд',
+  '/company-files': 'Компаний файлууд',
 }
 
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
@@ -171,7 +177,14 @@ export function EnterpriseShell() {
             <motion.div className="command-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setCommandOpen(false)}>
               <motion.div className="command-panel" role="dialog" aria-modal="true" aria-label="Шуурхай навигаци" initial={{ opacity: 0, scale: .96, y: -12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .96, y: -12 }} transition={{ type: 'spring', bounce: 0, duration: .35 }} onMouseDown={(event) => event.stopPropagation()}>
                 <div className="command-input"><Search size={18} /><input autoFocus placeholder="Төсөл, даалгавар эсвэл хэсэг хайх…" /></div>
-                <div className="command-list">{[...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }].map(({ to, label, icon: Icon }) => <button key={to} onClick={() => { navigate(to); setCommandOpen(false) }}><Icon size={17} />{t(label)}<span>{t('action.open')}</span></button>)}</div>
+                <div className="command-list">{[...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }, ...(roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role)) ? [
+                  { to: '/administration/workspace', label: 'Logo оруулах', icon: Settings2, roles: [], settings: true },
+                  { to: '/administration/collaboration', label: 'Чек ин тохиргоо', icon: Users2, roles: [], settings: true },
+                  { to: '/administration/access', label: 'Хандалтын удирдлага', icon: Users2, roles: [], settings: true },
+                  { to: '/administration/automation', label: 'Автоматжуулалт ба интеграци', icon: CalendarDays, roles: [], settings: true },
+                  { to: '/administration/admin-access', label: 'Админ хандалт', icon: KeyRound, roles: [], settings: true },
+                  { to: '/administration/oyuns', label: 'OYUNS agent-ын тохиргоо', icon: Sparkles, roles: [], settings: true },
+                ] : [])].map((item) => { const Icon = item.icon; return <button key={item.to} onClick={() => { navigate(item.to); setCommandOpen(false) }}><Icon size={17} />{'settings' in item ? item.label : t(item.label)}<span>{t('action.open')}</span></button> })}</div>
               </motion.div>
             </motion.div>
           )}

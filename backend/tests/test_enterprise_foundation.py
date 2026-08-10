@@ -15,7 +15,7 @@ from app.core.security import (
 )
 from app.core.enterprise_deps import ActorContext
 from app.main import app
-from app.models.models import Base
+from app.models.models import Base, Task
 from app.routers import enterprise
 from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _holiday_provider_rows, _task_out
 from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE
@@ -182,6 +182,12 @@ def test_task_serialization_computes_overdue_without_mutating_workflow():
     assert output["version"] == 3
     assert output["work_location_type"] == "office"
     assert output["work_location"] == "HQ"
+
+
+def test_tasks_expose_an_optional_reviewer_for_the_review_workflow():
+    assert "reviewer_id" in Base.metadata.tables["tasks"].c
+    task = Task(title="Review", reviewer_id=9)
+    assert _task_out(task)["reviewer_id"] == 9
 
 
 def test_planning_migration_follows_current_head_and_models_nullable_location():

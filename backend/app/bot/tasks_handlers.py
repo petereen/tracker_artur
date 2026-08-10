@@ -44,6 +44,7 @@ _DESCRIPTION_EDIT_RE = re.compile(
     r"(?P<description>.+?)(?:\s+болго(?:орой|но|ё)?|$)",
     re.IGNORECASE,
 )
+_REVIEWER_RE = re.compile(r"(?:хянагч(?:аар)?|reviewer)\s*[:=-]?\s*@(?P<username>[A-Za-z0-9_]{3,})", re.IGNORECASE)
 
 
 def _now_tz(tz: str | None) -> datetime:
@@ -74,6 +75,14 @@ def _fmt_task_line(t: dict, *, with_assignee: bool = False) -> str:
     return f"{em} #{t['id']} {t['title']}{who} — {_fmt_deadline(t['deadline_at'])}{overdue}"
 
 
+def _reviewer_from_text(text: str) -> tuple[str, str | None]:
+    """Extract `хянагч @username` without leaving it in the task title."""
+    match = _REVIEWER_RE.search(text or "")
+    if not match:
+        return text, None
+    return (text[:match.start()] + text[match.end():]).strip(" ,;"), match.group("username")
+
+
 # ─── /task ─────────────────────────────────────────────────────────────────────
 
 async def _create_task_from_text(
@@ -83,7 +92,8 @@ async def _create_task_from_text(
     уведомляет исполнителя. Используется и /task, и голосовым вводом."""
     tz = employee.timezone if employee else "Asia/Ulaanbaatar"
     can_assign_others = is_manager or employee_can_assign_tasks(employee.id if employee else None)
-    parsed = parse_task_text(text, now=_now_tz(tz), tz=tz)
+    task_text, reviewer_username = _reviewer_from_text(text)
+    parsed = parse_task_text(task_text, now=_now_tz(tz), tz=tz)
 
     assignee_id = None
     assignee_label = "та"
@@ -103,11 +113,21 @@ async def _create_task_from_text(
             return
         assignee_id = employee.id
 
+    reviewer_id = None
+    reviewer_label = "Сонгоогүй"
+    if reviewer_username:
+        reviewer = task_service.resolve_employee_by_username(reviewer_username)
+        if not reviewer:
+            await message.answer(f"❌ @{reviewer_username} хэрэглэгчтэй хянагч олдсонгүй. Username-ийг шалгана уу.")
+            return
+        reviewer_id, reviewer_label = reviewer.id, reviewer.name
+
     task = task_service.create_task(
         title=parsed.title,
         assignee_id=assignee_id,
         created_by_id=employee.id if employee else None,
         created_by_tg=tg_id,
+        reviewer_id=reviewer_id,
         deadline_at=parsed.deadline_at,
         priority=parsed.priority,
     )
@@ -120,6 +140,7 @@ async def _create_task_from_text(
         f"✅ Даалгавар үүслээ: <b>#{task['id']}</b>\n"
         f"«{task['title']}»\n"
         f"Гүйцэтгэгч: {assignee_label}\n"
+        f"Хянагч: {reviewer_label}\n"
         f"Тэргүүлэх зэрэг: {_PRIORITY_EMOJI.get(task['priority'], '🟡')}\n"
         f"Хугацаа: <b>{_fmt_deadline(task['deadline_at'])}</b>",
         parse_mode="HTML",
@@ -154,16 +175,33 @@ def _enqueue_assignment_bot(task: dict, actor_tg: str | None) -> None:
     )
 
 
+def _enqueue_review_request_bot(task: dict, actor_tg: str | None) -> None:
+    if not task.get("reviewer_tg") or str(task["reviewer_tg"]) == str(actor_tg or ""):
+        return
+    policy = load_policy(get_manager_settings())
+    nb = next_allowed(datetime.now(timezone.utc), task.get("reviewer_tz") or "Asia/Ulaanbaatar", policy)
+    task_service.enqueue_notification(
+        task_id=task["id"], recipient_tg=task["reviewer_tg"], kind="task_review_requested",
+        payload={
+            "title": task["title"], "description": task.get("description"),
+            "timezone_name": task.get("reviewer_tz") or "Asia/Ulaanbaatar",
+            "deadline_iso": _iso(task["deadline_at"]),
+            "text": f"“{task['title']}” даалгаврыг хянахаар илгээлээ.",
+        },
+        not_before=nb, dedup_key=f"task_review_requested:{task['id']}:v{task.get('version', 1)}",
+    )
+
+
 @router.message(Command("task"))
 async def cmd_task(message: Message, command: CommandObject, employee=None, is_manager: bool = False, tg_id: str | None = None):
     text = (command.args or "").strip()
     if not text:
         await message.answer(
             "📝 <b>Даалгавар үүсгэх</b>\n\n"
-            "Хэлбэр: <code>/task [@гүйцэтгэгч] юу хийх [хэзээ]</code>\n"
+            "Хэлбэр: <code>/task [@гүйцэтгэгч] юу хийх [хэзээ] [хянагч @username]</code>\n"
             "Жишээ:\n"
             "• <code>/task харилцагч руу маргааш 15:00-д залгах</code>\n"
-            "• <code>/task @bat баасан гарагт тайлан бэлдэх, яаралтай</code>\n\n"
+            "• <code>/task @bat баасан гарагт тайлан бэлдэх, яаралтай хянагч @saraa</code>\n\n"
             "🎙 Мөн дуу хоолойгоор хэлж болно.",
             parse_mode="HTML",
         )
@@ -274,6 +312,7 @@ def task_draft_text(draft: dict) -> str:
     desc = f"\n📝 {escape(str(draft['description']))}" if draft.get("description") else ""
     title = escape(str(draft.get("title") or "—"))
     assignee = escape(str(draft.get("assignee_name") or "—"))
+    reviewer = escape(str(draft.get("reviewer_name") or "Сонгоогүй"))
     assignee_label = (
         "Гүйцэтгэгчид"
         if draft.get("assign_to_all") or len(draft.get("assignee_ids") or []) > 1
@@ -283,6 +322,7 @@ def task_draft_text(draft: dict) -> str:
         f"🤖 <b>Даалгаврын ноорог</b>\n\n"
         f"<b>{title}</b>{desc}\n"
         f"👤 {assignee_label}: <b>{assignee}</b>\n"
+        f"🔎 Хянагч: <b>{reviewer}</b>\n"
         f"{_PRIORITY_EMOJI.get(draft.get('priority', 2), '🟡')} Тэргүүлэх зэрэг: {draft.get('priority', 2)}\n"
         f"🕒 Хугацаа: <b>{_fmt_ub_deadline(draft.get('deadline_at'))}</b>"
     )
@@ -401,6 +441,16 @@ def _structure_from_tool_arguments(
         else:
             assignee_id = _resolve_roster_name(assignee_value, roster)
 
+    reviewer_id = None
+    reviewer = arguments.get("reviewer")
+    if isinstance(reviewer, str) and reviewer.strip():
+        reviewer_value = reviewer.strip()
+        if reviewer_value.startswith("@"):
+            target = task_service.resolve_employee_by_username(reviewer_value[1:])
+            reviewer_id = target.id if target else None
+        else:
+            reviewer_id = _resolve_roster_name(reviewer_value, roster)
+
     description = arguments.get("description")
     if not isinstance(description, str) or not description.strip():
         description = None
@@ -411,6 +461,7 @@ def _structure_from_tool_arguments(
         "title": title.strip()[:200],
         "description": description,
         "assignee_id": assignee_id,
+        "reviewer_id": reviewer_id,
         "assign_to_self": assign_to_self,
         "assign_to_all": assign_to_all,
         "deadline_at": deadline_at,
@@ -459,7 +510,8 @@ async def begin_task_draft(
         roster.append({"id": self_emp["id"], "name": f"{self_emp['name']} (та өөрөө)", "username": self_emp.get("telegram_username")})
 
     now = _now_tz(tz)
-    parsed = parse_task_text(text, now=now, tz=tz)
+    task_text, reviewer_username = _reviewer_from_text(text)
+    parsed = parse_task_text(task_text, now=now, tz=tz)
     structured = _structure_from_tool_arguments(
         tool_arguments,
         roster=roster,
@@ -472,7 +524,7 @@ async def begin_task_draft(
         if parsed.assignee_username:
             t = task_service.resolve_employee_by_username(parsed.assignee_username)
             a_id = t.id if t else None
-        structured = {"title": parsed.title, "description": None, "assignee_id": a_id,
+        structured = {"title": parsed.title, "description": None, "assignee_id": a_id, "reviewer_id": None,
                       "assign_to_all": False, "deadline_at": parsed.deadline_at, "priority": parsed.priority}
     elif parsed.deadline_at is not None:
         # Mongolian relative dates/times are deterministic and timezone-aware;
@@ -486,6 +538,12 @@ async def begin_task_draft(
         structured["description"] = (text or "").strip()[:2_000] or None
 
     assignee_id = structured.get("assignee_id")
+    reviewer_id = structured.get("reviewer_id")
+    if reviewer_username:
+        reviewer = task_service.resolve_employee_by_username(reviewer_username)
+        if not reviewer:
+            return await fail("reviewer_not_resolved", f"❌ @{reviewer_username} хэрэглэгчтэй хянагч олдсонгүй.")
+        reviewer_id = reviewer.id
     exact_name_ids = _resolve_roster_names(text, roster)
     if exact_name_ids:
         # Explicit stored names are more reliable than a model selection and
@@ -548,9 +606,11 @@ async def begin_task_draft(
         for employee_id in assignee_ids
         if employee_id in names_by_id
     ]
+    reviewer_name = names_by_id.get(reviewer_id) if reviewer_id else None
     draft = {
         "title": structured["title"], "description": structured.get("description"),
         "assignee_id": assignee_id, "assignee_ids": assignee_ids,
+        "reviewer_id": reviewer_id, "reviewer_name": reviewer_name,
         "assign_to_all": assign_to_all,
         "assignee_name": (
             f"Бүх идэвхтэй ажилтан ({len(all_active_assignee_ids)})"
@@ -598,6 +658,7 @@ async def cb_draft_confirm(cb: CallbackQuery, state: FSMContext, tg_id: str | No
     tasks = task_service.create_tasks_for_assignees(
         title=d["title"], assignee_ids=d.get("assignee_ids") or [d["assignee_id"]],
         created_by_id=d["created_by_id"], created_by_tg=d["created_by_tg"],
+        reviewer_id=d.get("reviewer_id"),
         deadline_at=d["deadline_at"], priority=d["priority"], description=d.get("description"),
     )
     for task in tasks:
@@ -716,6 +777,31 @@ async def _complete_task(target, task_id: int, employee, is_manager: bool, tg_id
     await target.answer(f"✅ #{task_id} «{task['title']}» даалгаврыг дууссанд тэмдэглэлээ.")
 
 
+async def _submit_task_for_review(target, task_id: int, employee, is_manager: bool, tg_id: str | None):
+    task = task_service.get_task(task_id)
+    if not task:
+        await target.answer("❌ Даалгавар олдсонгүй.")
+        return
+    if not task_service.can_modify(task, employee_id=employee.id if employee else None, tg_id=tg_id, is_manager=is_manager):
+        await target.answer("❌ Энэ даалгаварт хандах эрх алга.")
+        return
+    updated = task_service.submit_for_review(task_id, by_employee_id=employee.id if employee else None)
+    if not updated:
+        await target.answer("❌ Даалгаврыг хянахад илгээж чадсангүй.")
+        return
+    _enqueue_review_request_bot(updated, tg_id)
+    await target.answer(f"🔎 #{task_id} «{task['title']}» даалгаврыг {updated.get('reviewer_name') or 'хянагч'} руу илгээлээ.")
+
+
+@router.message(Command("review"))
+async def cmd_review(message: Message, command: CommandObject, employee=None, is_manager: bool = False, tg_id: str | None = None):
+    arg = (command.args or "").strip()
+    if not arg.isdigit():
+        await message.answer("Хэлбэр: <code>/review &lt;id&gt;</code>", parse_mode="HTML")
+        return
+    await _submit_task_for_review(message, int(arg), employee, is_manager, tg_id)
+
+
 # ─── /snooze <id> <время> ────────────────────────────────────────────────────────
 
 @router.message(Command("snooze"))
@@ -781,6 +867,13 @@ async def cb_task_done(cb: CallbackQuery, employee=None, is_manager: bool = Fals
     task_id = int(cb.data.split(":")[2])
     await _complete_task(cb.message, task_id, employee, is_manager, tg_id)
     await cb.answer("Боллоо ✅")
+
+
+@router.callback_query(F.data.startswith("task:review:"))
+async def cb_task_review(cb: CallbackQuery, employee=None, is_manager: bool = False, tg_id: str | None = None):
+    task_id = int(cb.data.split(":")[2])
+    await _submit_task_for_review(cb.message, task_id, employee, is_manager, tg_id)
+    await cb.answer("Боллоо 🔎")
 
 
 @router.callback_query(F.data.startswith("task:snooze:"))

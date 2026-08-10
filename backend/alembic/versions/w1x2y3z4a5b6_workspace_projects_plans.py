@@ -17,38 +17,80 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("projects", sa.Column("archived_at", sa.DateTime(timezone=True)))
-    op.add_column("projects", sa.Column("archived_by_account_id", sa.Integer(), sa.ForeignKey("user_accounts.id", ondelete="SET NULL")))
-    op.add_column("company_plan_items", sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id", ondelete="CASCADE")))
-    op.add_column("company_plan_items", sa.Column("due_date", sa.Date()))
-    op.add_column("company_plan_items", sa.Column("approved_by_account_id", sa.Integer(), sa.ForeignKey("user_accounts.id", ondelete="SET NULL")))
-    op.drop_constraint("ck_company_plan_items_status", "company_plan_items", type_="check")
-    op.create_check_constraint("ck_company_plan_items_status", "company_plan_items", "status IN ('approved','archived')")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    def add_column_if_missing(table: str, column: sa.Column) -> None:
+        columns = {item["name"] for item in inspector.get_columns(table)}
+        if column.name not in columns:
+            op.add_column(table, column)
+
+    # The foundation migration creates projects from current model metadata,
+    # so these columns can already exist on a fresh database.
+    add_column_if_missing("projects", sa.Column("archived_at", sa.DateTime(timezone=True)))
+    add_column_if_missing(
+        "projects",
+        sa.Column(
+            "archived_by_account_id",
+            sa.Integer(),
+            sa.ForeignKey("user_accounts.id", ondelete="SET NULL"),
+        ),
+    )
+    add_column_if_missing(
+        "company_plan_items",
+        sa.Column(
+            "organization_id",
+            sa.Integer(),
+            sa.ForeignKey("organizations.id", ondelete="CASCADE"),
+        ),
+    )
+    add_column_if_missing("company_plan_items", sa.Column("due_date", sa.Date()))
+    add_column_if_missing(
+        "company_plan_items",
+        sa.Column(
+            "approved_by_account_id",
+            sa.Integer(),
+            sa.ForeignKey("user_accounts.id", ondelete="SET NULL"),
+        ),
+    )
+
+    checks = {item["name"] for item in inspector.get_check_constraints("company_plan_items")}
+    if "ck_company_plan_items_status" in checks:
+        op.drop_constraint("ck_company_plan_items_status", "company_plan_items", type_="check")
+    op.create_check_constraint(
+        "ck_company_plan_items_status",
+        "company_plan_items",
+        "status IN ('approved','archived')",
+    )
     op.execute("""UPDATE company_plan_items AS item SET organization_id = COALESCE(
         (SELECT account.organization_id FROM work_reports AS report JOIN user_accounts AS account ON account.employee_id = report.employee_id WHERE report.id = item.source_report_id LIMIT 1),
         (SELECT id FROM organizations ORDER BY id LIMIT 1)
     ) WHERE item.organization_id IS NULL""")
     op.alter_column("company_plan_items", "organization_id", nullable=False)
-    op.create_index("ix_company_plan_items_organization_id", "company_plan_items", ["organization_id"])
-    op.create_table(
-        "plan_ideas",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("submitted_by_account_id", sa.Integer(), sa.ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("submitted_by_employee_id", sa.Integer(), sa.ForeignKey("employees.id", ondelete="SET NULL")),
-        sa.Column("plan_month", sa.Date(), nullable=False),
-        sa.Column("title", sa.Text(), nullable=False),
-        sa.Column("content", sa.Text()),
-        sa.Column("suggested_due_date", sa.Date()),
-        sa.Column("status", sa.Text(), nullable=False, server_default="pending"),
-        sa.Column("reviewed_by_account_id", sa.Integer(), sa.ForeignKey("user_accounts.id", ondelete="SET NULL")),
-        sa.Column("merged_into_plan_item_id", sa.Integer(), sa.ForeignKey("company_plan_items.id", ondelete="SET NULL")),
-        sa.Column("reviewed_at", sa.DateTime(timezone=True)),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.CheckConstraint("status IN ('pending','approved','rejected','merged')", name="ck_plan_ideas_status"),
-    )
-    op.create_index("ix_plan_ideas_org_month_status", "plan_ideas", ["organization_id", "plan_month", "status"])
+    indexes = {item["name"] for item in inspector.get_indexes("company_plan_items")}
+    if "ix_company_plan_items_organization_id" not in indexes:
+        op.create_index("ix_company_plan_items_organization_id", "company_plan_items", ["organization_id"])
+    if "plan_ideas" not in inspector.get_table_names():
+        op.create_table(
+            "plan_ideas",
+            sa.Column("id", sa.Integer(), primary_key=True),
+            sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+            sa.Column("submitted_by_account_id", sa.Integer(), sa.ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False),
+            sa.Column("submitted_by_employee_id", sa.Integer(), sa.ForeignKey("employees.id", ondelete="SET NULL")),
+            sa.Column("plan_month", sa.Date(), nullable=False),
+            sa.Column("title", sa.Text(), nullable=False),
+            sa.Column("content", sa.Text()),
+            sa.Column("suggested_due_date", sa.Date()),
+            sa.Column("status", sa.Text(), nullable=False, server_default="pending"),
+            sa.Column("reviewed_by_account_id", sa.Integer(), sa.ForeignKey("user_accounts.id", ondelete="SET NULL")),
+            sa.Column("merged_into_plan_item_id", sa.Integer(), sa.ForeignKey("company_plan_items.id", ondelete="SET NULL")),
+            sa.Column("reviewed_at", sa.DateTime(timezone=True)),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.CheckConstraint("status IN ('pending','approved','rejected','merged')", name="ck_plan_ideas_status"),
+        )
+    if "ix_plan_ideas_org_month_status" not in {item["name"] for item in inspector.get_indexes("plan_ideas")}:
+        op.create_index("ix_plan_ideas_org_month_status", "plan_ideas", ["organization_id", "plan_month", "status"])
 
 
 def downgrade() -> None:

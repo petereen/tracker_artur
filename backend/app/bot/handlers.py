@@ -336,7 +336,7 @@ async def cmd_myid(message: Message, employee=None):
 @router.message(Command("help"))
 async def cmd_help(message: Message, is_manager: bool = False):
     tasks_block = (
-        "\n🤖 <b>OYUNS туслах</b>\n"
+        "\n🤖 <b>OYUNS agent</b>\n"
         "Энгийн текст эсвэл дуу хоолойгоор даалгавар, төлөвлөгөө, "
         "компаний мэдээлэл болон ажлын бичвэр хүсэж болно.\n\n"
         "📝 <b>Даалгавар</b>\n"

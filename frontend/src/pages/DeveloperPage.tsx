@@ -17,7 +17,7 @@ import {
 const INTENT_OPTIONS = [
   { value: 'create_task_draft', label: 'Даалгаврын ноорог' },
   { value: 'get_user_tasks', label: 'Миний даалгавар' },
-  { value: 'search_company_knowledge', label: 'Компаний мэдлэг хайх' },
+  { value: 'search_company_knowledge', label: 'Компаний өгөгдлийн сангаас хайх' },
 ]
 
 const EMPTY_CONTEXT: AssistantContextInput = {

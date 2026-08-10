@@ -15,11 +15,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import or_, select
 
 from app.core.database import AsyncSessionLocal
-from app.models.models import JobQueue
+from app.models.models import CalendarConnection, JobQueue
 from app.observability.sentry import init_from_env
 from app.services.email_service import send_auth_email
 from app.services.secret_box import decrypt_secret
-from app.services.google_calendar import sync_task
+from app.services.google_calendar import incremental_sync, register_watch, sync_task
 
 
 log = logging.getLogger(__name__)
@@ -73,6 +73,10 @@ async def execute_job(job_id: int) -> None:
                 )
             elif job.job_type == "calendar_sync":
                 await sync_task(db, int(job.payload["account_id"]), int(job.payload["task_id"]))
+            elif job.job_type == "calendar_watch":
+                await register_watch(db, int(job.payload["connection_id"]))
+            elif job.job_type == "calendar_inbound":
+                await incremental_sync(db, int(job.payload["connection_id"]))
             elif job.job_type in {"voice_transcription", "assistant_action"}:
                 raise RuntimeError(f"{job.job_type} provider is not configured")
             else:
@@ -81,6 +85,11 @@ async def execute_job(job_id: int) -> None:
             job.last_error = None
         except Exception as exc:  # noqa: BLE001 - job errors are persisted for operators
             job.last_error = str(exc)[:2000]
+            if job.job_type.startswith("calendar_") and job.payload.get("connection_id"):
+                connection = await db.get(CalendarConnection, int(job.payload["connection_id"]))
+                if connection:
+                    connection.sync_failure_count += 1
+                    connection.last_error = job.last_error
             if job.attempts >= job.max_attempts:
                 job.state = "failed"
             else:
@@ -96,7 +105,19 @@ async def execute_job(job_id: int) -> None:
 async def run() -> None:
     logging.basicConfig(level=logging.INFO)
     init_from_env(server_name="tracker-artur-worker")
+    last_watch_scan = datetime.min.replace(tzinfo=timezone.utc)
     while True:
+        now = datetime.now(timezone.utc)
+        if now - last_watch_scan >= timedelta(minutes=15):
+            async with AsyncSessionLocal() as db:
+                expiring = (await db.execute(select(CalendarConnection).where(CalendarConnection.status == "active", or_(CalendarConnection.channel_expires_at.is_(None), CalendarConnection.channel_expires_at < now + timedelta(hours=24))))).scalars().all()
+                for connection in expiring:
+                    dedup = f"calendar-watch:{connection.id}:{connection.channel_expires_at.date().isoformat() if connection.channel_expires_at else 'new'}"
+                    exists = await db.scalar(select(JobQueue.id).where(JobQueue.dedup_key == dedup, JobQueue.state.in_(("pending", "running", "completed"))))
+                    if not exists:
+                        db.add(JobQueue(job_type="calendar_watch", payload={"connection_id": connection.id}, dedup_key=dedup))
+                await db.commit()
+            last_watch_scan = now
         job_id = await claim_job()
         if job_id is None:
             await asyncio.sleep(2)

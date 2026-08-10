@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import mimetypes
+import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -16,7 +17,7 @@ import aiohttp
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,7 @@ from app.models.models import (
     AssistantConversation,
     AssistantMessage,
     Attachment,
+    AuditLog,
     CheckinQuestion,
     CheckinTemplate,
     Checkin,
@@ -43,6 +45,7 @@ from app.models.models import (
     JobQueue,
     KeyResult,
     Milestone,
+    ManagerSettings,
     Objective,
     PersonalTimeBlock,
     Project,
@@ -72,9 +75,9 @@ from app.models.models import (
 from app.services.enterprise_events import record_change
 from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
 from app.core.config import settings
-from app.services.voice_service import transcribe
-from app.services.google_calendar import account_from_state, authorization_url as google_authorization_url, exchange_code as google_exchange_code, is_configured as google_is_configured
-from app.services.secret_box import encrypt_secret
+from app.services import voice_service
+from app.services.google_calendar import account_from_state, authorization_url as google_authorization_url, exchange_code as google_exchange_code, is_configured as google_is_configured, stop_watch as google_stop_watch
+from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services import assistant_ai, exchange_rate_service
 from app.services.knowledge_service import rank_knowledge
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
@@ -266,7 +269,7 @@ def _task_out(item: Task) -> dict:
         "id": item.id, "public_id": str(item.public_id), "project_id": item.project_id,
         "parent_task_id": item.parent_task_id, "title": item.title,
         "description": item.description, "workflow_status": item.workflow_status,
-        "priority": item.priority, "primary_owner_id": item.assignee_id,
+        "priority": item.priority, "primary_owner_id": item.assignee_id, "reviewer_id": getattr(item, "reviewer_id", None),
         "start_at": item.start_at, "deadline_at": item.deadline_at,
         "estimate_minutes": item.estimate_minutes, "sort_position": _decimal(item.sort_position),
         "work_location_type": item.work_location_type, "work_location": item.work_location,
@@ -359,6 +362,7 @@ class EnterpriseTaskInput(BaseModel):
     priority: int = Field(default=2, ge=1, le=3)
     primary_owner_id: int | None = None
     assignee_ids: list[int] = Field(default_factory=list)
+    reviewer_id: int | None = None
     start_at: datetime | None = None
     deadline_at: datetime | None = None
     estimate_minutes: int | None = Field(default=None, ge=0)
@@ -376,6 +380,7 @@ class EnterpriseTaskPatch(BaseModel):
     priority: int | None = Field(default=None, ge=1, le=3)
     primary_owner_id: int | None = None
     assignee_ids: list[int] | None = None
+    reviewer_id: int | None = None
     start_at: datetime | None = None
     deadline_at: datetime | None = None
     estimate_minutes: int | None = Field(default=None, ge=0)
@@ -398,6 +403,13 @@ class CheckItemInput(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     assignee_id: int | None = None
     position: Decimal = Decimal("0")
+
+
+class CheckItemPatch(BaseModel):
+    text: str | None = Field(default=None, min_length=1, max_length=500)
+    assignee_id: int | None = None
+    position: Decimal | None = None
+    is_completed: bool | None = None
 
 
 class TaskCommentInput(BaseModel):
@@ -548,6 +560,7 @@ class AssistantDraftInput(BaseModel):
 class AssistantChatInput(BaseModel):
     text: str = Field(min_length=1, max_length=6000)
     conversation_id: int | None = None
+    voice_mode: bool = False
 
 
 class ProjectRequestReview(BaseModel):
@@ -577,6 +590,10 @@ class HolidayCountryInput(BaseModel):
 
 class CalendarSyncInput(BaseModel):
     task_id: int
+
+
+class CalendarSyncModeInput(BaseModel):
+    sync_mode: Literal["outbound", "bidirectional"]
 
 
 async def _daily_report(db: AsyncSession, employee: Employee, local_day: date) -> WorkReport:
@@ -1001,18 +1018,22 @@ async def list_tasks(
         if not actor.employee_id:
             return []
         contributor_tasks = select(TaskAssignee.task_id).where(TaskAssignee.employee_id == actor.employee_id)
-        query = query.where(or_(Task.assignee_id == actor.employee_id, Task.id.in_(contributor_tasks)))
+        query = query.where(or_(
+            Task.assignee_id == actor.employee_id,
+            Task.id.in_(contributor_tasks),
+            and_(Task.reviewer_id == actor.employee_id, Task.workflow_status == "review"),
+        ))
     rows = (await db.execute(query.order_by(Task.workflow_status, Task.sort_position, Task.id))).scalars().all()
     task_ids = [row.id for row in rows]
     assignment_rows = (await db.execute(select(TaskAssignee).where(TaskAssignee.task_id.in_(task_ids)))).scalars().all() if task_ids else []
     assignees: dict[int, list[int]] = {}
     for assignment in assignment_rows:
         assignees.setdefault(assignment.task_id, []).append(assignment.employee_id)
-    employee_ids = {row.assignee_id for row in rows if row.assignee_id} | {row.created_by_id for row in rows if row.created_by_id} | {item.employee_id for item in assignment_rows}
+    employee_ids = {row.assignee_id for row in rows if row.assignee_id} | {row.reviewer_id for row in rows if row.reviewer_id} | {row.created_by_id for row in rows if row.created_by_id} | {item.employee_id for item in assignment_rows}
     people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all()} if employee_ids else {}
     project_ids = {row.project_id for row in rows if row.project_id}
     projects = {row.id: row.name for row in (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()} if project_ids else {}
-    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "creator_name": people.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id)} for row in rows]
+    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "reviewer_name": people.get(row.reviewer_id), "creator_name": people.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id)} for row in rows]
 
 
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)
@@ -1058,11 +1079,15 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         valid = set((await db.execute(select(Employee.id).where(Employee.id.in_(requested_assignees), Employee.is_active.is_(True)))).scalars().all())
         if valid != requested_assignees:
             raise HTTPException(status_code=400, detail="Task assignee is invalid")
+    if data.reviewer_id is not None:
+        reviewer = await db.get(Employee, data.reviewer_id)
+        if not reviewer or not reviewer.is_active:
+            raise HTTPException(status_code=400, detail="Task reviewer is invalid")
     owner_id = data.primary_owner_id or (actor.employee_id if not actor.has_any_role(*MANAGEMENT_ROLES) else None)
     task = Task(
         organization_id=actor.organization_id, project_id=project_id, parent_task_id=data.parent_task_id,
         title=data.title, description=data.description, workflow_status=data.workflow_status,
-        status=LEGACY_STATUS[data.workflow_status], priority=data.priority, assignee_id=owner_id,
+        status=LEGACY_STATUS[data.workflow_status], priority=data.priority, assignee_id=owner_id, reviewer_id=data.reviewer_id,
         start_at=data.start_at, deadline_at=data.deadline_at, estimate_minutes=data.estimate_minutes,
         work_location_type=data.work_location_type, work_location=data.work_location,
         sort_position=data.sort_position, created_by_id=actor.employee_id,
@@ -1084,6 +1109,14 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         payload={"task_id": task.id, "title": task.title, "deadline_iso": task.deadline_at.isoformat() if task.deadline_at else None},
         source_event_id=source_event.id, task_id=task.id, dedup_key=f"task-created:{task.id}",
     )
+    if task.workflow_status == "review" and task.reviewer_id is not None and task.reviewer_id != actor.employee_id:
+        await create_notifications(
+            db, organization_id=actor.organization_id, employee_ids=[task.reviewer_id],
+            kind="task_review_requested", title="Хянах шаардлагатай",
+            body=f"“{task.title}” даалгаврыг хянахаар илгээлээ.", target_url=f"/tasks?task={task.id}",
+            payload={"task_id": task.id, "title": task.title}, source_event_id=source_event.id,
+            task_id=task.id, dedup_key=f"task-review-requested:{task.id}:v{task.version}",
+        )
     if idempotency_key:
         db.add(IdempotencyRecord(account_id=actor.account_id, operation="create_task", key=idempotency_key, request_hash=request_hash, response_status=201, response_body=json.loads(json.dumps(output, default=str)), expires_at=datetime.now(timezone.utc) + timedelta(days=1)))
     await db.commit()
@@ -1096,9 +1129,10 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     if not task or task.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Task not found")
     can_manage = actor.has_any_role(*MANAGEMENT_ROLES) or (actor.employee_id is not None and task.created_by_id == actor.employee_id)
+    is_contributor = actor.employee_id is not None and bool(await db.scalar(select(TaskAssignee.id).where(TaskAssignee.task_id == task.id, TaskAssignee.employee_id == actor.employee_id)))
+    is_reviewer = actor.employee_id is not None and task.reviewer_id == actor.employee_id
     if not can_manage:
-        is_contributor = actor.employee_id is not None and bool(await db.scalar(select(TaskAssignee.id).where(TaskAssignee.task_id == task.id, TaskAssignee.employee_id == actor.employee_id)))
-        if task.assignee_id != actor.employee_id and not is_contributor:
+        if task.assignee_id != actor.employee_id and not is_contributor and not (is_reviewer and task.workflow_status == "review"):
             raise HTTPException(status_code=403, detail="Task is outside your scope")
     if if_match is not None:
         try:
@@ -1108,6 +1142,7 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
         if task.version != expected:
             raise HTTPException(status_code=409, detail={"message": "Task changed", "latest": _task_out(task)})
     patch = data.model_dump(exclude_unset=True)
+    next_workflow = patch.get("workflow_status")
     if not can_manage:
         current = set((await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all())
         changed = (("primary_owner_id" in patch and patch["primary_owner_id"] != task.assignee_id) or ("project_id" in patch and patch["project_id"] != task.project_id) or ("assignee_ids" in patch and set(patch["assignee_ids"] or []) != current))
@@ -1115,6 +1150,10 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
             raise HTTPException(status_code=403, detail="Your role cannot assign work to other workers")
     if patch.get("workflow_status") and patch["workflow_status"] not in WORKFLOW_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid workflow status")
+    if "reviewer_id" in patch and patch["reviewer_id"] is not None:
+        reviewer = await db.get(Employee, patch["reviewer_id"])
+        if not reviewer or not reviewer.is_active:
+            raise HTTPException(status_code=400, detail="Task reviewer is invalid")
     if "parent_task_id" in patch and patch["parent_task_id"]:
         if patch["parent_task_id"] == task.id:
             raise HTTPException(status_code=400, detail="A task cannot be its own parent")
@@ -1145,7 +1184,15 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     await db.flush()
     current_assignees = (await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all()
     output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees))}
-    await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before=before, after=output)
+    source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before=before, after=output)
+    if next_workflow == "review" and before["workflow_status"] != "review" and task.reviewer_id is not None and task.reviewer_id != actor.employee_id:
+        await create_notifications(
+            db, organization_id=actor.organization_id, employee_ids=[task.reviewer_id],
+            kind="task_review_requested", title="Хянах шаардлагатай",
+            body=f"“{task.title}” даалгаврыг хянахаар илгээлээ.", target_url=f"/tasks?task={task.id}",
+            payload={"task_id": task.id, "title": task.title}, source_event_id=source_event.id,
+            task_id=task.id, dedup_key=f"task-review-requested:{task.id}:v{task.version}",
+        )
     await db.commit()
     return output
 
@@ -1469,6 +1516,29 @@ async def add_dependency(task_id: int, data: DependencyInput, db: AsyncSession =
     return {"id": dependency.id, "predecessor_task_id": data.predecessor_task_id, "successor_task_id": task_id}
 
 
+@router.get("/tasks/{task_id}/dependencies")
+async def list_dependencies(task_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await _task_for_actor(db, task_id, actor)
+    rows = (await db.execute(
+        select(TaskDependency, Task.title).join(Task, Task.id == TaskDependency.predecessor_task_id).where(
+            TaskDependency.successor_task_id == task_id,
+            Task.organization_id == actor.organization_id,
+        ).order_by(TaskDependency.id)
+    )).all()
+    return [{"id": row.id, "predecessor_task_id": row.predecessor_task_id, "predecessor_title": title, "successor_task_id": row.successor_task_id, "dependency_type": row.dependency_type} for row, title in rows]
+
+
+@router.delete("/tasks/{task_id}/dependencies/{dependency_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_dependency(task_id: int, dependency_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
+    await _task_for_actor(db, task_id, actor, write=True)
+    dependency = await db.get(TaskDependency, dependency_id)
+    if not dependency or dependency.successor_task_id != task_id:
+        raise HTTPException(status_code=404, detail="Dependency not found")
+    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_dependency", aggregate_id=dependency.id, operation="deleted", before={"predecessor_task_id": dependency.predecessor_task_id, "successor_task_id": task_id})
+    await db.delete(dependency)
+    await db.commit()
+
+
 @router.post("/tasks/{task_id}/check-items", status_code=status.HTTP_201_CREATED)
 async def add_check_item(task_id: int, data: CheckItemInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     task = await _task_for_actor(db, task_id, actor, write=True)
@@ -1478,6 +1548,63 @@ async def add_check_item(task_id: int, data: CheckItemInput, db: AsyncSession = 
     await record_change(db, actor=actor, topic="tasks", aggregate_type="task_check_item", aggregate_id=item.id, operation="created", after={"task_id": task_id, "text": item.text})
     await db.commit()
     return {"id": item.id, "task_id": task_id, **data.model_dump()}
+
+
+@router.get("/tasks/{task_id}/check-items")
+async def list_check_items(task_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await _task_for_actor(db, task_id, actor)
+    rows = (await db.execute(select(TaskCheckItem).where(TaskCheckItem.task_id == task_id).order_by(TaskCheckItem.position, TaskCheckItem.id))).scalars().all()
+    return [{"id": row.id, "task_id": row.task_id, "text": row.text, "is_completed": row.is_completed, "assignee_id": row.assignee_id, "position": _decimal(row.position), "completed_at": row.completed_at, "created_at": row.created_at} for row in rows]
+
+
+@router.patch("/tasks/{task_id}/check-items/{item_id}")
+async def update_check_item(task_id: int, item_id: int, data: CheckItemPatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await _task_for_actor(db, task_id, actor, write=True)
+    item = await db.get(TaskCheckItem, item_id, with_for_update=True)
+    if not item or item.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Checklist item not found")
+    before = {"text": item.text, "is_completed": item.is_completed, "assignee_id": item.assignee_id, "position": _decimal(item.position)}
+    patch = data.model_dump(exclude_unset=True)
+    for field, value in patch.items():
+        setattr(item, field, value)
+    if "is_completed" in patch:
+        item.completed_at = datetime.now(timezone.utc) if item.is_completed else None
+    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_check_item", aggregate_id=item.id, operation="updated", before=before, after={"task_id": task_id, **patch})
+    await db.commit()
+    return {"id": item.id, "task_id": task_id, "text": item.text, "is_completed": item.is_completed, "assignee_id": item.assignee_id, "position": _decimal(item.position), "completed_at": item.completed_at}
+
+
+@router.delete("/tasks/{task_id}/check-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_check_item(task_id: int, item_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await _task_for_actor(db, task_id, actor, write=True)
+    item = await db.get(TaskCheckItem, item_id)
+    if not item or item.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Checklist item not found")
+    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_check_item", aggregate_id=item.id, operation="deleted", before={"task_id": task_id, "text": item.text})
+    await db.delete(item)
+    await db.commit()
+
+
+@router.get("/tasks/{task_id}/activity")
+async def task_activity(task_id: int, limit: int = Query(default=100, ge=1, le=200), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await _task_for_actor(db, task_id, actor)
+    candidates = (await db.execute(select(AuditLog).where(
+        AuditLog.organization_id == actor.organization_id,
+        AuditLog.entity_type.in_(("task", "task_assignees", "task_dependency", "task_check_item", "task_comment", "attachment")),
+    ).order_by(AuditLog.created_at.desc()).limit(limit * 4))).scalars().all()
+    rows = []
+    for event in candidates:
+        before = event.before_data or {}
+        after = event.after_data or {}
+        belongs = event.entity_type == "task" and event.entity_id == task_id
+        belongs = belongs or before.get("task_id") == task_id or after.get("task_id") == task_id
+        belongs = belongs or after.get("object_type") == "task" and after.get("object_id") == task_id
+        belongs = belongs or before.get("object_type") == "task" and before.get("object_id") == task_id
+        if belongs:
+            rows.append({"id": event.id, "action": event.action, "entity_type": event.entity_type, "entity_id": event.entity_id, "actor_account_id": event.actor_account_id, "actor_employee_id": event.actor_employee_id, "before": before, "after": after, "created_at": event.created_at})
+        if len(rows) >= limit:
+            break
+    return rows
 
 
 @router.get("/tasks/{task_id}/comments")
@@ -2365,6 +2492,105 @@ async def analytics_daily(
     return {"date_from": date_from, "date_to": date_to, "employee_id": target, "days": days}
 
 
+ANALYTIC_METRICS = ("utilization", "billable_ratio", "budget_burn", "task_completion", "deadline_health", "report_compliance")
+
+
+async def _drilldown_employee_ids(db: AsyncSession, actor: ActorContext, employee_id: int | None) -> list[int]:
+    active = select(Employee.id).join(UserAccount, UserAccount.employee_id == Employee.id).where(
+        UserAccount.organization_id == actor.organization_id, UserAccount.status == "active", Employee.is_active.is_(True),
+    )
+    if actor.has_any_role("admin", "manager"):
+        if employee_id is not None:
+            active = active.where(Employee.id == employee_id)
+    elif actor.has_any_role("team_lead"):
+        managed_team_ids = select(Team.id).where(Team.organization_id == actor.organization_id, Team.manager_id == actor.employee_id)
+        assigned_team_ids = select(RoleAssignment.team_id).where(RoleAssignment.account_id == actor.account_id, RoleAssignment.role == "team_lead", RoleAssignment.team_id.isnot(None))
+        allowed = select(TeamMember.employee_id).where(TeamMember.team_id.in_(managed_team_ids.union(assigned_team_ids)))
+        if actor.employee_id:
+            active = active.where(or_(Employee.id.in_(allowed), Employee.id == actor.employee_id))
+        else:
+            active = active.where(Employee.id.in_(allowed))
+        if employee_id is not None:
+            active = active.where(Employee.id == employee_id)
+    else:
+        if actor.has_any_role("contractor", "client_auditor") or not actor.employee_id:
+            raise HTTPException(status_code=403, detail="Employee analytics are outside your scope")
+        if employee_id is not None and employee_id != actor.employee_id:
+            raise HTTPException(status_code=403, detail="Employee analytics are outside your scope")
+        active = active.where(Employee.id == actor.employee_id)
+    return list((await db.execute(active.distinct().order_by(Employee.id))).scalars().all())
+
+
+@router.get("/analytics/drilldown")
+async def analytics_drilldown(
+    metric: Literal["utilization", "billable_ratio", "budget_burn", "task_completion", "deadline_health", "report_compliance"],
+    date_from: date | None = None,
+    date_to: date | None = None,
+    employee_id: int | None = None,
+    project_id: int | None = None,
+    client_id: int | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    period_end = date_to or date.today()
+    period_start = date_from or period_end - timedelta(days=29)
+    if period_start > period_end or (period_end - period_start).days > 370:
+        raise HTTPException(status_code=400, detail="Analytics period must be between 1 and 371 days")
+    if metric == "budget_burn":
+        if not actor.has_any_role("admin", "manager"):
+            raise HTTPException(status_code=403, detail="Financial analytics require administrator or manager access")
+        query = select(Project).where(Project.organization_id == actor.organization_id, Project.archived_at.is_(None))
+        if project_id: query = query.where(Project.id == project_id)
+        if client_id: query = query.where(Project.client_id == client_id)
+        projects = list((await db.execute(query.order_by(Project.name))).scalars().all())
+        rows = []
+        for project in projects:
+            entries = (await db.execute(select(WorkTimeEntry).where(
+                WorkTimeEntry.project_id == project.id, WorkTimeEntry.entry_type == "work", WorkTimeEntry.is_billable.is_(True),
+                WorkTimeEntry.approval_status == "approved", WorkTimeEntry.ended_at.isnot(None),
+                WorkTimeEntry.local_work_date >= period_start, WorkTimeEntry.local_work_date <= period_end,
+            ))).scalars().all()
+            burned = Decimal("0"); unpriced_minutes = 0
+            for entry in entries:
+                minutes = Decimal(str((entry.ended_at - entry.started_at).total_seconds() / 60))
+                if entry.hourly_rate_snapshot is None or not entry.rate_currency:
+                    unpriced_minutes += round(float(minutes)); continue
+                amount = minutes * Decimal(entry.hourly_rate_snapshot) / Decimal("60")
+                if entry.rate_currency != project.currency:
+                    snapshot = await db.get(ExchangeRateSnapshot, entry.exchange_rate_snapshot_id) if entry.exchange_rate_snapshot_id else None
+                    if not snapshot or snapshot.base_currency != entry.rate_currency or snapshot.quote_currency != project.currency:
+                        unpriced_minutes += round(float(minutes)); continue
+                    amount *= Decimal(snapshot.rate)
+                burned += amount
+            budget = Decimal(project.budget_amount or 0)
+            rows.append({"project_id": project.id, "project_name": project.name, "client_id": project.client_id, "currency": project.currency, "budget_amount": _decimal(budget), "burned_amount": float(burned.quantize(Decimal("0.01"))), "remaining_amount": float((budget - burned).quantize(Decimal("0.01"))) if project.budget_amount is not None else None, "value": round(float(burned * 100 / budget), 1) if budget > 0 else None, "unpriced_minutes": unpriced_minutes, "historical_snapshots": True})
+    else:
+        employee_ids = await _drilldown_employee_ids(db, actor, employee_id)
+        employees = {row.id: row for row in (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all()} if employee_ids else {}
+        rows = []
+        weekdays = sum(1 for offset in range((period_end - period_start).days + 1) if (period_start + timedelta(days=offset)).weekday() < 5)
+        for target_id in employee_ids:
+            employee = employees[target_id]
+            worked = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).where(WorkTimeEntry.employee_id == target_id, WorkTimeEntry.entry_type == "work", WorkTimeEntry.ended_at.isnot(None), WorkTimeEntry.local_work_date >= period_start, WorkTimeEntry.local_work_date <= period_end)) or 0
+            billable = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", WorkTimeEntry.ended_at - WorkTimeEntry.started_at) / 60), 0)).where(WorkTimeEntry.employee_id == target_id, WorkTimeEntry.entry_type == "work", WorkTimeEntry.ended_at.isnot(None), WorkTimeEntry.is_billable.is_(True), WorkTimeEntry.approval_status == "approved", WorkTimeEntry.local_work_date >= period_start, WorkTimeEntry.local_work_date <= period_end)) or 0
+            task_scope = [Task.organization_id == actor.organization_id, _task_employee_scope(target_id)]
+            if project_id: task_scope.append(Task.project_id == project_id)
+            task_total = await db.scalar(select(func.count()).select_from(Task).where(*task_scope, Task.created_at < datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))) or 0
+            completed = await db.scalar(select(func.count()).select_from(Task).where(*task_scope, Task.workflow_status == "done", Task.completed_at >= datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc), Task.completed_at < datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))) or 0
+            due_total = await db.scalar(select(func.count()).select_from(Task).where(*task_scope, Task.deadline_at >= datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc), Task.deadline_at < datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))) or 0
+            overdue = await db.scalar(select(func.count()).select_from(Task).where(*task_scope, Task.deadline_at < datetime.now(timezone.utc), Task.workflow_status.notin_(("done", "cancelled")), Task.deadline_at >= datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc))) or 0
+            report_total = await db.scalar(select(func.count()).select_from(WorkReport).where(WorkReport.employee_id == target_id, WorkReport.period_date >= period_start, WorkReport.period_date <= period_end)) or 0
+            submitted = await db.scalar(select(func.count()).select_from(WorkReport).where(WorkReport.employee_id == target_id, WorkReport.period_date >= period_start, WorkReport.period_date <= period_end, WorkReport.status.in_(("submitted", "approved")))) or 0
+            capacity = round((employee.weekly_capacity_minutes or 2400) * weekdays / 5)
+            values = {"utilization": round(float(worked) * 100 / max(capacity, 1), 1), "billable_ratio": round(float(billable) * 100 / max(float(worked), 1), 1), "task_completion": round(completed * 100 / max(task_total, 1), 1), "deadline_health": round((due_total - overdue) * 100 / max(due_total, 1), 1), "report_compliance": round(submitted * 100 / max(report_total, 1), 1)}
+            rows.append({"employee_id": target_id, "employee_name": employee.name, "value": values[metric], "worked_minutes": round(float(worked)), "available_minutes": capacity, "billable_minutes": round(float(billable)), "task_total": task_total, "completed_tasks": completed, "due_tasks": due_total, "overdue_tasks": overdue, "report_total": report_total, "submitted_reports": submitted})
+    total_count = len(rows); start = (page - 1) * page_size; items = rows[start:start + page_size]
+    numeric_values = [row["value"] for row in rows if row.get("value") is not None]
+    return {"metric": metric, "scope": "organization" if actor.has_any_role("admin", "manager") and employee_id is None else "scoped", "date_from": period_start, "date_to": period_end, "items": items, "totals": {"count": total_count, "average_value": round(sum(numeric_values) / len(numeric_values), 1) if numeric_values else None, "unpriced_minutes": sum(row.get("unpriced_minutes", 0) for row in rows)}, "page": page, "page_size": page_size, "total": total_count}
+
+
 @router.get("/workers")
 async def worker_directory(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     employees = (await db.execute(select(Employee).where(Employee.is_active.is_(True)).order_by(Employee.name))).scalars().all()
@@ -2446,12 +2672,12 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     text = data.text.strip()
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
     workers = [{"id": employee.id, "name": employee.name, "timezone": employee.timezone, "is_active": employee.is_active} for employee in (await db.execute(select(Employee).where(Employee.is_active.is_(True)))).scalars().all()]
-    decision = await assistant_ai.classify_intent(text, now=datetime.now(ZoneInfo("Asia/Ulaanbaatar")), timezone_name="Asia/Ulaanbaatar", is_manager=actor.has_any_role(*MANAGEMENT_ROLES), workers=workers, voice_mode=False, chat_history=history, learned_contexts=[])
+    decision = await assistant_ai.classify_intent(text, now=datetime.now(ZoneInfo("Asia/Ulaanbaatar")), timezone_name="Asia/Ulaanbaatar", is_manager=actor.has_any_role(*MANAGEMENT_ROLES), workers=workers, voice_mode=data.voice_mode, chat_history=history, learned_contexts=[])
     raw, action, sources = await _assistant_web_tool(db, decision, actor) if decision.selected_tool else ({}, None, [])
     if action:
         answer = f"“{action['payload']['title']}” даалгаврын ноорог бэлэн. Үүсгэхээс өмнө шалгана уу."
     elif decision.selected_tool and decision.react_messages and decision.assistant_tool_message and decision.tool_call_id:
-        answer = await assistant_ai.synthesize_tool_result(request_messages=decision.react_messages, assistant_message=decision.assistant_tool_message, tool_call_id=decision.tool_call_id, raw_result=raw, voice_mode=False)
+        answer = await assistant_ai.synthesize_tool_result(request_messages=decision.react_messages, assistant_message=decision.assistant_tool_message, tool_call_id=decision.tool_call_id, raw_result=raw, voice_mode=data.voice_mode)
     else:
         answer = decision.direct_answer or "Асуултаа арай дэлгэрэнгүй асууна уу."
     if not answer:
@@ -2487,10 +2713,24 @@ async def transcribe_voice(file: UploadFile = File(...), actor: ActorContext = D
     audio = await file.read(12 * 1024 * 1024 + 1)
     if len(audio) > 12 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio file exceeds 12 MB")
-    text, error = await transcribe(audio, filename=file.filename or "voice.ogg")
+    text, error = await voice_service.transcribe(audio, filename=file.filename or "voice.ogg")
     if error:
         raise HTTPException(status_code=502, detail=error)
     return {"transcript": text, "retained": False, "requires_review": True}
+
+
+@router.post("/assistant/speech")
+async def assistant_speech(data: AssistantChatInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Return a Chimege WAV answer only while the shared bot TTS mode is enabled."""
+    settings_row = (await db.execute(select(ManagerSettings).limit(1))).scalar_one_or_none()
+    if settings_row is not None and settings_row.tts_answers_enabled is False:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not voice_service.synthesis_enabled():
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    audio, error = await voice_service.synthesize(data.text)
+    if error or not audio:
+        raise HTTPException(status_code=502, detail=error or "Chimege audio could not be generated")
+    return Response(content=audio, media_type="audio/wav", headers={"Content-Disposition": "inline; filename=oyuns-answer.wav"})
 
 
 @router.get("/integrations/google-calendar/connect")
@@ -2498,6 +2738,24 @@ async def google_calendar_connect(actor: ActorContext = Depends(get_actor)):
     if not google_is_configured():
         return {"provider": "google", "status": "configuration_required", "fallback": "calendar_template_url", "message": "Configure Google OAuth client credentials to enable synchronized calendars."}
     return {"provider": "google", "status": "ready", "authorization_url": google_authorization_url(actor.account_id)}
+
+
+@router.get("/integrations/google-calendar/status")
+async def google_calendar_status(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == actor.account_id, CalendarConnection.provider == "google"))).scalar_one_or_none()
+    if not connection:
+        return {"provider": "google", "status": "disconnected", "sync_mode": "outbound", "configured": google_is_configured()}
+    return {"provider": "google", "status": connection.status, "sync_mode": connection.sync_mode, "configured": google_is_configured(), "calendar_id": connection.calendar_id, "watch_active": bool(connection.webhook_channel_id and connection.channel_expires_at and connection.channel_expires_at > datetime.now(timezone.utc)), "watch_expires_at": connection.channel_expires_at, "last_synced_at": connection.last_synced_at, "last_error": connection.last_error, "sync_failure_count": connection.sync_failure_count}
+
+
+@router.put("/integrations/google-calendar/sync-mode")
+async def google_calendar_sync_mode(data: CalendarSyncModeInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == actor.account_id, CalendarConnection.provider == "google"))).scalar_one_or_none()
+    if not connection:
+        raise HTTPException(status_code=409, detail="Connect Google Calendar first")
+    connection.sync_mode = data.sync_mode
+    await db.commit()
+    return {"status": connection.status, "sync_mode": connection.sync_mode}
 
 
 @router.get("/integrations/google-calendar/callback")
@@ -2521,6 +2779,8 @@ async def google_calendar_callback(code: str | None = None, state: str | None = 
     connection.scopes = str(token.get("scope", "")).split()
     connection.status = "active"
     connection.last_error = None
+    await db.flush()
+    db.add(JobQueue(job_type="calendar_watch", payload={"connection_id": connection.id}, dedup_key=f"calendar-watch:{connection.id}:initial:{uuid.uuid4().hex}"))
     await db.commit()
     return RedirectResponse(f"{settings.PUBLIC_APP_URL.rstrip('/')}/administration?calendar=connected", status_code=303)
 
@@ -2541,5 +2801,40 @@ async def google_calendar_sync(data: CalendarSyncInput, db: AsyncSession = Depen
 async def google_calendar_disconnect(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == actor.account_id, CalendarConnection.provider == "google"))).scalar_one_or_none()
     if connection:
+        try:
+            await google_stop_watch(db, connection)
+        except Exception:
+            pass
         await db.delete(connection)
         await db.commit()
+
+
+@router.post("/integrations/google-calendar/webhook", status_code=status.HTTP_202_ACCEPTED)
+async def google_calendar_webhook(
+    channel_id: str | None = Header(default=None, alias="X-Goog-Channel-ID"),
+    resource_id: str | None = Header(default=None, alias="X-Goog-Resource-ID"),
+    channel_token: str | None = Header(default=None, alias="X-Goog-Channel-Token"),
+    message_number: str | None = Header(default=None, alias="X-Goog-Message-Number"),
+    resource_state: str | None = Header(default=None, alias="X-Goog-Resource-State"),
+    db: AsyncSession = Depends(get_db),
+):
+    if not all((channel_id, resource_id, channel_token, message_number)) or not message_number.isdigit():
+        raise HTTPException(status_code=400, detail="Google Calendar webhook headers are incomplete")
+    connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.webhook_channel_id == channel_id).with_for_update())).scalar_one_or_none()
+    if not connection or connection.webhook_resource_id != resource_id or not connection.encrypted_channel_token:
+        raise HTTPException(status_code=404, detail="Calendar channel not found")
+    if not secrets.compare_digest(decrypt_secret(connection.encrypted_channel_token), channel_token):
+        raise HTTPException(status_code=403, detail="Calendar channel token is invalid")
+    if connection.channel_expires_at and connection.channel_expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="Calendar channel expired")
+    previous = int(connection.last_webhook_message_number or 0)
+    current = int(message_number)
+    if current <= previous:
+        return {"status": "duplicate", "message_number": message_number}
+    connection.last_webhook_message_number = message_number
+    dedup_key = f"calendar-inbound:{connection.id}:{message_number}"
+    existing = await db.scalar(select(JobQueue.id).where(JobQueue.dedup_key == dedup_key))
+    if not existing and resource_state != "sync":
+        db.add(JobQueue(job_type="calendar_inbound", payload={"connection_id": connection.id, "message_number": message_number}, dedup_key=dedup_key))
+    await db.commit()
+    return {"status": "queued" if resource_state != "sync" else "channel_ready", "message_number": message_number}

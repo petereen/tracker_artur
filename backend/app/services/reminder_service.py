@@ -222,6 +222,9 @@ def _render_outbox(item: dict):
             )
             if tid else None
         )
+    if item["kind"] == "task_review_requested":
+        text = f"🔎 <b>Хянах шаардлагатай</b>\n\n#{tid} {title}\n{p.get('text', '')}"
+        return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, description=description, timezone_name=timezone_name, include_submit_for_review=False) if tid else None)
     if item["kind"] == "task_overdue":
         text = (f"🔴 #{tid} даалгаврын хугацаа хэтэрлээ: {title}\n"
                 f"/done {tid} гэж дуусгах эсвэл /snooze {tid} <цаг> гэж хугацааг хойшлуулна уу.")

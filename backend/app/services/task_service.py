@@ -67,6 +67,7 @@ def create_task(
     assignee_id: Optional[int],
     created_by_id: Optional[int],
     created_by_tg: Optional[str],
+    reviewer_id: Optional[int] = None,
     deadline_at: Optional[datetime] = None,
     priority: int = 2,
     description: Optional[str] = None,
@@ -78,6 +79,7 @@ def create_task(
             title=title,
             description=description,
             assignee_id=assignee_id,
+            reviewer_id=reviewer_id,
             created_by_id=created_by_id,
             created_by_tg=created_by_tg,
             deadline_at=deadline_at,
@@ -99,6 +101,7 @@ def create_tasks_for_assignees(
     assignee_ids: list[int],
     created_by_id: Optional[int],
     created_by_tg: Optional[str],
+    reviewer_id: Optional[int] = None,
     deadline_at: Optional[datetime] = None,
     priority: int = 2,
     description: Optional[str] = None,
@@ -114,6 +117,7 @@ def create_tasks_for_assignees(
                 title=title,
                 description=description,
                 assignee_id=employee_id,
+                reviewer_id=reviewer_id,
                 created_by_id=created_by_id,
                 created_by_tg=created_by_tg,
                 deadline_at=deadline_at,
@@ -313,6 +317,22 @@ def set_status(task_id: int, status: str, *, by_employee_id: Optional[int] = Non
         return _to_dict(s, task)
 
 
+def submit_for_review(task_id: int, *, by_employee_id: Optional[int] = None) -> Optional[dict]:
+    """Move a task into review; reviewer selection remains optional."""
+    with get_session() as s:
+        task = s.get(Task, task_id)
+        if not task:
+            return None
+        task.status = "open"
+        task.workflow_status = "review"
+        task.completed_at = None
+        task.completed_by_id = None
+        task.version = (task.version or 1) + 1
+        s.commit()
+        s.refresh(task)
+        return _to_dict(s, task)
+
+
 def snooze(task_id: int, new_deadline: datetime) -> Optional[dict]:
     with get_session() as s:
         task = s.get(Task, task_id)
@@ -368,7 +388,7 @@ def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, 
             web_key = f"legacy:{dedup_key}:account:{account.id}"
             notification = s.execute(select(UserNotification).where(UserNotification.dedup_key == web_key)).scalar_one_or_none()
             if not notification:
-                title = "Шинэ даалгавар" if kind == "task_assigned" else "Даалгаврын сануулга" if kind == "task_deadline" else "Даалгаврын хугацаа хэтэрлээ" if kind == "task_overdue" else "Мэдэгдэл"
+                title = "Шинэ даалгавар" if kind == "task_assigned" else "Хянах шаардлагатай" if kind == "task_review_requested" else "Даалгаврын сануулга" if kind == "task_deadline" else "Даалгаврын хугацаа хэтэрлээ" if kind == "task_overdue" else "Мэдэгдэл"
                 body = payload.get("text") or (f"“{payload.get('title', 'Даалгавар')}” даалгаврын мэдээлэл шинэчлэгдлээ.")
                 notification = UserNotification(
                     organization_id=account.organization_id, recipient_account_id=account.id,
@@ -471,6 +491,7 @@ def mark_outbox(outbox_id: int, status: str, error: str | None = None) -> None:
 
 def _to_dict(s, task: Task) -> dict:
     assignee = s.get(Employee, task.assignee_id) if task.assignee_id else None
+    reviewer = s.get(Employee, task.reviewer_id) if task.reviewer_id else None
     creator = s.get(Employee, task.created_by_id) if task.created_by_id else None
     assigned_ids = set(s.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id)).scalars())
     if task.assignee_id:
@@ -482,6 +503,8 @@ def _to_dict(s, task: Task) -> dict:
         "description": task.description,
         "status": task.status,
         "priority": task.priority,
+        "workflow_status": task.workflow_status,
+        "version": task.version,
         "deadline_at": task.deadline_at,
         "created_at": task.created_at,
         "completed_at": task.completed_at,
@@ -490,6 +513,10 @@ def _to_dict(s, task: Task) -> dict:
         "assignee_name": assignee.name if assignee else None,
         "assignee_tg": assignee.telegram_id if assignee else None,
         "assignee_tz": assignee.timezone if assignee else None,
+        "reviewer_id": task.reviewer_id,
+        "reviewer_name": reviewer.name if reviewer else None,
+        "reviewer_tg": reviewer.telegram_id if reviewer else None,
+        "reviewer_tz": reviewer.timezone if reviewer else None,
         "assignees": [{"id": employee.id, "telegram_id": employee.telegram_id, "timezone": employee.timezone} for employee in assigned_people],
         "created_by_id": task.created_by_id,
         "created_by_tg": task.created_by_tg,

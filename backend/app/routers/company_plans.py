@@ -181,7 +181,7 @@ async def _notify_item_created(db: AsyncSession, actor: ActorContext, item: Comp
     ))).scalars().all())
     await create_notifications(
         db, organization_id=actor.organization_id, employee_ids=employee_ids,
-        kind="company_plan_created", title="Шинэ компанийн төлөвлөгөө",
+        kind="company_plan_created", title="Шинэ компаний төлөвлөгөө",
         body=f"“{item.title}” төлөвлөгөө нэмэгдлээ.", target_url="/plans",
         payload={"plan_item_id": item.id, "plan_month": str(item.plan_month)},
         source_event_id=event.id, dedup_key=f"company-plan-created:{item.id}",

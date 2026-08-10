@@ -185,6 +185,7 @@ class CreateTaskToolArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assignee: str = Field(min_length=1, max_length=200)
+    reviewer: Optional[str] = Field(default=None, max_length=200)
     title: str = Field(min_length=1, max_length=200)
     due_date: Optional[str]
     priority: Literal[1, 2, 3]
@@ -351,6 +352,13 @@ def native_tool_specs() -> list[dict]:
                                 "when the manager explicitly assigns every active worker (for "
                                 "example, 'бүгдээрээ'). Otherwise use the exact worker name or "
                                 "@username found in the supplied active employee directory."
+                            ),
+                        },
+                        "reviewer": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "The exact worker name or @username explicitly named as reviewer, "
+                                "or null when no reviewer was requested."
                             ),
                         },
                         "title": {

@@ -369,6 +369,6 @@ Internal PSA is included; invoicing, tax, payment collection, and accounting exp
 Employees use email/password in normal browsers and may also use their linked Telegram identity.
 PostgreSQL remains the system of record and initial event/job backbone.
 REST and WebSockets are the public application interfaces; no GraphQL or gRPC layer is added.
-Azure Container Apps remains the production environment; attachments and temporary voice files move to private Azure Blob Storage.
+Docker Compose on self-hosted Dokploy remains the production environment. Attachments use the private local volume mounted by the API and worker services; temporary voice data remains short-lived and is not promoted to durable storage.
 Mongolian is the default locale, Asia/Ulaanbaatar the default timezone, and MNT the base reporting currency.
-Existing source code and TODO.md remain unmodified during Plan Mode; tracker synchronization is the mandatory first execution action.
+The production browser and Mini App use `erp.oyuns.mn`; `artur.oyuns.mn` remains a legacy administration compatibility domain. `TODO.md` is synchronized before and throughout implementation.

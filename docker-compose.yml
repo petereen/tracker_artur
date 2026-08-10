@@ -1,6 +1,9 @@
 services:
   clamav:
     image: clamav/clamav:1.4
+    # clamav/clamav:1.4 currently publishes amd64 only; Docker Desktop
+    # emulates this platform on Apple Silicon hosts.
+    platform: linux/amd64
     restart: unless-stopped
     volumes:
       - clamav_data:/var/lib/clamav
@@ -68,6 +71,7 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      GOOGLE_WEBHOOK_URL: ${GOOGLE_WEBHOOK_URL:-}
     ports:
       # Keep the API private; the frontend proxies /api/ to it on the Docker network.
       - "127.0.0.1:8010:8000"
@@ -101,6 +105,7 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      GOOGLE_WEBHOOK_URL: ${GOOGLE_WEBHOOK_URL:-}
       MANAGER_TG_ID: ${MANAGER_TG_ID:-306983322}
       MINI_APP_URL: ${MINI_APP_URL:-https://erp.oyuns.mn/tg}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
@@ -138,6 +143,7 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      GOOGLE_WEBHOOK_URL: ${GOOGLE_WEBHOOK_URL:-}
     command: python -m app.worker
 
   frontend:

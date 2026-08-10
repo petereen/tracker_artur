@@ -16,6 +16,8 @@ export interface EnterpriseTask {
   priority: number
   primary_owner_id: number | null
   primary_owner_name: string | null
+  reviewer_id: number | null
+  reviewer_name: string | null
   assignee_ids: number[]
   assignee_names: string[]
   project_name: string | null
@@ -66,6 +68,13 @@ export interface ClockEntry {
   ended_at: string | null
 }
 
+export interface TaskDependency { id: number; predecessor_task_id: number; predecessor_title: string; successor_task_id: number; dependency_type: string }
+export interface TaskCheckItem { id: number; task_id: number; text: string; is_completed: boolean; assignee_id: number | null; position: number; completed_at: string | null }
+export interface TaskComment { id: number; task_id: number; author_account_id?: number; author_employee_id?: number; text: string; mentions: number[]; is_resolved: boolean; edited_at?: string | null; created_at: string }
+export interface EnterpriseAttachment { id: number; filename: string; content_type: string; size: number; checksum: string; scan_status: string; created_at: string }
+export interface TaskActivity { id: number; action: string; entity_type: string; actor_account_id: number | null; actor_employee_id: number | null; before: Record<string, unknown>; after: Record<string, unknown>; created_at: string }
+export interface SavedView { id: number; module: string; name: string; view_type: string; filters: Record<string, unknown>; grouping: Record<string, unknown>; visible_columns: string[]; sort: Record<string, unknown>[]; is_shared: boolean }
+
 export function useEnterpriseLogin() {
   return useMutation({
     mutationFn: (input: { email: string; password: string }) => api.post('/v1/auth/login', input).then((response) => response.data),
@@ -97,6 +106,10 @@ export function useGoogleCalendarConnect() {
     mutationFn: () => api.get('/v1/integrations/google-calendar/connect').then((response) => response.data),
   })
 }
+export interface CalendarConnectionStatus { provider: 'google'; status: string; sync_mode: 'outbound' | 'bidirectional'; configured: boolean; calendar_id?: string; watch_active?: boolean; watch_expires_at?: string | null; last_synced_at?: string | null; last_error?: string | null; sync_failure_count?: number }
+export function useGoogleCalendarStatus() { return useQuery<CalendarConnectionStatus>({ queryKey: ['v1', 'integrations', 'google-calendar'], queryFn: () => api.get('/v1/integrations/google-calendar/status').then((r) => r.data) }) }
+export function useGoogleCalendarSyncMode() { const qc = useQueryClient(); return useMutation({ mutationFn: (sync_mode: 'outbound' | 'bidirectional') => api.put('/v1/integrations/google-calendar/sync-mode', { sync_mode }).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'integrations', 'google-calendar'] }) }) }
+export function useGoogleCalendarDisconnect() { const qc = useQueryClient(); return useMutation({ mutationFn: () => api.post('/v1/integrations/google-calendar/disconnect'), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'integrations', 'google-calendar'] }) }) }
 
 export interface ManagedAccount {
   id: number
@@ -250,6 +263,34 @@ export function useDeleteEnterpriseTask() {
   })
 }
 
+const invalidateTaskDetail = (queryClient: ReturnType<typeof useQueryClient>, id: number) => {
+  queryClient.invalidateQueries({ queryKey: ['v1', 'tasks', id] })
+  queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] })
+}
+
+export function useTaskDependencies(id?: number) { return useQuery<TaskDependency[]>({ queryKey: ['v1', 'tasks', id, 'dependencies'], queryFn: () => api.get(`/v1/tasks/${id}/dependencies`).then((r) => r.data), enabled: Boolean(id) }) }
+export function useAddTaskDependency() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, predecessor_task_id }: { taskId: number; predecessor_task_id: number }) => api.post(`/v1/tasks/${taskId}/dependencies`, { predecessor_task_id, dependency_type: 'blocks' }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || 'Хамаарал хадгалагдсангүй') }) }
+export function useDeleteTaskDependency() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id }: { taskId: number; id: number }) => api.delete(`/v1/tasks/${taskId}/dependencies/${id}`), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId) }) }
+
+export function useTaskCheckItems(id?: number) { return useQuery<TaskCheckItem[]>({ queryKey: ['v1', 'tasks', id, 'check-items'], queryFn: () => api.get(`/v1/tasks/${id}/check-items`).then((r) => r.data), enabled: Boolean(id) }) }
+export function useAddTaskCheckItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, text }: { taskId: number; text: string }) => api.post(`/v1/tasks/${taskId}/check-items`, { text, position: Date.now() }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId) }) }
+export function useUpdateTaskCheckItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id, ...input }: { taskId: number; id: number; text?: string; is_completed?: boolean }) => api.patch(`/v1/tasks/${taskId}/check-items/${id}`, input).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId) }) }
+export function useDeleteTaskCheckItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id }: { taskId: number; id: number }) => api.delete(`/v1/tasks/${taskId}/check-items/${id}`), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId) }) }
+
+export function useTaskComments(id?: number) { return useQuery<TaskComment[]>({ queryKey: ['v1', 'tasks', id, 'comments'], queryFn: () => api.get(`/v1/tasks/${id}/comments`).then((r) => r.data), enabled: Boolean(id) }) }
+export function useAddTaskComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, text, mentions = [] }: { taskId: number; text: string; mentions?: number[] }) => api.post(`/v1/tasks/${taskId}/comments`, { text, mentions }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId) }) }
+export function useResolveTaskComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id, is_resolved }: { taskId: number; id: number; is_resolved: boolean }) => api.patch(`/v1/tasks/${taskId}/comments/${id}`, { is_resolved }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId) }) }
+
+export function useAttachments(objectType: 'task' | 'report', objectId?: number) { return useQuery<EnterpriseAttachment[]>({ queryKey: ['v1', 'attachments', objectType, objectId], queryFn: () => api.get('/v1/attachments', { params: { object_type: objectType, object_id: objectId } }).then((r) => r.data), enabled: Boolean(objectId) }) }
+export function useUploadAttachment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ objectType, objectId, file, onProgress }: { objectType: 'task' | 'report'; objectId: number; file: File; onProgress?: (value: number) => void }) => { const form = new FormData(); form.append('file', file); return api.post('/v1/attachments', form, { params: { object_type: objectType, object_id: objectId }, onUploadProgress: (event) => onProgress?.(event.total ? Math.round(event.loaded * 100 / event.total) : 0) }).then((r) => r.data) }, onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['v1', 'attachments', v.objectType, v.objectId] }), onError: (e: any) => toast.error(e.response?.data?.detail || 'Файл байршуулсангүй') }) }
+export function useDeleteAttachment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id }: { id: number; objectType: 'task' | 'report'; objectId: number }) => api.delete(`/v1/attachments/${id}`), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['v1', 'attachments', v.objectType, v.objectId] }) }) }
+export async function downloadAttachment(id: number, filename: string) { const response = await api.get(`/v1/attachments/${id}/download`, { responseType: 'blob' }); const url = URL.createObjectURL(response.data); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url) }
+
+export function useTaskActivity(id?: number) { return useQuery<TaskActivity[]>({ queryKey: ['v1', 'tasks', id, 'activity'], queryFn: () => api.get(`/v1/tasks/${id}/activity`).then((r) => r.data), enabled: Boolean(id) }) }
+export function useSavedViews(module: string) { return useQuery<SavedView[]>({ queryKey: ['v1', 'saved-views', module], queryFn: () => api.get('/v1/saved-views', { params: { module } }).then((r) => r.data) }) }
+export function useCreateSavedView() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: Omit<SavedView, 'id'>) => api.post('/v1/saved-views', input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'saved-views'] }) }) }
+export function useDeleteSavedView() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/v1/saved-views/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'saved-views'] }) }) }
+
 export function useCapacity(period?: DateRange) {
   return useQuery<any[]>({ queryKey: ['v1', 'capacity', period], queryFn: () => api.get('/v1/capacity', { params: period }).then((response) => response.data) })
 }
@@ -328,6 +369,10 @@ export function useDailyAnalytics(period: DateRange, employeeId?: number) {
   return useQuery<any>({ queryKey: ['v1', 'analytics', 'daily', period, employeeId], queryFn: () => api.get('/v1/analytics/daily', { params: { ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data), refetchOnMount: 'always', refetchOnWindowFocus: false })
 }
 
+export type AnalyticsMetric = 'utilization' | 'billable_ratio' | 'budget_burn' | 'task_completion' | 'deadline_health' | 'report_compliance'
+export interface AnalyticsDrilldown { metric: AnalyticsMetric; scope: string; date_from: string; date_to: string; items: Array<Record<string, any>>; totals: { count: number; average_value: number | null; unpriced_minutes: number }; page: number; page_size: number; total: number }
+export function useAnalyticsDrilldown(metric: AnalyticsMetric | undefined, period: DateRange, employeeId?: number) { return useQuery<AnalyticsDrilldown>({ queryKey: ['v1', 'analytics', 'drilldown', metric, period, employeeId], queryFn: () => api.get('/v1/analytics/drilldown', { params: { metric, ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((r) => r.data), enabled: Boolean(metric) }) }
+
 export interface PersonalTimeBlock { id: number; title: string; starts_at: string; ends_at: string; task_id: number | null; version: number }
 
 export function useCalendarEvents(scope: 'private' | 'corporate', period: DateRange) {
@@ -382,6 +427,10 @@ export function useSaveReportDraft() {
   })
 }
 
+export function useAddReportComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ reportId, revision_id, text, range_metadata }: { reportId: number; revision_id?: number; text: string; range_metadata?: { start: number; end: number; quote: string } }) => api.post(`/v1/reports/${reportId}/comments`, { revision_id, text, range_metadata }).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['v1', 'reports', 'detail', v.reportId] }), onError: (e: any) => toast.error(e.response?.data?.detail || 'Сэтгэгдэл хадгалагдсангүй') }) }
+export function useResolveReportComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ reportId, id, is_resolved }: { reportId: number; id: number; is_resolved: boolean }) => api.patch(`/v1/reports/${reportId}/comments/${id}`, null, { params: { is_resolved } }).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['v1', 'reports', 'detail', v.reportId] }) }) }
+export function useBatchApproveReports() { const qc = useQueryClient(); return useMutation({ mutationFn: (report_ids: number[]) => api.post('/v1/reports/batch-approve', { report_ids }).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'reports'] }); toast.success('Сонгосон тайлангууд батлагдлаа') }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Багц батлалт амжилтгүй') }) }
+
 export interface WorkerDirectoryItem {
   id: number
   name: string
@@ -408,7 +457,19 @@ export function useAssistantDraft() {
 }
 
 export function useAssistantChat() {
-  return useMutation({ mutationFn: (input: { text: string; conversation_id?: number }) => api.post('/v1/assistant/conversations', input).then((response) => response.data) })
+  return useMutation({ mutationFn: (input: { text: string; conversation_id?: number; voice_mode?: boolean }) => api.post('/v1/assistant/conversations', input).then((response) => response.data) })
+}
+
+export async function transcribeAssistantVoice(recording: Blob) {
+  const form = new FormData()
+  form.append('file', recording, 'oyuns-question.webm')
+  return api.post('/v1/voice/transcriptions', form).then((response) => response.data as { transcript: string })
+}
+
+export async function synthesizeAssistantSpeech(text: string): Promise<string | undefined> {
+  const response = await api.post('/v1/assistant/speech', { text }, { responseType: 'blob', validateStatus: (status) => status === 200 || status === 204 })
+  if (response.status === 204 || !response.data?.size) return undefined
+  return URL.createObjectURL(response.data)
 }
 
 export interface UserProfile {

@@ -61,13 +61,15 @@ def task_actions_kb(
     deadline: datetime | None = None,
     description: str | None = None,
     timezone_name: str | None = None,
+    include_submit_for_review: bool = True,
 ) -> InlineKeyboardMarkup:
+    actions = [InlineKeyboardButton(text="✅ Дууссан", callback_data=f"task:done:{task_id}")]
+    if include_submit_for_review:
+        actions.append(InlineKeyboardButton(text="🔎 Хянахад илгээх", callback_data=f"task:review:{task_id}"))
+    actions.append(InlineKeyboardButton(text="⏰ 1 өдрөөр хойшлуулах", callback_data=f"task:snooze:{task_id}:1440"))
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Дууссан", callback_data=f"task:done:{task_id}"),
-                InlineKeyboardButton(text="⏰ 1 өдрөөр хойшлуулах", callback_data=f"task:snooze:{task_id}:1440"),
-            ],
+            actions,
             [InlineKeyboardButton(
                 text="📅 Google Calendar-д нэмэх",
                 url=google_calendar_task_url(

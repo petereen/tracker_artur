@@ -10,41 +10,13 @@ const DAY_OPTIONS = [
   { value: '0', label: 'Ням' },
 ]
 
-export function ManagerSettingsPage() {
-  const { data } = useManagerSettings()
+export function AdminAccessPanel() {
   const { data: adminUsers = [] } = useAdminUsers()
-  const save = useUpdateManagerSettings()
   const createAdmin = useCreateAdminUser()
   const deleteAdmin = useDeleteAdminUser()
   const changePassword = useChangeOwnPassword()
-
   const [newAdmin, setNewAdmin] = useState({ email: '', password: '' })
   const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
-
-  const [form, setForm] = useState({
-    telegram_id: '', telegram_username: '', telegram_admin_ids: [''],
-    summary_time: '09:00', weekly_summary_time: '17:00', weekly_summary_day: '5',
-    alerts_enabled: true, gamification_enabled: true, soft_mode_weeks: 1,
-    tts_answers_enabled: true,
-  })
-
-  useEffect(() => {
-    if (data) setForm({
-      telegram_id: data.telegram_id || '',
-      telegram_username: data.telegram_username || '',
-      telegram_admin_ids: data.telegram_admin_ids?.length ? data.telegram_admin_ids : [data.telegram_id || ''],
-      summary_time: data.summary_time?.slice(0, 5) || '09:00',
-      weekly_summary_time: data.weekly_summary_time?.slice(0, 5) || '17:00',
-      weekly_summary_day: String(data.weekly_summary_day ?? 5),
-      alerts_enabled: data.alerts_enabled,
-      gamification_enabled: data.gamification_enabled,
-      soft_mode_weeks: data.soft_mode_weeks,
-      tts_answers_enabled: data.tts_answers_enabled ?? true,
-    })
-  }, [data])
-
-  const f = (k: string, v: any) => setForm((prev) => ({ ...prev, [k]: v }))
-  const updateTelegramId = (index: number, value: string) => f('telegram_admin_ids', form.telegram_admin_ids.map((id, i) => i === index ? value : id))
 
   const addAdmin = async () => {
     if (!newAdmin.email || newAdmin.password.length < 8) {
@@ -72,10 +44,73 @@ export function ManagerSettingsPage() {
     }
   }
 
+  return <>
+    <Card>
+      <div className="font-semibold text-[15px] mb-1">Админ хандалт</div>
+      <div className="text-xs text-muted mb-4">Энд нэмсэн и-мэйл болон нууц үгээр админ самбарт нэвтэрнэ.</div>
+      <div className="flex flex-col gap-3">
+        {adminUsers.map((user) => (
+          <div key={user.id} className="flex items-center justify-between gap-3 rounded-lg bg-surface2 px-3 py-2">
+            <div className="text-sm truncate">{user.email}</div>
+            <Btn variant="danger" onClick={() => deleteAdmin.mutate(user.id)} disabled={deleteAdmin.isPending || adminUsers.length === 1}>Эрх цуцлах</Btn>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-[1fr_1fr_auto] gap-3 mt-4 items-end">
+        <Input label="Шинэ админы и-мэйл" value={newAdmin.email} onChange={(v) => setNewAdmin((p) => ({ ...p, email: v }))} type="email" fullWidth />
+        <Input label="Түр нууц үг" value={newAdmin.password} onChange={(v) => setNewAdmin((p) => ({ ...p, password: v }))} type="password" fullWidth />
+        <Btn variant="primary" size="lg" onClick={addAdmin} disabled={createAdmin.isPending}>Админ нэмэх</Btn>
+      </div>
+    </Card>
+
+    <Card>
+      <div className="font-semibold text-[15px] mb-1">Миний нууц үг</div>
+      <div className="text-xs text-muted mb-4">Шинэ нууц үг хамгийн багадаа 8 тэмдэгт байна.</div>
+      <div className="grid grid-cols-3 gap-3 items-end">
+        <Input label="Одоогийн нууц үг" value={passwordForm.current_password} onChange={(v) => setPasswordForm((p) => ({ ...p, current_password: v }))} type="password" fullWidth />
+        <Input label="Шинэ нууц үг" value={passwordForm.new_password} onChange={(v) => setPasswordForm((p) => ({ ...p, new_password: v }))} type="password" fullWidth />
+        <div className="flex gap-2 items-end">
+          <Input label="Давтах" value={passwordForm.confirm_password} onChange={(v) => setPasswordForm((p) => ({ ...p, confirm_password: v }))} type="password" fullWidth />
+          <Btn variant="primary" size="lg" onClick={updatePassword} disabled={changePassword.isPending}>Солих</Btn>
+        </div>
+      </div>
+    </Card>
+  </>
+}
+
+export function ManagerSettingsPage() {
+  const { data } = useManagerSettings()
+  const save = useUpdateManagerSettings()
+
+  const [form, setForm] = useState({
+    telegram_id: '', telegram_username: '', telegram_admin_ids: [''],
+    summary_time: '09:00', weekly_summary_time: '17:00', weekly_summary_day: '5',
+    alerts_enabled: true, gamification_enabled: true, soft_mode_weeks: 1,
+    tts_answers_enabled: true,
+  })
+
+  useEffect(() => {
+    if (data) setForm({
+      telegram_id: data.telegram_id || '',
+      telegram_username: data.telegram_username || '',
+      telegram_admin_ids: data.telegram_admin_ids?.length ? data.telegram_admin_ids : [data.telegram_id || ''],
+      summary_time: data.summary_time?.slice(0, 5) || '09:00',
+      weekly_summary_time: data.weekly_summary_time?.slice(0, 5) || '17:00',
+      weekly_summary_day: String(data.weekly_summary_day ?? 5),
+      alerts_enabled: data.alerts_enabled,
+      gamification_enabled: data.gamification_enabled,
+      soft_mode_weeks: data.soft_mode_weeks,
+      tts_answers_enabled: data.tts_answers_enabled ?? true,
+    })
+  }, [data])
+
+  const f = (k: string, v: any) => setForm((prev) => ({ ...prev, [k]: v }))
+  const updateTelegramId = (index: number, value: string) => f('telegram_admin_ids', form.telegram_admin_ids.map((id, i) => i === index ? value : id))
+
   const OPTIONS = [
     { key: 'alerts_enabled',        label: 'Алгасалтын анхааруулга', desc: 'Ажилтан хугацаа дууссаны дараа бөглөөгүй бол удирдлагад мэдэгдэх' },
     { key: 'gamification_enabled',  label: 'Урамшууллын систем', desc: 'Ажилтнуудад чансаа болон бөглөлтийн цувралыг харуулах' },
-    { key: 'tts_answers_enabled',   label: 'Туслахын дуу хариулт', desc: 'Асуултад хариулахдаа текстийн хамт Chimege-ээр үүсгэсэн аудио илгээх' },
+    { key: 'tts_answers_enabled',   label: 'Агентын дуу хоолойгоор хариулах горим', desc: 'Асуултад хариулахдаа текстийн хамт Chimege-ээр үүсгэсэн аудио илгээх' },
   ]
 
   return (
@@ -96,37 +131,6 @@ export function ManagerSettingsPage() {
               <Btn onClick={() => f('telegram_admin_ids', [...form.telegram_admin_ids, ''])}>+ Удирдлага нэмэх</Btn>
             </div>
             <div className="text-xs text-muted">Сарын AI хураангуй болон удирдлагын мэдэгдлийг энд оруулсан бүх Telegram ID руу илгээнэ.</div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="font-semibold text-[15px] mb-1">Админ хандалт</div>
-          <div className="text-xs text-muted mb-4">Энд нэмсэн и-мэйл болон нууц үгээр админ самбарт нэвтэрнэ.</div>
-          <div className="flex flex-col gap-3">
-            {adminUsers.map((user) => (
-              <div key={user.id} className="flex items-center justify-between gap-3 rounded-lg bg-surface2 px-3 py-2">
-                <div className="text-sm truncate">{user.email}</div>
-                <Btn variant="danger" onClick={() => deleteAdmin.mutate(user.id)} disabled={deleteAdmin.isPending || adminUsers.length === 1}>Эрх цуцлах</Btn>
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-[1fr_1fr_auto] gap-3 mt-4 items-end">
-            <Input label="Шинэ админы и-мэйл" value={newAdmin.email} onChange={(v) => setNewAdmin((p) => ({ ...p, email: v }))} type="email" fullWidth />
-            <Input label="Түр нууц үг" value={newAdmin.password} onChange={(v) => setNewAdmin((p) => ({ ...p, password: v }))} type="password" fullWidth />
-            <Btn variant="primary" size="lg" onClick={addAdmin} disabled={createAdmin.isPending}>Админ нэмэх</Btn>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="font-semibold text-[15px] mb-1">Миний нууц үг</div>
-          <div className="text-xs text-muted mb-4">Шинэ нууц үг хамгийн багадаа 8 тэмдэгт байна.</div>
-          <div className="grid grid-cols-3 gap-3 items-end">
-            <Input label="Одоогийн нууц үг" value={passwordForm.current_password} onChange={(v) => setPasswordForm((p) => ({ ...p, current_password: v }))} type="password" fullWidth />
-            <Input label="Шинэ нууц үг" value={passwordForm.new_password} onChange={(v) => setPasswordForm((p) => ({ ...p, new_password: v }))} type="password" fullWidth />
-            <div className="flex gap-2 items-end">
-              <Input label="Давтах" value={passwordForm.confirm_password} onChange={(v) => setPasswordForm((p) => ({ ...p, confirm_password: v }))} type="password" fullWidth />
-              <Btn variant="primary" size="lg" onClick={updatePassword} disabled={changePassword.isPending}>Солих</Btn>
-            </div>
           </div>
         </Card>
 

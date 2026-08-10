@@ -37,7 +37,7 @@ export function Btn({ children, variant = 'ghost', size = 'sm', onClick, disable
 }) {
   return (
     <button type={type} disabled={disabled} onClick={onClick}
-      className={`${btnBase} ${btnVariants[variant]} ${btnSizes[size]}`}>
+      className={`${btnBase} ${btnVariants[variant]} ${btnSizes[size]} workspace-btn workspace-btn-${variant} workspace-btn-${size}`}>
       {children}
     </button>
   )
@@ -108,9 +108,9 @@ export function Modal({ title, onClose, children, className = '' }: { title: str
 }
 
 // --- PageHeader ---
-export function PageHeader({ title, sub, children }: { title: string; sub?: string; children?: React.ReactNode }) {
+export function PageHeader({ title, sub, children, className = '' }: { title: string; sub?: string; children?: React.ReactNode; className?: string }) {
   return (
-    <div className="flex items-start justify-between mb-6">
+    <div className={`flex items-start justify-between mb-6 ${className}`}>
       <div>
         <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
         {sub && <p className="text-[13px] text-muted mt-0.5">{sub}</p>}

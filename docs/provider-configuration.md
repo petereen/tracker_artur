@@ -106,3 +106,6 @@ Widget is included. The Mini App itself does not require the Login Widget.
 # Malware scanning and profile avatars
 
 Production compose deployments run the official `clamav/clamav:1.4` LTS image and set `CLAMAV_ENABLED=true`. Attachment and avatar uploads fail closed with HTTP 503 while the scanner is unavailable, and infected files are rejected before storage. Custom avatars use the persistent `avatar_uploads` volume, accept PNG/JPEG/WebP up to 2 MB, and reject dimensions over 256×256 pixels. Budget roughly 4 GB of RAM for the ClamAV service and persist `/var/lib/clamav` so signature updates survive restarts.
+# Google Calendar inbound synchronization
+
+Set `GOOGLE_WEBHOOK_URL` to the public HTTPS webhook at `/api/v1/integrations/google-calendar/webhook`. OAuth queues channel registration automatically. Keep the worker running so watches renew before expiration and incremental events are processed. Outbound mode remains the default; enable bidirectional mode per account only when Google schedule changes should update linked OYUNS task dates.

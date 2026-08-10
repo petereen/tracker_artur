@@ -97,6 +97,7 @@ are supplied; see `docs/provider-configuration.md`.
 Attachments use the mounted local Dokploy volume; Azure is not required for this
 self-hosted deployment.
 
-Inbound Calendar push synchronization, external malware scanning, production
-load testing, and a migration rehearsal still require deployment infrastructure
-and remain open in `TODO.md`.
+Inbound Calendar push synchronization, scoped analytical drill-downs, collaboration
+UI, and production-shaped exercise scripts are implemented. Live provider, load,
+migration, and restore rehearsals still require operator-authorized infrastructure;
+follow `docs/production-hardening.md` and record the evidence in the deployment ticket.

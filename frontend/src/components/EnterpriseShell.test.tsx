@@ -21,7 +21,7 @@ describe('enterprise sidebar', () => {
   it('places company files immediately above the profile and logout controls', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
-    const link = screen.getByRole('link', { name: 'Компанийн файлууд' })
+    const link = screen.getByRole('link', { name: 'Компаний файлууд' })
     const profile = container.querySelector('.sidebar-profile')
     expect(profile).not.toBeNull()
     expect(link.compareDocumentPosition(profile as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

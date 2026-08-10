@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.models import CalendarConnection, CalendarEventLink, Task
+from app.models.models import CalendarConnection, CalendarEventLink, DomainEvent, Task, UserAccount
 from app.services.secret_box import decrypt_secret, encrypt_secret
 
 
@@ -111,3 +111,116 @@ async def sync_task(db: AsyncSession, account_id: int, task_id: int) -> None:
     else:
         db.add(CalendarEventLink(connection_id=connection.id, task_id=task.id, external_event_id=payload["id"], external_etag=payload.get("etag"), sync_state="synced"))
     connection.last_synced_at = datetime.now(timezone.utc)
+
+
+def webhook_url() -> str:
+    return settings.GOOGLE_WEBHOOK_URL or f"{settings.PUBLIC_APP_URL.rstrip('/')}/api/v1/integrations/google-calendar/webhook"
+
+
+async def register_watch(db: AsyncSession, connection_id: int) -> None:
+    connection = await db.get(CalendarConnection, connection_id)
+    if not connection or connection.status != "active":
+        raise RuntimeError("Google Calendar connection is unavailable")
+    if connection.webhook_channel_id and connection.webhook_resource_id:
+        await stop_watch(db, connection)
+    token = await access_token(db, connection)
+    channel_id = secrets.token_urlsafe(24)
+    channel_token = secrets.token_urlsafe(32)
+    body = {"id": channel_id, "type": "web_hook", "address": webhook_url(), "token": channel_token, "params": {"ttl": "604800"}}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+        async with session.post(f"{CALENDAR_API}/calendars/{connection.calendar_id}/events/watch", headers=headers, json=body) as response:
+            payload = await response.json(content_type=None)
+            if response.status not in {200, 201}:
+                raise RuntimeError(f"Google Calendar watch failed: {payload.get('error', response.status)}")
+    connection.webhook_channel_id = payload.get("id", channel_id)
+    connection.webhook_resource_id = payload.get("resourceId")
+    connection.encrypted_channel_token = encrypt_secret(channel_token)
+    expiration = payload.get("expiration")
+    connection.channel_expires_at = datetime.fromtimestamp(int(expiration) / 1000, timezone.utc) if expiration else datetime.now(timezone.utc) + timedelta(days=7)
+    connection.last_webhook_message_number = None
+    connection.last_error = None
+    connection.sync_failure_count = 0
+
+
+async def stop_watch(db: AsyncSession, connection: CalendarConnection) -> None:
+    if not connection.webhook_channel_id or not connection.webhook_resource_id:
+        return
+    token = await access_token(db, connection)
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    body = {"id": connection.webhook_channel_id, "resourceId": connection.webhook_resource_id}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+        async with session.post(f"{CALENDAR_API}/channels/stop", headers=headers, json=body) as response:
+            if response.status not in {200, 204, 404, 410}:
+                raise RuntimeError(f"Google Calendar channel stop failed: {response.status}")
+
+
+def _event_datetime(value: dict | None) -> datetime | None:
+    raw = (value or {}).get("dateTime")
+    if not raw:
+        return None
+    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+async def incremental_sync(db: AsyncSession, connection_id: int) -> None:
+    connection = await db.get(CalendarConnection, connection_id)
+    if not connection or connection.status != "active":
+        return
+    account = await db.get(UserAccount, connection.account_id)
+    if not account:
+        raise RuntimeError("Calendar account is unavailable")
+    token = await access_token(db, connection)
+    headers = {"Authorization": f"Bearer {token}"}
+    params: dict[str, str] = {"singleEvents": "true", "showDeleted": "true", "maxResults": "2500"}
+    if connection.sync_cursor:
+        params["syncToken"] = connection.sync_cursor
+    else:
+        params["timeMin"] = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    page_token = None
+    reset_attempted = False
+    while True:
+        request_params = dict(params)
+        if page_token: request_params["pageToken"] = page_token
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with session.get(f"{CALENDAR_API}/calendars/{connection.calendar_id}/events", headers=headers, params=request_params) as response:
+                payload = await response.json(content_type=None)
+                if response.status == 410 and not reset_attempted:
+                    connection.sync_cursor = None
+                    params.pop("syncToken", None)
+                    params["timeMin"] = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+                    reset_attempted = True
+                    continue
+                if response.status != 200:
+                    raise RuntimeError(f"Google incremental sync failed: {payload.get('error', response.status)}")
+        for event in payload.get("items", []):
+            external_id = event.get("id")
+            if not external_id:
+                continue
+            link = (await db.execute(select(CalendarEventLink).where(CalendarEventLink.connection_id == connection.id, CalendarEventLink.external_event_id == external_id))).scalar_one_or_none()
+            task_id = ((event.get("extendedProperties") or {}).get("private") or {}).get("oyunsTaskId")
+            if link is None and task_id and str(task_id).isdigit():
+                task = await db.get(Task, int(task_id))
+                if task and task.organization_id == account.organization_id:
+                    link = CalendarEventLink(connection_id=connection.id, task_id=task.id, external_event_id=external_id, sync_state="synced")
+                    db.add(link)
+            task = await db.get(Task, link.task_id) if link else None
+            if not link or not task or task.organization_id != account.organization_id:
+                continue
+            if event.get("status") == "cancelled":
+                await db.delete(link)
+                db.add(DomainEvent(organization_id=account.organization_id, topic="tasks", aggregate_type="task", aggregate_id=task.id, aggregate_version=task.version, operation="calendar_unlinked", payload={"task_id": task.id, "provider": "google"}))
+                continue
+            if connection.sync_mode == "bidirectional":
+                starts_at = _event_datetime(event.get("start")); ends_at = _event_datetime(event.get("end"))
+                if starts_at and ends_at and ends_at > starts_at and (task.start_at != starts_at or task.deadline_at != ends_at):
+                    task.start_at = starts_at; task.deadline_at = ends_at; task.version += 1; task.updated_at = datetime.now(timezone.utc)
+                    db.add(DomainEvent(organization_id=account.organization_id, topic="tasks", aggregate_type="task", aggregate_id=task.id, aggregate_version=task.version, operation="calendar_scheduled", payload={"task_id": task.id, "start_at": starts_at.isoformat(), "deadline_at": ends_at.isoformat()}))
+            link.external_etag = event.get("etag"); link.sync_state = "synced"; link.last_error = None
+        page_token = payload.get("nextPageToken")
+        if not page_token:
+            connection.sync_cursor = payload.get("nextSyncToken", connection.sync_cursor)
+            break
+    connection.last_synced_at = datetime.now(timezone.utc)
+    connection.last_error = None
+    connection.sync_failure_count = 0

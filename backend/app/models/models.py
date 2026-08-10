@@ -284,6 +284,7 @@ class Task(Base):
     created_by_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
     created_by_tg = Column(Text)
     assignee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    reviewer_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
     deadline_at = Column(DateTime(timezone=True))
     status = Column(
         Text,
@@ -310,6 +311,7 @@ class Task(Base):
     overdue_pinged_at = Column(DateTime(timezone=True))  # когда был отправлен немедленный пинг о просрочке
 
     assignee = relationship("Employee", foreign_keys=[assignee_id])
+    reviewer = relationship("Employee", foreign_keys=[reviewer_id])
     creator = relationship("Employee", foreign_keys=[created_by_id])
     comments = relationship("TaskComment", back_populates="task", cascade="all, delete-orphan")
 
@@ -505,7 +507,7 @@ class WorkTimeEntry(Base):
     report = relationship("WorkReport", back_populates="work_time_entries")
 
 
-# ─── Компанийн сарын төлөвлөгөө ─────────────────────────────────────────────
+# ─── Компаний сарын төлөвлөгөө ─────────────────────────────────────────────
 
 COMPANY_PLAN_HORIZONS = ("long_term", "mid_term", "short_term")
 COMPANY_PLAN_STATUSES = ("approved", "archived")
@@ -1268,6 +1270,13 @@ class CalendarConnection(Base):
     token_expires_at = Column(DateTime(timezone=True))
     scopes = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     sync_cursor = Column(Text)
+    calendar_id = Column(Text, nullable=False, server_default="primary", default="primary")
+    webhook_channel_id = Column(Text, unique=True)
+    webhook_resource_id = Column(Text)
+    encrypted_channel_token = Column(Text)
+    channel_expires_at = Column(DateTime(timezone=True))
+    last_webhook_message_number = Column(String(32))
+    sync_failure_count = Column(Integer, nullable=False, server_default="0", default=0)
     sync_mode = Column(Text, nullable=False, server_default="outbound", default="outbound")
     status = Column(Text, nullable=False, server_default="pending", default="pending")
     last_synced_at = Column(DateTime(timezone=True))

@@ -123,8 +123,8 @@ export function KnowledgePage() {
   return (
     <div>
       <PageHeader
-        title="Компаний мэдлэг"
-        sub="OYUNS туслахын хариултад ашиглах бодлого, журам, FAQ болон заавар"
+        title="Компаний өгөгдлийн сан"
+        sub="OYUNS agent-ын хариултад ашиглах бодлого, журам, FAQ болон заавар"
       >
         <Btn variant="primary" onClick={openCreate}>+ Мэдээлэл нэмэх</Btn>
       </PageHeader>
@@ -141,7 +141,7 @@ export function KnowledgePage() {
       {isLoading && <div className="text-sm text-muted">Ачаалж байна...</div>}
       {!isLoading && filtered.length === 0 && (
         <Card className="text-center text-sm text-muted">
-          {entries.length ? 'Хайлтад тохирох мэдээлэл алга.' : 'Компаний мэдлэгийн мэдээлэл хараахан нэмээгүй байна.'}
+          {entries.length ? 'Хайлтад тохирох мэдээлэл алга.' : 'Компаний өгөгдлийн санд мэдээлэл хараахан нэмээгүй байна.'}
         </Card>
       )}
 

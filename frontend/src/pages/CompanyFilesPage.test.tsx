@@ -35,7 +35,7 @@ describe('company file library', () => {
 
   it('shows browsing and management actions to managers', () => {
     render(<CompanyFilesPage />)
-    expect(screen.getByRole('heading', { name: 'Компанийн файлууд' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Компаний файлууд' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Шинэ хавтас/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /Файл оруулах/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'PoliciesХавтас' })).toBeInTheDocument()

@@ -138,6 +138,21 @@ export function EmployeesPage() {
       toast.error(error.response?.data?.detail || 'Хандалт холбогдсонгүй')
     }
   }
+  const changeAccessPassword = async (emp: any) => {
+    const account = accountFor(emp)
+    if (!account) return
+    const password = window.prompt(`${emp.name}-ийн шинэ нууц үг (10+ тэмдэгт):`)
+    if (!password) return
+    if (password.length < 10) { toast.error('Нууц үг 10+ тэмдэгт байх ёстой'); return }
+    try {
+      await updateAccount.mutateAsync({ id: account.id, password })
+      toast.success('Нууц үг шинэчлэгдлээ')
+    } catch (error: any) { toast.error(error.response?.data?.detail || 'Нууц үг шинэчлэгдсэнгүй') }
+  }
+  const toggleAccountStatus = (emp: any) => {
+    const account = accountFor(emp)
+    if (account) updateAccount.mutate({ id: account.id, status: account.status === 'disabled' ? 'active' : 'disabled' })
+  }
   const setPerformanceQuickRange = (days: number, key: 'day' | 'week' | 'month') => {
     const start = new Date()
     start.setDate(start.getDate() - days + 1)
@@ -188,6 +203,7 @@ export function EmployeesPage() {
                 <td className="px-4 py-3">
                   <div className="flex gap-1.5" onClick={(event) => event.stopPropagation()}>
                     <Btn variant="ghost" onClick={() => openEdit(e)}>Засах</Btn>
+                    {accountFor(e) && <><Btn variant="ghost" onClick={() => changeAccessPassword(e)}>Нууц үг</Btn><Btn variant="ghost" onClick={() => toggleAccountStatus(e)}>{accountFor(e)?.status === 'disabled' ? 'Хандалт идэвхжүүлэх' : 'Хандалт хаах'}</Btn></>}
                     <Btn variant={e.is_active ? 'danger' : 'ghost'} onClick={() => toggle(e)}>{e.is_active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}</Btn>
                   </div>
                 </td>

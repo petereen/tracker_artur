@@ -61,7 +61,13 @@ git clone https://github.com/bronxtc52/tracker_artur.git
 cd tracker_artur
 ```
 
-Создайте `.env` в корне (все переменные обязательны):
+Для локальной разработки скопируйте готовый безопасный шаблон (он создаёт admin-пользователя `admin` с паролем `admin12345`):
+
+```bash
+cp .env.local.example .env
+```
+
+Для production создайте `.env` вручную и замените локальные значения на секреты и HTTPS-адреса:
 
 ```env
 POSTGRES_PASSWORD=your-strong-db-password
@@ -107,6 +113,25 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 ```bash
 docker compose up -d
 ```
+
+Локальная панель: `http://localhost:3010`. Войти можно как `admin` / `admin12345`.
+Не используйте эти локальные учётные данные в production.
+
+### Frontend development with hot reload
+
+For immediate visual updates while editing React/CSS files, keep the Docker
+backend and database running, then start Vite directly on the host:
+
+```bash
+docker compose up -d db backend
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1
+```
+
+Open `http://localhost:5173`. Vite proxies `/api` to the Docker backend at
+`http://localhost:8010`; edits are applied automatically without rebuilding
+the frontend image. Use `Ctrl+C` to stop Vite.
 
 ### Monthly report digest test
 
@@ -198,7 +223,7 @@ sales-tracker/
 
 ## База знаний компании
 
-- Администратор управляет короткими статьями (заголовок, категория, содержание, активность) в разделе **«Компаний мэдлэг»**.
+- Администратор управляет короткими статьями (заголовок, категория, содержание, активность) в разделе **«Компаний өгөгдлийн сан»**.
 - Бот получает не более пяти релевантных активных статей и ограничивает их общий объём перед LLM-вызовом.
 - Неактивные статьи не передаются боту. В текстовом ответе показываются названия использованных источников.
 - Внешние документы, URL, векторный поиск и долговременная история диалога не используются.

@@ -10,7 +10,7 @@ const NAV = [
   { id: 'reports',    label: 'Тайлангууд',    icon: '▤' },
   { id: 'plans',      label: 'Төлөвлөгөө',    icon: '▧' },
   { id: 'manager',    label: 'Удирдлага',     icon: '◎' },
-  { id: 'knowledge',  label: 'Компаний мэдлэг', icon: '◆' },
+  { id: 'knowledge',  label: 'Компаний өгөгдлийн сан', icon: '◆' },
   { id: 'developer',  label: 'Хөгжүүлэлт',      icon: '⌘' },
   { id: 'onboarding', label: 'Танилцуулга',   icon: '▷' },
 ]

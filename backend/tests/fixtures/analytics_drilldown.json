@@ -1,0 +1,9 @@
+{
+  "period": { "date_from": "2026-07-01", "date_to": "2026-07-31" },
+  "employee": { "id": 7001, "capacity_minutes": 2400, "approved_minutes": 1800, "billable_minutes": 1200 },
+  "rate": { "amount": "100000.00", "currency": "MNT", "effective_from": "2026-01-01" },
+  "exchange_snapshot": { "base_currency": "MNT", "quote_currency": "USD", "rate": "0.00028000", "captured_at": "2026-07-15T00:00:00Z" },
+  "project": { "id": 8001, "budget_amount": "3000000.00", "currency": "MNT" },
+  "deadlines": { "total": 4, "healthy": 3, "overdue": 1 },
+  "reports": { "expected": 4, "submitted": 3, "approved": 2 }
+}

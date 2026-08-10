@@ -1,6 +1,27 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Stabilize the existing dirty-worktree baseline, test expectations, Node typings, and deployment documentation
+- [x] Phase 3: Complete task collaboration APIs, detail UI, saved views, conflict recovery, undo, and cross-channel coverage
+- [x] Phase 4: Complete typed check-ins, collaborative report review, attachments, comparisons, and timer recovery UX
+- [x] Phase 5: Add permission-safe KPI and financial drill-down APIs, UI, and deterministic fixtures
+- [x] Phase 6: Add inbound Google Calendar synchronization, production-shaped exercises, runbooks, and acceptance coverage
+- [x] Run the full backend/frontend/migration/production-shaped validation matrix and record external-environment limits and baseline failures
+- [x] Add optional task reviewer selection, review queue, unrestricted task-status changes, and web/Telegram review notifications (`backend/app`, `frontend/src/pages/EnterpriseTasksPage.tsx`)
+- [x] Center OYUNS assistant voice/send controls and auto-grow the message textarea with a maximum scroll height (`frontend/src/components/OyunsAssistant.tsx`, `frontend/src/index.css`)
+- [x] Add OYUNS web-chat voice recording, transcription, and Chimege audio replies controlled by the shared bot TTS setting (`frontend/src/components/OyunsAssistant.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise.py`)
+- [x] Move admin password and new-admin controls into a dedicated Admin access settings group (`frontend/src/pages/ManagerSettingsPage.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/App.tsx`)
+- [x] Unify Calendar, Tasks, Projects, and Plans workspace action sizing and toolbar alignment (`frontend/src/index.css`, `frontend/src/pages/PlansPage.tsx`, `frontend/src/components/ui.tsx`)
+- [x] Reorganize System Settings into cohesive category pages with legacy redirects (`frontend/src/pages`, `frontend/src/App.tsx`, `frontend/src/index.css`)
+- [x] Keep blue primary button text white in explicit light mode (`frontend/src/index.css`)
+- [x] Add host Vite hot reload workflow with a local Docker backend proxy (`frontend/vite.config.ts`, `README.md`)
+- [x] Offset the sleeping Today companion GIF 50px to the right (`frontend/src/index.css`)
+- [x] Give the working and sleeping Today companion GIFs separate sizing and formatting rules (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`)
+- [x] Restrict Telegram work-time reminders to each employee's configured schedule weekdays (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
+- [x] Make workspace project/plan migration compatible with foundation-created schemas (`backend/alembic/versions/w1x2y3z4a5b6_workspace_projects_plans.py`)
+- [x] Make refresh-session auth-method migration compatible with foundation-created schemas (`backend/alembic/versions/s7t8u9v0w1x2_add_refresh_session_auth_method.py`)
+- [x] Make the Docker Compose ClamAV dependency runnable on Apple Silicon (`docker-compose.yml`)
+- [x] Add a local Docker Compose environment template and working local admin login configuration (`.env.local.example`, `README.md`)
 - [x] Add the organization-scoped company file library schema and migration (`backend/app/models/models.py`, `backend/alembic/versions`)
 - [x] Add company file browsing, upload, organization, trash, restore, and download APIs (`backend/app/routers/company_files.py`)
 - [x] Build the responsive company file library and sidebar entry (`frontend/src/pages/CompanyFilesPage.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
@@ -48,10 +69,10 @@
 - [x] Fix production React render-depth error and suppress employee-unlinked clock polling (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Phase 1 foundation: Add enterprise schema, identity, RBAC, shared events, and real-time infrastructure
 - [x] Phase 2 foundation: Build the responsive Apple-style application shell and design system
-- [ ] Phase 3 completion: Finish remaining task collaboration UI; malware scanning and editable calendar/timeline are delivered
-- [ ] Phase 4 completion: Finish check-in/report authoring UI, side-by-side revisions, inline review UI, and timer recovery UX
-- [ ] Phase 5 completion: Add permission-safe financial and KPI analytical drill-downs
-- [ ] Phase 6 completion: Add inbound Google push synchronization and run production hardening exercises
+- [x] Phase 3 completion: Finish remaining task collaboration UI; malware scanning and editable calendar/timeline are delivered
+- [x] Phase 4 completion: Finish check-in/report authoring UI, side-by-side revisions, inline review UI, and timer recovery UX
+- [x] Phase 5 completion: Add permission-safe financial and KPI analytical drill-downs
+- [x] Phase 6 completion: Add inbound Google push synchronization and production hardening exercise tooling
 - [x] Enforce worker-private tasks, reports, and performance while exposing organization views to administrators and supervisors (`backend/app/routers/enterprise.py`)
 - [x] Replace the placeholder task timeline with date-driven Timeline/Calendar views and editable scheduling (`frontend/src/pages/EnterpriseTasksPage.tsx`)
 - [x] Add worker report draft/edit/submit UI and administrator-only submitted-report reopening (`frontend/src/pages/EnterpriseReportsPage.tsx`)
@@ -63,6 +84,21 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Match the Plans “Төлөвлөгөө нэмэх” button to the smaller create-action sizing (`frontend/src/pages/PlansPage.tsx`)
+- [x] Increase the vertical gap between Stats metric cards and the worktime heatmap panel (`frontend/src/index.css`)
+- [x] Center OYUNS assistant voice/send controls and auto-grow the message textarea with a maximum scroll height (`frontend/src/components/OyunsAssistant.tsx`, `frontend/src/index.css`)
+- [x] Add OYUNS web-chat voice recording, transcription, and Chimege audio replies controlled by the shared bot TTS setting (`frontend/src/components/OyunsAssistant.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise.py`)
+- [x] Reorganize System Settings into cohesive category pages with legacy redirects (`frontend/src/pages`, `frontend/src/App.tsx`, `frontend/src/index.css`)
+- [x] Keep blue primary button text white in explicit light mode (`frontend/src/index.css`)
+- [x] Align profile action buttons horizontally and preserve white text on light-theme primary buttons (`frontend/src/pages/ProfilePage.tsx`, `frontend/src/index.css`)
+- [x] Move the password create/change fields into a modal opened from the profile form (`frontend/src/pages/ProfilePage.tsx`, `frontend/src/index.css`)
+- [x] Add clean internal spacing to the profile fields and action buttons (`frontend/src/index.css`)
+- [x] Add host Vite hot reload workflow with a local Docker backend proxy (`frontend/vite.config.ts`, `README.md`)
+- [x] Restrict Telegram work-time reminders to each employee's configured schedule weekdays (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
+- [x] Make workspace project/plan migration compatible with foundation-created schemas (`backend/alembic/versions/w1x2y3z4a5b6_workspace_projects_plans.py`)
+- [x] Make refresh-session auth-method migration compatible with foundation-created schemas (`backend/alembic/versions/s7t8u9v0w1x2_add_refresh_session_auth_method.py`)
+- [x] Make the Docker Compose ClamAV dependency runnable on Apple Silicon (`docker-compose.yml`)
+- [x] Add a local Docker Compose environment template and working local admin login configuration (`.env.local.example`, `README.md`)
 - [x] Switch the Today companion between the supplied working and sleeping GIFs based on the active clock entry (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/public/oyuns-working.gif`, `frontend/public/oyuns-sleeping.gif`)
 - [x] Limit worktime heatmap refreshes to Stats tab opens while preserving active-session elapsed time at fetch time (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Include active work sessions in daily analytics and refresh today’s personal heatmap continuously (`backend/app/routers/enterprise.py`, `frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
