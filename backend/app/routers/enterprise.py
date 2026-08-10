@@ -1225,7 +1225,19 @@ async def delete_task(task_id: int, db: AsyncSession = Depends(get_db), actor: A
     task = await db.get(Task, task_id, with_for_update=True)
     if not task or task.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Task not found")
-    can_manage = actor.has_any_role(*MANAGEMENT_ROLES) or (actor.employee_id is not None and task.created_by_id == actor.employee_id)
+    created_by_account = await db.scalar(
+        select(AuditLog.id).where(
+            AuditLog.organization_id == actor.organization_id,
+            AuditLog.actor_account_id == actor.account_id,
+            AuditLog.action == "created",
+            AuditLog.entity_type == "task",
+            AuditLog.entity_id == task.id,
+        ).limit(1)
+    )
+    can_manage = actor.has_any_role(*MANAGEMENT_ROLES) or (
+        (actor.employee_id is not None and task.created_by_id == actor.employee_id)
+        or created_by_account is not None
+    )
     if not can_manage:
         raise HTTPException(status_code=403, detail="Only the task creator or management can delete this task")
     before = _task_out(task)
