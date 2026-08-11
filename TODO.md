@@ -3,6 +3,7 @@
 ## Current Milestone
 - [x] Implement live AI gateway routing, token budgets, and GPT-5.6 model failover (`backend/app/services/ai_gateway`)
 - [x] Add Redis exact caching, pgvector semantic-cache persistence, and cache observability (`backend/app`, `backend/alembic`, Compose)
+- [x] Merge the AI gateway migration with all existing Alembic heads (`backend/alembic/versions/c3d4e5f6g7h8_ai_gateway_cache.py`)
 - [x] Route OYUNS web and Telegram conversations through the live gateway and remove offline answer fallbacks (`backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`)
 - [x] Add AI gateway regression tests and an opt-in live smoke check (`backend/tests`, `backend/scripts`)
 - [x] Route Mongolian company-plan and project questions to permission-scoped enterprise retrieval instead of generic clarification (`backend/app/services/enterprise_tools.py`, `backend/tests/test_enterprise_tools.py`)

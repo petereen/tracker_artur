@@ -1,7 +1,7 @@
 """add AI gateway semantic response cache
 
 Revision ID: c3d4e5f6g7h8
-Revises: z4a5b6c7d8e9
+Revises: c2d3e4f5g6h7, z4a5b6c7d8e9
 """
 from typing import Sequence, Union
 
@@ -10,7 +10,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "c3d4e5f6g7h8"
-down_revision: Union[str, Sequence[str], None] = "z4a5b6c7d8e9"
+down_revision: Union[str, Sequence[str], None] = ("c2d3e4f5g6h7", "z4a5b6c7d8e9")
 branch_labels = None
 depends_on = None
 
