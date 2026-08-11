@@ -105,7 +105,9 @@ services:
       backend:
         condition: service_healthy
     environment: *app_environment
-    command: python -m app.worker
+    # Run migrations from the worker startup path too. This prevents the
+    # index scan from querying knowledge_documents before its migration exists.
+    command: sh -c "alembic upgrade head && exec python -m app.worker"
 
   frontend:
     build:

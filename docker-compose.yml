@@ -150,7 +150,9 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       GOOGLE_WEBHOOK_URL: ${GOOGLE_WEBHOOK_URL:-}
-    command: python -m app.worker
+    # The API may be allowed to start in Dokploy recovery mode; the worker
+    # must still refuse to run against a schema missing enterprise tables.
+    command: sh -c "alembic upgrade head && exec python -m app.worker"
 
   frontend:
     build:
