@@ -2626,6 +2626,67 @@ async def analytics_daily(
     return {"date_from": date_from, "date_to": date_to, "employee_id": target, "days": days}
 
 
+@router.get("/analytics/work-hours")
+async def analytics_work_hours(
+    date_from: date,
+    date_to: date,
+    employee_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    if date_from > date_to or (date_to - date_from).days > 370:
+        raise HTTPException(status_code=400, detail="Analytics period must be between 1 and 371 days")
+    if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
+        raise HTTPException(status_code=403, detail="Worker analytics are outside your scope")
+
+    target = employee_id if actor.has_any_role(*MANAGEMENT_ROLES) else actor.employee_id or -1
+    analytics_now = datetime.now(timezone.utc)
+    conditions = [
+        WorkTimeEntry.entry_type == "work",
+        WorkTimeEntry.mode.in_(("remote", "in_person")),
+        WorkTimeEntry.employee_id.isnot(None),
+        WorkTimeEntry.local_work_date >= date_from,
+        WorkTimeEntry.local_work_date <= date_to,
+        UserAccount.organization_id == actor.organization_id,
+        UserAccount.status == "active",
+    ]
+    if target is not None:
+        conditions.append(WorkTimeEntry.employee_id == target)
+
+    rows = (
+        await db.execute(
+            select(
+                WorkTimeEntry.mode,
+                func.coalesce(
+                    func.sum(
+                        func.extract(
+                            "epoch",
+                            func.coalesce(WorkTimeEntry.ended_at, analytics_now) - WorkTimeEntry.started_at,
+                        )
+                        / 60,
+                    ),
+                    0,
+                ),
+            )
+            .join(UserAccount, UserAccount.employee_id == WorkTimeEntry.employee_id)
+            .where(*conditions)
+            .group_by(WorkTimeEntry.mode)
+        )
+    ).all()
+    minutes_by_mode = {mode: round(float(minutes or 0)) for mode, minutes in rows}
+    remote_minutes = minutes_by_mode.get("remote", 0)
+    office_minutes = minutes_by_mode.get("in_person", 0)
+    return {
+        "date_from": date_from,
+        "date_to": date_to,
+        "employee_id": None if actor.has_any_role(*MANAGEMENT_ROLES) and employee_id is None else target,
+        "remote_minutes": remote_minutes,
+        "office_minutes": office_minutes,
+        "total_minutes": remote_minutes + office_minutes,
+        "scope": "organization" if actor.has_any_role(*MANAGEMENT_ROLES) and employee_id is None else "worker",
+    }
+
+
 ANALYTIC_METRICS = ("utilization", "billable_ratio", "budget_burn", "task_completion", "deadline_health", "report_compliance")
 
 

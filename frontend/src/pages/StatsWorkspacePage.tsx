@@ -11,6 +11,7 @@ import { EMPTY_ROLES, useAuthStore } from "../store/auth";
 import { HeatmapCalendar } from "../components/HeatmapCalendar";
 import { QueryRegion, Skeleton } from "../components/Loading";
 import { DropdownSelect } from "../components/DropdownSelect";
+import { WorkHourHierarchyChart } from "../components/WorkHourHierarchyChart";
 
 function localDate(value: Date) {
   const offset = value.getTimezoneOffset() * 60_000;
@@ -137,6 +138,7 @@ export function StatsWorkspacePage() {
               </strong>
             </article>
           </section>
+          <WorkHourHierarchyChart period={period} employeeId={employeeId} />
           <section className="panel heatmap-panel">
             <div className="panel-heading">
               <div>

@@ -1,6 +1,22 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Restore the Today work-hour timer's live interval, visibility resync, and instant clock-action state (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
+- [x] Add permission-scoped work-hour hierarchy analytics aggregation (`backend/app/routers/enterprise.py`, `backend/tests`)
+- [x] Add typed current/prior-period work-hour analytics queries and share-trend inputs (`frontend/src/api/enterprise.ts`)
+- [x] Create the interactive work-hour hierarchy donut component with loading, empty, tooltip, and legend states (`frontend/src/components/WorkHourHierarchyChart.tsx`)
+- [x] Build the interactive Remote vs. Office hierarchy donut and integrate it into Stats (`frontend/src/components/WorkHourHierarchyChart.tsx`, `frontend/src/pages/StatsWorkspacePage.tsx`)
+- [x] Add localized work-hour hierarchy chart copy for Mongolian, English, and Russian (`frontend/src/i18n.ts`)
+- [x] Add backend route, aggregation, scope, active-session, and empty-period regression coverage (`backend/tests/test_enterprise_foundation.py`)
+- [x] Refine backend work-hour authorization assertions and empty-period coverage (`backend/tests/test_enterprise_foundation.py`)
+- [x] Add focused chart interaction and state coverage (`frontend/src/components/WorkHourHierarchyChart.test.tsx`)
+- [x] Add shared jsdom ResizeObserver support for responsive chart tests (`frontend/src/test/setup.ts`)
+- [x] Stabilize chart interaction assertions around animated center content (`frontend/src/components/WorkHourHierarchyChart.test.tsx`)
+- [x] Polish tooltip icon, visible-total percentage, and viewport-safe positioning (`frontend/src/components/WorkHourHierarchyChart.tsx`, `frontend/src/index.css`)
+- [x] Add localized chart copy, responsive states, synchronized legend interactions, and theme-aware styling (`frontend/src/i18n.ts`, `frontend/src/index.css`)
+- [x] Validate chart interactions with the full frontend test suite and production build (`frontend/src/components/WorkHourHierarchyChart.test.tsx`, `frontend`)
+- [x] Syntax-check the work-hour analytics route and backend regression test module (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
+- [ ] Run backend pytest regression coverage (blocked in this environment because the `pytest` module is unavailable) (`backend/tests/test_enterprise_foundation.py`, `backend/tests/test_work_report_service.py`)
 - [x] Merge the remaining Alembic migration heads so backend deployment can run `alembic upgrade head` (`backend/alembic/versions`, `TODO.md`)
 - [x] Deliver folder ZIP downloads and persistent list/grid previews for the company file library (`backend/app/routers/company_files.py`, `frontend/src/pages/CompanyFilesPage.tsx`)
 - [x] Make Today worktime seconds, minutes, and hours update live while a work session is active (`frontend/src/pages/EnterpriseDashboardPage.tsx`)
@@ -103,6 +119,8 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Deliver the permission-scoped Remote vs. Office work-hour hierarchy donut chart with trends, synchronized interactions, localized states, and responsive styling (`backend/app/routers/enterprise.py`, `frontend/src/components/WorkHourHierarchyChart.tsx`, `frontend/src/pages/StatsWorkspacePage.tsx`)
+- [x] Restore the Today work-hour timer's live interval, visibility resync, and instant clock-action state (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Merge the remaining Alembic migration heads so backend deployment can run `alembic upgrade head` (`backend/alembic/versions`, `TODO.md`)
 - [x] Make Today worktime seconds, minutes, and hours update live while a work session is active (`frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Remove task saved-view controls and place the filter button at the right edge of the task view modes (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)

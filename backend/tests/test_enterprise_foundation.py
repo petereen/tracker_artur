@@ -122,7 +122,59 @@ def test_enterprise_schema_registers_required_foundation_tables():
 
 def test_versioned_routes_include_auth_clock_tasks_reports_and_realtime():
     paths = {route.path for route in app.routes}
-    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/auth/profile", "/v1/auth/profile/password", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime", "/v1/checkins/today", "/v1/calendar/events", "/v1/analytics/daily"}.issubset(paths)
+    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/auth/profile", "/v1/auth/profile/password", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime", "/v1/checkins/today", "/v1/calendar/events", "/v1/analytics/daily", "/v1/analytics/work-hours"}.issubset(paths)
+
+
+def test_work_hour_analytics_aggregates_modes_and_returns_total():
+    class Rows:
+        def all(self):
+            return [("remote", 125.4), ("in_person", 180.2)]
+
+    class Db:
+        async def execute(self, statement):
+            self.statement = statement
+            return Rows()
+
+    actor = ActorContext(account_id=1, organization_id=1, employee_id=3, email="manager", locale="mn", roles=frozenset({"manager"}))
+    db = Db()
+    result = asyncio.run(enterprise.analytics_work_hours(date(2026, 8, 1), date(2026, 8, 7), db=db, actor=actor))
+
+    assert result["remote_minutes"] == 125
+    assert result["office_minutes"] == 180
+    assert result["total_minutes"] == 305
+    assert result["scope"] == "organization"
+    assert "entry_type" in str(db.statement)
+    assert "mode" in str(db.statement)
+    assert "coalesce" in str(db.statement).lower()
+
+
+def test_work_hour_analytics_rejects_out_of_scope_employee():
+    from fastapi import HTTPException
+
+    actor = ActorContext(account_id=1, organization_id=1, employee_id=3, email="worker", locale="mn", roles=frozenset({"member"}))
+    try:
+        asyncio.run(enterprise.analytics_work_hours(date(2026, 8, 1), date(2026, 8, 7), employee_id=4, db=SimpleNamespace(), actor=actor))
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("Worker analytics must reject another employee's work-hour data")
+
+
+def test_work_hour_analytics_returns_zeroes_for_an_empty_period():
+    class Rows:
+        def all(self):
+            return []
+
+    class Db:
+        async def execute(self, _statement):
+            return Rows()
+
+    actor = ActorContext(account_id=1, organization_id=1, employee_id=3, email="manager", locale="mn", roles=frozenset({"manager"}))
+    result = asyncio.run(enterprise.analytics_work_hours(date(2026, 8, 1), date(2026, 8, 7), db=Db(), actor=actor))
+
+    assert result["remote_minutes"] == 0
+    assert result["office_minutes"] == 0
+    assert result["total_minutes"] == 0
 
 
 def test_refresh_sessions_record_the_authentication_method():

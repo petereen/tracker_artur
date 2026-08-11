@@ -204,16 +204,98 @@ export function useEnterpriseSummary(period?: DateRange, employeeId?: number) {
   return useQuery({ queryKey: ['v1', 'analytics', period, employeeId], queryFn: () => api.get('/v1/analytics/summary', { params: { ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data) })
 }
 
-export function useClock(enabled = true) {
-  return useQuery<{ active: ClockEntry | null; today_entries: ClockEntry[]; timezone: string; server_time: string }>({ queryKey: ['v1', 'clock'], queryFn: () => api.get('/v1/clock/status').then((response) => response.data), enabled, refetchInterval: enabled ? 30_000 : false })
+export interface ClockStatus {
+  active: ClockEntry | null
+  today_entries: ClockEntry[]
+  timezone: string
+  server_time: string
 }
+
+const clockQueryKey = ['v1', 'clock'] as const
+
+export function useClock(enabled = true) {
+  return useQuery<ClockStatus>({
+    queryKey: clockQueryKey,
+    queryFn: () => api.get('/v1/clock/status').then((response) => response.data),
+    enabled,
+    refetchInterval: enabled ? 30_000 : false,
+    refetchOnWindowFocus: enabled,
+  })
+}
+
+type ClockAction = 'start' | 'break' | 'resume' | 'stop'
+interface ClockActionInput { action: ClockAction; mode?: 'in_person' | 'remote' }
 
 export function useClockAction() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ action, mode }: { action: 'start' | 'break' | 'resume' | 'stop'; mode?: 'in_person' | 'remote' }) => api.post(`/v1/clock/${action}`, action === 'start' ? { mode } : {}).then((response) => response.data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'clock'] }),
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Цагийн төлөв өөрчлөгдсөнгүй'),
+    mutationFn: ({ action, mode }: ClockActionInput) => api.post(`/v1/clock/${action}`, action === 'start' ? { mode } : {}).then((response) => response.data),
+    onMutate: async ({ action, mode }: ClockActionInput) => {
+      await queryClient.cancelQueries({ queryKey: clockQueryKey })
+      const previous = queryClient.getQueryData<ClockStatus>(clockQueryKey)
+      if (!previous) return { previous }
+
+      const now = new Date().toISOString()
+      const active = previous.active
+      const entries = previous.today_entries.slice()
+      const closeActive = (items: ClockEntry[]) => active
+        ? items.map((entry) => entry.id === active.id ? { ...entry, ended_at: now } : entry)
+        : items
+      const employeeId = active?.employee_id ?? entries[entries.length - 1]?.employee_id ?? 0
+      const localWorkDate = active?.local_work_date ?? entries[entries.length - 1]?.local_work_date ?? now.slice(0, 10)
+      const previousWork = [...entries].reverse().find((entry) => entry.entry_type === 'work')
+      const optimisticEntry = (entryType: ClockEntry['entry_type'], entryMode: ClockEntry['mode']): ClockEntry => ({
+        id: -Date.now(),
+        employee_id: employeeId,
+        local_work_date: localWorkDate,
+        project_id: previousWork?.project_id ?? null,
+        task_id: previousWork?.task_id ?? null,
+        entry_type: entryType,
+        mode: entryMode,
+        started_at: now,
+        ended_at: null,
+      })
+
+      if (action === 'stop') {
+        queryClient.setQueryData<ClockStatus>(clockQueryKey, {
+          ...previous,
+          active: null,
+          today_entries: closeActive(entries),
+          server_time: now,
+        })
+      } else if (action === 'break' && active?.entry_type === 'work') {
+        const next = optimisticEntry('break', null)
+        queryClient.setQueryData<ClockStatus>(clockQueryKey, {
+          ...previous,
+          active: next,
+          today_entries: [...closeActive(entries), next],
+          server_time: now,
+        })
+      } else if (action === 'resume' && active?.entry_type === 'break') {
+        const next = optimisticEntry('work', previousWork?.mode ?? 'in_person')
+        queryClient.setQueryData<ClockStatus>(clockQueryKey, {
+          ...previous,
+          active: next,
+          today_entries: [...closeActive(entries), next],
+          server_time: now,
+        })
+      } else if (action === 'start' && !(active?.entry_type === 'work' && active.mode === mode)) {
+        const next = optimisticEntry('work', mode ?? 'in_person')
+        queryClient.setQueryData<ClockStatus>(clockQueryKey, {
+          ...previous,
+          active: next,
+          today_entries: [...closeActive(entries), next],
+          server_time: now,
+        })
+      }
+
+      return { previous }
+    },
+    onError: (error: any, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(clockQueryKey, context.previous)
+      toast.error(error.response?.data?.detail || 'Цагийн төлөв өөрчлөгдсөнгүй')
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: clockQueryKey }),
   })
 }
 
@@ -399,6 +481,55 @@ export function useSubmitCheckin() {
 
 export function useDailyAnalytics(period: DateRange, employeeId?: number) {
   return useQuery<any>({ queryKey: ['v1', 'analytics', 'daily', period, employeeId], queryFn: () => api.get('/v1/analytics/daily', { params: { ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data), refetchOnMount: 'always', refetchOnWindowFocus: false })
+}
+
+export interface WorkHoursAnalytics {
+  date_from: string
+  date_to: string
+  employee_id: number | null
+  remote_minutes: number
+  office_minutes: number
+  total_minutes: number
+  scope: 'organization' | 'worker'
+}
+
+function dateOnly(value: Date) {
+  return `${value.getFullYear().toString().padStart(4, '0')}-${(value.getMonth() + 1).toString().padStart(2, '0')}-${value.getDate().toString().padStart(2, '0')}`
+}
+
+export function previousDateRange(period: DateRange): DateRange {
+  const start = new Date(`${period.date_from}T12:00:00`)
+  const end = new Date(`${period.date_to}T12:00:00`)
+  const dayCount = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1)
+  const previousEnd = new Date(start)
+  previousEnd.setDate(previousEnd.getDate() - 1)
+  const previousStart = new Date(previousEnd)
+  previousStart.setDate(previousStart.getDate() - dayCount + 1)
+  return { date_from: dateOnly(previousStart), date_to: dateOnly(previousEnd) }
+}
+
+function workHoursQuery(period: DateRange, employeeId?: number) {
+  return {
+    queryKey: ['v1', 'analytics', 'work-hours', period, employeeId],
+    queryFn: () => api.get<WorkHoursAnalytics>('/v1/analytics/work-hours', { params: { ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data),
+    refetchOnMount: 'always' as const,
+    refetchOnWindowFocus: false as const,
+  }
+}
+
+export function useWorkHoursAnalytics(period: DateRange, employeeId?: number) {
+  const previous = previousDateRange(period)
+  const currentQuery = useQuery<WorkHoursAnalytics>(workHoursQuery(period, employeeId))
+  const previousQuery = useQuery<WorkHoursAnalytics>(workHoursQuery(previous, employeeId))
+  return {
+    data: currentQuery.data,
+    previousData: previousQuery.data,
+    isLoading: currentQuery.isLoading,
+    isFetching: currentQuery.isFetching,
+    trendPending: previousQuery.isLoading || previousQuery.isFetching,
+    isError: currentQuery.isError,
+    refetch: currentQuery.refetch,
+  }
 }
 
 export type AnalyticsMetric = 'utilization' | 'billable_ratio' | 'budget_burn' | 'task_completion' | 'deadline_health' | 'report_compliance'

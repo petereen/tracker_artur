@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   Archive,
@@ -338,15 +338,60 @@ export function EnterpriseDashboardPage() {
   );
   const active = clock.data?.active;
   const [clientNow, setClientNow] = useState(() => Date.now());
+  const serverClockRef = useRef<{ serverTimeMs: number; clientTimeMs: number } | null>(null);
+  const clockRefetchRef = useRef(clock.refetch);
+  clockRefetchRef.current = clock.refetch;
+  const serverTime = clock.data?.server_time;
   useEffect(() => {
-    if (!active) return;
-    const timer = window.setInterval(() => setClientNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  const serverOffset = clock.data?.server_time
-    ? new Date(clock.data.server_time).getTime() - Date.now()
-    : 0;
-  const clockNow = clientNow + serverOffset;
+    if (!serverTime) return;
+    const serverTimeMs = new Date(serverTime).getTime();
+    if (Number.isFinite(serverTimeMs)) {
+      serverClockRef.current = { serverTimeMs, clientTimeMs: Date.now() };
+    }
+  }, [serverTime]);
+  const activeTimerKey = active
+    ? `${active.id}:${active.entry_type}:${active.started_at}`
+    : null;
+  useEffect(() => {
+    let timer: number | undefined;
+    const syncNow = () => setClientNow(Date.now());
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const startTimer = () => {
+      if (
+        activeTimerKey &&
+        document.visibilityState === "visible" &&
+        timer === undefined
+      ) {
+        timer = window.setInterval(syncNow, 1000);
+      }
+    };
+    const handleVisibilityChange = () => {
+      syncNow();
+      if (document.visibilityState === "visible") {
+        void clockRefetchRef.current();
+        startTimer();
+      } else {
+        clearTimer();
+      }
+    };
+
+    syncNow();
+    startTimer();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      clearTimer();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [activeTimerKey]);
+  const serverClock = serverClockRef.current;
+  const clockNow = serverClock
+    ? serverClock.serverTimeMs + (clientNow - serverClock.clientTimeMs)
+    : clientNow;
   const recoveredClock = Boolean(active && (active.local_work_date !== today || clockNow - new Date(active.started_at).getTime() > 16 * 60 * 60 * 1000));
   const working = active?.entry_type === "work";
   const onBreak = active?.entry_type === "break";
