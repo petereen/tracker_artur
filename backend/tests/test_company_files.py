@@ -1,14 +1,15 @@
 import asyncio
+import inspect
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
-from app.core.enterprise_deps import ActorContext
+from app.core.enterprise_deps import ActorContext, get_actor
 from app.main import app
 from app.models.models import Base
-from app.routers.company_files import _active_descendants, _clean_name, _has_deleted_ancestor, _item_for_actor, browse_company_files
+from app.routers.company_files import _active_descendants, _clean_name, _has_deleted_ancestor, _item_for_actor, browse_company_files, upload_company_file
 
 
 def actor(*roles: str, organization_id: int = 1) -> ActorContext:
@@ -29,6 +30,11 @@ def test_company_file_schema_and_routes_are_registered():
         "/v1/company-files/{item_id}/preview",
         "/v1/company-files/{item_id}/download",
     }.issubset(paths)
+
+
+def test_every_authenticated_account_can_upload_company_files():
+    actor_parameter = inspect.signature(upload_company_file).parameters["actor"]
+    assert actor_parameter.default.dependency is get_actor
 
 
 def test_company_file_names_are_sanitized_and_invalid_names_rejected():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import html
 import time
 from collections import defaultdict, deque
 from datetime import datetime
@@ -11,7 +12,7 @@ import pytz
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.bot.work_report_handlers import claim_report_text
 from app.bot.tasks_handlers import TaskDraft, begin_task_draft, task_draft_keyboard, task_draft_text
@@ -24,6 +25,13 @@ from app.services import (
     unknown_request_service,
     voice_service,
 )
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal
+from app.core.enterprise_deps import actor_from_telegram_id
+from app.models.models import AssistantConversation, AssistantMessage, CompanyLibraryItem
+from app.services import enterprise_tools
+from app.services.attachment_storage import get_attachment
+from sqlalchemy import select
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -105,6 +113,42 @@ async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=
             parse_mode=parse_mode,
             reply_markup=reply_markup if not remaining else None,
         )
+
+
+async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> bool:
+    """Run the new tool stack only for a linked enterprise identity."""
+    if not settings.ENTERPRISE_TOOLS_ENABLED or not tg_id:
+        return False
+    async with AsyncSessionLocal() as db:
+        actor = await actor_from_telegram_id(tg_id, db)
+        if not actor:
+            await _answer(message, "OYUNS enterprise tools require a linked active platform account.")
+            return True
+        thread_key = str(getattr(message.chat, "id", tg_id))
+        conversation = await db.scalar(select(AssistantConversation).where(AssistantConversation.account_id == actor.account_id, AssistantConversation.channel == "telegram", AssistantConversation.external_thread_key == thread_key))
+        if not conversation:
+            conversation = AssistantConversation(account_id=actor.account_id, organization_id=actor.organization_id, channel="telegram", external_thread_key=thread_key, title=text[:120])
+            db.add(conversation); await db.flush()
+        rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation.id).order_by(AssistantMessage.id.desc()).limit(12))).scalars().all()
+        history = [{"role": row.role, "content": row.content} for row in reversed(rows)]
+        db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
+        result = await enterprise_tools.run_agent(db, actor, text=text, history=history, channel="telegram", conversation_id=conversation.id)
+        action = {"type": "task_update_preview", "payload": result["action"]} if result.get("action") else None
+        db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=result["answer"], action=action, sources=result["sources"]))
+        conversation.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Confirm update", callback_data=f"assistant-confirm:{result['action']['token']}")]]) if result.get("action") else None
+        await _answer(message, html.escape(result["answer"]), reply_markup=keyboard, parse_mode="HTML")
+        protected_links = [delivery.get("url") for delivery in result.get("deliveries", []) if delivery.get("kind") == "authenticated_link" and delivery.get("url")]
+        if protected_links:
+            await _answer(message, "Open protected file: " + "\n".join(protected_links), parse_mode=None)
+        for delivery in result.get("deliveries", []):
+            if delivery.get("kind") != "telegram_attachment" or not str(delivery.get("source_id", "")).startswith("company_file:"):
+                continue
+            item = await db.get(CompanyLibraryItem, int(str(delivery["source_id"]).split(":", 1)[1]))
+            if item and item.storage_key:
+                await message.answer_document(BufferedInputFile(await get_attachment(item.storage_key), filename=item.name))
+    return True
 
 
 def _should_answer_in_voice(
@@ -332,6 +376,8 @@ async def route_and_respond(
     tg_id: str | None,
     voice_mode: bool,
 ) -> None:
+    if await _enterprise_route(message, text, tg_id):
+        return
     started = time.monotonic()
     actor = _actor(employee, message=message, is_manager=is_manager, tg_id=tg_id)
     if not actor:
@@ -477,6 +523,22 @@ async def route_and_respond(
     answer = _generation_unavailable(decision.language)
     await _answer(message, answer)
     _remember(history_key, text, answer)
+
+
+@router.callback_query(F.data.startswith("assistant-confirm:"))
+async def confirm_enterprise_task_update(callback: CallbackQuery, tg_id: str | None = None):
+    token = (callback.data or "").split(":", 1)[-1]
+    if not tg_id:
+        await callback.answer("Access unavailable", show_alert=True); return
+    async with AsyncSessionLocal() as db:
+        actor = await actor_from_telegram_id(tg_id, db)
+        if not actor:
+            await callback.answer("Link an enterprise account first", show_alert=True); return
+        result = await enterprise_tools.confirm_task_update(db, actor, token, channel="telegram")
+        await db.commit()
+    await callback.answer("Updated" if result["status"] == "ok" else result["data"].get("reason", "Update unavailable"), show_alert=result["status"] != "ok")
+    if callback.message and result["status"] == "ok":
+        await callback.message.answer("Task update was applied.")
 
 
 @router.message(StateFilter(None, TaskDraft.confirming), F.voice)

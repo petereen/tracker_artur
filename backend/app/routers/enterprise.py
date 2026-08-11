@@ -57,6 +57,8 @@ from app.models.models import (
     Question,
     ReportComment,
     ResourceAllocation,
+    ResourceGrant,
+    ResourcePolicy,
     RoleAssignment,
     SavedView,
     Task,
@@ -86,6 +88,7 @@ from app.services.knowledge_service import rank_knowledge
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
+from app.services import enterprise_tools
 
 
 router = APIRouter()
@@ -566,6 +569,26 @@ class AssistantChatInput(BaseModel):
     text: str = Field(min_length=1, max_length=6000)
     conversation_id: int | None = None
     voice_mode: bool = False
+
+
+class AssistantToolRequest(BaseModel):
+    tool_name: Literal["file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool"]
+    arguments: dict = Field(default_factory=dict)
+
+
+class AssistantActionConfirmInput(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+
+class ResourceGrantInput(BaseModel):
+    principal_type: Literal["role", "team", "project", "account"]
+    principal_key: str = Field(min_length=1, max_length=128)
+
+
+class ResourcePolicyInput(BaseModel):
+    classification: Literal["public_link_safe", "internal", "confidential", "restricted"]
+    inherit_from_parent: bool = True
+    grants: list[ResourceGrantInput] = Field(default_factory=list, max_length=100)
 
 
 class ProjectRequestReview(BaseModel):
@@ -2866,15 +2889,21 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
     text = data.text.strip()
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-    workers = [{"id": employee.id, "name": employee.name, "timezone": employee.timezone, "is_active": employee.is_active} for employee in (await db.execute(select(Employee).where(Employee.is_active.is_(True)))).scalars().all()]
-    decision = await assistant_ai.classify_intent(text, now=datetime.now(ZoneInfo("Asia/Ulaanbaatar")), timezone_name="Asia/Ulaanbaatar", is_manager=actor.has_any_role(*MANAGEMENT_ROLES), workers=workers, voice_mode=data.voice_mode, chat_history=history, learned_contexts=[])
-    raw, action, sources = await _assistant_web_tool(db, decision, actor) if decision.selected_tool else ({}, None, [])
-    if action:
-        answer = f"“{action['payload']['title']}” даалгаврын ноорог бэлэн. Үүсгэхээс өмнө шалгана уу."
-    elif decision.selected_tool and decision.react_messages and decision.assistant_tool_message and decision.tool_call_id:
-        answer = await assistant_ai.synthesize_tool_result(request_messages=decision.react_messages, assistant_message=decision.assistant_tool_message, tool_call_id=decision.tool_call_id, raw_result=raw, voice_mode=data.voice_mode)
+    if settings.ENTERPRISE_TOOLS_ENABLED:
+        enterprise = await enterprise_tools.run_agent(db, actor, text=text, history=history, channel="web", conversation_id=conversation.id)
+        answer = enterprise["answer"]
+        action = {"type": "task_update_preview", "payload": enterprise["action"]} if enterprise.get("action") else None
+        sources = enterprise["sources"]
     else:
-        answer = decision.direct_answer or "Асуултаа арай дэлгэрэнгүй асууна уу."
+        workers = [{"id": employee.id, "name": employee.name, "timezone": employee.timezone, "is_active": employee.is_active} for employee in (await db.execute(select(Employee).where(Employee.is_active.is_(True)))).scalars().all()]
+        decision = await assistant_ai.classify_intent(text, now=datetime.now(ZoneInfo("Asia/Ulaanbaatar")), timezone_name="Asia/Ulaanbaatar", is_manager=actor.has_any_role(*MANAGEMENT_ROLES), workers=workers, voice_mode=data.voice_mode, chat_history=history, learned_contexts=[])
+        raw, action, sources = await _assistant_web_tool(db, decision, actor) if decision.selected_tool else ({}, None, [])
+        if action:
+            answer = f"“{action['payload']['title']}” даалгаврын ноорог бэлэн. Үүсгэхээс өмнө шалгана уу."
+        elif decision.selected_tool and decision.react_messages and decision.assistant_tool_message and decision.tool_call_id:
+            answer = await assistant_ai.synthesize_tool_result(request_messages=decision.react_messages, assistant_message=decision.assistant_tool_message, tool_call_id=decision.tool_call_id, raw_result=raw, voice_mode=data.voice_mode)
+        else:
+            answer = decision.direct_answer or "Асуултаа арай дэлгэрэнгүй асууна уу."
     if not answer:
         answer = "Одоогоор хариулт боловсруулж чадсангүй. Түр хүлээгээд дахин оролдоно уу."
     assistant_message = AssistantMessage(conversation_id=conversation.id, role="assistant", content=answer, action=action, sources=sources)
@@ -2884,6 +2913,53 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     return {"conversation_id": conversation.id, "message": {"id": assistant_message.id, "role": "assistant", "content": answer, "action": action, "sources": sources}}
 
 
+@router.post("/assistant/tools")
+async def assistant_tool(data: AssistantToolRequest, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Typed direct endpoint used by the web client and verification harness."""
+    result = await enterprise_tools.execute(db, actor, data.tool_name, data.arguments, channel="web", prompt="direct tool request")
+    await db.commit()
+    return result
+
+
+@router.get("/assistant/resources/{resource_type}/{resource_id}/policy")
+async def get_assistant_resource_policy(resource_type: Literal["company_file", "company_knowledge"], resource_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "manager"))):
+    policy = await db.scalar(select(ResourcePolicy).where(ResourcePolicy.organization_id == actor.organization_id, ResourcePolicy.resource_type == resource_type, ResourcePolicy.resource_id == resource_id))
+    if not policy:
+        return {"classification": "internal", "inherit_from_parent": True, "grants": []}
+    grants = list((await db.execute(select(ResourceGrant).where(ResourceGrant.policy_id == policy.id))).scalars().all())
+    return {"classification": policy.classification, "inherit_from_parent": policy.inherit_from_parent, "grants": [{"principal_type": grant.principal_type, "principal_key": grant.principal_key} for grant in grants]}
+
+
+@router.put("/assistant/resources/{resource_type}/{resource_id}/policy")
+async def update_assistant_resource_policy(resource_type: Literal["company_file", "company_knowledge"], resource_id: int, data: ResourcePolicyInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "manager"))):
+    if resource_type == "company_file":
+        source = await db.get(CompanyLibraryItem, resource_id)
+        valid = bool(source and source.organization_id == actor.organization_id)
+    else:
+        source = await db.get(CompanyKnowledge, resource_id)
+        valid = bool(source and source.organization_id == actor.organization_id)
+    if not valid:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    policy = await db.scalar(select(ResourcePolicy).where(ResourcePolicy.organization_id == actor.organization_id, ResourcePolicy.resource_type == resource_type, ResourcePolicy.resource_id == resource_id).with_for_update())
+    if not policy:
+        policy = ResourcePolicy(organization_id=actor.organization_id, resource_type=resource_type, resource_id=resource_id, created_by_account_id=actor.account_id)
+        db.add(policy); await db.flush()
+    policy.classification = data.classification; policy.inherit_from_parent = data.inherit_from_parent
+    await db.execute(ResourceGrant.__table__.delete().where(ResourceGrant.policy_id == policy.id))
+    for grant in data.grants:
+        db.add(ResourceGrant(policy_id=policy.id, **grant.model_dump()))
+    await record_change(db, actor=actor, topic="assistant_tools", aggregate_type="resource_policy", aggregate_id=policy.id, operation="updated", after={"resource_type": resource_type, "resource_id": resource_id, "classification": data.classification, "grant_count": len(data.grants)})
+    await db.commit()
+    return await get_assistant_resource_policy(resource_type, resource_id, db, actor)
+
+
+@router.post("/assistant/actions/confirm")
+async def confirm_assistant_action(data: AssistantActionConfirmInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    result = await enterprise_tools.confirm_task_update(db, actor, data.token, channel="web")
+    await db.commit()
+    return result
+
+
 @router.get("/assistant/conversations/{conversation_id}")
 async def assistant_conversation(conversation_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     conversation = await db.get(AssistantConversation, conversation_id)
@@ -2891,6 +2967,16 @@ async def assistant_conversation(conversation_id: int, db: AsyncSession = Depend
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation_id).order_by(AssistantMessage.id))).scalars().all()
     return {"id": conversation.id, "messages": [{"id": row.id, "role": row.role, "content": row.content, "action": row.action, "sources": row.sources, "created_at": row.created_at} for row in rows]}
+
+
+@router.delete("/assistant/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_assistant_conversation(conversation_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    conversation = await db.get(AssistantConversation, conversation_id)
+    if not conversation or conversation.account_id != actor.account_id or conversation.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    await db.delete(conversation)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/assistant/drafts")

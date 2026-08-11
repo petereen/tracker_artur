@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [ ] Deliver secure enterprise AI tool foundation: unified actors, strict tool schemas, ACL policies, encrypted audit records, and confirmation actions (`backend/app`)
+- [ ] Add hybrid company knowledge/file indexing, Office document extraction, and pgvector deployment/migration (`backend/app`, `backend/alembic`, `docker-compose.yml`)
+- [ ] Integrate file, statistics, project-management, and calendar tools into web and Telegram OYUNS conversations (`backend/app`, `frontend/src`)
+- [ ] Add enterprise-agent tool documentation, verification script, and regression coverage (`docs`, `backend/tests`)
+- [x] Allow every authenticated workspace account to upload company files while keeping file management actions role-scoped (`backend/app/routers/company_files.py`, `frontend/src/pages/CompanyFilesPage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/CompanyFilesPage.test.tsx`)
 - [x] Restore the Today work-hour timer's live interval, visibility resync, and instant clock-action state (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Add permission-scoped work-hour hierarchy analytics aggregation (`backend/app/routers/enterprise.py`, `backend/tests`)
 - [x] Add typed current/prior-period work-hour analytics queries and share-trend inputs (`frontend/src/api/enterprise.ts`)
@@ -119,6 +124,14 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Compile the enterprise assistant backend sources and complete the frontend production build (`backend/app`, `frontend`)
+- [x] Enforce enterprise resource policies in file access and add management policy/grant APIs (`backend/app/routers/company_files.py`, `backend/app/routers/enterprise.py`)
+- [x] Scope legacy knowledge administration per organization and enqueue article indexing (`backend/app/routers/knowledge.py`, `backend/app/worker.py`)
+- [x] Add pgvector migration, document extraction/indexing worker jobs, and enterprise tool service contracts (`backend/alembic/versions`, `backend/app/services/enterprise_tools.py`, `backend/app/worker.py`)
+- [x] Integrate feature-flagged web and Telegram enterprise assistant routing with persistent channel threads and task-update confirmation (`backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`, `frontend/src/components/OyunsAssistant.tsx`)
+- [x] Add enterprise tool contract tests, production verification script, and operator documentation (`backend/tests/test_enterprise_tools.py`, `backend/scripts/verify_enterprise_tools.py`, `docs/enterprise-agent-tools.md`)
+- [x] Add enterprise assistant persistence primitives for ACLs, indexed documents, encrypted tool audits, pending actions, and channel-aware conversations (`backend/app/models/models.py`)
+- [x] Allow every authenticated workspace account to upload company files while keeping file management actions role-scoped (`backend/app/routers/company_files.py`, `frontend/src/pages/CompanyFilesPage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/CompanyFilesPage.test.tsx`)
 - [x] Deliver the permission-scoped Remote vs. Office work-hour hierarchy donut chart with trends, synchronized interactions, localized states, and responsive styling (`backend/app/routers/enterprise.py`, `frontend/src/components/WorkHourHierarchyChart.tsx`, `frontend/src/pages/StatsWorkspacePage.tsx`)
 - [x] Restore the Today work-hour timer's live interval, visibility resync, and instant clock-action state (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Merge the remaining Alembic migration heads so backend deployment can run `alembic upgrade head` (`backend/alembic/versions`, `TODO.md`)

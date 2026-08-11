@@ -12,14 +12,15 @@ import os
 import socket
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 
 from app.core.database import AsyncSessionLocal
-from app.models.models import CalendarConnection, JobQueue
+from app.models.models import AssistantToolAudit, CalendarConnection, CompanyKnowledge, CompanyLibraryItem, JobQueue, KnowledgeDocument
 from app.observability.sentry import init_from_env
 from app.services.email_service import send_auth_email
 from app.services.secret_box import decrypt_secret
 from app.services.google_calendar import incremental_sync, register_watch, sync_task
+from app.services.enterprise_tools import index_company_file, index_company_knowledge
 
 
 log = logging.getLogger(__name__)
@@ -77,6 +78,20 @@ async def execute_job(job_id: int) -> None:
                 await register_watch(db, int(job.payload["connection_id"]))
             elif job.job_type == "calendar_inbound":
                 await incremental_sync(db, int(job.payload["connection_id"]))
+            elif job.job_type == "knowledge_index_file":
+                item = await db.get(CompanyLibraryItem, int(job.payload["item_id"]))
+                if item and item.kind == "file" and item.deleted_at is None:
+                    await index_company_file(db, item)
+            elif job.job_type == "knowledge_index_article":
+                entry = await db.get(CompanyKnowledge, int(job.payload["entry_id"]))
+                if entry and entry.is_active:
+                    await index_company_knowledge(db, entry)
+            elif job.job_type == "assistant_audit_purge":
+                now = datetime.now(timezone.utc)
+                rows = list((await db.execute(select(AssistantToolAudit).where(AssistantToolAudit.content_expires_at <= now, AssistantToolAudit.encrypted_payload.isnot(None)))).scalars().all())
+                for row in rows:
+                    row.encrypted_payload = None
+                await db.execute(AssistantToolAudit.__table__.delete().where(AssistantToolAudit.metadata_expires_at <= now))
             elif job.job_type in {"voice_transcription", "assistant_action"}:
                 raise RuntimeError(f"{job.job_type} provider is not configured")
             else:
@@ -106,6 +121,8 @@ async def run() -> None:
     logging.basicConfig(level=logging.INFO)
     init_from_env(server_name="tracker-artur-worker")
     last_watch_scan = datetime.min.replace(tzinfo=timezone.utc)
+    last_audit_purge = datetime.min.replace(tzinfo=timezone.utc)
+    last_index_scan = datetime.min.replace(tzinfo=timezone.utc)
     while True:
         now = datetime.now(timezone.utc)
         if now - last_watch_scan >= timedelta(minutes=15):
@@ -118,6 +135,29 @@ async def run() -> None:
                         db.add(JobQueue(job_type="calendar_watch", payload={"connection_id": connection.id}, dedup_key=dedup))
                 await db.commit()
             last_watch_scan = now
+        if now - last_audit_purge >= timedelta(days=1):
+            async with AsyncSessionLocal() as db:
+                dedup = f"assistant-audit-purge:{now.date().isoformat()}"
+                exists = await db.scalar(select(JobQueue.id).where(JobQueue.dedup_key == dedup))
+                if not exists:
+                    db.add(JobQueue(job_type="assistant_audit_purge", payload={}, dedup_key=dedup))
+                    await db.commit()
+            last_audit_purge = now
+        if now - last_index_scan >= timedelta(minutes=15):
+            async with AsyncSessionLocal() as db:
+                file_rows = list((await db.execute(select(CompanyLibraryItem).outerjoin(KnowledgeDocument, and_(KnowledgeDocument.organization_id == CompanyLibraryItem.organization_id, KnowledgeDocument.source_type == "company_file", KnowledgeDocument.source_id == CompanyLibraryItem.id)).where(CompanyLibraryItem.kind == "file", CompanyLibraryItem.deleted_at.is_(None), or_(KnowledgeDocument.id.is_(None), KnowledgeDocument.checksum != CompanyLibraryItem.checksum, KnowledgeDocument.index_status.in_(("pending", "failed")))).limit(100))).scalars().all())
+                for item in file_rows:
+                    key = f"knowledge-index-file:{item.id}:{item.checksum}"
+                    if not await db.scalar(select(JobQueue.id).where(JobQueue.dedup_key == key)):
+                        db.add(JobQueue(job_type="knowledge_index_file", payload={"item_id": item.id}, dedup_key=key))
+                article_rows = list((await db.execute(select(CompanyKnowledge).outerjoin(KnowledgeDocument, and_(KnowledgeDocument.organization_id == CompanyKnowledge.organization_id, KnowledgeDocument.source_type == "company_knowledge", KnowledgeDocument.source_id == CompanyKnowledge.id)).where(CompanyKnowledge.organization_id.isnot(None), CompanyKnowledge.is_active.is_(True), or_(KnowledgeDocument.id.is_(None), KnowledgeDocument.index_status.in_(("pending", "failed")))).limit(100))).scalars().all())
+                for entry in article_rows:
+                    key = f"knowledge-index-article-backfill:{entry.id}:{entry.updated_at.isoformat() if entry.updated_at else 'new'}"
+                    if not await db.scalar(select(JobQueue.id).where(JobQueue.dedup_key == key)):
+                        db.add(JobQueue(job_type="knowledge_index_article", payload={"entry_id": entry.id}, dedup_key=key))
+                if file_rows or article_rows:
+                    await db.commit()
+            last_index_scan = now
         job_id = await claim_job()
         if job_id is None:
             await asyncio.sleep(2)

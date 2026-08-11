@@ -9,7 +9,7 @@ services:
       - clamav_data:/var/lib/clamav
 
   db:
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     restart: unless-stopped
     environment:
       POSTGRES_DB: sales_tracker
@@ -43,6 +43,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ENTERPRISE_TOOLS_ENABLED: ${ENTERPRISE_TOOLS_ENABLED:-false}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       AGENT_RATES_API_KEY: ${AGENT_RATES_API_KEY:-}
       OPENAI_WHISPER_MODEL: ${OPENAI_WHISPER_MODEL:-gpt-4o-mini-transcribe}
       OPENAI_MONGOLIAN_TRANSCRIBE_MODEL: ${OPENAI_MONGOLIAN_TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
@@ -112,6 +114,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ENTERPRISE_TOOLS_ENABLED: ${ENTERPRISE_TOOLS_ENABLED:-false}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       AGENT_RATES_API_KEY: ${AGENT_RATES_API_KEY:-}
       OPENAI_WHISPER_MODEL: ${OPENAI_WHISPER_MODEL:-gpt-4o-mini-transcribe}
       OPENAI_MONGOLIAN_TRANSCRIBE_MODEL: ${OPENAI_MONGOLIAN_TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
@@ -133,6 +137,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
       SECRET_KEY: ${SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       BOT_TOKEN: ${BOT_TOKEN:-}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://erp.oyuns.mn}
       SMTP_HOST: ${SMTP_HOST:-smtp.resend.com}

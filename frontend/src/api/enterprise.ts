@@ -647,6 +647,10 @@ export function useAssistantChat() {
   return useMutation({ mutationFn: (input: { text: string; conversation_id?: number; voice_mode?: boolean }) => api.post('/v1/assistant/conversations', input).then((response) => response.data) })
 }
 
+export function useConfirmAssistantAction() {
+  return useMutation({ mutationFn: (token: string) => api.post('/v1/assistant/actions/confirm', { token }).then((response) => response.data) })
+}
+
 export async function transcribeAssistantVoice(recording: Blob) {
   const form = new FormData()
   form.append('file', recording, 'oyuns-question.webm')
@@ -782,6 +786,7 @@ export interface CompanyFilesPageData {
   breadcrumbs: { id: number; name: string }[]
   items: CompanyLibraryItem[]
   folders: { id: number; parent_id: number | null; name: string }[]
+  can_upload: boolean
   can_manage: boolean
   is_search: boolean
   is_trash: boolean

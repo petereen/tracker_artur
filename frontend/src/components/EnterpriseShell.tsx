@@ -123,7 +123,7 @@ export function EnterpriseShell() {
   const commandChannels = useMemo(() => [...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }].map((item) => ({ id: item.to, type: 'channel' as const, title: 'settings' in item ? String(item.label) : t(item.label), subtitle: 'Workspace section', icon: item.icon, run: () => navigate(item.to) })), [nav, navigate, t])
   const commandFeatures = useMemo(() => [
     { id: 'create-task', type: 'feature' as const, title: 'Create task', subtitle: 'Open a new task form', icon: CheckSquare2, run: () => navigate('/tasks?create=1') },
-    ...(roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role)) ? [{ id: 'upload-file', type: 'feature' as const, title: 'Upload file', subtitle: 'Open the company file uploader', icon: Upload, run: () => navigate('/company-files?upload=1') }] : []),
+    { id: 'upload-file', type: 'feature' as const, title: 'Upload file', subtitle: 'Open the company file uploader', icon: Upload, run: () => navigate('/company-files?upload=1') },
     ...(roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role)) ? [
       { id: 'workspace-settings', type: 'feature' as const, title: 'Workspace settings', subtitle: 'Branding and identity', icon: Settings2, run: () => navigate('/administration/workspace') },
       { id: 'collaboration-settings', type: 'feature' as const, title: 'Collaboration settings', subtitle: 'Check-ins and team workflows', icon: Users2, run: () => navigate('/administration/collaboration') },

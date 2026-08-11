@@ -17,6 +17,7 @@ vi.mock('../api/enterprise', () => ({
       breadcrumbs: [],
       items: [{ id: 1, parent_id: null, kind: 'folder', name: 'Policies', content_type: null, size: null, checksum: null, uploaded_by_account_id: 1, created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z', deleted_at: null }],
       folders: [{ id: 1, parent_id: null, name: 'Policies' }],
+      can_upload: true,
       can_manage: canManage,
       is_search: false,
       is_trash: false,
@@ -48,11 +49,11 @@ describe('company file library', () => {
     expect(screen.getByRole('button', { name: 'PoliciesХавтас' })).toBeInTheDocument()
   })
 
-  it('hides all mutation controls from ordinary members', () => {
+  it('keeps upload available while hiding management controls from ordinary members', () => {
     canManage = false
     render(<CompanyFilesPage />)
     expect(screen.queryByRole('button', { name: /Шинэ хавтас/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Файл оруулах/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Файл оруулах/ })).toBeEnabled()
     expect(screen.queryByRole('button', { name: /Policies нэр солих/ })).not.toBeInTheDocument()
   })
 

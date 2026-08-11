@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = ""
     GOOGLE_WEBHOOK_URL: str = ""
+    OPENAI_API_KEY: str = ""
+    OPENAI_ASSISTANT_MODEL: str = "gpt-5-mini"
+    ENTERPRISE_TOOLS_ENABLED: bool = False
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    OPENAI_EMBEDDING_DIMENSIONS: int = 1536
+    ASSISTANT_AUDIT_CONTENT_DAYS: int = 30
+    ASSISTANT_AUDIT_METADATA_DAYS: int = 365
 
     class Config:
         env_file = ".env"

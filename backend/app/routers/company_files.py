@@ -18,10 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
-from app.models.models import CompanyLibraryItem
+from app.models.models import CompanyLibraryItem, JobQueue
 from app.services.attachment_storage import delete_attachment, get_attachment, iter_attachment_chunks, put_attachment
 from app.services.enterprise_events import record_change
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
+from app.services.enterprise_tools import _policy_for_file, can_read_policy
 
 
 router = APIRouter()
@@ -169,6 +170,9 @@ async def _previewable_file(db: AsyncSession, item_id: int, actor: ActorContext)
     all_items = await _organization_items(db, actor.organization_id)
     if item.kind != "file" or item.deleted_at is not None or _has_deleted_ancestor(item, {candidate.id: candidate for candidate in all_items}):
         raise HTTPException(status_code=404, detail="File not found")
+    if not await can_read_policy(db, actor, await _policy_for_file(db, item)):
+        # Match a missing resource to avoid leaking restricted file names.
+        raise HTTPException(status_code=404, detail="File not found")
     return item
 
 
@@ -196,6 +200,12 @@ async def browse_company_files(
             items = [item for item in items if needle in item.name.casefold()]
         else:
             items = [item for item in items if item.parent_id == parent_id]
+    if not can_manage:
+        visible: list[CompanyLibraryItem] = []
+        for item in items:
+            if item.kind == "folder" or await can_read_policy(db, actor, await _policy_for_file(db, item)):
+                visible.append(item)
+        items = visible
     if sort == "newest":
         items.sort(key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     elif sort == "oldest":
@@ -211,6 +221,7 @@ async def browse_company_files(
         "breadcrumbs": _breadcrumbs(parent, by_id),
         "items": [_item_out(item) for item in items],
         "folders": [{"id": item.id, "parent_id": item.parent_id, "name": item.name} for item in folders],
+        "can_upload": True,
         "can_manage": can_manage,
         "is_search": bool(q and q.strip()),
         "is_trash": trash,
@@ -243,7 +254,7 @@ async def upload_company_file(
     files: list[UploadFile] = File(...),
     parent_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
+    actor: ActorContext = Depends(get_actor),
 ):
     await _active_folder(db, parent_id, actor)
     if not files:
@@ -293,6 +304,7 @@ async def upload_company_file(
         await db.flush()
         for item, scan_status, name, checksum in uploaded_items:
             await record_change(db, actor=actor, topic="company_files", aggregate_type="company_library_item", aggregate_id=item.id, operation="uploaded", after={"name": name, "parent_id": parent_id, "size": item.size, "checksum": checksum, "scan_status": scan_status})
+            db.add(JobQueue(job_type="knowledge_index_file", payload={"item_id": item.id}, dedup_key=f"knowledge-index-file:{item.id}:{checksum}"))
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()

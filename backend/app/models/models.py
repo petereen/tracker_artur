@@ -8,6 +8,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -23,6 +24,11 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func, text as sa_text
 
 from app.core.database import Base
+
+try:  # Keeps source imports usable before optional production dependencies install.
+    from pgvector.sqlalchemy import Vector
+except ModuleNotFoundError:  # pragma: no cover - production uses pgvector
+    Vector = None
 
 
 class Employee(Base):
@@ -170,6 +176,7 @@ class CompanyKnowledge(Base):
     __tablename__ = "company_knowledge"
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
     title = Column(Text, nullable=False)
     category = Column(Text)
     content = Column(Text, nullable=False)
@@ -958,6 +965,116 @@ class CompanyLibraryItem(Base):
     deleted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
 
 
+RESOURCE_CLASSIFICATIONS = ("public_link_safe", "internal", "confidential", "restricted")
+
+
+class ResourcePolicy(Base):
+    """Access policy shared by company files and curated knowledge."""
+
+    __tablename__ = "resource_policies"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "resource_type", "resource_id", name="uq_resource_policy_resource"),
+        CheckConstraint("classification IN ('public_link_safe','internal','confidential','restricted')", name="ck_resource_policy_classification"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    resource_type = Column(String(32), nullable=False)  # company_file | company_knowledge
+    resource_id = Column(Integer, nullable=False)
+    classification = Column(String(32), nullable=False, server_default="internal", default="internal")
+    inherit_from_parent = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ResourceGrant(Base):
+    __tablename__ = "resource_grants"
+    __table_args__ = (
+        CheckConstraint("principal_type IN ('role','team','project','account')", name="ck_resource_grant_principal"),
+        UniqueConstraint("policy_id", "principal_type", "principal_key", name="uq_resource_grant_principal"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    policy_id = Column(Integer, ForeignKey("resource_policies.id", ondelete="CASCADE"), nullable=False, index=True)
+    principal_type = Column(String(16), nullable=False)
+    principal_key = Column(String(128), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class KnowledgeDocument(Base):
+    """Index metadata; source bytes remain in the existing attachment stores."""
+
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "source_type", "source_id", name="uq_knowledge_document_source"),
+        Index("ix_knowledge_documents_index_status", "organization_id", "index_status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_type = Column(String(32), nullable=False)  # company_file | company_knowledge
+    source_id = Column(Integer, nullable=False)
+    title = Column(Text, nullable=False)
+    content_type = Column(Text)
+    checksum = Column(String(64))
+    index_status = Column(String(16), nullable=False, server_default="pending", default="pending")
+    indexed_at = Column(DateTime(timezone=True))
+    last_error = Column(Text)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (Index("ix_knowledge_chunks_document_position", "document_id", "position"),)
+
+    id = Column(Integer, primary_key=True)
+    document_id = Column(Integer, ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    position = Column(Integer, nullable=False)
+    locator = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    content = Column(Text, nullable=False)
+    search_vector = Column(Text)
+    embedding = Column(Vector(1536) if Vector else ARRAY(Float))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AssistantToolAudit(Base):
+    __tablename__ = "assistant_tool_audits"
+    __table_args__ = (Index("ix_assistant_tool_audits_expiry", "content_expires_at"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    conversation_id = Column(Integer, ForeignKey("assistant_conversations.id", ondelete="SET NULL"))
+    channel = Column(String(16), nullable=False)
+    tool_name = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False)
+    resource_refs = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    metadata = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    encrypted_payload = Column(Text)
+    content_expires_at = Column(DateTime(timezone=True), nullable=False)
+    metadata_expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AssistantPendingAction(Base):
+    __tablename__ = "assistant_pending_actions"
+    __table_args__ = (Index("ix_assistant_pending_actions_expiry", "expires_at"),)
+
+    id = Column(Integer, primary_key=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    expected_version = Column(Integer, nullable=False)
+    channel = Column(String(16), nullable=False)
+    payload = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    consumed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 Index(
     "uq_company_library_items_active_sibling_name",
     CompanyLibraryItem.organization_id,
@@ -1047,6 +1164,8 @@ class AssistantConversation(Base):
     id = Column(Integer, primary_key=True)
     account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    channel = Column(String(16), nullable=False, server_default="web", default="web")
+    external_thread_key = Column(String(128))
     title = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

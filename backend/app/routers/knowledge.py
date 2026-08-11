@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.config import settings
-from app.models.models import CompanyKnowledge
+from app.models.models import CompanyKnowledge, JobQueue, KnowledgeDocument, UserAccount
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -115,14 +115,30 @@ def _delete_attachment(stored_name: str | None) -> None:
         log.exception("knowledge.attachment_delete_failed stored_name=%s", stored_name)
 
 
+async def _organization_id(db: AsyncSession, legacy_user) -> int:
+    """Bridge the legacy knowledge admin gate to organization-scoped records."""
+    organization_id = await db.scalar(select(UserAccount.organization_id).where(UserAccount.legacy_admin_id == legacy_user.id)) if legacy_user.id else None
+    if organization_id:
+        return organization_id
+    organization_id = await db.scalar(select(UserAccount.organization_id).order_by(UserAccount.organization_id).limit(1))
+    if not organization_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No enterprise organization is configured")
+    return organization_id
+
+
+def _index_job(entry: CompanyKnowledge) -> JobQueue:
+    return JobQueue(job_type="knowledge_index_article", payload={"entry_id": entry.id}, dedup_key=f"knowledge-index-article:{entry.id}:{entry.updated_at.isoformat() if entry.updated_at else 'new'}")
+
+
 @router.get("", response_model=list[KnowledgeOut])
 async def list_knowledge(
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
+    organization_id = await _organization_id(db, user)
     rows = (
         await db.execute(
-            select(CompanyKnowledge).order_by(
+            select(CompanyKnowledge).where(CompanyKnowledge.organization_id == organization_id).order_by(
                 CompanyKnowledge.is_active.desc(),
                 CompanyKnowledge.updated_at.desc(),
                 CompanyKnowledge.id.desc(),
@@ -136,10 +152,12 @@ async def list_knowledge(
 async def create_knowledge(
     data: KnowledgeCreate,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
-    entry = CompanyKnowledge(**data.model_dump())
+    entry = CompanyKnowledge(organization_id=await _organization_id(db, user), **data.model_dump())
     db.add(entry)
+    await db.flush()
+    db.add(_index_job(entry))
     await db.commit()
     await db.refresh(entry)
     return entry
@@ -153,7 +171,7 @@ async def create_knowledge_with_attachment(
     is_active: bool = Form(default=True),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     """Create a knowledge entry and attach one supported file in the same request."""
     fallback_content = f"Хавсаргасан файл: {Path(file.filename or 'attachment').name}"
@@ -164,9 +182,11 @@ async def create_knowledge_with_attachment(
         is_active=is_active,
     )
     attachment = await _store_attachment(file)
-    entry = CompanyKnowledge(**data.model_dump(), **attachment)
+    entry = CompanyKnowledge(organization_id=await _organization_id(db, user), **data.model_dump(), **attachment)
     db.add(entry)
     try:
+        await db.flush()
+        db.add(_index_job(entry))
         await db.commit()
     except Exception:
         _delete_attachment(attachment["attachment_stored_name"])
@@ -180,13 +200,15 @@ async def update_knowledge(
     entry_id: int,
     data: KnowledgeUpdate,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     entry = await db.get(CompanyKnowledge, entry_id)
-    if not entry:
+    if not entry or entry.organization_id != await _organization_id(db, user):
         raise HTTPException(status_code=404, detail="knowledge entry not found")
     for key, value in data.model_dump().items():
         setattr(entry, key, value)
+    await db.flush()
+    db.add(_index_job(entry))
     await db.commit()
     await db.refresh(entry)
     return entry
@@ -197,16 +219,18 @@ async def replace_knowledge_attachment(
     entry_id: int,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     entry = await db.get(CompanyKnowledge, entry_id)
-    if not entry:
+    if not entry or entry.organization_id != await _organization_id(db, user):
         raise HTTPException(status_code=404, detail="knowledge entry not found")
     attachment = await _store_attachment(file)
     old_stored_name = entry.attachment_stored_name
     for key, value in attachment.items():
         setattr(entry, key, value)
     try:
+        await db.flush()
+        db.add(_index_job(entry))
         await db.commit()
     except Exception:
         _delete_attachment(attachment["attachment_stored_name"])
@@ -220,10 +244,10 @@ async def replace_knowledge_attachment(
 async def download_knowledge_attachment(
     entry_id: int,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     entry = await db.get(CompanyKnowledge, entry_id)
-    if not entry or not entry.attachment_stored_name or not entry.attachment_filename:
+    if not entry or entry.organization_id != await _organization_id(db, user) or not entry.attachment_stored_name or not entry.attachment_filename:
         raise HTTPException(status_code=404, detail="knowledge attachment not found")
     path = _attachment_directory() / entry.attachment_stored_name
     if not path.is_file():
@@ -240,16 +264,18 @@ async def download_knowledge_attachment(
 async def delete_knowledge_attachment(
     entry_id: int,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     entry = await db.get(CompanyKnowledge, entry_id)
-    if not entry:
+    if not entry or entry.organization_id != await _organization_id(db, user):
         raise HTTPException(status_code=404, detail="knowledge entry not found")
     stored_name = entry.attachment_stored_name
     entry.attachment_filename = None
     entry.attachment_stored_name = None
     entry.attachment_content_type = None
     entry.attachment_size = None
+    await db.flush()
+    db.add(_index_job(entry))
     await db.commit()
     await db.refresh(entry)
     _delete_attachment(stored_name)
@@ -260,12 +286,14 @@ async def delete_knowledge_attachment(
 async def delete_knowledge(
     entry_id: int,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     entry = await db.get(CompanyKnowledge, entry_id)
-    if not entry:
+    if not entry or entry.organization_id != await _organization_id(db, user):
         raise HTTPException(status_code=404, detail="knowledge entry not found")
     stored_name = entry.attachment_stored_name
+    if entry.organization_id:
+        await db.execute(KnowledgeDocument.__table__.delete().where(KnowledgeDocument.organization_id == entry.organization_id, KnowledgeDocument.source_type == "company_knowledge", KnowledgeDocument.source_id == entry.id))
     await db.delete(entry)
     await db.commit()
     _delete_attachment(stored_name)
