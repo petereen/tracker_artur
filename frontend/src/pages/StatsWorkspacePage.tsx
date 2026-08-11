@@ -1,15 +1,16 @@
 import { useMemo, useState, useTransition } from "react";
 import {
   AnalyticsMetric,
-  useAnalyticsDrilldown,
   useDailyAnalytics,
   useEnterpriseSummary,
   useWorkerDirectory,
 } from "../api/enterprise";
+import { KpiDrilldownCard } from "../components/KpiDrilldownCard";
 import { TimePeriodFilter } from "../components/TimePeriodFilter";
 import { EMPTY_ROLES, useAuthStore } from "../store/auth";
 import { HeatmapCalendar } from "../components/HeatmapCalendar";
 import { QueryRegion, Skeleton } from "../components/Loading";
+import { DropdownSelect } from "../components/DropdownSelect";
 
 function localDate(value: Date) {
   const offset = value.getTimezoneOffset() * 60_000;
@@ -40,7 +41,6 @@ export function StatsWorkspacePage() {
   const workers = useWorkerDirectory();
   const summary = useEnterpriseSummary(period, employeeId);
   const daily = useDailyAnalytics(period, employeeId);
-  const drilldown = useAnalyticsDrilldown(metric, period, employeeId);
   const days = daily.data?.days ?? [];
   const workingDays = days.filter((day: any) => {
     const weekday = new Date(`${day.date}T12:00:00`).getDay();
@@ -65,23 +65,21 @@ export function StatsWorkspacePage() {
         </div>
         <div className="toolbar-cluster">
           {canReview && (
-            <select
-              value={employeeId || ""}
-              onChange={(event) =>
+            <DropdownSelect
+              ariaLabel="Ажилтан сонгох"
+              value={employeeId ? String(employeeId) : ""}
+              onChange={(value) =>
                 startTransition(() =>
                   setEmployeeId(
-                    event.target.value ? Number(event.target.value) : undefined,
+                    value ? Number(value) : undefined,
                   ),
                 )
               }
-            >
-              <option value="">Байгууллагын нийлбэр</option>
-              {workers.data?.map((worker) => (
-                <option key={worker.id} value={worker.id}>
-                  {worker.name}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "", label: "Байгууллагын нийлбэр" },
+                ...(workers.data?.map((worker) => ({ value: String(worker.id), label: worker.name })) ?? []),
+              ]}
+            />
           )}
           <TimePeriodFilter
             preset={preset}
@@ -93,9 +91,6 @@ export function StatsWorkspacePage() {
               })
             }
           />
-          <select aria-label="KPI дэлгэрэнгүй" value={metric} onChange={(event) => setMetric(event.target.value as AnalyticsMetric)}>
-            <option value="utilization">Ашиглалт</option><option value="billable_ratio">Billable ratio</option><option value="task_completion">Даалгаврын гүйцэтгэл</option><option value="deadline_health">Deadline Health</option><option value="report_compliance">Тайлангийн биелэлт</option>{canSeeFinancials && <option value="budget_burn">Төсвийн зарцуулалт</option>}
-          </select>
         </div>
       </div>
       <QueryRegion
@@ -180,7 +175,13 @@ export function StatsWorkspacePage() {
               }
             />
           </section>
-          <section className="panel analytics-drilldown" aria-live="polite"><div className="panel-heading"><div><span className="eyebrow">KPI drill-down</span><h2>{metric.replaceAll("_", " ")}</h2></div><strong>{drilldown.data?.totals.average_value ?? "—"}%</strong></div>{drilldown.isLoading || drilldown.isFetching ? <Skeleton variant="table-row" count={4} /> : drilldown.isError ? <p role="alert">Энэ үзүүлэлтийн дэлгэрэнгүйг харах эрхгүй эсвэл өгөгдөл ачаалсангүй.</p> : drilldown.data?.items.length ? <div className="analytics-table"><header><span>Нэр</span><span>Үзүүлэлт</span><span>Тооцооллын эх өгөгдөл</span></header>{drilldown.data.items.map((item, index) => <article key={item.employee_id ?? item.project_id ?? index}><strong>{item.employee_name ?? item.project_name}</strong><span>{item.value == null ? "—" : `${item.value}%`}</span><small>{metric === "budget_burn" ? `${item.burned_amount} / ${item.budget_amount ?? "—"} ${item.currency}${item.unpriced_minutes ? ` · ${item.unpriced_minutes} минут үнэлгээгүй` : ""}` : `${item.worked_minutes ?? 0} минут · ${item.completed_tasks ?? 0}/${item.task_total ?? 0} даалгавар`}</small></article>)}</div> : <p>Сонгосон хугацаанд өгөгдөл алга.</p>}</section>
+          <KpiDrilldownCard
+            metric={metric}
+            onMetricChange={setMetric}
+            period={period}
+            employeeId={employeeId}
+            canSeeFinancials={canSeeFinancials}
+          />
         </>
       </QueryRegion>
     </div>

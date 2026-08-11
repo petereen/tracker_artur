@@ -1,6 +1,15 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Deliver folder ZIP downloads and persistent list/grid previews for the company file library (`backend/app/routers/company_files.py`, `frontend/src/pages/CompanyFilesPage.tsx`)
+- [x] Make Today worktime seconds, minutes, and hours update live while a work session is active (`frontend/src/pages/EnterpriseDashboardPage.tsx`)
+- [x] Remove task saved-view controls and place the filter button at the right edge of the task view modes (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
+- [x] Apply the shared modern dropdown menu to applicable workspace filters and selectors (`frontend/src/components/DropdownSelect.tsx`, `frontend/src`)
+- [x] Modernize the MGL/KPI summary dropdown with a pill trigger, animated menu, outside-click close, Escape handling, and reduced-motion fallback (`frontend/src/components/KpiDrilldownCard.tsx`, `frontend/src/index.css`)
+- [x] Refactor the KPI drilldown card layout with an in-card selector, animated view transitions, and mobile stacking (`frontend/src/components/KpiDrilldownCard.tsx`, `frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/index.css`)
+- [x] Preload and cache previous, current, and next calendar months so event items remain visible during month switching (`frontend/src/api/enterprise.ts`, `frontend/src/pages/CalendarWorkspacePage.tsx`)
+- [x] Consolidate missed check-in alerts and suppress them when no employee-specific check-in question is configured (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
+- [x] Deliver global Cmd/Ctrl+K command-bar search with permission-safe task, worker, file, workspace, and quick-action results (`backend/app/routers/enterprise.py`, `frontend/src/components/GlobalCommandBar.tsx`, `frontend/src`)
 - [x] Render task, project, and plan date ranges as continuous calendar blocks across intermediate dates and day separators (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Merge the two Alembic migration heads so Dokploy backend startup can run `alembic upgrade head` (`backend/alembic/versions`)
 - [x] Send immediate multi-channel review notifications to every assigned reviewer with assignee context, direct task links, and Telegram actions (`backend/app/routers/enterprise.py`, `backend/app/services/user_notifications.py`, `backend/app/services/reminder_service.py`, `backend/app/bot/keyboards.py`)
@@ -93,6 +102,12 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Make Today worktime seconds, minutes, and hours update live while a work session is active (`frontend/src/pages/EnterpriseDashboardPage.tsx`)
+- [x] Remove task saved-view controls and place the filter button at the right edge of the task view modes (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
+- [x] Apply the shared modern dropdown menu to applicable workspace filters and selectors (`frontend/src/components/DropdownSelect.tsx`, `frontend/src`)
+- [x] Create the shared pill-style dropdown component and use it for the reusable `Select` UI primitive (`frontend/src/components/DropdownSelect.tsx`, `frontend/src/components/ui.tsx`)
+- [x] Modernize the MGL/KPI summary dropdown with a pill trigger, animated menu, outside-click close, Escape handling, and reduced-motion fallback (`frontend/src/components/KpiDrilldownCard.tsx`, `frontend/src/index.css`)
+- [x] Refactor the KPI drilldown card layout with an in-card selector, animated view transitions, and mobile stacking (`frontend/src/components/KpiDrilldownCard.tsx`, `frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Allow task creators to delete tasks using their account audit identity when employee linkage is unavailable (`backend/app/routers/enterprise.py`)
 - [x] Add a square task Delete button beside the full-width Save button in task settings (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
 - [x] Merge the two Alembic migration heads so Dokploy backend startup can run `alembic upgrade head` (`backend/alembic/versions`)

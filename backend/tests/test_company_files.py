@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from app.core.enterprise_deps import ActorContext
 from app.main import app
 from app.models.models import Base
-from app.routers.company_files import _clean_name, _has_deleted_ancestor, _item_for_actor, browse_company_files
+from app.routers.company_files import _active_descendants, _clean_name, _has_deleted_ancestor, _item_for_actor, browse_company_files
 
 
 def actor(*roles: str, organization_id: int = 1) -> ActorContext:
@@ -25,6 +25,8 @@ def test_company_file_schema_and_routes_are_registered():
         "/v1/company-files/{item_id}",
         "/v1/company-files/{item_id}/restore",
         "/v1/company-files/{item_id}/permanent",
+        "/v1/company-files/{folder_id}/archive",
+        "/v1/company-files/{item_id}/preview",
         "/v1/company-files/{item_id}/download",
     }.issubset(paths)
 
@@ -61,3 +63,12 @@ def test_items_from_another_organization_are_not_visible():
     with pytest.raises(HTTPException) as exc:
         asyncio.run(_item_for_actor(FakeDb(), 7, actor("admin", organization_id=1)))
     assert exc.value.status_code == 404
+
+
+def test_archive_descendants_preserve_nested_paths_and_skip_deleted_items():
+    folder = SimpleNamespace(id=1, parent_id=None, kind="folder", name="Policies", deleted_at=None)
+    nested = SimpleNamespace(id=2, parent_id=1, kind="folder", name="2026", deleted_at=None)
+    file = SimpleNamespace(id=3, parent_id=2, kind="file", name="guide.txt", deleted_at=None)
+    deleted = SimpleNamespace(id=4, parent_id=1, kind="file", name="old.txt", deleted_at=datetime.now(timezone.utc))
+    descendants = _active_descendants(folder, [folder, nested, file, deleted])
+    assert [(item.id, path) for item, path in descendants] == [(2, "Policies/2026"), (3, "Policies/2026/guide.txt")]

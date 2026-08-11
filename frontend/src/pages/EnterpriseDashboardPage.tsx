@@ -336,13 +336,17 @@ export function EnterpriseDashboardPage() {
   const isSupervisor = roles.some((role) =>
     ["admin", "manager", "team_lead"].includes(role),
   );
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const timer = window.setInterval(() => tick((value) => value + 1), 1000);
-    return () => clearInterval(timer);
-  }, []);
   const active = clock.data?.active;
-  const clockNow = Date.now() + (clock.data?.server_time ? new Date(clock.data.server_time).getTime() - Date.now() : 0);
+  const [clientNow, setClientNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setClientNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  const serverOffset = clock.data?.server_time
+    ? new Date(clock.data.server_time).getTime() - Date.now()
+    : 0;
+  const clockNow = clientNow + serverOffset;
   const recoveredClock = Boolean(active && (active.local_work_date !== today || clockNow - new Date(active.started_at).getTime() > 16 * 60 * 60 * 1000));
   const working = active?.entry_type === "work";
   const onBreak = active?.entry_type === "break";

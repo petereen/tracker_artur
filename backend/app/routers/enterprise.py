@@ -7,6 +7,7 @@ import json
 import mimetypes
 import secrets
 import uuid
+from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
@@ -37,6 +38,7 @@ from app.models.models import (
     CheckinAnswer,
     Client,
     CompanyPlanItem,
+    CompanyLibraryItem,
     CompanyKnowledge,
     Employee,
     EmployeeQuestion,
@@ -668,9 +670,72 @@ async def _task_for_actor(db: AsyncSession, task_id: int, actor: ActorContext, *
             return task
     elif actor.employee_id:
         assigned = task.assignee_id == actor.employee_id or bool(await db.scalar(select(TaskAssignee.id).where(TaskAssignee.task_id == task.id, TaskAssignee.employee_id == actor.employee_id)))
-        if assigned:
+        reviewer = not write and task.workflow_status == "review" and (task.reviewer_id == actor.employee_id or bool(await db.scalar(select(TaskReviewer.id).where(TaskReviewer.task_id == task.id, TaskReviewer.employee_id == actor.employee_id))) )
+        if assigned or reviewer:
             return task
     raise HTTPException(status_code=404, detail="Task not found")
+
+
+def _search_score(query: str, *values: str | None) -> float:
+    """Small, deterministic fuzzy scorer used after organization-scoped filtering."""
+    needle = query.casefold().strip()
+    haystack = " ".join(value for value in values if value).casefold()
+    if not needle or not haystack:
+        return 0
+    if needle == haystack:
+        return 1.0
+    if any(part.startswith(needle) for part in haystack.split()):
+        return 0.95
+    if needle in haystack:
+        return 0.8
+    return SequenceMatcher(None, needle, haystack).ratio()
+
+
+@router.get("/search")
+async def global_search(
+    q: str = Query(min_length=1, max_length=120),
+    limit_per_group: int = Query(default=5, ge=1, le=10),
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    """Permission-safe command-bar search across live workspace entities."""
+    task_query = select(Task).where(Task.organization_id == actor.organization_id, Task.is_archived.is_(False))
+    if actor.has_any_role("client_auditor"):
+        scoped_projects = select(RoleAssignment.project_id).where(RoleAssignment.account_id == actor.account_id, RoleAssignment.project_id.isnot(None))
+        scoped_clients = select(RoleAssignment.client_id).where(RoleAssignment.account_id == actor.account_id, RoleAssignment.client_id.isnot(None))
+        task_query = task_query.where(or_(Task.project_id.in_(scoped_projects), Task.project_id.in_(select(Project.id).where(Project.client_id.in_(scoped_clients)))))
+    elif not actor.has_any_role(*MANAGEMENT_ROLES):
+        if not actor.employee_id:
+            task_query = task_query.where(False)
+        else:
+            contributor = select(TaskAssignee.task_id).where(TaskAssignee.employee_id == actor.employee_id)
+            reviewer = select(TaskReviewer.task_id).where(TaskReviewer.employee_id == actor.employee_id)
+            task_query = task_query.where(or_(Task.assignee_id == actor.employee_id, Task.id.in_(contributor), and_(Task.workflow_status == "review", or_(Task.reviewer_id == actor.employee_id, Task.id.in_(reviewer)))))
+    tasks = list((await db.execute(task_query)).scalars().all())
+    task_people = {row.id: row.name for row in (await db.execute(select(Employee))).scalars().all()}
+    projects = {row.id: row.name for row in (await db.execute(select(Project).where(Project.organization_id == actor.organization_id))).scalars().all()}
+    task_results = []
+    for task in tasks:
+        score = _search_score(q, task.title, task.description, projects.get(task.project_id), task_people.get(task.assignee_id))
+        if score >= 0.28:
+            task_results.append({"id": task.id, "type": "task", "title": task.title, "subtitle": projects.get(task.project_id), "score": score, "metadata": {"status": task.workflow_status, "assignee": task_people.get(task.assignee_id), "project": projects.get(task.project_id)}})
+
+    account_employees = select(UserAccount.employee_id).where(UserAccount.organization_id == actor.organization_id, UserAccount.employee_id.isnot(None), UserAccount.status == "active")
+    workers = list((await db.execute(select(Employee).where(Employee.id.in_(account_employees), Employee.is_active.is_(True)))).scalars().all())
+    worker_results = []
+    for worker in workers:
+        score = _search_score(q, worker.name, worker.job_title, worker.telegram_username)
+        if score >= 0.28:
+            worker_results.append({"id": worker.id, "type": "worker", "title": worker.name, "subtitle": worker.job_title or worker.telegram_username, "score": score, "metadata": {"avatar_url": (worker.metadata_json or {}).get("avatar_url"), "role": worker.job_title, "presence": "offline"}})
+
+    files = list((await db.execute(select(CompanyLibraryItem).where(CompanyLibraryItem.organization_id == actor.organization_id, CompanyLibraryItem.deleted_at.is_(None)))).scalars().all())
+    file_results = []
+    for item in files:
+        score = _search_score(q, item.name, item.content_type, item.kind)
+        if score >= 0.28:
+            file_results.append({"id": item.id, "type": "file", "title": item.name, "subtitle": item.content_type or item.kind, "score": score, "metadata": {"kind": item.kind, "size": item.size, "parent_id": item.parent_id}})
+    rank = lambda rows: sorted(rows, key=lambda row: (-row["score"], row["title"].casefold()))[:limit_per_group]
+    return {"query": q, "groups": {"tasks": rank(task_results), "workers": rank(worker_results), "files": rank(file_results)}}
 
 
 @router.get("/teams")
@@ -1041,6 +1106,16 @@ async def list_tasks(
     project_ids = {row.project_id for row in rows if row.project_id}
     projects = {row.id: row.name for row in (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()} if project_ids else {}
     return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "reviewer_name": people.get(row.reviewer_id), "reviewer_ids": reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])), "reviewer_names": [people[employee_id] for employee_id in reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])) if employee_id in people], "creator_name": people.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id)} for row in rows]
+
+
+@router.get("/tasks/{task_id}")
+async def get_task(task_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    task = await _task_for_actor(db, task_id, actor)
+    assignee_ids = list((await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all())
+    reviewer_ids = list((await db.execute(select(TaskReviewer.employee_id).where(TaskReviewer.task_id == task.id))).scalars().all())
+    people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_({*assignee_ids, *reviewer_ids, task.assignee_id, task.reviewer_id, task.created_by_id} - {None})))).scalars().all()} if assignee_ids or reviewer_ids or task.assignee_id or task.reviewer_id or task.created_by_id else {}
+    project = await db.get(Project, task.project_id) if task.project_id else None
+    return {**_task_out(task), "primary_owner_name": people.get(task.assignee_id), "reviewer_name": people.get(task.reviewer_id), "reviewer_ids": reviewer_ids or ([task.reviewer_id] if task.reviewer_id else []), "reviewer_names": [people[item] for item in reviewer_ids if item in people], "creator_name": people.get(task.created_by_id), "assignee_ids": assignee_ids, "assignee_names": [people[item] for item in assignee_ids if item in people], "project_name": project.name if project and project.organization_id == actor.organization_id else None}
 
 
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)

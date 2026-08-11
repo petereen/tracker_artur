@@ -25,6 +25,19 @@ def _schedule_weekdays(schedule) -> tuple[int, ...]:
     return tuple((schedule.weekdays if schedule else None) or _DEFAULT_SCHEDULE_WEEKDAYS)
 
 
+def _missed_job_groups(employees_and_schedules):
+    """Group missed-check-in jobs that share a local deadline.
+
+    A group is deliberately scheduled as one job so managers receive one
+    consolidated alert instead of one alert per employee.
+    """
+    groups = {}
+    for employee, schedule, tz, deadline, weekdays in employees_and_schedules:
+        key = (tz.zone, deadline.hour, deadline.minute, tuple(weekdays))
+        groups.setdefault(key, {"timezone": tz, "deadline": deadline, "weekdays": tuple(weekdays), "employee_ids": []})["employee_ids"].append(employee.id)
+    return groups.values()
+
+
 def _make_bot():
     from aiogram import Bot
     from aiogram.client.default import DefaultBotProperties
@@ -50,6 +63,7 @@ def _rebuild_jobs_unlocked():
     from app.services.digest_service import send_employee_morning_digest, send_employee_evening_digest
     md, ed = policy.morning_digest, policy.evening_digest
 
+    missed_job_groups = []
     for emp in employees:
         try:
             tz = pytz.timezone(emp.timezone)
@@ -105,9 +119,17 @@ def _rebuild_jobs_unlocked():
             hour=r2.hour, minute=r2.minute, day_of_week=dow, timezone=tz,
             id=f"reminder2_{emp.id}", replace_existing=True, args=[emp.id, 2])
 
+        missed_job_groups.append((emp, sch, tz, deadline, weekdays))
+
+    for group in _missed_job_groups(missed_job_groups):
+        employee_ids = sorted(group["employee_ids"])
+        group_key = sha256(
+            f"{group['timezone'].zone}:{group['deadline'].isoformat()}:{group['weekdays']}:{employee_ids}".encode()
+        ).hexdigest()[:16]
         scheduler.add_job(mark_missed_job, "cron",
-            hour=deadline.hour, minute=deadline.minute, day_of_week=dow, timezone=tz,
-            id=f"missed_{emp.id}", replace_existing=True, args=[emp.id])
+            hour=group["deadline"].hour, minute=group["deadline"].minute,
+            day_of_week=",".join(str(day - 1) for day in group["weekdays"]), timezone=group["timezone"],
+            id=f"missed_{group_key}", replace_existing=True, args=[employee_ids])
 
 
     if manager_settings:
@@ -348,12 +370,39 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str):
         await bot.session.close()
 
 
-async def mark_missed_job(employee_id: int):
-    from app.bot.db import mark_session_missed, get_manager_settings, get_session
-    from app.models.models import Employee
+async def mark_missed_job(employee_ids: list[int]):
+    """Mark and report missed check-ins as a single manager notification."""
+    from sqlalchemy import select
+    from app.bot.db import canonical_checkin_complete, get_manager_settings, get_questions, get_session, mark_session_missed
+    from app.models.models import Employee, SurveySession
     from app.services.manager_recipients import manager_telegram_ids
 
-    mark_session_missed(employee_id)
+    missing_names = []
+    with get_session() as s:
+        employees = [s.get(Employee, employee_id) for employee_id in employee_ids]
+
+    for employee in employees:
+        if not employee or not employee.is_active or not get_questions(employee.id):
+            continue
+        local_day = _local_today(employee.timezone)
+        if canonical_checkin_complete(employee.id, local_day):
+            continue
+        with get_session() as s:
+            completed_session = s.execute(
+                select(SurveySession.id).where(
+                    SurveySession.employee_id == employee.id,
+                    SurveySession.date == local_day,
+                    SurveySession.status == "completed",
+                )
+            ).scalar_one_or_none()
+        if completed_session:
+            continue
+        mark_session_missed(employee.id)
+        missing_names.append(employee.name)
+
+    if not missing_names:
+        return
+
     ms = get_manager_settings()
     recipients = manager_telegram_ids(ms)
     if not ms or not ms.alerts_enabled or not recipients:
@@ -361,12 +410,9 @@ async def mark_missed_job(employee_id: int):
 
     bot = _make_bot()
     try:
-        with get_session() as s:
-            emp = s.get(Employee, employee_id)
-            emp_name = emp.name if emp else None
-        if emp_name:
-            for recipient in recipients:
-                await bot.send_message(recipient, f"🚨 {emp_name} өнөөдөр чек-ин бөглөөгүй байна.")
+        message = "Өнөөдөр чек-ин бөглөөгүй ажилтан: " + ", ".join(missing_names)
+        for recipient in recipients:
+            await bot.send_message(recipient, message)
     finally:
         await bot.session.close()
 

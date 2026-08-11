@@ -1,4 +1,5 @@
 import React from 'react'
+import { DropdownSelect } from './DropdownSelect'
 
 // --- Badge ---
 type BadgeColor = 'green' | 'red' | 'yellow' | 'blue' | 'purple' | 'muted'
@@ -72,13 +73,7 @@ export function Select({ label, value, onChange, options, fullWidth }: {
   options: { value: string; label: string }[]; fullWidth?: boolean
 }) {
   return (
-    <div className={`flex flex-col gap-1.5 ${fullWidth ? 'w-full' : ''}`}>
-      {label && <label className="text-xs text-muted font-medium">{label}</label>}
-      <select value={value} onChange={(e) => onChange(e.target.value)}
-        className={`bg-surface2 border border-border rounded-lg px-3 py-2 text-text outline-none focus:border-accent transition-colors ${fullWidth ? 'w-full' : ''}`}>
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    </div>
+    <DropdownSelect label={label} value={value} onChange={onChange} options={options} fullWidth />
   )
 }
 

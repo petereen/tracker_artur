@@ -12,6 +12,7 @@ vi.mock('../api/enterprise', () => ({
   useWorkerDirectory: () => ({ data: [] }),
   useWorkerPerformance: () => ({ data: {} }),
   useWorkerProfile: () => ({ data: null, isLoading: false }),
+  useGlobalSearch: () => ({ data: undefined, isFetching: false }),
 }))
 vi.mock('./NotificationCenter', () => ({ NotificationCenter: () => null }))
 vi.mock('./OyunsAssistant', () => ({ OyunsAssistant: () => null }))

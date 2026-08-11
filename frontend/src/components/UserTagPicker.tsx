@@ -1,4 +1,5 @@
 import { X } from 'lucide-react'
+import { DropdownSelect } from './DropdownSelect'
 
 export type UserOption = { id: number; name: string }
 
@@ -19,15 +20,7 @@ export function UserTagPicker({ label, value, users, onChange, emptyLabel = 'Х�
   const selectValue = available.length ? '' : '__none__'
 
   return <div className="user-tag-picker">
-    <label>
-      {label}
-      <select value={selectValue} onChange={(event) => { if (event.target.value === '__all__') onChange(users.map((user) => user.id)); else if (event.target.value) add(Number(event.target.value)) }} disabled={!available.length}>
-        <option value="">{available.length ? emptyLabel : 'Бүх хэрэглэгч сонгогдсон'}</option>
-        {!available.length && <option value="__none__" hidden />}
-        {allLabel && <option value="__all__">{allLabel}</option>}
-        {available.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
-      </select>
-    </label>
+    <DropdownSelect label={label} value={selectValue} onChange={(next) => { if (next === '__all__') onChange(users.map((user) => user.id)); else if (next) add(Number(next)) }} disabled={!available.length} options={[{ value: '', label: available.length ? emptyLabel : 'Бүх хэрэглэгч сонгогдсон' }, ...(allLabel ? [{ value: '__all__', label: allLabel }] : []), ...available.map((user) => ({ value: String(user.id), label: user.name }))]} />
     {selected.length > 0 && <div className="user-tag-list" aria-label={`${label} сонгосон хэрэглэгчид`}>
       {selected.map((user) => <span className="user-tag" key={user.id}>
         <span>{user.name}</span>

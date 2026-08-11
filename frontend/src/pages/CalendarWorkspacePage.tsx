@@ -90,8 +90,7 @@ export function CalendarWorkspacePage() {
   const canPublish = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const isAdmin = roles.includes('admin')
   const days = useMemo(() => { const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1); first.setDate(first.getDate() - ((first.getDay() + 6) % 7)); return Array.from({ length: 42 }, (_, index) => { const day = new Date(first); day.setDate(day.getDate() + index); return day }) }, [anchor])
-  const period = { date_from: localDate(days[0]), date_to: localDate(days[41]) }
-  const events = useCalendarEvents(scope, period)
+  const events = useCalendarEvents(scope, anchor)
   const holidaySettings = useHolidaySettings(); const setCountry = useSetHolidayCountry()
   const createEntry = useCreateCalendarEntry(); const createTask = useCreateEnterpriseTask()
   const submit = async (event: React.FormEvent) => { event.preventDefault(); const starts_at = new Date(form.starts_at).toISOString(); const ends_at = new Date(form.ends_at).toISOString(); if (kind === 'task') await createTask.mutateAsync({ title: form.title, description: form.description || null, start_at: starts_at, deadline_at: ends_at, workflow_status: 'to_do' }); else await createEntry.mutateAsync({ kind, visibility: form.visibility, title: form.title, description: form.description || null, starts_at, ends_at, remind_at: kind === 'reminder' ? starts_at : null }); setForm({ title: '', description: '', starts_at: '', ends_at: '', visibility: 'private' }); setCreating(false) }

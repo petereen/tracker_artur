@@ -1,10 +1,20 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { acceptSession, api, refreshAccessToken } from './client'
 import { useAuthStore, Actor } from '../store/auth'
 
 export type WorkflowStatus = 'backlog' | 'to_do' | 'in_progress' | 'review' | 'done' | 'cancelled'
+export type SearchEntityType = 'task' | 'worker' | 'file'
+export interface GlobalSearchResult {
+  id: number
+  type: SearchEntityType
+  title: string
+  subtitle: string | null
+  score: number
+  metadata: { status?: WorkflowStatus; assignee?: string | null; project?: string | null; avatar_url?: string | null; role?: string | null; presence?: string; kind?: 'file' | 'folder'; size?: number | null; parent_id?: number | null }
+}
+export interface GlobalSearchResponse { query: string; groups: { tasks: GlobalSearchResult[]; workers: GlobalSearchResult[]; files: GlobalSearchResult[] } }
 
 export interface EnterpriseTask {
   id: number
@@ -177,6 +187,19 @@ export function useEnterpriseLogout() {
 
 export interface DateRange { date_from: string; date_to: string }
 
+function localCalendarDate(year: number, month: number, day: number) {
+  return `${year.toString().padStart(4, '0')}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
+}
+
+function calendarMonthPeriod(anchor: Date, offset: number): DateRange {
+  const month = new Date(anchor.getFullYear(), anchor.getMonth() + offset, 1)
+  const lastDay = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+  return {
+    date_from: localCalendarDate(month.getFullYear(), month.getMonth(), 1),
+    date_to: localCalendarDate(month.getFullYear(), month.getMonth(), lastDay),
+  }
+}
+
 export function useEnterpriseSummary(period?: DateRange, employeeId?: number) {
   return useQuery({ queryKey: ['v1', 'analytics', period, employeeId], queryFn: () => api.get('/v1/analytics/summary', { params: { ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data) })
 }
@@ -224,6 +247,12 @@ export function useArchiveProject() {
 export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; priority?: 1 | 2 | 3; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' | 'delegated' }
 export function useEnterpriseTasks(projectId?: number, period?: Partial<DateRange>, filters: TaskFilters = {}) {
   return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId, period, filters], queryFn: () => api.get('/v1/tasks', { params: { ...(projectId ? { project_id: projectId } : {}), ...period, ...filters } }).then((response) => response.data) })
+}
+export function useEnterpriseTask(id?: number) {
+  return useQuery<EnterpriseTask>({ queryKey: ['v1', 'tasks', id], queryFn: () => api.get(`/v1/tasks/${id}`).then((response) => response.data), enabled: Boolean(id) })
+}
+export function useGlobalSearch(query: string) {
+  return useQuery<GlobalSearchResponse>({ queryKey: ['v1', 'search', query], queryFn: () => api.get('/v1/search', { params: { q: query, limit_per_group: 5 } }).then((response) => response.data), enabled: query.trim().length > 0, staleTime: 30_000 })
 }
 
 export function useDeadlines(enabled = true) {
@@ -378,8 +407,32 @@ export function useAnalyticsDrilldown(metric: AnalyticsMetric | undefined, perio
 
 export interface PersonalTimeBlock { id: number; title: string; starts_at: string; ends_at: string; task_id: number | null; version: number }
 
-export function useCalendarEvents(scope: 'private' | 'corporate', period: DateRange) {
-  return useQuery<any>({ queryKey: ['v1', 'calendar', scope, period], queryFn: () => api.get('/v1/calendar/events', { params: { scope, ...period } }).then((response) => response.data) })
+export function useCalendarEvents(scope: 'private' | 'corporate', anchor: Date) {
+  const months = [-1, 0, 1].map((offset) => {
+    const month = new Date(anchor.getFullYear(), anchor.getMonth() + offset, 1)
+    return { month, period: calendarMonthPeriod(anchor, offset) }
+  })
+  const queries = useQueries({
+    queries: months.map(({ month, period }) => ({
+      queryKey: ['v1', 'calendar', scope, 'month', month.getFullYear(), month.getMonth()],
+      queryFn: () => api.get('/v1/calendar/events', { params: { scope, ...period } }).then((response) => response.data),
+      staleTime: 5 * 60 * 1000,
+    })),
+  })
+  const data = queries.reduce((combined, query) => {
+    const monthData = query.data
+    if (!monthData) return combined
+    for (const key of ['tasks', 'projects', 'plans', 'entries', 'holidays', 'time_blocks']) {
+      combined[key] = [...combined[key], ...(monthData[key] ?? [])]
+    }
+    return combined
+  }, { tasks: [], projects: [], plans: [], entries: [], holidays: [], time_blocks: [] } as Record<string, any[]>)
+  return {
+    data,
+    isLoading: queries.some((query) => query.isLoading),
+    isFetching: queries.some((query) => query.isFetching),
+    isError: queries.some((query) => query.isError),
+  }
 }
 
 export function useHolidaySettings() {
@@ -664,12 +717,30 @@ export function useDeleteCompanyItemPermanently() {
 
 export async function downloadCompanyFile(item: CompanyLibraryItem) {
   const response = await api.get(`/v1/company-files/${item.id}/download`, { responseType: 'blob' })
-  const url = URL.createObjectURL(response.data)
+  saveCompanyBlob(response.data, item.name)
+}
+
+export function saveCompanyBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = item.name
+  link.download = name
   document.body.appendChild(link)
   link.click()
   link.remove()
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+export async function downloadCompanyFolder(folder: CompanyLibraryItem, onProgress?: () => void) {
+  const response = await api.get(`/v1/company-files/${folder.id}/archive`, { responseType: 'blob', timeout: 10 * 60 * 1000, onDownloadProgress: () => onProgress?.() })
+  saveCompanyBlob(response.data, `${folder.name}.zip`)
+}
+
+export async function getCompanyFileBlob(item: CompanyLibraryItem) {
+  return (await api.get(`/v1/company-files/${item.id}/download`, { responseType: 'blob' })).data as Blob
+}
+
+export async function getCompanyFilePreview(item: CompanyLibraryItem) {
+  const response = await api.get(`/v1/company-files/${item.id}/preview`, { responseType: 'blob' })
+  return { blob: response.data as Blob, truncated: response.headers['x-preview-truncated'] === 'true' }
 }

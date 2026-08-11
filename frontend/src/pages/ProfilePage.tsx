@@ -7,6 +7,7 @@ import {
   useUpdateProfile,
   useUploadAvatar,
 } from "../api/enterprise";
+import { DropdownSelect } from "../components/DropdownSelect";
 
 const MEMOJI_OPTIONS = Array.from(
   { length: 10 },
@@ -229,19 +230,7 @@ export function ProfilePage() {
               />
             </label>
           )}
-          <label>
-            Хэл
-            <select
-              value={form.locale}
-              onChange={(event) =>
-                setForm({ ...form, locale: event.target.value })
-              }
-            >
-              <option value="mn">Монгол</option>
-              <option value="en">English</option>
-              <option value="ru">Русский</option>
-            </select>
-          </label>
+          <DropdownSelect label="Хэл" value={form.locale} onChange={(locale) => setForm({ ...form, locale })} options={[{ value: "mn", label: "Монгол" }, { value: "en", label: "English" }, { value: "ru", label: "Русский" }]} fullWidth />
           <div className="profile-actions">
             <button
               className="primary-action profile-save"

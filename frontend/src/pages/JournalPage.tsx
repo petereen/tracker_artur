@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Badge, Card, PageHeader } from '../components/ui'
 import { useAnswers, useEmployees, useWorkReports } from '../api/hooks'
+import { DropdownSelect } from '../components/DropdownSelect'
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
   daily: 'Өдрийн тайлан',
@@ -73,22 +74,14 @@ export function JournalPage() {
                 className={`px-2.5 py-1.5 rounded text-xs cursor-pointer border-none ${range === key ? 'bg-accent text-white' : 'bg-transparent text-muted'}`}>{label}</button>
             ))}
           </div>
-          <select value={empFilter} onChange={(e) => setEmpFilter(e.target.value)}
-            className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">
-            <option value="">Бүх ажилтан</option>
-            {employees.map((e: any) => <option key={e.id} value={e.id}>{e.name}</option>)}
-          </select>
+          <DropdownSelect ariaLabel="Ажилтан сонгох" value={empFilter} onChange={setEmpFilter} options={[{ value: '', label: 'Бүх ажилтан' }, ...employees.map((e: any) => ({ value: String(e.id), label: e.name }))]} />
           <input type="date" value={dateFrom} onChange={(e) => { setRange('custom'); setDateFrom(e.target.value) }}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
           <input type="date" value={dateTo} onChange={(e) => { setRange('custom'); setDateTo(e.target.value) }}
             className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none" />
           {tab === 'reports' && <>
-            <select value={reportType} onChange={(e) => setReportType(e.target.value)} className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">
-              <option value="">Бүх төрөл</option>{Object.entries(REPORT_TYPE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-            </select>
-            <select value={reportStatus} onChange={(e) => setReportStatus(e.target.value)} className="bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none">
-              <option value="">Бүх төлөв</option>{Object.entries(REPORT_STATUS_LABELS).filter(([key]) => key !== 'deleted').map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-            </select>
+            <DropdownSelect ariaLabel="Тайлангийн төрөл сонгох" value={reportType} onChange={setReportType} options={[{ value: '', label: 'Бүх төрөл' }, ...Object.entries(REPORT_TYPE_LABELS).map(([value, label]) => ({ value, label }))]} />
+            <DropdownSelect ariaLabel="Тайлангийн төлөв сонгох" value={reportStatus} onChange={setReportStatus} options={[{ value: '', label: 'Бүх төлөв' }, ...Object.entries(REPORT_STATUS_LABELS).filter(([key]) => key !== 'deleted').map(([value, label]) => ({ value, label }))]} />
           </>}
           <div className="ml-auto text-[13px] text-muted">{tab === 'answers' ? rows.length : reports.length} бичлэг</div>
         </div>

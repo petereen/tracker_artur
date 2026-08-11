@@ -4,10 +4,12 @@ import hashlib
 import mimetypes
 import uuid
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -17,7 +19,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
 from app.models.models import CompanyLibraryItem
-from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
+from app.services.attachment_storage import delete_attachment, get_attachment, iter_attachment_chunks, put_attachment
 from app.services.enterprise_events import record_change
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 
@@ -26,6 +28,11 @@ router = APIRouter()
 MANAGEMENT_ROLES = ("admin", "manager", "team_lead")
 BLOCKED_CONTENT_TYPES = {"application/x-msdownload", "application/x-sh", "application/x-executable"}
 BLOCKED_EXTENSIONS = (".exe", ".dll", ".bat", ".cmd", ".sh")
+ARCHIVE_MAX_FILES = 500
+ARCHIVE_MAX_BYTES = 1024 * 1024 * 1024
+TEXT_PREVIEW_EXTENSIONS = {".js", ".ts", ".json", ".md", ".txt", ".csv"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif"}
+TEXT_PREVIEW_MAX_BYTES = 64 * 1024
 
 
 class FolderInput(BaseModel):
@@ -130,6 +137,39 @@ def _breadcrumbs(folder: CompanyLibraryItem | None, by_id: dict[int, CompanyLibr
         result.append({"id": current.id, "name": current.name})
         current = by_id.get(current.parent_id) if current.parent_id is not None else None
     return list(reversed(result))
+
+
+def _active_descendants(folder: CompanyLibraryItem, all_items: list[CompanyLibraryItem]) -> list[tuple[CompanyLibraryItem, str]]:
+    """Return active descendants paired with a safe ZIP-relative path."""
+    by_id = {item.id: item for item in all_items}
+    children: dict[int, list[CompanyLibraryItem]] = {}
+    for candidate in all_items:
+        if candidate.parent_id is not None:
+            children.setdefault(candidate.parent_id, []).append(candidate)
+    results: list[tuple[CompanyLibraryItem, str]] = []
+    stack: list[tuple[CompanyLibraryItem, PurePosixPath, set[int]]] = [(folder, PurePosixPath(folder.name), {folder.id})]
+    while stack:
+        current, path, ancestors = stack.pop()
+        for child in children.get(current.id, []):
+            if child.id in ancestors or child.deleted_at is not None or _has_deleted_ancestor(child, by_id):
+                continue
+            child_path = path / child.name
+            results.append((child, str(child_path)))
+            if child.kind == "folder":
+                stack.append((child, child_path, ancestors | {child.id}))
+    return results
+
+
+def _file_extension(item: CompanyLibraryItem) -> str:
+    return PurePosixPath(item.name).suffix.casefold()
+
+
+async def _previewable_file(db: AsyncSession, item_id: int, actor: ActorContext) -> CompanyLibraryItem:
+    item = await _item_for_actor(db, item_id, actor)
+    all_items = await _organization_items(db, actor.organization_id)
+    if item.kind != "file" or item.deleted_at is not None or _has_deleted_ancestor(item, {candidate.id: candidate for candidate in all_items}):
+        raise HTTPException(status_code=404, detail="File not found")
+    return item
 
 
 @router.get("")
@@ -377,16 +417,97 @@ async def permanently_delete_company_item(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("/{folder_id}/archive")
+async def download_company_folder_archive(
+    folder_id: int,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    """Stream an organization-scoped folder as a ZIP without buffering the archive."""
+    folder = await _active_folder(db, folder_id, actor)
+    assert folder is not None
+    descendants = _active_descendants(folder, await _organization_items(db, actor.organization_id))
+    files = [(item, path) for item, path in descendants if item.kind == "file"]
+    total_bytes = sum(item.size or 0 for item, _ in files)
+    if len(files) > ARCHIVE_MAX_FILES or total_bytes > ARCHIVE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Folder archive exceeds the {ARCHIVE_MAX_FILES}-file or 1 GB limit",
+        )
+
+    try:
+        import zipstream
+    except ImportError as exc:  # pragma: no cover - deployment dependency guard
+        raise HTTPException(status_code=503, detail="Folder archive support is temporarily unavailable") from exc
+
+    archive = zipstream.ZipStream(compress_type=zipstream.ZIP_DEFLATED)
+    archive.mkdir(f"{folder.name}/")
+    for item, path in descendants:
+        if item.kind == "folder":
+            archive.mkdir(f"{path}/")
+        else:
+            archive.add(iter_attachment_chunks(item.storage_key), arcname=path)
+    encoded_name = quote(f"{folder.name}.zip", safe="")
+    return StreamingResponse(
+        archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+            "X-Content-Type-Options": "nosniff",
+            "X-Archive-File-Count": str(len(files)),
+        },
+    )
+
+
+@router.get("/{item_id}/preview")
+async def preview_company_file(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    """Return a bounded text snippet or a small image for authenticated previews."""
+    item = await _previewable_file(db, item_id, actor)
+    extension = _file_extension(item)
+    if extension in TEXT_PREVIEW_EXTENSIONS:
+        content = await get_attachment(item.storage_key)
+        truncated = len(content) > TEXT_PREVIEW_MAX_BYTES
+        snippet = content[:TEXT_PREVIEW_MAX_BYTES].decode("utf-8", errors="replace")
+        return Response(
+            snippet,
+            media_type="text/plain; charset=utf-8",
+            headers={"X-Preview-Truncated": str(truncated).lower(), "X-Content-Type-Options": "nosniff"},
+        )
+    if extension not in IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Preview is unavailable for this file type")
+    content = await get_attachment(item.storage_key)
+    # SVG and animated GIF stay intact: rasterising them would remove their useful fidelity.
+    if extension in {".svg", ".gif"}:
+        return Response(content, media_type=item.content_type or mimetypes.guess_type(item.name)[0] or "image/*", headers={"X-Content-Type-Options": "nosniff"})
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        image = Image.open(BytesIO(content))
+        image.thumbnail((480, 320))
+        buffer = BytesIO()
+        output_format = "PNG" if image.mode in {"RGBA", "LA"} else "JPEG"
+        if output_format == "JPEG" and image.mode != "RGB":
+            image = image.convert("RGB")
+        image.save(buffer, format=output_format, optimize=True)
+        media_type = "image/png" if output_format == "PNG" else "image/jpeg"
+        return Response(buffer.getvalue(), media_type=media_type, headers={"X-Content-Type-Options": "nosniff"})
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Image preview could not be generated") from exc
+
+
 @router.get("/{item_id}/download")
 async def download_company_file(
     item_id: int,
     db: AsyncSession = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ):
-    item = await _item_for_actor(db, item_id, actor)
-    all_items = await _organization_items(db, actor.organization_id)
-    if item.kind != "file" or item.deleted_at is not None or _has_deleted_ancestor(item, {candidate.id: candidate for candidate in all_items}):
-        raise HTTPException(status_code=404, detail="File not found")
+    item = await _previewable_file(db, item_id, actor)
     content = await get_attachment(item.storage_key)
     encoded_name = quote(item.name, safe="")
     return Response(

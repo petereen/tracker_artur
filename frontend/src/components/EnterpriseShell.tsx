@@ -1,11 +1,10 @@
 import { Suspense, useEffect, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { AnimatePresence, motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import {
   BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal, KeyRound,
-  FolderArchive, LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X,
+  FolderArchive, LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { useActor, useBrandingSettings, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
@@ -13,6 +12,7 @@ import { periodFromPreset } from './TimePeriodFilter'
 import { OyunsAssistant } from './OyunsAssistant'
 import { NotificationCenter } from './NotificationCenter'
 import { WorkspaceSkeleton } from './Loading'
+import { GlobalCommandBar } from './GlobalCommandBar'
 
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
@@ -120,6 +120,17 @@ export function EnterpriseShell() {
   const visibleWorkers = useMemo(() => (workers.data ?? []).filter((worker) => worker.name.toLowerCase().includes(workerSearch.toLowerCase())), [workerSearch, workers.data])
   const title = TITLES[location.pathname] ?? 'OYUNS Workspace'
   const logo = theme === 'dark' ? branding.data?.dark_logo : branding.data?.light_logo
+  const commandChannels = useMemo(() => [...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }].map((item) => ({ id: item.to, type: 'channel' as const, title: 'settings' in item ? String(item.label) : t(item.label), subtitle: 'Workspace section', icon: item.icon, run: () => navigate(item.to) })), [nav, navigate, t])
+  const commandFeatures = useMemo(() => [
+    { id: 'create-task', type: 'feature' as const, title: 'Create task', subtitle: 'Open a new task form', icon: CheckSquare2, run: () => navigate('/tasks?create=1') },
+    ...(roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role)) ? [{ id: 'upload-file', type: 'feature' as const, title: 'Upload file', subtitle: 'Open the company file uploader', icon: Upload, run: () => navigate('/company-files?upload=1') }] : []),
+    ...(roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role)) ? [
+      { id: 'workspace-settings', type: 'feature' as const, title: 'Workspace settings', subtitle: 'Branding and identity', icon: Settings2, run: () => navigate('/administration/workspace') },
+      { id: 'collaboration-settings', type: 'feature' as const, title: 'Collaboration settings', subtitle: 'Check-ins and team workflows', icon: Users2, run: () => navigate('/administration/collaboration') },
+      { id: 'access-settings', type: 'feature' as const, title: 'Access control', subtitle: 'Manage workspace access', icon: Settings2, run: () => navigate('/administration/access') },
+    ] : []),
+    { id: 'profile', type: 'feature' as const, title: 'Open profile', subtitle: 'Manage your account', icon: UserCircle2, run: () => navigate('/profile') },
+  ], [navigate, roles])
 
   return (
     <RealtimeProvider>
@@ -172,23 +183,7 @@ export function EnterpriseShell() {
         </nav>
         <aside className={`workers-drawer ${workersOpen ? 'open' : ''}`} aria-label="Ажилтны төлөв"><button className="workers-toggle" onClick={() => setWorkersOpen((value) => !value)} aria-label={workersOpen ? 'Ажилтны жагсаалт хаах' : 'Ажилтны жагсаалт нээх'}>{workersOpen ? <ChevronRight /> : <><ChevronLeft /><Users2 /></>}</button>{workersOpen && <div className="workers-content"><header><div><span className="eyebrow">Live presence</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)}><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={worker.avatar_url} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Ажлын алба оруулаагүй'}</p>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer"><Send size={14} />Telegram-аар чатлах</a>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div>}</aside>
         <OyunsAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
-        <AnimatePresence>
-          {commandOpen && (
-            <motion.div className="command-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setCommandOpen(false)}>
-              <motion.div className="command-panel" role="dialog" aria-modal="true" aria-label="Шуурхай навигаци" initial={{ opacity: 0, scale: .96, y: -12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .96, y: -12 }} transition={{ type: 'spring', bounce: 0, duration: .35 }} onMouseDown={(event) => event.stopPropagation()}>
-                <div className="command-input"><Search size={18} /><input autoFocus placeholder="Төсөл, даалгавар эсвэл хэсэг хайх…" /></div>
-                <div className="command-list">{[...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }, ...(roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role)) ? [
-                  { to: '/administration/workspace', label: 'Logo оруулах', icon: Settings2, roles: [], settings: true },
-                  { to: '/administration/collaboration', label: 'Чек ин тохиргоо', icon: Users2, roles: [], settings: true },
-                  { to: '/administration/access', label: 'Хандалтын удирдлага', icon: Users2, roles: [], settings: true },
-                  { to: '/administration/automation', label: 'Автоматжуулалт ба интеграци', icon: CalendarDays, roles: [], settings: true },
-                  { to: '/administration/admin-access', label: 'Админ хандалт', icon: KeyRound, roles: [], settings: true },
-                  { to: '/administration/oyuns', label: 'OYUNS agent-ын тохиргоо', icon: Sparkles, roles: [], settings: true },
-                ] : [])].map((item) => { const Icon = item.icon; return <button key={item.to} onClick={() => { navigate(item.to); setCommandOpen(false) }}><Icon size={17} />{'settings' in item ? item.label : t(item.label)}<span>{t('action.open')}</span></button> })}</div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <GlobalCommandBar open={commandOpen} onClose={() => setCommandOpen(false)} accountId={actorQuery.data?.id} channels={commandChannels} features={commandFeatures} onWorker={(id) => { setSelectedWorker(id); setWorkersOpen(true) }} />
       </div>
     </RealtimeProvider>
   )

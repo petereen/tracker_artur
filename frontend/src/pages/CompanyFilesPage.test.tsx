@@ -8,6 +8,9 @@ const mutation = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }
 
 vi.mock('../api/enterprise', () => ({
   downloadCompanyFile: vi.fn(),
+  downloadCompanyFolder: vi.fn(),
+  getCompanyFileBlob: vi.fn(),
+  getCompanyFilePreview: vi.fn(),
   useCompanyFiles: () => ({
     data: {
       current_folder: null,
@@ -31,7 +34,11 @@ vi.mock('../api/enterprise', () => ({
 }))
 
 describe('company file library', () => {
-  beforeEach(() => { canManage = true; mutation.mutate.mockReset(); mutation.mutateAsync.mockReset() })
+  beforeEach(() => {
+    canManage = true; mutation.mutate.mockReset(); mutation.mutateAsync.mockReset()
+    localStorage.clear()
+    vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
+  })
 
   it('shows browsing and management actions to managers', () => {
     render(<CompanyFilesPage />)
@@ -54,5 +61,12 @@ describe('company file library', () => {
     fireEvent.click(screen.getByRole('button', { name: /Шинэ хавтас/ }))
     expect(screen.getByRole('dialog', { name: 'Шинэ хавтас' })).toBeInTheDocument()
     expect(screen.getByLabelText('Нэр')).toHaveFocus()
+  })
+
+  it('switches to and persists the grid layout without a page refresh', () => {
+    render(<CompanyFilesPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Торон харагдац' }))
+    expect(localStorage.getItem('company-files-layout')).toBe('grid')
+    expect(document.querySelector('.company-file-grid')).toBeInTheDocument()
   })
 })

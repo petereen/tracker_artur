@@ -41,6 +41,14 @@ async def get_attachment(storage_key: str) -> bytes:
         return await handle.read()
 
 
+def iter_attachment_chunks(storage_key: str, chunk_size: int = 64 * 1024):
+    """Yield a local attachment without loading the complete file into memory."""
+    _ensure_local_backend()
+    with _local_path(storage_key).open("rb") as handle:
+        while chunk := handle.read(chunk_size):
+            yield chunk
+
+
 async def delete_attachment(storage_key: str) -> None:
     _ensure_local_backend()
     _local_path(storage_key).unlink(missing_ok=True)

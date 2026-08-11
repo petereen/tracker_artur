@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -37,17 +37,15 @@ import {
   useAddTaskDependency,
   useAttachments,
   useCreateEnterpriseTask,
-  useCreateSavedView,
   useDeleteEnterpriseTask,
   useDeadlines,
   useDeleteAttachment,
-  useDeleteSavedView,
   useDeleteTaskCheckItem,
   useDeleteTaskDependency,
   useEnterpriseTasks,
+  useEnterpriseTask,
   useProjects,
   useResolveTaskComment,
-  useSavedViews,
   useTaskActivity,
   useTaskCheckItems,
   useTaskComments,
@@ -172,74 +170,6 @@ function Column({
       className={`kanban-dropzone ${drop.isOver ? "over" : ""}`}
     >
       {children}
-    </div>
-  );
-}
-
-function SavedViewControls({
-  view,
-  setView,
-  filters,
-  setFilters,
-}: {
-  view: "board" | "list" | "timeline" | "calendar";
-  setView: (value: "board" | "list" | "timeline" | "calendar") => void;
-  filters: TaskFilters;
-  setFilters: (value: TaskFilters) => void;
-}) {
-  const saved = useSavedViews("tasks");
-  const create = useCreateSavedView();
-  const remove = useDeleteSavedView();
-  const save = () => {
-    const name = window.prompt("Харагдацын нэр");
-    if (name?.trim())
-      create.mutate({
-        module: "tasks",
-        name: name.trim(),
-        view_type: view,
-        filters: { ...filters },
-        grouping: {},
-        visible_columns: [],
-        sort: [],
-        is_shared: false,
-      });
-  };
-  return (
-    <div className="saved-view-controls">
-      <select
-        aria-label="Хадгалсан харагдац"
-        defaultValue=""
-        onChange={(event) => {
-          const item = saved.data?.find(
-            (candidate) => candidate.id === Number(event.target.value),
-          );
-          if (item) {
-            setView(item.view_type as typeof view);
-            setFilters(item.filters as TaskFilters);
-          }
-        }}
-      >
-        <option value="">Хадгалсан харагдац</option>
-        {saved.data?.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.name}
-          </option>
-        ))}
-      </select>
-      <button className="text-action" onClick={save}>
-        Хадгалах
-      </button>
-      {saved.data?.length ? (
-        <button
-          className="text-action"
-          onClick={() => {
-            const id = Number(window.prompt("Устгах харагдацын ID"));
-            if (id) remove.mutate(id);
-          }}
-        >
-          Устгах
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -586,6 +516,7 @@ export function EnterpriseTasksPage() {
     Object.keys(dateFilters).length ? dateFilters : undefined,
     filters,
   );
+  const deepLinkedTask = useEnterpriseTask(params.get("task") ? Number(params.get("task")) : undefined);
   const projects = useProjects();
   const workers = useWorkerDirectory();
   const createTask = useCreateEnterpriseTask();
@@ -683,6 +614,12 @@ export function EnterpriseTasksPage() {
       work_location: task.work_location || "",
     });
   };
+  useEffect(() => {
+    if (deepLinkedTask.data && !selected) openTask(deepLinkedTask.data);
+  }, [deepLinkedTask.data]);
+  useEffect(() => {
+    if (params.get("create") === "1") openCreate();
+  }, []);
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selected) return;
@@ -986,28 +923,53 @@ export function EnterpriseTasksPage() {
           </button>
         </div>
       </div>
-      <SavedViewControls
-        view={view}
-        setView={setView}
-        filters={filters}
-        setFilters={setFilters}
-      />
       {lastMove && (
         <div className="undo-banner" role="status">
           Даалгавар зөөгдлөө.<button onClick={undoMove}>Буцаах</button>
         </div>
       )}
       <div className="task-filterbar">
-        <div className="task-filter-control">
-          <button
-            className="secondary-action compact"
-            onClick={() => setFiltersOpen(!filtersOpen)}
-            aria-expanded={filtersOpen}
-          >
-            <Filter size={15} />
-            Шүүлтүүр
-          </button>
-          {filtersOpen && (
+        <div className="task-viewmodes">
+          <div className="segmented-control">
+            <button
+              className={view === "board" ? "active" : ""}
+              onClick={() => setView("board")}
+            >
+              <LayoutGrid size={15} />
+              Самбар
+            </button>
+            <button
+              className={view === "list" ? "active" : ""}
+              onClick={() => setView("list")}
+            >
+              <List size={15} />
+              Жагсаалт
+            </button>
+            <button
+              className={view === "timeline" ? "active" : ""}
+              onClick={() => setView("timeline")}
+            >
+              <Rows3 size={15} />
+              Timeline
+            </button>
+            <button
+              className={view === "calendar" ? "active" : ""}
+              onClick={() => setView("calendar")}
+            >
+              <CalendarDays size={15} />
+              Календарь
+            </button>
+          </div>
+          <div className="task-filter-control">
+            <button
+              className="secondary-action compact"
+              onClick={() => setFiltersOpen(!filtersOpen)}
+              aria-expanded={filtersOpen}
+            >
+              <Filter size={15} />
+              Шүүлтүүр
+            </button>
+            {filtersOpen && (
             <div className="task-filter-panel">
               <div className="form-row">
                 <label>
@@ -1113,36 +1075,7 @@ export function EnterpriseTasksPage() {
               </button>
             </div>
           )}
-        </div>
-        <div className="segmented-control">
-          <button
-            className={view === "board" ? "active" : ""}
-            onClick={() => setView("board")}
-          >
-            <LayoutGrid size={15} />
-            Самбар
-          </button>
-          <button
-            className={view === "list" ? "active" : ""}
-            onClick={() => setView("list")}
-          >
-            <List size={15} />
-            Жагсаалт
-          </button>
-          <button
-            className={view === "timeline" ? "active" : ""}
-            onClick={() => setView("timeline")}
-          >
-            <Rows3 size={15} />
-            Timeline
-          </button>
-          <button
-            className={view === "calendar" ? "active" : ""}
-            onClick={() => setView("calendar")}
-          >
-            <CalendarDays size={15} />
-            Календарь
-          </button>
+          </div>
         </div>
       </div>
       <QueryRegion
