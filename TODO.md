@@ -6,6 +6,7 @@
 - [ ] Deliver secure enterprise AI tool foundation: unified actors, strict tool schemas, ACL policies, encrypted audit records, and confirmation actions (`backend/app`)
 - [ ] Add hybrid company knowledge/file indexing, Office document extraction, and pgvector deployment/migration (`backend/app`, `backend/alembic`, `docker-compose.yml`)
 - [ ] Integrate file, statistics, project-management, and calendar tools into web and Telegram OYUNS conversations (`backend/app`, `frontend/src`)
+- [ ] Verify Mongolian enterprise-agent routing for file search, capabilities, and employee directory (`backend/app/services/enterprise_tools.py`, `backend/tests/test_enterprise_tools.py`)
 - [ ] Add enterprise-agent tool documentation, verification script, and regression coverage (`docs`, `backend/tests`)
 - [x] Allow every authenticated workspace account to upload company files while keeping file management actions role-scoped (`backend/app/routers/company_files.py`, `frontend/src/pages/CompanyFilesPage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/CompanyFilesPage.test.tsx`)
 - [x] Restore the Today work-hour timer's live interval, visibility resync, and instant clock-action state (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
@@ -126,6 +127,7 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Add provider-independent Mongolian routing for enterprise file search, capability answers, and employee directory requests (`backend/app/services/enterprise_tools.py`, `backend/tests/test_enterprise_tools.py`)
 - [x] Compile the enterprise assistant backend sources and complete the frontend production build (`backend/app`, `frontend`)
 - [x] Enforce enterprise resource policies in file access and add management policy/grant APIs (`backend/app/routers/company_files.py`, `backend/app/routers/enterprise.py`)
 - [x] Scope legacy knowledge administration per organization and enqueue article indexing (`backend/app/routers/knowledge.py`, `backend/app/worker.py`)

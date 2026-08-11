@@ -7,7 +7,9 @@ from app.services.enterprise_tools import (
     ProjectQueryInput,
     ProjectUpdateInput,
     StatsInput,
+    _capability_answer,
     _chunks,
+    _offline_route,
     extract_content,
     tool_specs,
 )
@@ -27,7 +29,7 @@ def test_governed_tool_inputs_cover_the_public_contract():
     assert CalendarInput(intent="availability", scope="team").scope == "team"
     preview = ProjectUpdateInput(operation="update_task", task_id=4, changes={"workflow_status": "done"})
     assert preview.changes.workflow_status == "done"
-    assert {spec["name"] for spec in tool_specs()} == {"file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool"}
+    assert {spec["name"] for spec in tool_specs()} == {"file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool", "employee_directory_tool"}
 
 
 def test_text_extraction_produces_safe_locations_and_overlap_chunks():
@@ -38,3 +40,20 @@ def test_text_extraction_produces_safe_locations_and_overlap_chunks():
     chunks = _chunks(" ".join(f"word{number}" for number in range(1_000)), {"section": "A"})
     assert len(chunks) == 2
     assert chunks[1][1]["word_start"] == 680
+
+
+def test_offline_route_recognizes_mongolian_enterprise_requests():
+    assert _offline_route("файлын сангаас powerpoint template ол") == (
+        "file_search_tool",
+        {"query": "файлын сангаас powerpoint template ол", "file_types": ["pptx", "potx", "potm"], "limit": 5, "delivery": "none"},
+    )
+    assert _offline_route("Ажилчдын жагсаалт") == (
+        "employee_directory_tool",
+        {"include_inactive": False},
+    )
+
+
+def test_offline_capability_answer_is_mongolian():
+    answer = _capability_answer("Чи юу хийж чадах вэ")
+    assert "файлын сан" in answer
+    assert "календарь" in answer
