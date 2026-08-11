@@ -147,7 +147,7 @@
 .stats-workspace,
 .calendar-workspace {
   display: grid;
-  gap: 18px;
+  gap: 12px;
 }
 .heatmap-panel {
   overflow: hidden;
@@ -519,7 +519,7 @@ a {
   font-weight: 700;
   gap: 8px;
   justify-content: center;
-  min-height: 42px;
+  min-height: 36px;
   padding: 0 16px;
   transition:
     filter 0.16s,
@@ -4202,6 +4202,7 @@ a {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 14px;
+  margin-top: 10px;
 }
 .task-filterbar select,
 .deadline-workspace select,
@@ -5535,7 +5536,7 @@ a {
   gap: 12px;
 }
 .view-toolbar {
-  margin-bottom: 16px;
+  margin-bottom: 0px;
 }
 .view-toolbar > *,
 .panel-heading > * {
@@ -5650,6 +5651,7 @@ a {
 .heatmap-panel {
   max-width: 100%;
   min-width: 0;
+  margin-top: 10px;
 }
 .planning-calendar,
 .calendar-skeleton {
@@ -6115,8 +6117,9 @@ a {
   }
 }
 .analytics-drilldown {
-  margin-top: 1rem;
+  margin-top: 10px;
   padding: 1rem;
+
 }
 .analytics-drilldown-heading {
   align-items: flex-start;
@@ -6424,6 +6427,7 @@ a {
   overflow: hidden;
   padding: 24px;
   position: relative;
+  margin-top: 10px;
   border-radius: 18px;
 }
 .work-hour-card-header {
