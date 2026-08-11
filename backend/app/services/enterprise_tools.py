@@ -528,7 +528,8 @@ async def run_agent(db: AsyncSession, actor: ActorContext, *, text: str, history
             async with aiohttp.ClientSession() as session:
                 async with session.post("https://api.openai.com/v1/responses", json=payload, headers={"Authorization": f"Bearer {key}"}, timeout=aiohttp.ClientTimeout(total=35)) as response:
                     if response.status != 200:
-                        log.warning("enterprise_tools.responses status=%s", response.status)
+                        body = (await response.text())[:1_000]
+                        log.warning("enterprise_tools.responses status=%s body=%s", response.status, body)
                         break
                     body = await response.json()
         except aiohttp.ClientError:

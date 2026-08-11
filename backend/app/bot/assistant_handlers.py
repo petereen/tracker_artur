@@ -6,7 +6,7 @@ import logging
 import html
 import time
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytz
 from aiogram import F, Router

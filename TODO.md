@@ -131,6 +131,7 @@
 - [x] Prevent high-confidence enterprise requests from falling through to the legacy unknown-response router (`backend/app/bot/assistant_handlers.py`, `backend/app/routers/enterprise.py`)
 - [x] Ensure worker startup applies Alembic before querying enterprise knowledge tables (`docker-compose.yml`, `docker-compose.dokploy.yml`)
 - [x] Use the pgvector database image in Dokploy so the enterprise knowledge migration can complete (`docker-compose.dokploy.yml`)
+- [x] Fix Telegram enterprise-agent response crash caused by the missing timezone import (`backend/app/bot/assistant_handlers.py`)
 - [x] Compile the enterprise assistant backend sources and complete the frontend production build (`backend/app`, `frontend`)
 - [x] Enforce enterprise resource policies in file access and add management policy/grant APIs (`backend/app/routers/company_files.py`, `backend/app/routers/enterprise.py`)
 - [x] Scope legacy knowledge administration per organization and enqueue article indexing (`backend/app/routers/knowledge.py`, `backend/app/worker.py`)
