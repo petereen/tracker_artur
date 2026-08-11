@@ -126,7 +126,7 @@ def tool_specs() -> list[dict]:
         "get_stats_tool": "Retrieve governed ERP metrics. Never invent unsupported revenue, DAU, or support values.",
         "project_mgmt_tool": "Retrieve scoped projects, tasks, blockers, and milestone-backed sprint plans.",
         "calendar_tool": "Retrieve scoped calendar events, schedules, or availability without exposing unauthorized private details.",
-        "employee_directory_tool": "List active company employees and their job titles. Do not expose Telegram IDs or private fields.",
+        "employee_directory_tool": "List active company employees, job titles, and Telegram usernames when available. Never expose Telegram IDs or other private fields.",
     }
     specs = [{"type": "function", "name": name, "description": descriptions[name], "strict": True, "parameters": model.model_json_schema()} for name, model in INPUT_MODELS.items()]
     specs.append({"type": "function", "name": "project_mgmt_update_tool", "description": "Prepare a task update for explicit confirmation; never apply it directly.", "strict": True, "parameters": ProjectUpdateInput.model_json_schema()})
@@ -286,7 +286,19 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
             return dot / max(math.sqrt(sum(float(a) ** 2 for a in left)) * math.sqrt(sum(float(b) ** 2 for b in right)), 1e-12)
         except (TypeError, ValueError):
             return 0.0
-    semantic_ranked = sorted(((chunk, cosine(query_embedding, chunk.embedding)) for chunk in chunks if query_embedding and chunk.embedding), key=lambda pair: pair[1], reverse=True)
+    # Embeddings may be returned as lists or NumPy-like arrays. Never use an
+    # array in a boolean expression: multi-value arrays raise the ambiguous
+    # truth-value error and turn an otherwise valid keyword/semantic search
+    # into an unavailable tool response.
+    semantic_ranked = sorted(
+        (
+            (chunk, cosine(query_embedding, chunk.embedding))
+            for chunk in chunks
+            if query_embedding is not None and chunk.embedding is not None
+        ),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
     if data.search_mode == "keyword" or not semantic_ranked:
         ranked = keyword_ranked
     elif data.search_mode == "semantic":
@@ -487,7 +499,12 @@ async def execute(db: AsyncSession, actor: ActorContext, tool_name: str, argumen
                 query = query.where(Employee.is_active.is_(True))
             employees = (await db.execute(query.order_by(Employee.name))).scalars().all()
             result = _result("ok" if employees else "empty", {"employees": [
-                {"name": employee.name, "job_title": employee.job_title, "is_active": employee.is_active}
+                {
+                    "name": employee.name,
+                    "job_title": employee.job_title,
+                    "telegram_username": employee.telegram_username,
+                    "is_active": employee.is_active,
+                }
                 for employee in employees
             ]})
         else: result = _result("denied", {"reason": "Unknown tool"})
@@ -582,9 +599,11 @@ def _fallback_answer(result: dict) -> str:
         return "\n".join(f"• {row['title']}: {row['excerpt'][:260]}" for row in data["results"])
     if "employees" in data:
         if not data["employees"]:
-            return "Идэвхтэй ажилтан олдсонгүй."
-        return "Ажилтнуудын жагсаалт:\n" + "\n".join(
-            f"• {item['name']}" + (f" — {item['job_title']}" if item.get("job_title") else "")
+            return "Одоогоор идэвхтэй ажилтан бүртгэлгүй байна."
+        return "Одоогоор идэвхтэй байгаа хүмүүс:\n" + "\n".join(
+            f"• {item['name']}"
+            + (f" — {item['job_title']}" if item.get("job_title") else "")
+            + (f" — Telegram: @{str(item['telegram_username']).lstrip('@')}" if item.get("telegram_username") else "")
             for item in data["employees"]
         )
     return json.dumps(data, default=str, ensure_ascii=False)
@@ -618,5 +637,5 @@ def is_high_confidence_request(text: str) -> bool:
 def _capability_answer(text: str) -> str:
     lowered = (text or "").casefold()
     if any(term in lowered for term in ("юу хийж чад", "юу чаддаг", "what can you do", "capabilit", "боломж")):
-        return "Би компанийн файлын сангаас хайх, ажилтнуудын жагсаалт харах, даалгавар ба төслийн мэдээлэл, календарь, статистик болон байгууллагын дотоод мэдээлэлд тусалж чадна."
+        return "Ажил дээр хэрэгтэй мэдээллийг таньж, компанийн файлуудаас хайж, ажилтнууд, даалгавар, төсөл, календарь болон статистикийн мэдээллийг нэгтгэж өгнө. Юуг шалгаж өгөх вэ?"
     return "Энэ хүсэлтийг боловсруулахад AI үйлчилгээ түр боломжгүй байна. Дахин оролдоно уу."

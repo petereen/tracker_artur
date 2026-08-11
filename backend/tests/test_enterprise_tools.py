@@ -56,7 +56,7 @@ def test_offline_route_recognizes_mongolian_enterprise_requests():
 
 def test_offline_capability_answer_is_mongolian():
     answer = _capability_answer("Чи юу хийж чадах вэ")
-    assert "файлын сан" in answer
+    assert "компанийн файлуудаас" in answer
     assert "календарь" in answer
 
 
