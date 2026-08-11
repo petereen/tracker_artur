@@ -72,6 +72,9 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       GOOGLE_WEBHOOK_URL: ${GOOGLE_WEBHOOK_URL:-}
+      # Keep the backend reachable when migrations need to be run manually
+      # from Dokploy's terminal during a recovery deployment.
+      ALLOW_START_WITH_MIGRATION_FAILURE: ${ALLOW_START_WITH_MIGRATION_FAILURE:-true}
     expose:
       - "8000"
     volumes:
