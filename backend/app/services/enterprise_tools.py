@@ -457,7 +457,7 @@ async def confirm_task_update(db: AsyncSession, actor: ActorContext, token: str,
 async def audit_tool(db: AsyncSession, actor: ActorContext, *, channel: str, tool_name: str, status: str, prompt: str, result: dict, conversation_id: int | None = None) -> None:
     now = datetime.now(timezone.utc)
     refs = [source.get("id") for source in result.get("sources", []) if source.get("id")]
-    db.add(AssistantToolAudit(organization_id=actor.organization_id, account_id=actor.account_id, conversation_id=conversation_id, channel=channel, tool_name=tool_name, status=status, resource_refs=refs, metadata={"result_status": result.get("status")}, encrypted_payload=encrypt_secret(json.dumps({"prompt": prompt, "result": result}, default=str, ensure_ascii=False)), content_expires_at=now + timedelta(days=settings.ASSISTANT_AUDIT_CONTENT_DAYS), metadata_expires_at=now + timedelta(days=settings.ASSISTANT_AUDIT_METADATA_DAYS)))
+    db.add(AssistantToolAudit(organization_id=actor.organization_id, account_id=actor.account_id, conversation_id=conversation_id, channel=channel, tool_name=tool_name, status=status, resource_refs=refs, audit_metadata={"result_status": result.get("status")}, encrypted_payload=encrypt_secret(json.dumps({"prompt": prompt, "result": result}, default=str, ensure_ascii=False)), content_expires_at=now + timedelta(days=settings.ASSISTANT_AUDIT_CONTENT_DAYS), metadata_expires_at=now + timedelta(days=settings.ASSISTANT_AUDIT_METADATA_DAYS)))
 
 
 async def execute(db: AsyncSession, actor: ActorContext, tool_name: str, arguments: dict, *, channel: str, prompt: str, conversation_id: int | None = None) -> dict:

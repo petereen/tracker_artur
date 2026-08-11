@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Fix SQLAlchemy reserved `metadata` attribute blocking backend startup (`backend/app/models/models.py`, `backend/app/services/enterprise_tools.py`)
 - [ ] Deliver secure enterprise AI tool foundation: unified actors, strict tool schemas, ACL policies, encrypted audit records, and confirmation actions (`backend/app`)
 - [ ] Add hybrid company knowledge/file indexing, Office document extraction, and pgvector deployment/migration (`backend/app`, `backend/alembic`, `docker-compose.yml`)
 - [ ] Integrate file, statistics, project-management, and calendar tools into web and Telegram OYUNS conversations (`backend/app`, `frontend/src`)

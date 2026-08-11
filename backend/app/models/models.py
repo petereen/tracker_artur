@@ -1051,7 +1051,9 @@ class AssistantToolAudit(Base):
     tool_name = Column(String(64), nullable=False)
     status = Column(String(16), nullable=False)
     resource_refs = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
-    metadata = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    # ``metadata`` is reserved by SQLAlchemy's declarative API. Keep the
+    # existing database column while exposing it through a safe ORM name.
+    audit_metadata = Column("metadata", JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     encrypted_payload = Column(Text)
     content_expires_at = Column(DateTime(timezone=True), nullable=False)
     metadata_expires_at = Column(DateTime(timezone=True), nullable=False)
