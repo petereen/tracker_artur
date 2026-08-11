@@ -85,6 +85,9 @@ ADMIN_PASSWORD=your-admin-password
 
 # Optional: enable voice input and AI assistance
 OPENAI_API_KEY=your-openai-api-key
+AI_REDIS_URL=redis://redis:6379/0
+# Optional: validated JSON override for the GPT-5.6 routing registry.
+AI_MODEL_REGISTRY_JSON=
 # Required to answer live exchange-rate questions. Keep server-side only.
 AGENT_RATES_API_KEY=your-agent-rates-api-key
 OPENAI_WHISPER_MODEL=gpt-4o-mini-transcribe
@@ -219,7 +222,28 @@ sales-tracker/
 
 Руководитель может поставить одинаковую задачу всем **активным** сотрудникам текстом или голосом: например, «Назначь встречу всем сотрудникам». Сначала показывается один черновик с количеством получателей; после подтверждения создаётся отдельная задача и уведомление для каждого сотрудника.
 
-Ответ соответствует языку пользователя (монгольский, английский или русский; fallback — монгольский). Голос распознаётся в текст, а ответ остаётся коротким Telegram-текстом. Без `OPENAI_API_KEY` запросы задач, справка, детерминированная постановка и базовый план остаются доступны.
+Ответ соответствует языку пользователя (монгольский, английский или русский; fallback — монгольский). Голос распознаётся в текст, а ответ остаётся коротким Telegram-текстом. Для успешного ответа OYUNS требуется `OPENAI_API_KEY`: при недоступности всех live-моделей сервис возвращает ошибку, а не локальный AI-ответ.
+
+## AI gateway
+
+OYUNS web и Telegram используют единый live gateway на Responses API. Отдельный
+live-классификатор выбирает `simple_qa`, `complex_reasoning`,
+`code_generation` или `multimodal`, затем маршрутизатор выбирает GPT-5.6 Luna,
+Terra или Sol по конфигурации. Временные и явно проверяемые вопросы обязательно
+включают native web search; запросы к корпоративным данным используют только
+permission-scoped tools.
+
+Redis хранит точные cache hits, PostgreSQL/pgvector — только безопасные
+семантические hits для контекст-независимого simple QA. RAG, действия, история
+диалога и web-search ответы не кэшируются. Значения TTL и similarity threshold
+настраиваются через `AI_*` переменные; default TTL — 24 часа, threshold — 0.94.
+
+Проверка с реальным ключом запускается только вручную:
+
+```bash
+cd backend
+OPENAI_API_KEY=... python scripts/verify_ai_gateway_live.py
+```
 
 ## База знаний компании
 

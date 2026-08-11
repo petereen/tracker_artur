@@ -1,4 +1,16 @@
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   clamav:
     image: clamav/clamav:1.4
     # clamav/clamav:1.4 currently publishes amd64 only; Docker Desktop
@@ -29,6 +41,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       clamav:
         condition: service_started
     environment:
@@ -43,6 +57,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_REDIS_URL: ${AI_REDIS_URL:-redis://redis:6379/0}
+      AI_MODEL_REGISTRY_JSON: ${AI_MODEL_REGISTRY_JSON:-}
       ENTERPRISE_TOOLS_ENABLED: ${ENTERPRISE_TOOLS_ENABLED:-false}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       AGENT_RATES_API_KEY: ${AGENT_RATES_API_KEY:-}
@@ -93,6 +109,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL}
       SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
@@ -114,6 +132,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_REDIS_URL: ${AI_REDIS_URL:-redis://redis:6379/0}
+      AI_MODEL_REGISTRY_JSON: ${AI_MODEL_REGISTRY_JSON:-}
       ENTERPRISE_TOOLS_ENABLED: ${ENTERPRISE_TOOLS_ENABLED:-false}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       AGENT_RATES_API_KEY: ${AGENT_RATES_API_KEY:-}
@@ -173,6 +193,7 @@ services:
           - oyuns-agent-frontend
 
 volumes:
+  redis_data:
   pgdata:
   knowledge_uploads:
   attachment_uploads:

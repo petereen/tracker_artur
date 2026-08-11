@@ -120,7 +120,7 @@ export function ProfilePage() {
             </p>
             <button
               type="button"
-              className="secondary-action compact"
+              className="secondary-action compact" 
               onClick={linkTelegram}
               disabled={telegramLink.isPending}
             >

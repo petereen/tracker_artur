@@ -27,6 +27,7 @@ def test_tool_schemas_are_strict_and_bounded():
 def test_governed_tool_inputs_cover_the_public_contract():
     assert StatsInput(metrics=["task_completion"], timeframe="today").metrics == ["task_completion"]
     assert ProjectQueryInput(entity="milestones").entity == "milestones"
+    assert ProjectQueryInput(entity="plans").entity == "plans"
     assert CalendarInput(intent="availability", scope="team").scope == "team"
     preview = ProjectUpdateInput(operation="update_task", task_id=4, changes={"workflow_status": "done"})
     assert preview.changes.workflow_status == "done"
@@ -52,6 +53,14 @@ def test_offline_route_recognizes_mongolian_enterprise_requests():
         "employee_directory_tool",
         {"include_inactive": False},
     )
+    assert _offline_route("компанийн төлөвлөгөө юу вэ") == (
+        "project_mgmt_tool",
+        {"operation": "query", "entity": "plans", "completion_state": "all", "limit": 20},
+    )
+    assert _offline_route("компанийн хийгдэж буй төслүүд байгаа юу?") == (
+        "project_mgmt_tool",
+        {"operation": "query", "entity": "projects", "completion_state": "all", "active_only": True, "limit": 20},
+    )
 
 
 def test_offline_capability_answer_is_mongolian():
@@ -64,3 +73,5 @@ def test_high_confidence_requests_bypass_legacy_unknown_fallback():
     assert is_high_confidence_request("Чи юу хийж чадах вэ")
     assert is_high_confidence_request("файлын сангаас powerpoint template ол")
     assert is_high_confidence_request("Ажилчдын жагсаалт")
+    assert is_high_confidence_request("компанийн төлөвлөгөө юу вэ")
+    assert is_high_confidence_request("компанийн хийгдэж буй төслүүд байгаа юу?")

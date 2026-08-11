@@ -89,9 +89,11 @@ from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable
 from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
 from app.services import enterprise_tools
+from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
 
 
 router = APIRouter()
+ai_gateway = AIGateway()
 MANAGEMENT_ROLES = ("admin", "manager", "team_lead")
 WORKFLOW_STATUSES = {"backlog", "to_do", "in_progress", "review", "done", "cancelled"}
 LEGACY_STATUS = {
@@ -2889,30 +2891,37 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
     text = data.text.strip()
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-    if settings.ENTERPRISE_TOOLS_ENABLED or enterprise_tools.is_high_confidence_request(text):
-        enterprise = await enterprise_tools.run_agent(db, actor, text=text, history=history, channel="web", conversation_id=conversation.id)
-        answer = enterprise["answer"]
-        action = {"type": "task_update_preview", "payload": enterprise["action"]} if enterprise.get("action") else None
-        sources = enterprise["sources"]
-    else:
-        workers = [{"id": employee.id, "name": employee.name, "timezone": employee.timezone, "is_active": employee.is_active} for employee in (await db.execute(select(Employee).where(Employee.is_active.is_(True)))).scalars().all()]
-        decision = await assistant_ai.classify_intent(text, now=datetime.now(ZoneInfo("Asia/Ulaanbaatar")), timezone_name="Asia/Ulaanbaatar", is_manager=actor.has_any_role(*MANAGEMENT_ROLES), workers=workers, voice_mode=data.voice_mode, chat_history=history, learned_contexts=[])
-        raw, action, sources = await _assistant_web_tool(db, decision, actor) if decision.selected_tool else ({}, None, [])
-        if action:
-            answer = f"“{action['payload']['title']}” даалгаврын ноорог бэлэн. Үүсгэхээс өмнө шалгана уу."
-        elif decision.selected_tool and decision.react_messages and decision.assistant_tool_message and decision.tool_call_id:
-            answer = await assistant_ai.synthesize_tool_result(request_messages=decision.react_messages, assistant_message=decision.assistant_tool_message, tool_call_id=decision.tool_call_id, raw_result=raw, voice_mode=data.voice_mode)
-            if not answer and decision.selected_tool == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE:
-                answer = assistant_ai.knowledge_fallback_answer(raw, decision.language)
-        else:
-            answer = decision.direct_answer or "Асуултаа арай дэлгэрэнгүй асууна уу."
-    if not answer:
-        answer = "Одоогоор хариулт боловсруулж чадсангүй. Түр хүлээгээд дахин оролдоно уу."
+    tool_sources: list[dict] = []
+    pending_action = None
+
+    async def execute_gateway_tool(name: str, arguments: dict) -> dict:
+        nonlocal pending_action
+        result = await enterprise_tools.execute(db, actor, name, arguments, channel="web", prompt=text, conversation_id=conversation.id)
+        tool_sources.extend(result.get("sources", []))
+        pending_action = result.get("data", {}).get("pending_action") or pending_action
+        return result
+
+    try:
+        routed = await ai_gateway.respond(db, GatewayRequest(
+            text=text, history=history, channel="web", language_hint="mn",
+            tools=enterprise_tools.tool_specs(), execute_tool=execute_gateway_tool,
+            conversation_id=conversation.id,
+        ))
+    except GatewayError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail="OYUNS live AI service is temporarily unavailable") from exc
+    answer = routed.answer
+    action = {"type": "task_update_preview", "payload": pending_action} if pending_action else None
+    source_map = {item["id"]: item for item in [*tool_sources, *routed.sources] if item.get("id")}
+    sources = list(source_map.values())
     assistant_message = AssistantMessage(conversation_id=conversation.id, role="assistant", content=answer, action=action, sources=sources)
     db.add(assistant_message)
     conversation.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"conversation_id": conversation.id, "message": {"id": assistant_message.id, "role": "assistant", "content": answer, "action": action, "sources": sources}}
+    result = {"conversation_id": conversation.id, "message": {"id": assistant_message.id, "role": "assistant", "content": answer, "action": action, "sources": sources}}
+    if actor.has_any_role("admin"):
+        result["routing"] = {"category": routed.route, "model": routed.model, "cache": routed.cache, "web_search_used": routed.web_search_used, "usage": routed.usage}
+    return result
 
 
 @router.post("/assistant/tools")

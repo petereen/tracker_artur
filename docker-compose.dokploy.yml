@@ -1,6 +1,18 @@
 # Dokploy deployment: configure the public domain in Dokploy's Domains tab
 # and select the `frontend` service on port 80.
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   clamav:
     image: clamav/clamav:1.4
     restart: unless-stopped
@@ -32,6 +44,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       clamav:
         condition: service_started
     environment: &app_environment
@@ -46,6 +60,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_REDIS_URL: ${AI_REDIS_URL:-redis://redis:6379/0}
+      AI_MODEL_REGISTRY_JSON: ${AI_MODEL_REGISTRY_JSON:-}
       AGENT_RATES_API_KEY: ${AGENT_RATES_API_KEY:-}
       OPENAI_WHISPER_MODEL: ${OPENAI_WHISPER_MODEL:-gpt-4o-mini-transcribe}
       OPENAI_MONGOLIAN_TRANSCRIBE_MODEL: ${OPENAI_MONGOLIAN_TRANSCRIBE_MODEL:-gpt-4o-mini-transcribe}
@@ -124,6 +140,7 @@ services:
       - "80"
 
 volumes:
+  redis_data:
   pgdata:
   knowledge_uploads:
   attachment_uploads:

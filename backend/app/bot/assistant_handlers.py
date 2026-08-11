@@ -30,12 +30,14 @@ from app.core.database import AsyncSessionLocal
 from app.core.enterprise_deps import actor_from_telegram_id
 from app.models.models import AssistantConversation, AssistantMessage, CompanyLibraryItem
 from app.services import enterprise_tools
+from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
 from app.services.attachment_storage import get_attachment
 from sqlalchemy import select
 
 log = logging.getLogger(__name__)
 router = Router()
 _conversation_history: dict[str, deque[dict]] = defaultdict(lambda: deque(maxlen=12))
+ai_gateway = AIGateway()
 
 
 def _history_key(message: Message, tg_id: str | None) -> str:
@@ -116,12 +118,8 @@ async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=
 
 
 async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> bool:
-    """Run the new tool stack only for a linked enterprise identity."""
-    if (
-        not tg_id
-        or not settings.ENTERPRISE_TOOLS_ENABLED
-        and not enterprise_tools.is_high_confidence_request(text)
-    ):
+    """Run every linked Telegram conversation through the live gateway."""
+    if not tg_id:
         return False
     async with AsyncSessionLocal() as db:
         actor = await actor_from_telegram_id(tg_id, db)
@@ -136,9 +134,26 @@ async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> b
         rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation.id).order_by(AssistantMessage.id.desc()).limit(12))).scalars().all()
         history = [{"role": row.role, "content": row.content} for row in reversed(rows)]
         db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-        result = await enterprise_tools.run_agent(db, actor, text=text, history=history, channel="telegram", conversation_id=conversation.id)
-        action = {"type": "task_update_preview", "payload": result["action"]} if result.get("action") else None
-        db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=result["answer"], action=action, sources=result["sources"]))
+        tool_sources: list[dict] = []
+        pending_action = None
+
+        async def execute_gateway_tool(name: str, arguments: dict) -> dict:
+            nonlocal pending_action
+            result = await enterprise_tools.execute(db, actor, name, arguments, channel="telegram", prompt=text, conversation_id=conversation.id)
+            tool_sources.extend(result.get("sources", []))
+            pending_action = result.get("data", {}).get("pending_action") or pending_action
+            return result
+
+        try:
+            routed = await ai_gateway.respond(db, GatewayRequest(text=text, history=history, channel="telegram", language_hint="mn", tools=enterprise_tools.tool_specs(), execute_tool=execute_gateway_tool, conversation_id=conversation.id))
+        except GatewayError:
+            await db.rollback()
+            await _answer(message, "OYUNS live AI service is temporarily unavailable. Please try again shortly.")
+            return True
+        action = {"type": "task_update_preview", "payload": pending_action} if pending_action else None
+        source_map = {item["id"]: item for item in [*tool_sources, *routed.sources] if item.get("id")}
+        result = {"answer": routed.answer, "action": pending_action, "sources": list(source_map.values()), "deliveries": []}
+        db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=routed.answer, action=action, sources=result["sources"]))
         conversation.updated_at = datetime.now(timezone.utc)
         await db.commit()
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Confirm update", callback_data=f"assistant-confirm:{result['action']['token']}")]]) if result.get("action") else None
@@ -382,6 +397,15 @@ async def route_and_respond(
 ) -> None:
     if await _enterprise_route(message, text, tg_id):
         return
+    # Telegram messages without a verified platform identity cannot safely be
+    # sent to the assistant. Do not drop into the historical heuristic router.
+    await _answer(message, "OYUNS access requires a linked active platform account.")
+    return
+
+    # Legacy implementation retained below temporarily for source-compatible
+    # imports/tests; the guarded return above makes it unreachable in
+    # production. It can be removed once downstream integrations stop
+    # importing its helpers.
     started = time.monotonic()
     actor = _actor(employee, message=message, is_manager=is_manager, tg_id=tg_id)
     if not actor:

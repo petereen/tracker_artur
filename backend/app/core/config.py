@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_DIMENSIONS: int = 1536
     ASSISTANT_AUDIT_CONTENT_DAYS: int = 30
     ASSISTANT_AUDIT_METADATA_DAYS: int = 365
+    # AI gateway: Redis accelerates exact/circuit cache operations while
+    # PostgreSQL/pgvector persists safe semantic cache entries.
+    AI_REDIS_URL: str = "redis://redis:6379/0"
+    AI_MODEL_REGISTRY_JSON: str = ""
+    AI_OPENAI_TIMEOUT_SECONDS: float = 35.0
+    AI_EXACT_CACHE_TTL_SECONDS: int = 86_400
+    AI_SEMANTIC_CACHE_TTL_SECONDS: int = 86_400
+    AI_SEMANTIC_CACHE_THRESHOLD: float = 0.94
+    AI_CIRCUIT_FAILURE_THRESHOLD: int = 5
+    AI_CIRCUIT_OPEN_SECONDS: int = 30
 
     class Config:
         env_file = ".env"

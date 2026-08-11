@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.enterprise_deps import ActorContext
 from app.models.models import (
-    AssistantPendingAction, AssistantToolAudit, CalendarEntry, CompanyKnowledge,
+    AssistantPendingAction, AssistantToolAudit, CalendarEntry, CompanyKnowledge, CompanyPlanItem,
     CompanyLibraryItem, KnowledgeChunk, KnowledgeDocument, Milestone,
     PersonalTimeBlock, Project, ProjectMember, ResourceGrant, ResourcePolicy,
     Employee, Task, TaskAssignee, TaskReviewer, TeamMember, UserAccount, WorkReport, WorkTimeEntry,
@@ -68,11 +68,12 @@ class StatsInput(_Strict):
 
 class ProjectQueryInput(_Strict):
     operation: Literal["query"] = "query"
-    entity: Literal["projects", "tasks", "milestones"] = "tasks"
+    entity: Literal["projects", "plans", "tasks", "milestones"] = "tasks"
     project_id: int | None = None
     employee_id: int | None = None
     completion_state: Literal["open", "completed", "all"] = "open"
     workflow_status: str | None = Field(default=None, max_length=32)
+    active_only: bool = False
     blockers_only: bool = False
     date_from: date | None = None
     date_to: date | None = None
@@ -125,7 +126,7 @@ def tool_specs() -> list[dict]:
     descriptions = {
         "file_search_tool": "Search permission-filtered company files and knowledge. Results include citations.",
         "get_stats_tool": "Retrieve governed ERP metrics. Never invent unsupported revenue, DAU, or support values.",
-        "project_mgmt_tool": "Retrieve scoped projects, tasks, blockers, and milestone-backed sprint plans.",
+        "project_mgmt_tool": "Retrieve scoped projects, approved company plans, tasks, blockers, and milestones.",
         "calendar_tool": "Retrieve scoped calendar events, schedules, or availability without exposing unauthorized private details.",
         "employee_directory_tool": "List active company employees, job titles, and Telegram usernames when available. Never expose Telegram IDs or other private fields.",
     }
@@ -383,10 +384,23 @@ async def stats(db: AsyncSession, actor: ActorContext, data: StatsInput) -> dict
 async def project_query(db: AsyncSession, actor: ActorContext, data: ProjectQueryInput) -> dict:
     if data.entity == "projects":
         query = select(Project).where(Project.organization_id == actor.organization_id, Project.archived_at.is_(None))
+        if data.active_only:
+            query = query.where(Project.status == "active")
         if not actor.has_any_role(*MANAGEMENT_ROLES):
             query = query.where(Project.id.in_(select(ProjectMember.project_id).where(ProjectMember.employee_id == actor.employee_id)))
         rows = list((await db.execute(query.order_by(Project.name).limit(data.limit))).scalars().all())
         return _result("ok" if rows else "empty", {"projects": [{"id": str(row.public_id), "name": row.name, "status": row.status, "starts_on": row.starts_on, "ends_on": row.ends_on} for row in rows]})
+    if data.entity == "plans":
+        query = select(CompanyPlanItem).where(
+            CompanyPlanItem.organization_id == actor.organization_id,
+            CompanyPlanItem.status == "approved",
+        )
+        if data.date_from:
+            query = query.where(CompanyPlanItem.plan_month >= data.date_from.replace(day=1))
+        if data.date_to:
+            query = query.where(CompanyPlanItem.plan_month <= data.date_to.replace(day=1))
+        rows = list((await db.execute(query.order_by(CompanyPlanItem.plan_month.desc(), CompanyPlanItem.position, CompanyPlanItem.id).limit(data.limit))).scalars().all())
+        return _result("ok" if rows else "empty", {"plans": [{"title": row.title, "content": row.content, "horizon": row.horizon, "plan_month": row.plan_month, "due_date": row.due_date} for row in rows]})
     if data.entity == "milestones":
         query = select(Milestone).where(Milestone.organization_id == actor.organization_id, Milestone.status.notin_(("done", "cancelled", "archived")))
         if data.project_id: query = query.where(Milestone.project_id == data.project_id)
@@ -605,6 +619,16 @@ def _fallback_answer(result: dict, *, text: str = "") -> str:
     if "results" in data:
         excerpt = next((str(row.get("excerpt", "")).strip() for row in data["results"] if row.get("excerpt")), "")
         return excerpt[:1_200] or empty
+    if "plans" in data:
+        titles = [str(item.get("title", "")).strip() for item in data["plans"] if item.get("title")]
+        if not titles:
+            return empty
+        return {"en": "The current company plans are: ", "ru": "Текущие планы компании: ", "mn": "Компанийн одоогийн төлөвлөгөөнүүд: "}[language] + "; ".join(titles[:8]) + "."
+    if "projects" in data:
+        names = [str(item.get("name", "")).strip() for item in data["projects"] if item.get("name")]
+        if not names:
+            return empty
+        return {"en": "The ongoing company projects are: ", "ru": "Текущие проекты компании: ", "mn": "Компанийн хийгдэж буй төслүүд: "}[language] + "; ".join(names[:8]) + "."
     if "employees" in data:
         if not data["employees"]:
             return "Одоогоор идэвхтэй ажилтан бүртгэлгүй байна."
@@ -625,6 +649,10 @@ def _offline_route(text: str) -> tuple[str | None, dict]:
     )):
         file_types = ["pptx", "potx", "potm"] if any(term in lowered for term in ("powerpoint", "pptx", "presentation", "танилцуулга", "template")) else []
         return "file_search_tool", {"query": text, "file_types": file_types, "limit": 5, "delivery": "none"}
+    if any(term in lowered for term in ("төлөвлөг", "company plan", "company plans")):
+        return "project_mgmt_tool", {"operation": "query", "entity": "plans", "completion_state": "all", "limit": 20}
+    if any(term in lowered for term in ("төсөл", "project", "projects")):
+        return "project_mgmt_tool", {"operation": "query", "entity": "projects", "completion_state": "all", "active_only": True, "limit": 20}
     if any(term in lowered for term in ("ажилтны жагсаалт", "ажилчдын жагсаалт", "ажилтнуудын жагсаалт", "ажилчид", "employees", "staff list", "worker list")):
         return "employee_directory_tool", {"include_inactive": False}
     if any(term in lowered for term in ("calendar", "meeting", "хурал", "schedule", "хуваарь")):

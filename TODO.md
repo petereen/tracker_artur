@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Implement live AI gateway routing, token budgets, and GPT-5.6 model failover (`backend/app/services/ai_gateway`)
+- [x] Add Redis exact caching, pgvector semantic-cache persistence, and cache observability (`backend/app`, `backend/alembic`, Compose)
+- [x] Route OYUNS web and Telegram conversations through the live gateway and remove offline answer fallbacks (`backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`)
+- [x] Add AI gateway regression tests and an opt-in live smoke check (`backend/tests`, `backend/scripts`)
+- [x] Route Mongolian company-plan and project questions to permission-scoped enterprise retrieval instead of generic clarification (`backend/app/services/enterprise_tools.py`, `backend/tests/test_enterprise_tools.py`)
 - [x] Make OYUNS synthesize retrieved company knowledge into direct language-matched answers, preserve a minimal knowledge fallback, and default its model to GPT-5.6 Luna (`backend/app/services/assistant_ai.py`, `backend/app/bot/assistant_handlers.py`, `backend/app/routers/enterprise.py`, deployment configuration)
 - [x] Allow Dokploy backend recovery startup when Alembic fails, so migrations can be run from the service terminal (`backend/start.sh`, `docker-compose.dokploy.yml`)
 - [x] Fix SQLAlchemy reserved `metadata` attribute blocking backend startup (`backend/app/models/models.py`, `backend/app/services/enterprise_tools.py`)

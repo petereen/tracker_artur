@@ -1186,6 +1186,27 @@ class AssistantMessage(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class AssistantSemanticCache(Base):
+    """Only stores public, context-independent responses produced by a live model."""
+
+    __tablename__ = "assistant_semantic_cache"
+    __table_args__ = (
+        Index("ix_assistant_semantic_cache_expiry", "expires_at"),
+        Index("ix_assistant_semantic_cache_prompt_language", "prompt_version", "language"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    prompt_version = Column(String(64), nullable=False)
+    language = Column(String(12), nullable=False)
+    query_text = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    embedding = Column(Vector(1536) if Vector else ARRAY(Float), nullable=False)
+    source_model = Column(String(128), nullable=False)
+    usage = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class CheckinTemplate(Base):
     __tablename__ = "checkin_templates"
 

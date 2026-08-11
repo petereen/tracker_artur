@@ -25,3 +25,4 @@ Pillow==10.4.0
 pytz==2024.2
 dateparser==1.2.0
 sentry-sdk[fastapi]>=2.14,<3
+redis[hiredis]>=5.2,<6
