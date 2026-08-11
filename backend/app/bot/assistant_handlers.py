@@ -467,7 +467,11 @@ async def route_and_respond(
                 voice_mode=voice_mode,
             )
             if not answer:
-                answer = _generation_unavailable(decision.language)
+                answer = (
+                    assistant_ai.knowledge_fallback_answer(raw_result, decision.language)
+                    if decision.selected_tool == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE
+                    else _generation_unavailable(decision.language)
+                )
             await _answer_question(
                 message,
                 answer,

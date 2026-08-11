@@ -2902,6 +2902,8 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
             answer = f"“{action['payload']['title']}” даалгаврын ноорог бэлэн. Үүсгэхээс өмнө шалгана уу."
         elif decision.selected_tool and decision.react_messages and decision.assistant_tool_message and decision.tool_call_id:
             answer = await assistant_ai.synthesize_tool_result(request_messages=decision.react_messages, assistant_message=decision.assistant_tool_message, tool_call_id=decision.tool_call_id, raw_result=raw, voice_mode=data.voice_mode)
+            if not answer and decision.selected_tool == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE:
+                answer = assistant_ai.knowledge_fallback_answer(raw, decision.language)
         else:
             answer = decision.direct_answer or "Асуултаа арай дэлгэрэнгүй асууна уу."
     if not answer:

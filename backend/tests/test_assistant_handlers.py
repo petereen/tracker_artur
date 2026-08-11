@@ -854,6 +854,31 @@ def test_company_tool_retrieves_postgres_knowledge(monkeypatch):
     assert "id" not in captured["raw_result"]["documents"][0]
 
 
+def test_company_knowledge_is_delivered_when_synthesis_is_unavailable(monkeypatch):
+    async def classify(*_args, **_kwargs):
+        return _react_decision(
+            AssistantIntent.GENERAL_PRODUCTIVITY,
+            AssistantToolName.SEARCH_COMPANY_KNOWLEDGE,
+            {"query": "wifi"},
+        ).model_copy(update={"language": AssistantLanguage.MN})
+
+    async def synthesize(**_kwargs):
+        return None
+
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
+    monkeypatch.setattr(assistant_handlers.assistant_ai, "synthesize_tool_result", synthesize)
+    monkeypatch.setattr(
+        assistant_handlers.knowledge_service,
+        "search_knowledge",
+        lambda *_args, **_kwargs: [{"title": "Wi-Fi", "category": "Office", "content": "Сүлжээний нэр: CorpNet. Нууц үг: secure-pass."}],
+    )
+
+    message = FakeMessage("оффисын wifi юу вэ")
+    asyncio.run(assistant_handlers.route_and_respond(message, object(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77", voice_mode=False))
+
+    assert message.answers[-1][0] == "Сүлжээний нэр: CorpNet. Нууц үг: secure-pass."
+
+
 def test_unknown_request_is_stored_without_task_draft(monkeypatch):
     async def classify(*_args, **_kwargs):
         return _decision(AssistantIntent.GENERAL_PRODUCTIVITY)

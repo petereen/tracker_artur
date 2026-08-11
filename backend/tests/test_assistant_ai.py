@@ -28,6 +28,7 @@ from app.services.assistant_ai import (
     is_task_query,
     is_worker_directory_query,
     is_information_question,
+    knowledge_fallback_answer,
     native_tool_specs,
     normalize_work_plan,
     parse_native_tool_message,
@@ -215,6 +216,26 @@ def test_gpt5_omits_unsupported_sampling_parameter(monkeypatch):
     )
     assert payload["model"] == "gpt-5-mini"
     assert "temperature" not in payload
+
+
+def test_assistant_defaults_to_gpt56_luna(monkeypatch):
+    monkeypatch.delenv("OPENAI_ASSISTANT_MODEL", raising=False)
+    assert _chat_completion_payload(messages=[{"role": "user", "content": "hello"}], temperature=0.2)["model"] == "gpt-5.6-luna"
+
+
+def test_knowledge_fallback_returns_only_retrieved_content():
+    answer = knowledge_fallback_answer(
+        {
+            "documents": [
+                {"title": "Wi-Fi", "category": "Office", "content": "SSID: CorpNet. Password: secure-pass."},
+                {"title": "Ignored", "content": "This must not be shown."},
+            ]
+        },
+        AssistantLanguage.EN,
+    )
+    assert answer == "SSID: CorpNet. Password: secure-pass."
+    assert "Wi-Fi" not in answer
+    assert "Ignored" not in answer
 
 
 def test_gpt5_reserves_reasoning_completion_budget(monkeypatch):

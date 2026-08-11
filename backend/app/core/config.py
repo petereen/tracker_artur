@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = ""
     GOOGLE_WEBHOOK_URL: str = ""
     OPENAI_API_KEY: str = ""
-    OPENAI_ASSISTANT_MODEL: str = "gpt-5-mini"
+    OPENAI_ASSISTANT_MODEL: str = "gpt-5.6-luna"
     ENTERPRISE_TOOLS_ENABLED: bool = False
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBEDDING_DIMENSIONS: int = 1536

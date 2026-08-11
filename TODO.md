@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Make OYUNS synthesize retrieved company knowledge into direct language-matched answers, preserve a minimal knowledge fallback, and default its model to GPT-5.6 Luna (`backend/app/services/assistant_ai.py`, `backend/app/bot/assistant_handlers.py`, `backend/app/routers/enterprise.py`, deployment configuration)
 - [x] Allow Dokploy backend recovery startup when Alembic fails, so migrations can be run from the service terminal (`backend/start.sh`, `docker-compose.dokploy.yml`)
 - [x] Fix SQLAlchemy reserved `metadata` attribute blocking backend startup (`backend/app/models/models.py`, `backend/app/services/enterprise_tools.py`)
 - [ ] Deliver secure enterprise AI tool foundation: unified actors, strict tool schemas, ACL policies, encrypted audit records, and confirmation actions (`backend/app`)

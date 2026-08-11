@@ -83,6 +83,15 @@ use pair "all calculated". Match formula results by their pair title, formula,
 or stable key. For an all-rates result, include both normal and calculated
 entries, grouped clearly if useful. Do not infer a missing pair from Telegram
 subscriptions.
+
+For company-knowledge questions, answer the user's question in the first
+sentence using only the retrieved documents. Write a concise, cohesive answer
+in the user's language; never dump document titles, categories, IDs, JSON,
+search snippets, or unrelated retrieved material. If the documents do not
+contain the answer, say only that this information is not yet registered in
+the company knowledge base. If the request is genuinely unclear, say it has
+been recorded for administrator review so the employee can receive a clearer
+answer later.
 """
 
 
@@ -277,7 +286,21 @@ def assistant_enabled() -> bool:
 
 
 def assistant_model() -> str:
-    return os.getenv("OPENAI_ASSISTANT_MODEL", "").strip() or "gpt-5-mini"
+    return os.getenv("OPENAI_ASSISTANT_MODEL", "").strip() or "gpt-5.6-luna"
+
+
+def knowledge_fallback_answer(raw_result: object, language: AssistantLanguage) -> str:
+    """Deliver the best retrieved fact if the user-facing synthesis call fails."""
+    documents = raw_result.get("documents", []) if isinstance(raw_result, dict) else []
+    if documents:
+        content = str(documents[0].get("content", "")).strip()
+        if content:
+            return re.sub(r"\s+", " ", content)[:2_000]
+    return {
+        AssistantLanguage.EN: "I could not find this information in the company knowledge base yet.",
+        AssistantLanguage.RU: "В базе знаний компании этой информации пока нет.",
+        AssistantLanguage.MN: "Компанийн мэдлэгийн санд энэ мэдээлэл одоогоор бүртгэгдээгүй байна.",
+    }[language]
 
 
 def assistant_timeout_seconds() -> int:
@@ -1223,11 +1246,15 @@ Answer the user in language "{language.value}". Set language to exactly
 Russian, English, or Mongolian based on the reference-data language. Use task
 and knowledge reference data when relevant. When company knowledge directly
 answers the user's company question, ground the answer in that reference data
-and include every used article ID in used_knowledge_ids. If the references do
-not establish a requested company fact, say that the knowledge base does not
-contain it. For drafting requests, produce the requested draft without
-pretending it was sent. used_knowledge_ids must contain only IDs actually used
-in the answer.
+and include every used article ID in used_knowledge_ids. Answer the user's
+actual question in the first sentence. Synthesize only relevant facts into a
+cohesive answer; never dump raw context, article titles, categories, IDs,
+database headers, or unrelated retrieved facts. If the references do not
+establish a requested company fact, say that the knowledge base does not
+contain it. If the request is genuinely unclear, say it has been recorded for
+administrator review. For drafting requests, produce the requested draft
+without pretending it was sent. used_knowledge_ids must contain only IDs
+actually used in the answer.
 {"Use no table and at most six short sentences because this came from voice." if voice_mode else ""}
 
 <user_message>

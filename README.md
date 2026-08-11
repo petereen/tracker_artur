@@ -92,7 +92,7 @@ OPENAI_WHISPER_MODEL=gpt-4o-mini-transcribe
 OPENAI_MONGOLIAN_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 OPENAI_TASK_MODEL=gpt-4o-mini
 # Optional; falls back to OPENAI_TASK_MODEL.
-OPENAI_ASSISTANT_MODEL=gpt-5-mini
+OPENAI_ASSISTANT_MODEL=gpt-5.6-luna
 # Leave empty for Mongolian: Whisper detects it automatically.
 OPENAI_TRANSCRIBE_LANGUAGE=
 
