@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Merge the remaining Alembic migration heads so backend deployment can run `alembic upgrade head` (`backend/alembic/versions`, `TODO.md`)
 - [x] Deliver folder ZIP downloads and persistent list/grid previews for the company file library (`backend/app/routers/company_files.py`, `frontend/src/pages/CompanyFilesPage.tsx`)
 - [x] Make Today worktime seconds, minutes, and hours update live while a work session is active (`frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Remove task saved-view controls and place the filter button at the right edge of the task view modes (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
@@ -102,6 +103,7 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Merge the remaining Alembic migration heads so backend deployment can run `alembic upgrade head` (`backend/alembic/versions`, `TODO.md`)
 - [x] Make Today worktime seconds, minutes, and hours update live while a work session is active (`frontend/src/pages/EnterpriseDashboardPage.tsx`)
 - [x] Remove task saved-view controls and place the filter button at the right edge of the task view modes (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
 - [x] Apply the shared modern dropdown menu to applicable workspace filters and selectors (`frontend/src/components/DropdownSelect.tsx`, `frontend/src`)
