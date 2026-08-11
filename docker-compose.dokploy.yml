@@ -8,7 +8,10 @@ services:
       - clamav_data:/var/lib/clamav
 
   db:
-    image: postgres:15
+    # The enterprise knowledge migration creates the pgvector extension.
+    # Plain postgres:15 does not ship vector.control and leaves the schema
+    # migration half-applied.
+    image: pgvector/pgvector:pg15
     restart: unless-stopped
     environment:
       POSTGRES_DB: sales_tracker
