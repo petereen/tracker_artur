@@ -2889,7 +2889,7 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
     text = data.text.strip()
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-    if settings.ENTERPRISE_TOOLS_ENABLED:
+    if settings.ENTERPRISE_TOOLS_ENABLED or enterprise_tools.is_high_confidence_request(text):
         enterprise = await enterprise_tools.run_agent(db, actor, text=text, history=history, channel="web", conversation_id=conversation.id)
         answer = enterprise["answer"]
         action = {"type": "task_update_preview", "payload": enterprise["action"]} if enterprise.get("action") else None

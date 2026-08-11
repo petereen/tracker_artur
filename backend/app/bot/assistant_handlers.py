@@ -117,7 +117,11 @@ async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=
 
 async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> bool:
     """Run the new tool stack only for a linked enterprise identity."""
-    if not settings.ENTERPRISE_TOOLS_ENABLED or not tg_id:
+    if (
+        not tg_id
+        or not settings.ENTERPRISE_TOOLS_ENABLED
+        and not enterprise_tools.is_high_confidence_request(text)
+    ):
         return False
     async with AsyncSessionLocal() as db:
         actor = await actor_from_telegram_id(tg_id, db)

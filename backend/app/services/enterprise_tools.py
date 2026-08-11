@@ -606,6 +606,14 @@ def _offline_route(text: str) -> tuple[str | None, dict]:
     return None, {}
 
 
+def is_high_confidence_request(text: str) -> bool:
+    """Identify requests that must not fall through to the legacy unknown path."""
+    lowered = (text or "").casefold()
+    return _offline_route(text)[0] is not None or any(term in lowered for term in (
+        "юу хийж чад", "юу чаддаг", "what can you do", "capabilit", "боломж",
+    ))
+
+
 def _capability_answer(text: str) -> str:
     lowered = (text or "").casefold()
     if any(term in lowered for term in ("юу хийж чад", "юу чаддаг", "what can you do", "capabilit", "боломж")):

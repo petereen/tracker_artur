@@ -10,6 +10,7 @@ from app.services.enterprise_tools import (
     _capability_answer,
     _chunks,
     _offline_route,
+    is_high_confidence_request,
     extract_content,
     tool_specs,
 )
@@ -57,3 +58,9 @@ def test_offline_capability_answer_is_mongolian():
     answer = _capability_answer("Чи юу хийж чадах вэ")
     assert "файлын сан" in answer
     assert "календарь" in answer
+
+
+def test_high_confidence_requests_bypass_legacy_unknown_fallback():
+    assert is_high_confidence_request("Чи юу хийж чадах вэ")
+    assert is_high_confidence_request("файлын сангаас powerpoint template ол")
+    assert is_high_confidence_request("Ажилчдын жагсаалт")
