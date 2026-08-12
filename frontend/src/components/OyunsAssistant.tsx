@@ -2,13 +2,12 @@ import { useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Bot, Check, LoaderCircle, Mic, Send, Sparkles, Square, Volume2, X } from 'lucide-react'
-import { synthesizeAssistantSpeech, transcribeAssistantVoice, useAssistantChat, useConfirmAssistantAction, useCreateEnterpriseTask } from '../api/enterprise'
+import { synthesizeAssistantSpeech, transcribeAssistantVoice, useAssistantChat, useConfirmAssistantAction } from '../api/enterprise'
 
 type Message = { role: 'user' | 'assistant'; text: string; audioUrl?: string; action?: { type: string; payload: Record<string, any> }; sources?: { id: string | number; title: string; locator?: Record<string, any> }[] }
 
 export function OyunsAssistant({ open, onClose }: { open: boolean; onClose: () => void }) {
   const assistant = useAssistantChat()
-  const createTask = useCreateEnterpriseTask()
   const confirmAction = useConfirmAssistantAction()
   const recorder = useRef<MediaRecorder>()
   const stream = useRef<MediaStream>()
@@ -105,15 +104,23 @@ export function OyunsAssistant({ open, onClose }: { open: boolean; onClose: () =
     if (recorder.current?.state === 'recording') recorder.current.stop()
   }
 
-  const confirmTask = async (payload: Record<string, any>) => {
-    await createTask.mutateAsync({ title: payload.title, description: payload.description ?? null, deadline_at: payload.deadline_at ?? null, priority: payload.priority ?? 2, workflow_status: 'to_do' })
-    setHistory((items) => [...items, { role: 'assistant', text: 'Даалгаврыг ERP-д үүсгэлээ.' }])
+  const confirmTaskAction = async (payload: Record<string, any>) => {
+    try {
+      const result = await confirmAction.mutateAsync(payload.token)
+      if (result?.status !== 'ok') throw new Error(result?.data?.reason || 'Action unavailable')
+      const created = result?.data?.created
+      const updated = result?.data?.updated
+      const title = created?.title || ''
+      const message = created
+        ? `Даалгаврыг ERP-д үүсгэлээ${title ? `: “${title}”` : ''}.`
+        : updated
+          ? 'Даалгаврын өөрчлөлтийг хэрэгжүүллээ.'
+          : 'Үйлдэл амжилттай хэрэгжлээ.'
+      setHistory((items) => [...items, { role: 'assistant', text: message }])
+    } catch (error: any) {
+      setHistory((items) => [...items, { role: 'assistant', text: error?.message || 'Үйлдлийг хэрэгжүүлж чадсангүй.' }])
+    }
   }
 
-  const confirmTaskUpdate = async (payload: Record<string, any>) => {
-    await confirmAction.mutateAsync(payload.token)
-    setHistory((items) => [...items, { role: 'assistant', text: 'Task update was applied.' }])
-  }
-
-  return <div className="assistant-backdrop" onMouseDown={onClose}><aside className="assistant-panel" role="dialog" aria-modal="true" aria-label="OYUNS AI агент" onMouseDown={(event) => event.stopPropagation()}><header><div><span><Sparkles size={15} /> OYUNS AI</span><strong>Компаний туслах</strong></div><button onClick={onClose} aria-label="Хаах"><X /></button></header><div className="assistant-messages" aria-live="polite">{history.map((message, index) => <div key={index} className={`assistant-message ${message.role}`}><span>{message.role === 'assistant' ? <Bot size={15} /> : 'Та'}</span><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>{message.audioUrl ? <audio className="assistant-audio" controls autoPlay src={message.audioUrl}><track kind="captions" /></audio> : null}{message.sources?.length ? <small>{message.sources.map((source) => source.title).join(' · ')}</small> : null}{message.action?.type === 'task_draft' && <section className="assistant-draft"><span>Баталгаажуулах ноорог</span><strong>{message.action.payload.title}</strong><button onClick={() => confirmTask(message.action!.payload)} disabled={createTask.isPending}><Check size={15} />ERP-д үүсгэх</button></section>}{message.action?.type === 'task_update_preview' && <section className="assistant-draft"><span>Task update preview</span><strong>{message.action.payload.task_id}</strong><button onClick={() => confirmTaskUpdate(message.action!.payload)} disabled={confirmAction.isPending}><Check size={15} />Confirm update</button></section>}</div>)}</div><form onSubmit={submit}><textarea ref={textarea} rows={1} value={input} onChange={(event) => resizeTextarea(event.target.value)} placeholder="Компаний журам, миний ажил, эсвэл даалгаврын талаар асуу…" autoFocus /><button type="button" className={`assistant-record ${isRecording ? 'recording' : ''}`} onClick={() => isRecording ? stopRecording() : startRecording()} disabled={assistant.isPending || isTranscribing} aria-label={isRecording ? 'Бичлэг дуусгах' : 'Дуугаар асуух'}>{isTranscribing ? <LoaderCircle className="spin" size={17} /> : isRecording ? <Square size={15} /> : <Mic size={18} />}</button><button disabled={assistant.isPending || isRecording || isTranscribing || !input.trim()} aria-label="Илгээх"><Send size={17} /></button></form>{isRecording ? <div className="assistant-recording"><span />Сонсож байна… <button onClick={() => stopRecording(true)}>Болих</button></div> : null}{isTranscribing ? <div className="assistant-recording"><LoaderCircle className="spin" size={15} />Дуу хоолойг таньж байна…</div> : null}</aside></div>
+  return <div className="assistant-backdrop" onMouseDown={onClose}><aside className="assistant-panel" role="dialog" aria-modal="true" aria-label="OYUNS AI агент" onMouseDown={(event) => event.stopPropagation()}><header><div><span><Sparkles size={15} /> OYUNS AI</span><strong>Компаний туслах</strong></div><button onClick={onClose} aria-label="Хаах"><X /></button></header><div className="assistant-messages" aria-live="polite">{history.map((message, index) => <div key={index} className={`assistant-message ${message.role}`}><span>{message.role === 'assistant' ? <Bot size={15} /> : 'Та'}</span><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>{message.audioUrl ? <audio className="assistant-audio" controls autoPlay src={message.audioUrl}><track kind="captions" /></audio> : null}{message.sources?.length ? <small>{message.sources.map((source) => source.title).join(' · ')}</small> : null}{message.action?.type === 'task_action_preview' && <section className="assistant-draft"><span>Баталгаажуулах ноорог</span><strong>{message.action.payload.title || message.action.payload.task_id || 'Даалгавар'}</strong><p>{message.action.payload.action_type === 'update_task' ? 'Даалгаврын өөрчлөлт' : message.action.payload.action_type === 'delegate_task' ? 'Өөр ажилтанд оноох шинэ даалгавар' : 'Шинэ даалгавар'}</p><button onClick={() => confirmTaskAction(message.action!.payload)} disabled={confirmAction.isPending}><Check size={15} />{message.action.payload.action_type === 'update_task' ? 'Өөрчлөлт хэрэгжүүлэх' : 'ERP-д үүсгэх'}</button></section>}</div>)}</div><form onSubmit={submit}><textarea ref={textarea} rows={1} value={input} onChange={(event) => resizeTextarea(event.target.value)} placeholder="Компаний журам, миний ажил, эсвэл даалгаврын талаар асуу…" autoFocus /><button type="button" className={`assistant-record ${isRecording ? 'recording' : ''}`} onClick={() => isRecording ? stopRecording() : startRecording()} disabled={assistant.isPending || isTranscribing} aria-label={isRecording ? 'Бичлэг дуусгах' : 'Дуугаар асуух'}>{isTranscribing ? <LoaderCircle className="spin" size={17} /> : isRecording ? <Square size={15} /> : <Mic size={18} />}</button><button disabled={assistant.isPending || isRecording || isTranscribing || !input.trim()} aria-label="Илгээх"><Send size={17} /></button></form>{isRecording ? <div className="assistant-recording"><span />Сонсож байна… <button onClick={() => stopRecording(true)}>Болих</button></div> : null}{isTranscribing ? <div className="assistant-recording"><LoaderCircle className="spin" size={15} />Дуу хоолойг таньж байна…</div> : null}</aside></div>
 }

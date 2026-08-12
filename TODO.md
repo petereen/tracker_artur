@@ -1,6 +1,10 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Make every OYUNS response retrieval-first and route web/Telegram through one organization- and RBAC-scoped assistant tool contract (`backend/app/services/enterprise_tools.py`, `backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`)
+- [x] Add strict `create_task` and `delegate_task` draft/confirm actions with actor authority checks, required-field clarification, idempotency, conflict/expiry handling, and persisted execution outcomes (`backend/app/services`, `backend/app/routers/enterprise.py`, `backend/app/bot`)
+- [x] Remove or quarantine legacy assistant knowledge/task paths that bypass the shared ACL and audit pipeline (`backend/app/services/assistant_ai.py`, `backend/app/bot/assistant_handlers.py`)
+- [x] Add cross-channel RBAC, restricted-data non-disclosure, missing-parameter, unauthorized-delegation, confirmation, and tool-outcome regression coverage (`backend/tests`, frontend assistant tests)
 - [x] Implement live AI gateway routing, token budgets, and GPT-5.6 model failover (`backend/app/services/ai_gateway`)
 - [x] Add Redis exact caching, pgvector semantic-cache persistence, and cache observability (`backend/app`, `backend/alembic`, Compose)
 - [x] Merge the AI gateway migration with all existing Alembic heads (`backend/alembic/versions/c3d4e5f6g7h8_ai_gateway_cache.py`)

@@ -134,7 +134,8 @@ async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> b
         rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation.id).order_by(AssistantMessage.id.desc()).limit(12))).scalars().all()
         history = [{"role": row.role, "content": row.content} for row in reversed(rows)]
         db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-        tool_sources: list[dict] = []
+        grounding = await enterprise_tools.retrieve_turn_context(db, actor, text, channel="telegram", conversation_id=conversation.id)
+        tool_sources: list[dict] = list(grounding.get("sources", []))
         pending_action = None
 
         async def execute_gateway_tool(name: str, arguments: dict) -> dict:
@@ -145,18 +146,18 @@ async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> b
             return result
 
         try:
-            routed = await ai_gateway.respond(db, GatewayRequest(text=text, history=history, channel="telegram", language_hint="mn", tools=enterprise_tools.tool_specs(), execute_tool=execute_gateway_tool, conversation_id=conversation.id))
+            routed = await ai_gateway.respond(db, GatewayRequest(text=text, history=history, channel="telegram", language_hint="mn", tools=enterprise_tools.tool_specs(), execute_tool=execute_gateway_tool, conversation_id=conversation.id, grounding_context=grounding.get("context"), grounding_sources=grounding.get("sources", [])))
         except GatewayError:
             await db.rollback()
             await _answer(message, "OYUNS live AI service is temporarily unavailable. Please try again shortly.")
             return True
-        action = {"type": "task_update_preview", "payload": pending_action} if pending_action else None
+        action = {"type": "task_action_preview", "payload": pending_action} if pending_action else None
         source_map = {item["id"]: item for item in [*tool_sources, *routed.sources] if item.get("id")}
         result = {"answer": routed.answer, "action": pending_action, "sources": list(source_map.values()), "deliveries": []}
         db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=routed.answer, action=action, sources=result["sources"]))
         conversation.updated_at = datetime.now(timezone.utc)
         await db.commit()
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Confirm update", callback_data=f"assistant-confirm:{result['action']['token']}")]]) if result.get("action") else None
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Confirm task", callback_data=f"assistant-confirm:{result['action']['token']}")]]) if result.get("action") else None
         await _answer(message, html.escape(result["answer"]), reply_markup=keyboard, parse_mode="HTML")
         protected_links = [delivery.get("url") for delivery in result.get("deliveries", []) if delivery.get("kind") == "authenticated_link" and delivery.get("url")]
         if protected_links:
@@ -568,9 +569,12 @@ async def confirm_enterprise_task_update(callback: CallbackQuery, tg_id: str | N
             await callback.answer("Link an enterprise account first", show_alert=True); return
         result = await enterprise_tools.confirm_task_update(db, actor, token, channel="telegram")
         await db.commit()
-    await callback.answer("Updated" if result["status"] == "ok" else result["data"].get("reason", "Update unavailable"), show_alert=result["status"] != "ok")
+    outcome = result.get("data", {}).get("created") or result.get("data", {}).get("updated")
+    success_text = "Task created" if result.get("data", {}).get("created") else "Task updated"
+    await callback.answer(success_text if result["status"] == "ok" else result["data"].get("reason", "Action unavailable"), show_alert=result["status"] != "ok")
     if callback.message and result["status"] == "ok":
-        await callback.message.answer("Task update was applied.")
+        title = outcome.get("title") if isinstance(outcome, dict) else None
+        await callback.message.answer(("Task created: " + title) if result.get("data", {}).get("created") and title else success_text + ".")
 
 
 @router.message(StateFilter(None, TaskDraft.confirming), F.voice)

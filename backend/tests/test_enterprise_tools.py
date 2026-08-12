@@ -1,8 +1,13 @@
+import asyncio
+
 from pydantic import ValidationError
 import pytest
 
 from app.services.enterprise_tools import (
+    AssistantTaskInput,
     CalendarInput,
+    can_read_policy,
+    DelegateTaskInput,
     FileSearchInput,
     ProjectQueryInput,
     ProjectUpdateInput,
@@ -14,6 +19,8 @@ from app.services.enterprise_tools import (
     extract_content,
     tool_specs,
 )
+from app.core.enterprise_deps import ActorContext
+from app.models.models import ResourceGrant, ResourcePolicy
 
 
 def test_tool_schemas_are_strict_and_bounded():
@@ -31,7 +38,15 @@ def test_governed_tool_inputs_cover_the_public_contract():
     assert CalendarInput(intent="availability", scope="team").scope == "team"
     preview = ProjectUpdateInput(operation="update_task", task_id=4, changes={"workflow_status": "done"})
     assert preview.changes.workflow_status == "done"
-    assert {spec["name"] for spec in tool_specs()} == {"file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool", "employee_directory_tool"}
+    assert {spec["name"] for spec in tool_specs()} == {"file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool", "employee_directory_tool", "create_task", "delegate_task"}
+    task = AssistantTaskInput(title="Prepare access review", assignee="Ada", priority=1)
+    assert task.assignee == "Ada"
+    with pytest.raises(ValidationError):
+        AssistantTaskInput(title=" ")
+    with pytest.raises(ValidationError):
+        DelegateTaskInput(title="Prepare access review")
+    with pytest.raises(ValidationError):
+        AssistantTaskInput(title="Task", organization_id=1)
 
 
 def test_text_extraction_produces_safe_locations_and_overlap_chunks():
@@ -75,3 +90,30 @@ def test_high_confidence_requests_bypass_legacy_unknown_fallback():
     assert is_high_confidence_request("Ажилчдын жагсаалт")
     assert is_high_confidence_request("компанийн төлөвлөгөө юу вэ")
     assert is_high_confidence_request("компанийн хийгдэж буй төслүүд байгаа юу?")
+
+
+class _GrantRows:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self.rows
+
+
+class _AclDb:
+    def __init__(self, grants):
+        self.grants = grants
+
+    async def execute(self, _statement):
+        return _GrantRows(self.grants)
+
+
+def test_restricted_resource_requires_an_explicit_account_grant():
+    policy = ResourcePolicy(id=9, classification="restricted")
+    actor = ActorContext(account_id=3, organization_id=1, employee_id=4, email="member@example.com", locale="mn", roles=frozenset({"member"}))
+    assert asyncio.run(can_read_policy(_AclDb([]), actor, policy)) is False
+    grant = ResourceGrant(policy_id=9, principal_type="account", principal_key="3")
+    assert asyncio.run(can_read_policy(_AclDb([grant]), actor, policy)) is True

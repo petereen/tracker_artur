@@ -15,7 +15,7 @@ from app.services.enterprise_tools import FileSearchInput, tool_specs
 
 
 async def main() -> None:
-    expected_tools = {"file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool", "employee_directory_tool"}
+    expected_tools = {"file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool", "employee_directory_tool", "create_task", "delegate_task"}
     assert {item["name"] for item in tool_specs()} == expected_tools
     assert FileSearchInput(query="security policy").search_mode == "hybrid"
     async with AsyncSessionLocal() as db:

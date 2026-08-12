@@ -116,8 +116,16 @@ def test_enterprise_schema_registers_required_foundation_tables():
         "objectives", "key_results", "milestones", "audit_logs", "domain_events", "job_queue",
         "calendar_connections", "calendar_event_links", "personal_time_blocks", "project_requests",
         "calendar_entries", "holiday_records", "assistant_conversations", "assistant_messages",
+        "assistant_pending_actions", "assistant_tool_audits", "knowledge_documents", "knowledge_chunks",
     }
     assert required.issubset(Base.metadata.tables)
+
+
+def test_assistant_pending_actions_support_creation_and_update_contracts():
+    table = Base.metadata.tables["assistant_pending_actions"]
+    assert table.c.action_type.nullable is False
+    assert table.c.task_id.nullable is True
+    assert table.c.expected_version.nullable is True
 
 
 def test_versioned_routes_include_auth_clock_tasks_reports_and_realtime():

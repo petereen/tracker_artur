@@ -84,7 +84,6 @@ from app.services import voice_service
 from app.services.google_calendar import account_from_state, authorization_url as google_authorization_url, exchange_code as google_exchange_code, is_configured as google_is_configured, stop_watch as google_stop_watch
 from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services import assistant_ai, exchange_rate_service
-from app.services.knowledge_service import rank_knowledge
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
@@ -574,7 +573,7 @@ class AssistantChatInput(BaseModel):
 
 
 class AssistantToolRequest(BaseModel):
-    tool_name: Literal["file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool"]
+    tool_name: Literal["file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool", "employee_directory_tool", "create_task", "delegate_task"]
     arguments: dict = Field(default_factory=dict)
 
 
@@ -2868,10 +2867,15 @@ async def _assistant_web_tool(db: AsyncSession, decision, actor: ActorContext) -
         tasks = (await db.execute(select(Task).where(Task.organization_id == actor.organization_id, _task_employee_scope(actor.employee_id), Task.is_archived.is_(False)).order_by(Task.deadline_at.nulls_last()).limit(50))).scalars().all()
         return {"count": len(tasks), "tasks": [{"title": task.title, "description": task.description, "status": task.workflow_status, "deadline_at": task.deadline_at} for task in tasks]}, None, []
     if tool == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE:
-        rows = (await db.execute(select(CompanyKnowledge).where(CompanyKnowledge.is_active.is_(True)).order_by(CompanyKnowledge.updated_at.desc()))).scalars().all()
-        records = [{"id": row.id, "title": row.title, "category": row.category, "content": row.content, "is_active": row.is_active} for row in rows]
-        matches = rank_knowledge(records, [arguments.get("query", "")], limit=5)
-        return {"query": arguments.get("query"), "count": len(matches), "documents": matches}, None, [{"id": item["id"], "title": item["title"]} for item in matches]
+        result = await enterprise_tools.execute(
+            db,
+            actor,
+            "file_search_tool",
+            {"query": arguments.get("query", ""), "search_mode": "hybrid", "limit": 5, "delivery": "none"},
+            channel="web",
+            prompt=arguments.get("query", ""),
+        )
+        return result.get("data", {}), None, result.get("sources", [])
     if tool == assistant_ai.AssistantToolName.GET_EXCHANGE_RATE:
         result = await exchange_rate_service.get_exchange_rate(provider=arguments["provider"], pair=arguments["pair"], force_refresh=arguments.get("force_refresh", False), request_type=arguments.get("request_type", "single"))
         return result, None, []
@@ -2891,7 +2895,8 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
     text = data.text.strip()
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-    tool_sources: list[dict] = []
+    grounding = await enterprise_tools.retrieve_turn_context(db, actor, text, channel="web", conversation_id=conversation.id)
+    tool_sources: list[dict] = list(grounding.get("sources", []))
     pending_action = None
 
     async def execute_gateway_tool(name: str, arguments: dict) -> dict:
@@ -2905,13 +2910,14 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
         routed = await ai_gateway.respond(db, GatewayRequest(
             text=text, history=history, channel="web", language_hint="mn",
             tools=enterprise_tools.tool_specs(), execute_tool=execute_gateway_tool,
-            conversation_id=conversation.id,
+            conversation_id=conversation.id, grounding_context=grounding.get("context"),
+            grounding_sources=grounding.get("sources", []),
         ))
     except GatewayError as exc:
         await db.rollback()
         raise HTTPException(status_code=exc.status_code, detail="OYUNS live AI service is temporarily unavailable") from exc
     answer = routed.answer
-    action = {"type": "task_update_preview", "payload": pending_action} if pending_action else None
+    action = {"type": "task_action_preview", "payload": pending_action} if pending_action else None
     source_map = {item["id"]: item for item in [*tool_sources, *routed.sources] if item.get("id")}
     sources = list(source_map.values())
     assistant_message = AssistantMessage(conversation_id=conversation.id, role="assistant", content=answer, action=action, sources=sources)
@@ -2995,7 +3001,7 @@ async def assistant_draft(data: AssistantDraftInput, db: AsyncSession = Depends(
     """Compatibility endpoint for clients not yet migrated to conversations."""
     response = await assistant_chat(AssistantChatInput(text=data.text), db, actor)
     action = response["message"].get("action") or {"type": "report_draft", "payload": {"title": "AI-assisted report", "markdown": data.text}}
-    return {"kind": data.kind, "requires_confirmation": action["type"] == "task_draft", "draft": action["payload"], "conversation_id": response["conversation_id"]}
+    return {"kind": data.kind, "requires_confirmation": action["type"] == "task_action_preview", "draft": action["payload"], "conversation_id": response["conversation_id"]}
 
 
 @router.post("/voice/transcriptions")

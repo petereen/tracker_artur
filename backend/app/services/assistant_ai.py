@@ -402,7 +402,7 @@ def native_tool_specs() -> list[dict]:
                             ),
                         },
                     },
-                    "required": ["assignee", "title", "due_date", "priority"],
+                    "required": ["assignee", "reviewer", "title", "due_date", "priority"],
                     "additionalProperties": False,
                 },
             },

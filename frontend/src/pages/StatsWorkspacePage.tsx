@@ -132,7 +132,7 @@ export function StatsWorkspacePage() {
               <strong>{summary.data?.completion_rate ?? 0}%</strong>
             </article>
             <article className="metric-card amber">
-              <span>Өдөрт дуусгасан дундаж</span>
+              <span>Өдөрт дуусгасан даалгаврын дундаж</span>
               <strong>
                 {Math.round((completed / Math.max(workingDays, 1)) * 10) / 10}
               </strong>

@@ -18,9 +18,10 @@ def configured_assignment_roles(organization: Organization | None) -> frozenset[
 
 async def actor_can_assign_tasks(db: AsyncSession, *, organization_id: int, employee_id: int | None, roles: frozenset[str]) -> bool:
     organization = await db.get(Organization, organization_id)
-    # Task delegation is a core collaboration action: every active member can
-    # assign work, including an administrator account that is not employee-linked.
-    return bool(roles.intersection(ALL_EMPLOYEE_ROLES) or employee_id is not None)
+    allowed_roles = configured_assignment_roles(organization)
+    # Assignment authority is derived from current organization settings and
+    # server-resolved roles. An employee link alone is never sufficient.
+    return bool(roles.intersection(allowed_roles))
 
 
 def employee_can_assign_tasks(employee_id: int | None) -> bool:

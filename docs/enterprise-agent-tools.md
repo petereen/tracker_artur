@@ -12,6 +12,8 @@ conversation records remain the source of history.
 | `get_stats_tool` | ERP task, work-time, report, project, and budget metrics | Revenue, DAU, and support metrics are rejected as unsupported |
 | `project_mgmt_tool` | Scoped projects, tasks, blockers, and milestones | Milestones are the v1 sprint-like view |
 | `project_mgmt_update_tool` | Generates a task update preview only | One-time actor/channel-bound confirmation expires in 10 minutes |
+| `create_task` | Generates a new task preview for confirmation | No database task is created until the same actor confirms |
+| `delegate_task` | Generates a new task assigned to another employee | Target must resolve to one authorized active employee; no implicit self-delegation |
 | `calendar_tool` | Events, schedule, and availability | Private details follow role hierarchy; others see free/busy |
 
 All input schemas are strict and inject actor/organization server-side. Every
@@ -29,6 +31,14 @@ Policies inherit from parent folders. Existing company files and unambiguous
 legacy knowledge records are backfilled as `internal`. Content is filtered
 before both retrieval and model calls; source IDs are opaque and database,
 Telegram, credential, and rate-internal fields are omitted.
+
+Every web and Telegram turn performs an organization-scoped knowledge and
+database preflight before the live model is called. If no authorized source
+answers the question, the assistant says so without exposing restricted
+context. Task action previews are account- and channel-bound, expire after 10
+minutes, and are replay-safe. Confirmation returns the persisted task,
+assignment, and notification outcome; preview text is never treated as
+completion.
 
 ## Indexing and operations
 
