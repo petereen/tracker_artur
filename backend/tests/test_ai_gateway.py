@@ -1,3 +1,5 @@
+import asyncio
+
 from app.services.ai_gateway.cache import exact_key
 from app.services.ai_gateway.config import QueryCategory, registry
 from app.services.ai_gateway.gateway import (
@@ -5,6 +7,7 @@ from app.services.ai_gateway.gateway import (
     Classification,
     CLASSIFICATION_SCHEMA,
     EXPLICIT_PROMPT_CACHE_TTL,
+    GatewayRequest,
 )
 
 
@@ -64,3 +67,71 @@ def test_history_is_trimmed_from_oldest_turns_without_touching_latest_turn():
         {"role": "assistant", "content": "new"},
     ]
     assert gateway._trim_history(history, 20) == [{"role": "assistant", "content": "new"}]
+
+
+def test_tool_enabled_turn_keeps_enterprise_tools_when_classifier_misses_route(monkeypatch):
+    """A misclassified task request must still be able to prepare its draft."""
+    gateway = AIGateway()
+    calls = []
+
+    class Cache:
+        async def circuit_open(self, _key):
+            return False
+
+        async def record_model_success(self, _key):
+            return None
+
+        async def record_model_failure(self, _key):
+            return None
+
+    gateway.cache = Cache()
+
+    async def classify(_text):
+        return Classification(
+            category="simple_qa",
+            language="mn",
+            requires_freshness=False,
+            requires_enterprise_tools=False,
+            requested_modalities=["text"],
+            cache_eligible=True,
+        )
+
+    async def post(payload, *, model_key, retries=2):
+        del model_key, retries
+        if any(item.get("type") == "function_call_output" for item in payload["input"]):
+            return {
+                "output": [{
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "Даалгаврын ноорог бэлэн боллоо."}],
+                }],
+                "usage": {},
+            }
+        return {
+            "output": [{
+                "type": "function_call",
+                "name": "create_task",
+                "call_id": "call-1",
+                "arguments": '{"title":"Маргаашийн хурал","assignee":"self","description":null,"reviewer":null,"priority":2,"deadline_at":null,"project_ref":null}',
+            }],
+        }
+
+    async def execute(name, arguments):
+        calls.append((name, arguments))
+        return {"status": "ok", "data": {"pending_action": {"title": arguments["title"]}}}
+
+    monkeypatch.setattr(gateway, "_classify", classify)
+    monkeypatch.setattr(gateway, "_post", post)
+    response = asyncio.run(gateway.respond(
+        None,
+        GatewayRequest(
+            text="Маргаашийн хурлыг даалгавар болго",
+            history=[],
+            channel="web",
+            tools=[{"type": "function", "name": "create_task", "parameters": {}}],
+            execute_tool=execute,
+        ),
+    ))
+
+    assert calls[0][0] == "create_task"
+    assert calls[0][1]["assignee"] == "self"
+    assert response.answer == "Даалгаврын ноорог бэлэн боллоо."

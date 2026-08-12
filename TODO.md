@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Keep ACL-scoped task tools available across web and Telegram even when live routing misclassifies a task request, bypass stale text-only cache entries, and clarify minimal task-draft inputs (`backend/app/services/ai_gateway/gateway.py`, `backend/app/services/enterprise_tools.py`, `backend/tests/test_ai_gateway.py`)
+- [x] Make all enterprise function schemas strict-compatible, add generic file-directory listing, and harden shared tool-call recovery (`backend/app/services/enterprise_tools.py`, `backend/app/services/ai_gateway/gateway.py`, `backend/tests`)
+- [x] Document the shared OYUNS prompt architecture and cross-channel error-handling contract (`docs/ai-assistant-prompt-architecture.md`)
 - [x] Use the provider-supported 30-minute explicit prompt-cache TTL so answer requests are accepted (`backend/app/services/ai_gateway/gateway.py`)
 - [x] Parse raw Responses API message content so OYUNS can use successful live classifier and answer responses (`backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_ai_gateway.py`)
 - [x] Restore live AI classifier requests after provider HTTP 400 responses (`backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_ai_gateway.py`)
@@ -141,6 +144,9 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Keep ACL-scoped task tools available across web and Telegram even when live routing misclassifies a task request, bypass stale text-only cache entries, and clarify minimal task-draft inputs (`backend/app/services/ai_gateway/gateway.py`, `backend/app/services/enterprise_tools.py`, `backend/tests/test_ai_gateway.py`)
+- [x] Make all enterprise function schemas strict-compatible, add generic file-directory listing, and harden shared tool-call recovery (`backend/app/services/enterprise_tools.py`, `backend/app/services/ai_gateway/gateway.py`, `backend/tests`)
+- [x] Document the shared OYUNS prompt architecture and cross-channel error-handling contract (`docs/ai-assistant-prompt-architecture.md`)
 - [x] Use the provider-supported 30-minute explicit prompt-cache TTL so answer requests are accepted (`backend/app/services/ai_gateway/gateway.py`)
 - [x] Parse raw Responses API message content so OYUNS can use successful live classifier and answer responses (`backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_ai_gateway.py`)
 - [x] Restore live AI classifier requests after provider HTTP 400 responses with a strict API-compatible schema and actionable provider error logging (`backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_ai_gateway.py`)

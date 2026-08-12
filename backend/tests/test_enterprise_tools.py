@@ -31,6 +31,29 @@ def test_tool_schemas_are_strict_and_bounded():
         FileSearchInput(query="policy", limit=11)
 
 
+def test_file_search_supports_directory_listing_without_a_query():
+    assert FileSearchInput(operation="list", folder_id=None).query is None
+    with pytest.raises(ValidationError):
+        FileSearchInput(operation="search")
+
+
+def test_all_enterprise_function_schemas_satisfy_responses_strict_mode():
+    def visit(node):
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                assert node.get("additionalProperties") is False
+                assert set(node.get("required", [])) == set(properties)
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    for spec in tool_specs():
+        visit(spec["parameters"])
+
+
 def test_governed_tool_inputs_cover_the_public_contract():
     assert StatsInput(metrics=["task_completion"], timeframe="today").metrics == ["task_completion"]
     assert ProjectQueryInput(entity="milestones").entity == "milestones"
@@ -75,6 +98,10 @@ def test_offline_route_recognizes_mongolian_enterprise_requests():
     assert _offline_route("компанийн хийгдэж буй төслүүд байгаа юу?") == (
         "project_mgmt_tool",
         {"operation": "query", "entity": "projects", "completion_state": "all", "active_only": True, "limit": 20},
+    )
+    assert _offline_route("файлын санд ямар файлууд байна?") == (
+        "file_search_tool",
+        {"operation": "list", "folder_id": None, "file_types": [], "limit": 10, "delivery": "none"},
     )
 
 

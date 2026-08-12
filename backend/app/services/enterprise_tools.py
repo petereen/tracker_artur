@@ -14,12 +14,13 @@ import os
 import re
 import secrets
 import math
+from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
 import aiohttp
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,12 +49,25 @@ class _Strict(BaseModel):
 
 
 class FileSearchInput(_Strict):
-    query: str = Field(min_length=1, max_length=500)
+    operation: Literal["search", "list"] = "search"
+    query: str | None = Field(default=None, max_length=500)
     search_mode: Literal["hybrid", "semantic", "keyword"] = "hybrid"
     folder_id: int | None = None
     file_types: list[str] = Field(default_factory=list, max_length=10)
     limit: int = Field(default=5, ge=1, le=10)
     delivery: Literal["none", "attachment", "link"] = "none"
+
+    @field_validator("query")
+    @classmethod
+    def _trim_query(cls, value: str | None) -> str | None:
+        value = value.strip() if value is not None else None
+        return value or None
+
+    @model_validator(mode="after")
+    def _require_query_for_search(self):
+        if self.operation == "search" and not self.query:
+            raise ValueError("query is required for file search")
+        return self
 
 
 class StatsInput(_Strict):
@@ -160,19 +174,55 @@ INPUT_MODELS = {
 }
 
 
+def _strict_parameters(model: type[BaseModel]) -> dict:
+    """Return a Responses strict-function-compatible Pydantic schema.
+
+    OpenAI strict function calling requires every object property to appear in
+    ``required``. Pydantic correctly omits fields with defaults from required,
+    so normalize every object, including nested ``$defs`` objects, at the
+    transport boundary. Optional values remain nullable in the generated
+    schema; defaults are applied by the validated application model.
+    """
+    schema = deepcopy(model.model_json_schema())
+
+    def visit(node: object) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                node["required"] = list(properties)
+                node["additionalProperties"] = False
+            node.pop("default", None)
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(schema)
+    return schema
+
+
 def tool_specs() -> list[dict]:
     """Strict function definitions accepted by the Responses API."""
     descriptions = {
-        "file_search_tool": "Search permission-filtered company files and knowledge. Results include citations.",
+        "file_search_tool": "List or search permission-filtered company files and knowledge. Use operation=list for a directory listing and operation=search for content search. Results include citations.",
         "get_stats_tool": "Retrieve governed ERP metrics. Never invent unsupported revenue, DAU, or support values.",
         "project_mgmt_tool": "Retrieve scoped projects, approved company plans, tasks, blockers, and milestones.",
         "calendar_tool": "Retrieve scoped calendar events, schedules, or availability without exposing unauthorized private details.",
         "employee_directory_tool": "List active company employees, job titles, and Telegram usernames when available. Never expose Telegram IDs or other private fields.",
-        "create_task": "Prepare a new task for confirmation. Never apply the task without explicit confirmation.",
-        "delegate_task": "Prepare a new task assigned to another authorized employee for confirmation. Never apply it without explicit confirmation.",
+        "create_task": (
+            "Prepare a new task for confirmation. The title is required; assignee defaults "
+            "to the current user, while description, reviewer, project, priority, and "
+            "deadline are optional. Never apply the task without explicit confirmation."
+        ),
+        "delegate_task": (
+            "Prepare a new task assigned to another authorized employee for confirmation. "
+            "Only the title and target employee are required; all other fields are optional. "
+            "Never apply the task without explicit confirmation."
+        ),
     }
-    specs = [{"type": "function", "name": name, "description": descriptions[name], "strict": True, "parameters": model.model_json_schema()} for name, model in INPUT_MODELS.items()]
-    specs.append({"type": "function", "name": "project_mgmt_update_tool", "description": "Prepare a task update for explicit confirmation; never apply it directly.", "strict": True, "parameters": ProjectUpdateInput.model_json_schema()})
+    specs = [{"type": "function", "name": name, "description": descriptions[name], "strict": True, "parameters": _strict_parameters(model)} for name, model in INPUT_MODELS.items()]
+    specs.append({"type": "function", "name": "project_mgmt_update_tool", "description": "Prepare a task update for explicit confirmation; never apply it directly.", "strict": True, "parameters": _strict_parameters(ProjectUpdateInput)})
     return specs
 
 
@@ -301,6 +351,27 @@ async def index_company_knowledge(db: AsyncSession, entry: CompanyKnowledge) -> 
 
 
 async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInput) -> dict:
+    if data.operation == "list":
+        rows = []
+        items = list((await db.execute(select(CompanyLibraryItem).where(
+            CompanyLibraryItem.organization_id == actor.organization_id,
+            CompanyLibraryItem.deleted_at.is_(None),
+            CompanyLibraryItem.parent_id == data.folder_id,
+        ).order_by(CompanyLibraryItem.kind, CompanyLibraryItem.name))).scalars().all())
+        for item in items:
+            if item.kind == "file" and data.file_types and Path(item.name).suffix.casefold().lstrip(".") not in {value.casefold().lstrip(".") for value in data.file_types}:
+                continue
+            policy = await _policy_for_file(db, item)
+            if not await can_read_policy(db, actor, policy):
+                continue
+            classification = policy.classification if policy else "internal"
+            source_id = f"company_file:{item.id}"
+            rows.append({"source_id": source_id, "title": item.name, "kind": item.kind, "parent_id": item.parent_id, "content_type": item.content_type, "size": item.size, "classification": classification})
+            if len(rows) >= data.limit:
+                break
+        return _result("ok" if rows else "empty", {"query": data.query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"]} for row in rows])
+    if not data.query:
+        return _result("denied", {"reason": "A search query is required."})
     query = data.query.casefold().strip()
     documents = list((await db.execute(select(KnowledgeDocument).where(KnowledgeDocument.organization_id == actor.organization_id, KnowledgeDocument.index_status == "ready"))).scalars().all())
     candidate_ids: list[int] = []
@@ -896,7 +967,7 @@ async def run_agent(db: AsyncSession, actor: ActorContext, *, text: str, history
         output = body.get("output", [])
         calls = [item for item in output if isinstance(item, dict) and item.get("type") == "function_call"]
         if not calls:
-            final_answer = body.get("output_text") or "I could not produce an answer right now."
+            final_answer = _responses_output_text(body) or "I could not produce an answer right now."
             break
         inputs.extend(output)
         for call in calls[:1]:
@@ -974,6 +1045,12 @@ def _offline_route(text: str) -> tuple[str | None, dict]:
         "файлын сан", "файл", "баримт", "document", "powerpoint", "template", "pptx", "журам",
     )):
         file_types = ["pptx", "potx", "potm"] if any(term in lowered for term in ("powerpoint", "pptx", "presentation", "танилцуулга", "template")) else []
+        listing_terms = (
+            "ямар файл", "файлууд байна", "файлын жагсаалт", "файлуудын жагсаалт",
+            "list files", "file list", "directory", "repository contents", "what files",
+        )
+        if any(term in lowered for term in listing_terms):
+            return "file_search_tool", {"operation": "list", "folder_id": None, "file_types": file_types, "limit": 10, "delivery": "none"}
         return "file_search_tool", {"query": text, "file_types": file_types, "limit": 5, "delivery": "none"}
     if any(term in lowered for term in ("төлөвлөг", "company plan", "company plans")):
         return "project_mgmt_tool", {"operation": "query", "entity": "plans", "completion_state": "all", "limit": 20}
@@ -986,6 +1063,20 @@ def _offline_route(text: str) -> tuple[str | None, dict]:
     if any(term in lowered for term in ("stat", "metric", "completion", "үзүүлэлт", "статистик")):
         return "get_stats_tool", {"metrics": ["task_completion"], "timeframe": "this_week"}
     return None, {}
+
+
+def _responses_output_text(data: dict) -> str:
+    convenience = data.get("output_text")
+    if convenience:
+        return str(convenience).strip()
+    chunks: list[str] = []
+    for item in data.get("output", []):
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for content in item.get("content", []):
+            if content.get("type") == "output_text" and content.get("text"):
+                chunks.append(str(content["text"]))
+    return "".join(chunks).strip()
 
 
 def is_high_confidence_request(text: str) -> bool:
