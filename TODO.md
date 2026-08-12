@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Parse raw Responses API message content so OYUNS can use successful live classifier and answer responses (`backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_ai_gateway.py`)
 - [x] Restore live AI classifier requests after provider HTTP 400 responses (`backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_ai_gateway.py`)
 - [x] Make every OYUNS response retrieval-first and route web/Telegram through one organization- and RBAC-scoped assistant tool contract (`backend/app/services/enterprise_tools.py`, `backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`)
 - [x] Add strict `create_task` and `delegate_task` draft/confirm actions with actor authority checks, required-field clarification, idempotency, conflict/expiry handling, and persisted execution outcomes (`backend/app/services`, `backend/app/routers/enterprise.py`, `backend/app/bot`)
@@ -139,6 +140,7 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Parse raw Responses API message content so OYUNS can use successful live classifier and answer responses (`backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_ai_gateway.py`)
 - [x] Restore live AI classifier requests after provider HTTP 400 responses with a strict API-compatible schema and actionable provider error logging (`backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_ai_gateway.py`)
 - [x] Add provider-independent Mongolian routing for enterprise file search, capability answers, and employee directory requests (`backend/app/services/enterprise_tools.py`, `backend/tests/test_enterprise_tools.py`)
 - [x] Prevent high-confidence enterprise requests from falling through to the legacy unknown-response router (`backend/app/bot/assistant_handlers.py`, `backend/app/routers/enterprise.py`)

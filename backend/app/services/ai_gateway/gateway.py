@@ -163,10 +163,30 @@ class AIGateway:
             }
             try:
                 data = await self._post(payload, model_key=key)
-                return Classification.model_validate_json(data.get("output_text", ""))
+                return Classification.model_validate_json(self._output_text(data))
             except (GatewayError, ValueError):
                 log.warning("ai_gateway.classifier_failed model=%s", key, exc_info=True)
         raise GatewayError("No live model could classify this request")
+
+    @staticmethod
+    def _output_text(data: dict) -> str:
+        """Read text from the raw Responses API shape returned by aiohttp.
+
+        ``output_text`` is an SDK convenience property and is not included in
+        the raw REST response. Responses are message items whose text lives in
+        ``output[].content[]``.
+        """
+        convenience = data.get("output_text")
+        if convenience:
+            return str(convenience).strip()
+        chunks: list[str] = []
+        for item in data.get("output", []):
+            if item.get("type") != "message":
+                continue
+            for content in item.get("content", []):
+                if content.get("type") == "output_text" and content.get("text"):
+                    chunks.append(str(content["text"]))
+        return "".join(chunks).strip()
 
     async def _embed(self, text: str) -> list[float] | None:
         key = settings.OPENAI_API_KEY.strip()
@@ -251,7 +271,7 @@ class AIGateway:
                     output = body.get("output", [])
                     calls = [item for item in output if item.get("type") == "function_call"]
                     if not calls:
-                        answer = str(body.get("output_text") or "").strip()
+                        answer = self._output_text(body)
                         if not answer:
                             raise GatewayError("Live model returned no answer", status_code=502)
                         usage = body.get("usage", {})

@@ -30,6 +30,18 @@ def test_classifier_schema_is_a_strict_responses_api_object():
     ]
 
 
+def test_raw_responses_items_are_converted_to_output_text():
+    assert AIGateway._output_text({
+        "output": [{
+            "type": "message",
+            "content": [
+                {"type": "output_text", "text": "hello"},
+                {"type": "output_text", "text": " world"},
+            ],
+        }],
+    }) == "hello world"
+
+
 def test_exact_cache_key_is_stable_for_whitespace_only_changes():
     assert exact_key(prompt_version="v1", language="mn", text="сайн байна уу") == exact_key(
         prompt_version="v1", language="mn", text="  сайн   байна уу  "
