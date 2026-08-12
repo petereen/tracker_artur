@@ -249,6 +249,46 @@ def test_voice_transcript_uses_shared_router(monkeypatch):
     assert captured["employee"] is EMPLOYEE
 
 
+def test_telegram_task_intake_uses_legacy_draft_controls(monkeypatch):
+    captured = {}
+
+    class Session:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    async def actor_lookup(_tg_id, _db):
+        return object()
+
+    async def begin(message, state, text, **kwargs):
+        captured.update({"message": message, "state": state, "text": text, **kwargs})
+        return {"ok": True}
+
+    monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", lambda: Session())
+    monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", actor_lookup)
+    monkeypatch.setattr(assistant_handlers, "begin_task_draft", begin)
+
+    message = FakeMessage("Create a task to prepare the report")
+    state = FakeState()
+    handled = asyncio.run(
+        assistant_handlers._enterprise_route(
+            message,
+            state,
+            message.text,
+            employee=EMPLOYEE,
+            is_manager=False,
+            tg_id="77",
+        )
+    )
+
+    assert handled is True
+    assert captured["state"] is state
+    assert captured["show_preview"] is True
+    assert captured["allow_ai_structuring"] is True
+
+
 def test_delegate_route_enters_existing_draft_without_direct_creation(monkeypatch):
     drafted = {}
     tool_arguments = {

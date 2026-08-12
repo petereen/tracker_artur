@@ -223,7 +223,7 @@ def _draft_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Үүсгэх", callback_data="taskdraft:confirm"),
         InlineKeyboardButton(text="✏️ Засах", callback_data="taskdraft:edit"),
-        InlineKeyboardButton(text="❌ Цуцлах", callback_data="taskdraft:cancel"),
+        InlineKeyboardButton(text="❌ Устгах", callback_data="taskdraft:cancel"),
     ]])
 
 
@@ -694,7 +694,7 @@ async def cb_draft_edit(cb: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "taskdraft:cancel", TaskDraft.confirming)
 async def cb_draft_cancel(cb: CallbackQuery, state: FSMContext):
     await state.clear()
-    await cb.message.answer("❌ Цуцлагдлаа.")
+    await cb.message.answer("❌ Ноорог устгагдлаа.")
     await cb.answer()
 
 

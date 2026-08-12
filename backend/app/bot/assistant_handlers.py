@@ -117,10 +117,40 @@ async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=
         )
 
 
-async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> bool:
-    """Run every linked Telegram conversation through the live gateway."""
+async def _enterprise_route(
+    message: Message,
+    state: FSMContext,
+    text: str,
+    *,
+    employee,
+    is_manager: bool,
+    tg_id: str | None,
+) -> bool:
+    """Route Telegram task intake to the legacy draft controls.
+
+    The Web assistant keeps the enterprise preview/action contract. Telegram
+    already has a richer, familiar draft state with confirm, edit, and delete
+    callbacks, so task-intake messages should enter that workflow directly.
+    """
     if not tg_id:
         return False
+    if assistant_ai.is_task_creation_request(text):
+        async with AsyncSessionLocal() as db:
+            actor = await actor_from_telegram_id(tg_id, db)
+            if not actor:
+                await _answer(message, "OYUNS access requires a linked active platform account.")
+                return True
+        await begin_task_draft(
+            message,
+            state,
+            text,
+            employee=employee,
+            is_manager=is_manager,
+            tg_id=tg_id,
+            show_preview=True,
+            allow_ai_structuring=True,
+        )
+        return True
     async with AsyncSessionLocal() as db:
         actor = await actor_from_telegram_id(tg_id, db)
         if not actor:
@@ -136,12 +166,16 @@ async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> b
         db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
         grounding = await enterprise_tools.retrieve_turn_context(db, actor, text, channel="telegram", conversation_id=conversation.id)
         tool_sources: list[dict] = list(grounding.get("sources", []))
+        tool_deliveries: list[dict] = []
         pending_action = None
 
         async def execute_gateway_tool(name: str, arguments: dict) -> dict:
             nonlocal pending_action
+            if name == "file_search_tool" and enterprise_tools.wants_file_attachment(text):
+                arguments = {**arguments, "delivery": "attachment"}
             result = await enterprise_tools.execute(db, actor, name, arguments, channel="telegram", prompt=text, conversation_id=conversation.id)
             tool_sources.extend(result.get("sources", []))
+            tool_deliveries.extend(result.get("deliveries", []))
             pending_action = result.get("data", {}).get("pending_action") or pending_action
             return result
 
@@ -153,8 +187,9 @@ async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> b
             return True
         action = {"type": "task_action_preview", "payload": pending_action} if pending_action else None
         source_map = {item["id"]: item for item in [*tool_sources, *routed.sources] if item.get("id")}
-        result = {"answer": routed.answer, "action": pending_action, "sources": list(source_map.values()), "deliveries": []}
-        db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=routed.answer, action=action, sources=result["sources"]))
+        result = {"answer": routed.answer, "action": pending_action, "sources": list(source_map.values()), "deliveries": tool_deliveries}
+        attachments = enterprise_tools.attachment_metadata(tool_deliveries)
+        db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=routed.answer, action=action, sources=result["sources"], attachments=attachments))
         conversation.updated_at = datetime.now(timezone.utc)
         await db.commit()
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Confirm task", callback_data=f"assistant-confirm:{result['action']['token']}")]]) if result.get("action") else None
@@ -163,9 +198,9 @@ async def _enterprise_route(message: Message, text: str, tg_id: str | None) -> b
         if protected_links:
             await _answer(message, "Open protected file: " + "\n".join(protected_links), parse_mode=None)
         for delivery in result.get("deliveries", []):
-            if delivery.get("kind") != "telegram_attachment" or not str(delivery.get("source_id", "")).startswith("company_file:"):
+            if delivery.get("kind") != "company_file_attachment":
                 continue
-            item = await db.get(CompanyLibraryItem, int(str(delivery["source_id"]).split(":", 1)[1]))
+            item = await db.get(CompanyLibraryItem, int(delivery["item_id"]))
             if item and item.storage_key:
                 await message.answer_document(BufferedInputFile(await get_attachment(item.storage_key), filename=item.name))
     return True
@@ -396,7 +431,14 @@ async def route_and_respond(
     tg_id: str | None,
     voice_mode: bool,
 ) -> None:
-    if await _enterprise_route(message, text, tg_id):
+    if await _enterprise_route(
+        message,
+        state,
+        text,
+        employee=employee,
+        is_manager=is_manager,
+        tg_id=tg_id,
+    ):
         return
     # Telegram messages without a verified platform identity cannot safely be
     # sent to the assistant. Do not drop into the historical heuristic router.

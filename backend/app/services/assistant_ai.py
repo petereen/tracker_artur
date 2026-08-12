@@ -815,6 +815,15 @@ _DELEGATE_RE = re.compile(
     r"поставь.*задач|поручи|назначь)",
     re.IGNORECASE,
 )
+_TASK_CREATE_RE = re.compile(
+    r"(?:\b(?:create|make|add|prepare|record)\s+(?:a\s+)?task\b|"
+    r"\b(?:assign|delegate|give)\s+(?:me\s+)?(?:a\s+)?task\b|"
+    r"\btask\s+for\b|"
+    r"\b(?:даалгавар|ажил)(?:ыг|ийг|аа)?\s*(?:өг|оноо|үүсгэ|үүсгэх|бэлд|болго|хариуцуул)|"
+    r"(?:даалгавар|ажил)\s+(?:өг|оноо|үүсгэ|бэлд)|"
+    r"хариуцуул)",
+    re.IGNORECASE,
+)
 _SCHEDULED_EVENT_RE = re.compile(
     r"(?:"
     r"(?:\b(?:өнөөдөр|маргааш|нөгөөдөр)\b.*?)?"
@@ -826,6 +835,9 @@ _SCHEDULED_EVENT_RE = re.compile(
     r"|"
     r"\b(?:сегодня|завтра|послезавтра)\b.*?"
     r"\b(?:встреча|совещание|мероприятие)\b"
+    r"|"
+    r"\b(?:өнөөдөр|маргааш|нөгөөдөр)\b.*?"
+    r"\b(?:хуралтай|уулзалттай)\b"
     r")",
     re.IGNORECASE,
 )
@@ -910,6 +922,13 @@ def is_task_query(text: str) -> bool:
 def is_scheduled_task(text: str) -> bool:
     """Recognize a concrete meeting/event statement that should become a draft."""
     return bool(_SCHEDULED_EVENT_RE.search(text or "") or _ALL_HANDS_GATHERING_RE.search(text or ""))
+
+
+def is_task_creation_request(text: str) -> bool:
+    """Recognize explicit task-intake wording for Telegram's legacy draft UI."""
+    if is_task_query(text):
+        return False
+    return bool(_TASK_CREATE_RE.search(text or "") or _DELEGATE_RE.search(text or "") or is_scheduled_task(text))
 
 
 def _router_intent_for_fallback(intent: AssistantIntent, text: str) -> RouterIntent:

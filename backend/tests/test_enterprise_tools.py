@@ -14,10 +14,12 @@ from app.services.enterprise_tools import (
     StatsInput,
     _capability_answer,
     _chunks,
+    attachment_metadata,
     _offline_route,
     is_high_confidence_request,
     extract_content,
     tool_specs,
+    wants_file_attachment,
 )
 from app.core.enterprise_deps import ActorContext
 from app.models.models import ResourceGrant, ResourcePolicy
@@ -103,6 +105,26 @@ def test_offline_route_recognizes_mongolian_enterprise_requests():
         "file_search_tool",
         {"operation": "list", "folder_id": None, "file_types": [], "limit": 10, "delivery": "none"},
     )
+
+
+def test_explicit_file_delivery_requests_create_safe_attachment_metadata():
+    assert wants_file_attachment("Надад leave policy файлыг хавсаргаж өгөөч") is True
+    assert wants_file_attachment("файлын жагсаалтыг харуул") is False
+    assert _offline_route("Надад powerpoint template-ийг илгээ") == (
+        "file_search_tool",
+        {"query": "Надад powerpoint template-ийг илгээ", "file_types": ["pptx", "potx", "potm"], "limit": 5, "delivery": "attachment"},
+    )
+    deliveries = [
+        {"kind": "company_file_attachment", "item_id": 7, "filename": "policy.pdf", "content_type": "application/pdf", "size": 12},
+        {"kind": "company_file_attachment", "item_id": 7, "filename": "policy.pdf", "content_type": "application/pdf", "size": 12},
+    ]
+    assert attachment_metadata(deliveries) == [{
+        "item_id": 7,
+        "filename": "policy.pdf",
+        "content_type": "application/pdf",
+        "size": 12,
+        "download_url": "/v1/company-files/7/download",
+    }]
 
 
 def test_offline_capability_answer_is_mongolian():

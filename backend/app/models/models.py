@@ -1184,6 +1184,7 @@ class AssistantMessage(Base):
     content = Column(Text, nullable=False)
     action = Column(JSONB)
     sources = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    attachments = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

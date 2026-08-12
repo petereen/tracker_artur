@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Bot, Check, LoaderCircle, Mic, Send, Sparkles, Square, Volume2, X } from 'lucide-react'
-import { synthesizeAssistantSpeech, transcribeAssistantVoice, useAssistantChat, useConfirmAssistantAction } from '../api/enterprise'
+import { Bot, Check, Download, LoaderCircle, Mic, Send, Sparkles, Square, X } from 'lucide-react'
+import { AssistantFileAttachment, downloadAssistantAttachment, synthesizeAssistantSpeech, transcribeAssistantVoice, useAssistantChat, useConfirmAssistantAction } from '../api/enterprise'
 
-type Message = { role: 'user' | 'assistant'; text: string; audioUrl?: string; action?: { type: string; payload: Record<string, any> }; sources?: { id: string | number; title: string; locator?: Record<string, any> }[] }
+type Message = { role: 'user' | 'assistant'; text: string; audioUrl?: string; action?: { type: string; payload: Record<string, any> }; sources?: { id: string | number; title: string; locator?: Record<string, any> }[]; attachments?: AssistantFileAttachment[] }
 
 export function OyunsAssistant({ open, onClose }: { open: boolean; onClose: () => void }) {
   const assistant = useAssistantChat()
@@ -17,13 +17,14 @@ export function OyunsAssistant({ open, onClose }: { open: boolean; onClose: () =
   const [conversationId, setConversationId] = useState<number>()
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [downloadingAttachment, setDownloadingAttachment] = useState<number>()
   const [history, setHistory] = useState<Message[]>([{ role: 'assistant', text: 'Сайн байна уу. Би өгөгдлийн сангаас хариулж, таны ажил болон даалгаврыг ойлгож тусална. Үйлдэл хийхийн өмнө заавал баталгаажуулна.' }])
   if (!open) return null
 
   const addAnswer = async (result: any) => {
     setConversationId(result.conversation_id)
     const message = result.message
-    const answer: Message = { role: 'assistant', text: message.content, action: message.action, sources: message.sources }
+    const answer: Message = { role: 'assistant', text: message.content, action: message.action, sources: message.sources, attachments: message.attachments }
     setHistory((items) => [...items, answer])
     try {
       const audioUrl = await synthesizeAssistantSpeech(message.content)
@@ -122,5 +123,16 @@ export function OyunsAssistant({ open, onClose }: { open: boolean; onClose: () =
     }
   }
 
-  return <div className="assistant-backdrop" onMouseDown={onClose}><aside className="assistant-panel" role="dialog" aria-modal="true" aria-label="OYUNS AI агент" onMouseDown={(event) => event.stopPropagation()}><header><div><span><Sparkles size={15} /> OYUNS AI</span><strong>Компаний туслах</strong></div><button onClick={onClose} aria-label="Хаах"><X /></button></header><div className="assistant-messages" aria-live="polite">{history.map((message, index) => <div key={index} className={`assistant-message ${message.role}`}><span>{message.role === 'assistant' ? <Bot size={15} /> : 'Та'}</span><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>{message.audioUrl ? <audio className="assistant-audio" controls autoPlay src={message.audioUrl}><track kind="captions" /></audio> : null}{message.sources?.length ? <small>{message.sources.map((source) => source.title).join(' · ')}</small> : null}{message.action?.type === 'task_action_preview' && <section className="assistant-draft"><span>Баталгаажуулах ноорог</span><strong>{message.action.payload.title || message.action.payload.task_id || 'Даалгавар'}</strong><p>{message.action.payload.action_type === 'update_task' ? 'Даалгаврын өөрчлөлт' : message.action.payload.action_type === 'delegate_task' ? 'Өөр ажилтанд оноох шинэ даалгавар' : 'Шинэ даалгавар'}</p><button onClick={() => confirmTaskAction(message.action!.payload)} disabled={confirmAction.isPending}><Check size={15} />{message.action.payload.action_type === 'update_task' ? 'Өөрчлөлт хэрэгжүүлэх' : 'ERP-д үүсгэх'}</button></section>}</div>)}</div><form onSubmit={submit}><textarea ref={textarea} rows={1} value={input} onChange={(event) => resizeTextarea(event.target.value)} placeholder="Компаний журам, миний ажил, эсвэл даалгаврын талаар асуу…" autoFocus /><button type="button" className={`assistant-record ${isRecording ? 'recording' : ''}`} onClick={() => isRecording ? stopRecording() : startRecording()} disabled={assistant.isPending || isTranscribing} aria-label={isRecording ? 'Бичлэг дуусгах' : 'Дуугаар асуух'}>{isTranscribing ? <LoaderCircle className="spin" size={17} /> : isRecording ? <Square size={15} /> : <Mic size={18} />}</button><button disabled={assistant.isPending || isRecording || isTranscribing || !input.trim()} aria-label="Илгээх"><Send size={17} /></button></form>{isRecording ? <div className="assistant-recording"><span />Сонсож байна… <button onClick={() => stopRecording(true)}>Болих</button></div> : null}{isTranscribing ? <div className="assistant-recording"><LoaderCircle className="spin" size={15} />Дуу хоолойг таньж байна…</div> : null}</aside></div>
+  const downloadAttachment = async (attachment: AssistantFileAttachment) => {
+    setDownloadingAttachment(attachment.item_id)
+    try {
+      await downloadAssistantAttachment(attachment)
+    } catch {
+      setHistory((items) => [...items, { role: 'assistant', text: `“${attachment.filename}” файлыг татаж чадсангүй. Дахин оролдоно уу.` }])
+    } finally {
+      setDownloadingAttachment(undefined)
+    }
+  }
+
+  return <div className="assistant-backdrop" onMouseDown={onClose}><aside className="assistant-panel" role="dialog" aria-modal="true" aria-label="OYUNS AI агент" onMouseDown={(event) => event.stopPropagation()}><header><div><span><Sparkles size={15} /> OYUNS AI</span><strong>Компаний туслах</strong></div><button onClick={onClose} aria-label="Хаах"><X /></button></header><div className="assistant-messages" aria-live="polite">{history.map((message, index) => <div key={index} className={`assistant-message ${message.role}`}><span>{message.role === 'assistant' ? <Bot size={15} /> : 'Та'}</span><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>{message.audioUrl ? <audio className="assistant-audio" controls autoPlay src={message.audioUrl}><track kind="captions" /></audio> : null}{message.attachments?.length ? <div className="assistant-attachments" aria-label="Хавсаргасан файлууд">{message.attachments.map((attachment) => <button key={attachment.item_id} type="button" className="assistant-attachment" onClick={() => downloadAttachment(attachment)} disabled={downloadingAttachment === attachment.item_id}><Download size={15} />{downloadingAttachment === attachment.item_id ? 'Татаж байна…' : attachment.filename}</button>)}</div> : null}{message.sources?.length ? <small>{message.sources.map((source) => source.title).join(' · ')}</small> : null}{message.action?.type === 'task_action_preview' && <section className="assistant-draft"><span>Баталгаажуулах ноорог</span><strong>{message.action.payload.title || message.action.payload.task_id || 'Даалгавар'}</strong><p>{message.action.payload.action_type === 'update_task' ? 'Даалгаврын өөрчлөлт' : message.action.payload.action_type === 'delegate_task' ? 'Өөр ажилтанд оноох шинэ даалгавар' : 'Шинэ даалгавар'}</p><button onClick={() => confirmTaskAction(message.action!.payload)} disabled={confirmAction.isPending}><Check size={15} />{message.action.payload.action_type === 'update_task' ? 'Өөрчлөлт хэрэгжүүлэх' : 'ERP-д үүсгэх'}</button></section>}</div>)}</div><form onSubmit={submit}><textarea ref={textarea} rows={1} value={input} onChange={(event) => resizeTextarea(event.target.value)} placeholder="Компаний журам, миний ажил, эсвэл даалгаврын талаар асуу…" autoFocus /><button type="button" className={`assistant-record ${isRecording ? 'recording' : ''}`} onClick={() => isRecording ? stopRecording() : startRecording()} disabled={assistant.isPending || isTranscribing} aria-label={isRecording ? 'Бичлэг дуусгах' : 'Дуугаар асуух'}>{isTranscribing ? <LoaderCircle className="spin" size={17} /> : isRecording ? <Square size={15} /> : <Mic size={18} />}</button><button disabled={assistant.isPending || isRecording || isTranscribing || !input.trim()} aria-label="Илгээх"><Send size={17} /></button></form>{isRecording ? <div className="assistant-recording"><span />Сонсож байна… <button onClick={() => stopRecording(true)}>Болих</button></div> : null}{isTranscribing ? <div className="assistant-recording"><LoaderCircle className="spin" size={15} />Дуу хоолойг таньж байна…</div> : null}</aside></div>
 }

@@ -32,6 +32,7 @@ from app.services.assistant_ai import (
     native_tool_specs,
     normalize_work_plan,
     parse_native_tool_message,
+    is_task_creation_request,
 )
 
 
@@ -41,6 +42,15 @@ def test_acceptance_routes_delegate_task():
         is_manager=True,
     )
     assert decision.intent == AssistantIntent.DELEGATE_TASK
+
+
+def test_telegram_task_intake_detector_distinguishes_creation_from_lookup():
+    assert is_task_creation_request("Create a task to prepare the report")
+    assert is_task_creation_request("Маргааш 15 цагт хуралтай")
+    assert is_task_creation_request("Маргааш хуралтай")
+    assert is_task_creation_request("@bat тайлан бэлд")
+    assert not is_task_creation_request("Миний даалгавар юу байна")
+    assert is_task_query("Миний даалгавар юу байна")
 
 
 def test_acceptance_routes_today_priorities():

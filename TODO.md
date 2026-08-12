@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Let the AI assistant attach ACL-authorized company files in web and Telegram messages, persist message attachments, and expose authenticated web downloads (`backend/app/services/enterprise_tools.py`, `backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`, `frontend/src/components/OyunsAssistant.tsx`, `backend/alembic/versions/f5g6h7i8j9k0_assistant_file_attachments.py`)
+- [x] Route Telegram task-intake messages through the legacy draft state with confirm, edit, and delete controls while keeping Web on the enterprise assistant flow (`backend/app/bot/assistant_handlers.py`, `backend/app/bot/tasks_handlers.py`, `backend/app/services/assistant_ai.py`, `backend/tests`)
 - [x] Keep ACL-scoped task tools available across web and Telegram even when live routing misclassifies a task request, bypass stale text-only cache entries, and clarify minimal task-draft inputs (`backend/app/services/ai_gateway/gateway.py`, `backend/app/services/enterprise_tools.py`, `backend/tests/test_ai_gateway.py`)
 - [x] Make all enterprise function schemas strict-compatible, add generic file-directory listing, and harden shared tool-call recovery (`backend/app/services/enterprise_tools.py`, `backend/app/services/ai_gateway/gateway.py`, `backend/tests`)
 - [x] Document the shared OYUNS prompt architecture and cross-channel error-handling contract (`docs/ai-assistant-prompt-architecture.md`)
@@ -144,6 +146,8 @@
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Let the AI assistant attach ACL-authorized company files in web and Telegram messages, persist message attachments, and expose authenticated web downloads (`backend/app/services/enterprise_tools.py`, `backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`, `frontend/src/components/OyunsAssistant.tsx`, `backend/alembic/versions/f5g6h7i8j9k0_assistant_file_attachments.py`)
+- [x] Route Telegram task-intake messages through the legacy draft state with confirm, edit, and delete controls while keeping Web on the enterprise assistant flow (`backend/app/bot/assistant_handlers.py`, `backend/app/bot/tasks_handlers.py`, `backend/app/services/assistant_ai.py`, `backend/tests`)
 - [x] Keep ACL-scoped task tools available across web and Telegram even when live routing misclassifies a task request, bypass stale text-only cache entries, and clarify minimal task-draft inputs (`backend/app/services/ai_gateway/gateway.py`, `backend/app/services/enterprise_tools.py`, `backend/tests/test_ai_gateway.py`)
 - [x] Make all enterprise function schemas strict-compatible, add generic file-directory listing, and harden shared tool-call recovery (`backend/app/services/enterprise_tools.py`, `backend/app/services/ai_gateway/gateway.py`, `backend/tests`)
 - [x] Document the shared OYUNS prompt architecture and cross-channel error-handling contract (`docs/ai-assistant-prompt-architecture.md`)

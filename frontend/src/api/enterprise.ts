@@ -647,6 +647,19 @@ export function useAssistantChat() {
   return useMutation({ mutationFn: (input: { text: string; conversation_id?: number; voice_mode?: boolean }) => api.post('/v1/assistant/conversations', input).then((response) => response.data) })
 }
 
+export interface AssistantFileAttachment {
+  item_id: number
+  filename: string
+  content_type: string
+  size: number | null
+  download_url: string
+}
+
+export async function downloadAssistantAttachment(attachment: AssistantFileAttachment) {
+  const response = await api.get(attachment.download_url, { responseType: 'blob' })
+  saveCompanyBlob(response.data, attachment.filename)
+}
+
 export function useConfirmAssistantAction() {
   return useMutation({ mutationFn: (token: string) => api.post('/v1/assistant/actions/confirm', { token }).then((response) => response.data) })
 }

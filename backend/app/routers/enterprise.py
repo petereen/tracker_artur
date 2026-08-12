@@ -2897,12 +2897,16 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
     grounding = await enterprise_tools.retrieve_turn_context(db, actor, text, channel="web", conversation_id=conversation.id)
     tool_sources: list[dict] = list(grounding.get("sources", []))
+    tool_deliveries: list[dict] = []
     pending_action = None
 
     async def execute_gateway_tool(name: str, arguments: dict) -> dict:
         nonlocal pending_action
+        if name == "file_search_tool" and enterprise_tools.wants_file_attachment(text):
+            arguments = {**arguments, "delivery": "attachment"}
         result = await enterprise_tools.execute(db, actor, name, arguments, channel="web", prompt=text, conversation_id=conversation.id)
         tool_sources.extend(result.get("sources", []))
+        tool_deliveries.extend(result.get("deliveries", []))
         pending_action = result.get("data", {}).get("pending_action") or pending_action
         return result
 
@@ -2920,11 +2924,12 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     action = {"type": "task_action_preview", "payload": pending_action} if pending_action else None
     source_map = {item["id"]: item for item in [*tool_sources, *routed.sources] if item.get("id")}
     sources = list(source_map.values())
-    assistant_message = AssistantMessage(conversation_id=conversation.id, role="assistant", content=answer, action=action, sources=sources)
+    attachments = enterprise_tools.attachment_metadata(tool_deliveries)
+    assistant_message = AssistantMessage(conversation_id=conversation.id, role="assistant", content=answer, action=action, sources=sources, attachments=attachments)
     db.add(assistant_message)
     conversation.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    result = {"conversation_id": conversation.id, "message": {"id": assistant_message.id, "role": "assistant", "content": answer, "action": action, "sources": sources}}
+    result = {"conversation_id": conversation.id, "message": {"id": assistant_message.id, "role": "assistant", "content": answer, "action": action, "sources": sources, "attachments": attachments}}
     if actor.has_any_role("admin"):
         result["routing"] = {"category": routed.route, "model": routed.model, "cache": routed.cache, "web_search_used": routed.web_search_used, "usage": routed.usage}
     return result
@@ -2983,7 +2988,7 @@ async def assistant_conversation(conversation_id: int, db: AsyncSession = Depend
     if not conversation or conversation.account_id != actor.account_id:
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation_id).order_by(AssistantMessage.id))).scalars().all()
-    return {"id": conversation.id, "messages": [{"id": row.id, "role": row.role, "content": row.content, "action": row.action, "sources": row.sources, "created_at": row.created_at} for row in rows]}
+    return {"id": conversation.id, "messages": [{"id": row.id, "role": row.role, "content": row.content, "action": row.action, "sources": row.sources, "attachments": row.attachments, "created_at": row.created_at} for row in rows]}
 
 
 @router.delete("/assistant/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -205,7 +205,7 @@ def _strict_parameters(model: type[BaseModel]) -> dict:
 def tool_specs() -> list[dict]:
     """Strict function definitions accepted by the Responses API."""
     descriptions = {
-        "file_search_tool": "List or search permission-filtered company files and knowledge. Use operation=list for a directory listing and operation=search for content search. Results include citations.",
+        "file_search_tool": "List or search permission-filtered company files and knowledge. Use operation=list for a directory listing and operation=search for content search. When the user asks to send, provide, attach, or download a file, set delivery=attachment so the transport attaches each authorized company file to the reply. Results include citations.",
         "get_stats_tool": "Retrieve governed ERP metrics. Never invent unsupported revenue, DAU, or support values.",
         "project_mgmt_tool": "Retrieve scoped projects, approved company plans, tasks, blockers, and milestones.",
         "calendar_tool": "Retrieve scoped calendar events, schedules, or availability without exposing unauthorized private details.",
@@ -228,6 +228,74 @@ def tool_specs() -> list[dict]:
 
 def _result(status: TOOL_STATUS, data: dict | None = None, *, sources: list[dict] | None = None, deliveries: list[dict] | None = None, warnings: list[str] | None = None) -> dict:
     return {"status": status, "data": data or {}, "sources": sources or [], "deliveries": deliveries or [], "warnings": warnings or []}
+
+
+FILE_ATTACHMENT_TERMS = (
+    "attach", "attachment", "send me", "send the file", "provide the file", "download",
+    "хавсарг", "илгээ", "явуул", "өгнө үү", "өгөөч", "татаж ав", "татаж өг",
+)
+
+
+def wants_file_attachment(text: str) -> bool:
+    """Recognize an explicit request to receive a company file as a download."""
+    lowered = (text or "").casefold()
+    return any(term in lowered for term in FILE_ATTACHMENT_TERMS)
+
+
+def _file_deliveries(rows: list[dict], delivery: str) -> list[dict]:
+    if delivery == "none":
+        return []
+    deliveries: list[dict] = []
+    for row in rows:
+        source_id = str(row.get("source_id", ""))
+        if not source_id.startswith("company_file:"):
+            continue
+        if row.get("kind") == "folder":
+            continue
+        try:
+            item_id = int(source_id.split(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        if delivery == "attachment":
+            deliveries.append({
+                "source_id": source_id,
+                "kind": "company_file_attachment",
+                "item_id": item_id,
+                "filename": row.get("title"),
+                "content_type": row.get("content_type"),
+                "size": row.get("size"),
+            })
+        else:
+            deliveries.append({
+                "source_id": source_id,
+                "kind": "authenticated_link",
+                "url": f"{settings.PUBLIC_APP_URL.rstrip('/')}/company-files?item={item_id}",
+            })
+    return deliveries
+
+
+def attachment_metadata(deliveries: list[dict]) -> list[dict]:
+    """Return safe, storage-key-free metadata for assistant message payloads."""
+    result: list[dict] = []
+    seen: set[int] = set()
+    for delivery in deliveries:
+        if delivery.get("kind") != "company_file_attachment":
+            continue
+        try:
+            item_id = int(delivery["item_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+        result.append({
+            "item_id": item_id,
+            "filename": delivery.get("filename") or "company-file",
+            "content_type": delivery.get("content_type") or "application/octet-stream",
+            "size": delivery.get("size"),
+            "download_url": f"/v1/company-files/{item_id}/download",
+        })
+    return result
 
 
 async def _policy_for_file(db: AsyncSession, item: CompanyLibraryItem) -> ResourcePolicy | None:
@@ -369,7 +437,7 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
             rows.append({"source_id": source_id, "title": item.name, "kind": item.kind, "parent_id": item.parent_id, "content_type": item.content_type, "size": item.size, "classification": classification})
             if len(rows) >= data.limit:
                 break
-        return _result("ok" if rows else "empty", {"query": data.query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"]} for row in rows])
+        return _result("ok" if rows else "empty", {"query": data.query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"]} for row in rows], deliveries=_file_deliveries(rows, data.delivery))
     if not data.query:
         return _result("denied", {"reason": "A search query is required."})
     query = data.query.casefold().strip()
@@ -440,13 +508,7 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
         if len(rows) >= data.limit: break
     if not rows:
         return _result("empty", {"query": data.query, "results": []})
-    deliveries = []
-    if data.delivery != "none":
-        for row in rows:
-            if row["source_id"].startswith("company_file:"):
-                kind = "telegram_attachment" if row["classification"] == "internal" and data.delivery == "attachment" else "authenticated_link"
-                file_id = row["source_id"].split(":", 1)[1]
-                deliveries.append({"source_id": row["source_id"], "kind": kind, "url": f"{settings.PUBLIC_APP_URL.rstrip('/')}/company-files?item={file_id}"})
+    deliveries = _file_deliveries(rows, data.delivery)
     return _result("ok", {"query": data.query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"], "locator": row["locator"]} for row in rows], deliveries=deliveries)
 
 
@@ -1044,14 +1106,15 @@ def _offline_route(text: str) -> tuple[str | None, dict]:
     if any(term in lowered for term in (
         "файлын сан", "файл", "баримт", "document", "powerpoint", "template", "pptx", "журам",
     )):
+        delivery = "attachment" if wants_file_attachment(text) else "none"
         file_types = ["pptx", "potx", "potm"] if any(term in lowered for term in ("powerpoint", "pptx", "presentation", "танилцуулга", "template")) else []
         listing_terms = (
             "ямар файл", "файлууд байна", "файлын жагсаалт", "файлуудын жагсаалт",
             "list files", "file list", "directory", "repository contents", "what files",
         )
         if any(term in lowered for term in listing_terms):
-            return "file_search_tool", {"operation": "list", "folder_id": None, "file_types": file_types, "limit": 10, "delivery": "none"}
-        return "file_search_tool", {"query": text, "file_types": file_types, "limit": 5, "delivery": "none"}
+            return "file_search_tool", {"operation": "list", "folder_id": None, "file_types": file_types, "limit": 10, "delivery": delivery}
+        return "file_search_tool", {"query": text, "file_types": file_types, "limit": 5, "delivery": delivery}
     if any(term in lowered for term in ("төлөвлөг", "company plan", "company plans")):
         return "project_mgmt_tool", {"operation": "query", "entity": "plans", "completion_state": "all", "limit": 20}
     if any(term in lowered for term in ("төсөл", "төслүүд", "project", "projects")):
