@@ -39,6 +39,37 @@ class Classification(BaseModel):
     cache_eligible: bool
 
 
+CLASSIFICATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "category": {
+            "type": "string",
+            "enum": [category.value for category in QueryCategory],
+        },
+        "language": {
+            "type": "string",
+            "enum": ["mn", "en", "ru", "other"],
+        },
+        "requires_freshness": {"type": "boolean"},
+        "requires_enterprise_tools": {"type": "boolean"},
+        "requested_modalities": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "cache_eligible": {"type": "boolean"},
+    },
+    "required": [
+        "category",
+        "language",
+        "requires_freshness",
+        "requires_enterprise_tools",
+        "requested_modalities",
+        "cache_eligible",
+    ],
+    "additionalProperties": False,
+}
+
+
 @dataclass(slots=True)
 class GatewayRequest:
     text: str
@@ -105,7 +136,7 @@ class AIGateway:
                         body = (await response.text())[:600]
                         retryable = response.status in {408, 429, 500, 502, 503, 504}
                         if not retryable:
-                            raise GatewayError(f"OpenAI rejected the request ({response.status})", status_code=502)
+                            raise GatewayError(f"OpenAI rejected the request ({response.status}): {body}", status_code=502)
                         retry_after = response.headers.get("Retry-After")
                         if attempt == retries:
                             raise GatewayError(f"Live model {model_key} unavailable: {body}")
@@ -120,7 +151,6 @@ class AIGateway:
         raise GatewayError("Live model unavailable")
 
     async def _classify(self, text: str) -> Classification:
-        schema = Classification.model_json_schema()
         candidates = ["luna", "terra", "sol"]
         for key in candidates:
             model = registry().models[key]
@@ -128,7 +158,7 @@ class AIGateway:
                 "model": model.id, "instructions": CLASSIFIER_SYSTEM,
                 "input": [{"role": "user", "content": text[:32_000]}], "store": False,
                 "max_output_tokens": 200, "reasoning": {"effort": "none"},
-                "text": {"format": {"type": "json_schema", "name": "oyuns_route", "strict": True, "schema": schema}},
+                "text": {"format": {"type": "json_schema", "name": "oyuns_route", "strict": True, "schema": CLASSIFICATION_SCHEMA}},
                 "prompt_cache_key": f"oyuns:classifier:{registry().version}",
             }
             try:

@@ -1,6 +1,6 @@
 from app.services.ai_gateway.cache import exact_key
 from app.services.ai_gateway.config import QueryCategory, registry
-from app.services.ai_gateway.gateway import AIGateway, Classification
+from app.services.ai_gateway.gateway import AIGateway, Classification, CLASSIFICATION_SCHEMA
 
 
 def test_default_registry_covers_each_supported_category():
@@ -19,6 +19,15 @@ def test_classifier_contract_requires_live_routing_fields():
     })
     assert parsed.cache_eligible is True
     assert parsed.category is QueryCategory.SIMPLE_QA
+
+
+def test_classifier_schema_is_a_strict_responses_api_object():
+    assert CLASSIFICATION_SCHEMA["type"] == "object"
+    assert CLASSIFICATION_SCHEMA["additionalProperties"] is False
+    assert set(CLASSIFICATION_SCHEMA["required"]) == set(CLASSIFICATION_SCHEMA["properties"])
+    assert CLASSIFICATION_SCHEMA["properties"]["category"]["enum"] == [
+        category.value for category in QueryCategory
+    ]
 
 
 def test_exact_cache_key_is_stable_for_whitespace_only_changes():
