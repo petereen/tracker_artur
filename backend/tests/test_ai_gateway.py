@@ -1,6 +1,11 @@
 from app.services.ai_gateway.cache import exact_key
 from app.services.ai_gateway.config import QueryCategory, registry
-from app.services.ai_gateway.gateway import AIGateway, Classification, CLASSIFICATION_SCHEMA
+from app.services.ai_gateway.gateway import (
+    AIGateway,
+    Classification,
+    CLASSIFICATION_SCHEMA,
+    EXPLICIT_PROMPT_CACHE_TTL,
+)
 
 
 def test_default_registry_covers_each_supported_category():
@@ -40,6 +45,10 @@ def test_raw_responses_items_are_converted_to_output_text():
             ],
         }],
     }) == "hello world"
+
+
+def test_explicit_prompt_cache_uses_provider_supported_ttl():
+    assert EXPLICIT_PROMPT_CACHE_TTL == "30m"
 
 
 def test_exact_cache_key_is_stable_for_whitespace_only_changes():
