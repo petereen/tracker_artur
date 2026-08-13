@@ -1,7 +1,7 @@
 """persist deferred MCP discovery context for assistant conversations
 
-Revision ID: a5b6c7d8e9f0
-Revises: z4a5b6c7d8e9
+Revision ID: b7c8d9e0f1a2
+Revises: f5g6h7i8j9k0
 """
 
 from typing import Sequence, Union
@@ -11,8 +11,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 
-revision: str = "a5b6c7d8e9f0"
-down_revision: Union[str, Sequence[str], None] = "z4a5b6c7d8e9"
+revision: str = "b7c8d9e0f1a2"
+down_revision: Union[str, Sequence[str], None] = "f5g6h7i8j9k0"
 branch_labels = None
 depends_on = None
 
