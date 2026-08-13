@@ -1170,6 +1170,10 @@ class AssistantConversation(Base):
     channel = Column(String(16), nullable=False, server_default="web", default="web")
     external_thread_key = Column(String(128))
     title = Column(Text)
+    # The Responses API requires a prior ``mcp_list_tools`` item to be kept in
+    # the next turn when deferred MCP discovery is enabled.  This stores only
+    # that protocol context, never tool arguments, results, or credentials.
+    mcp_context = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

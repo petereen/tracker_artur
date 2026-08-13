@@ -60,6 +60,40 @@ def create_enterprise_access_token(account_id: int, organization_id: int) -> str
     )
 
 
+def create_mcp_access_token(
+    *,
+    account_id: int,
+    organization_id: int,
+    channel: str,
+    conversation_id: int | None,
+    allowed_tools: list[str],
+) -> str:
+    """Create a short-lived capability token for one OYUNS MCP turn.
+
+    The edge still reloads account status and roles at execution time. Claims
+    therefore constrain exposure but never replace database authorization.
+    """
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "sub": str(account_id),
+            "organization_id": organization_id,
+            "kind": "oyuns_mcp",
+            "aud": "oyuns-mcp",
+            "iss": settings.MCP_TOKEN_ISSUER,
+            "channel": channel,
+            "conversation_id": conversation_id,
+            "tools": sorted(set(allowed_tools)),
+            "jti": secrets.token_urlsafe(18),
+            "iat": now,
+            "nbf": now,
+            "exp": now + settings.MCP_TOKEN_TTL_SECONDS,
+        },
+        settings.SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
 def new_refresh_token() -> tuple[str, str]:
     token = secrets.token_urlsafe(48)
     return token, hashlib.sha256(token.encode()).hexdigest()
@@ -74,3 +108,13 @@ def decode_token(token: str) -> dict | None:
         return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
         return None
+
+
+def decode_mcp_access_token(token: str) -> dict | None:
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM], audience="oyuns-mcp", issuer=settings.MCP_TOKEN_ISSUER)
+    except JWTError:
+        return None
+    if payload.get("kind") != "oyuns_mcp" or not payload.get("jti"):
+        return None
+    return payload

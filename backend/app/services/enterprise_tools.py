@@ -871,6 +871,18 @@ async def prepare_task_update(db: AsyncSession, actor: ActorContext, data: Proje
 
 
 async def confirm_task_update(db: AsyncSession, actor: ActorContext, token: str, *, channel: str) -> dict:
+    # MCP previews never return the raw pending-action token to the model. Web
+    # and Telegram callbacks may instead submit an encrypted, actor/channel
+    # bound action reference; legacy direct-tool tokens remain compatible.
+    if token.startswith("mcpact_"):
+        try:
+            from app.services.mcp.references import resolve_action_reference
+            token = resolve_action_reference(actor, token, channel=channel)
+        except ValueError:
+            return _result("denied", {"reason": "Action is unavailable or expired"})
+    from app.services.mcp.guard import guard
+    if not await guard.allow_confirmation(account_id=actor.account_id):
+        return _result("denied", {"reason": "Too many confirmations. Please retry shortly.", "retry_after_seconds": 1})
     action = await db.scalar(select(AssistantPendingAction).where(AssistantPendingAction.token_hash == hashlib.sha256(token.encode()).hexdigest()).with_for_update())
     now = datetime.now(timezone.utc)
     if not action or action.account_id != actor.account_id or action.organization_id != actor.organization_id or action.channel != channel:

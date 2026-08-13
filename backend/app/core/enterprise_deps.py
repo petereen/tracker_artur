@@ -28,11 +28,9 @@ class ActorContext:
         return bool(self.roles.intersection(roles))
 
 
-async def actor_from_token(token: str, db: AsyncSession) -> ActorContext:
-    payload = decode_token(token)
-    if not payload or payload.get("kind") != "enterprise":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
-    account = await db.get(UserAccount, int(payload["sub"]))
+async def actor_from_account_id(account_id: int, db: AsyncSession) -> ActorContext:
+    """Rehydrate current account status and time-bounded roles from storage."""
+    account = await db.get(UserAccount, account_id)
     if not account or account.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account unavailable")
     today = date.today()
@@ -53,6 +51,16 @@ async def actor_from_token(token: str, db: AsyncSession) -> ActorContext:
         locale=account.locale,
         roles=frozenset(rows),
     )
+
+
+async def actor_from_token(token: str, db: AsyncSession) -> ActorContext:
+    payload = decode_token(token)
+    if not payload or payload.get("kind") != "enterprise":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    actor = await actor_from_account_id(int(payload["sub"]), db)
+    if actor.organization_id != int(payload.get("organization_id", -1)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    return actor
 
 
 async def actor_from_telegram_id(telegram_id: str, db: AsyncSession) -> ActorContext | None:

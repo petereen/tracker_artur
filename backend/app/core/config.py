@@ -63,6 +63,27 @@ class Settings(BaseSettings):
     AI_SEMANTIC_CACHE_THRESHOLD: float = 0.94
     AI_CIRCUIT_FAILURE_THRESHOLD: int = 5
     AI_CIRCUIT_OPEN_SECONDS: int = 30
+    # Remote MCP is deliberately opt-in while the existing direct-function
+    # route remains the rollback path. The edge is public to OpenAI; the
+    # executor stays on the private application network.
+    AI_MCP_ENABLED: bool = False
+    AI_MCP_SERVER_URL: str = ""
+    AI_MCP_ORGANIZATION_ALLOWLIST: str = ""
+    MCP_CATALOG_VERSION: str = "2026-08-01.1"
+    MCP_TOKEN_ISSUER: str = "oyuns"
+    MCP_TOKEN_TTL_SECONDS: int = 120
+    MCP_EDGE_PORT: int = 8011
+    MCP_EXECUTOR_URL: str = "http://backend:8000/v1/mcp-executor"
+    MCP_INTERNAL_SHARED_SECRET: str = ""
+    MCP_INTERNAL_REQUIRE_MTLS: bool = False
+    MCP_INTERNAL_CA_FILE: str = ""
+    MCP_INTERNAL_CERT_FILE: str = ""
+    MCP_INTERNAL_KEY_FILE: str = ""
+    MCP_READS_PER_ACTOR_MINUTE: int = 60
+    MCP_PREVIEWS_PER_ACTOR_MINUTE: int = 10
+    MCP_CONFIRMS_PER_ACTOR_MINUTE: int = 5
+    MCP_READS_PER_ORGANIZATION_MINUTE: int = 600
+    MCP_MAX_ORGANIZATION_CONCURRENT_READS: int = 50
 
     class Config:
         env_file = ".env"

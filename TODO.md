@@ -1,6 +1,15 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Define the versioned MCP catalog, strict schemas, result envelope, opaque references, and adapters over existing enterprise tool services (`backend/app/services/mcp`, `backend/app/services/enterprise_tools.py`)
+- [x] Add short-lived actor-scoped MCP tokens, per-request replay protection, internal executor authentication, and Redis-backed limits (`backend/app/core`, `backend/app/services/mcp`)
+- [x] Build the stateless Streamable HTTP MCP edge with dynamic actor-scoped discovery and bounded read/preview execution (`backend/app/mcp_server.py`, `backend/tests`)
+- [x] Add the private mTLS FastAPI executor that rehydrates `ActorContext` and delegates to existing RBAC/ACL/audit services (`backend/app/mcp_executor.py`, `backend/tests`)
+- [x] Migrate the AI gateway to remote MCP tools behind an organization-scoped feature flag while preserving trusted Web/Telegram confirmation callbacks (`backend/app/services/ai_gateway`, `backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`)
+- [x] Add MCP edge/executor deployment, certificate, secret, health-check, and rollback configuration for local Compose and Dokploy (`docker-compose.yml`, `docker-compose.dokploy.yml`, `.env.local.example`)
+- [ ] Add MCP protocol, routing, tenant-isolation, prompt-injection, payload-budget, rate-limit, timeout, replay, and preview/confirmation regression coverage (`backend/tests`, `backend/scripts`)
+- [ ] Canary MCP reads and previews, compare them with direct function tools, make MCP the default after parity, and retain a time-bounded rollback flag (`docs`, deployment configuration)
+- [x] Publish the OYUNS MCP hybrid-gateway architecture and security specification (`docs/mcp-server-architecture.md`)
 - [x] Let the AI assistant attach ACL-authorized company files in web and Telegram messages, persist message attachments, and expose authenticated web downloads (`backend/app/services/enterprise_tools.py`, `backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`, `frontend/src/components/OyunsAssistant.tsx`, `backend/alembic/versions/f5g6h7i8j9k0_assistant_file_attachments.py`)
 - [x] Route Telegram task-intake messages through the legacy draft state with confirm, edit, and delete controls while keeping Web on the enterprise assistant flow (`backend/app/bot/assistant_handlers.py`, `backend/app/bot/tasks_handlers.py`, `backend/app/services/assistant_ai.py`, `backend/tests`)
 - [x] Keep ACL-scoped task tools available across web and Telegram even when live routing misclassifies a task request, bypass stale text-only cache entries, and clarify minimal task-draft inputs (`backend/app/services/ai_gateway/gateway.py`, `backend/app/services/enterprise_tools.py`, `backend/tests/test_ai_gateway.py`)

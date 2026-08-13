@@ -60,6 +60,13 @@ services:
       AI_REDIS_URL: ${AI_REDIS_URL:-redis://redis:6379/0}
       AI_MODEL_REGISTRY_JSON: ${AI_MODEL_REGISTRY_JSON:-}
       ENTERPRISE_TOOLS_ENABLED: ${ENTERPRISE_TOOLS_ENABLED:-false}
+      AI_MCP_ENABLED: ${AI_MCP_ENABLED:-false}
+      AI_MCP_SERVER_URL: ${AI_MCP_SERVER_URL:-}
+      AI_MCP_ORGANIZATION_ALLOWLIST: ${AI_MCP_ORGANIZATION_ALLOWLIST:-}
+      MCP_CATALOG_VERSION: ${MCP_CATALOG_VERSION:-2026-08-01.1}
+      MCP_TOKEN_ISSUER: ${MCP_TOKEN_ISSUER:-oyuns}
+      MCP_TOKEN_TTL_SECONDS: ${MCP_TOKEN_TTL_SECONDS:-120}
+      MCP_INTERNAL_SHARED_SECRET: ${MCP_INTERNAL_SHARED_SECRET:-}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       AGENT_RATES_API_KEY: ${AGENT_RATES_API_KEY:-}
       OPENAI_WHISPER_MODEL: ${OPENAI_WHISPER_MODEL:-gpt-4o-mini-transcribe}
@@ -135,6 +142,13 @@ services:
       AI_REDIS_URL: ${AI_REDIS_URL:-redis://redis:6379/0}
       AI_MODEL_REGISTRY_JSON: ${AI_MODEL_REGISTRY_JSON:-}
       ENTERPRISE_TOOLS_ENABLED: ${ENTERPRISE_TOOLS_ENABLED:-false}
+      AI_MCP_ENABLED: ${AI_MCP_ENABLED:-false}
+      AI_MCP_SERVER_URL: ${AI_MCP_SERVER_URL:-}
+      AI_MCP_ORGANIZATION_ALLOWLIST: ${AI_MCP_ORGANIZATION_ALLOWLIST:-}
+      MCP_CATALOG_VERSION: ${MCP_CATALOG_VERSION:-2026-08-01.1}
+      MCP_TOKEN_ISSUER: ${MCP_TOKEN_ISSUER:-oyuns}
+      MCP_TOKEN_TTL_SECONDS: ${MCP_TOKEN_TTL_SECONDS:-120}
+      MCP_INTERNAL_SHARED_SECRET: ${MCP_INTERNAL_SHARED_SECRET:-}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       AGENT_RATES_API_KEY: ${AGENT_RATES_API_KEY:-}
       OPENAI_WHISPER_MODEL: ${OPENAI_WHISPER_MODEL:-gpt-4o-mini-transcribe}
@@ -173,6 +187,44 @@ services:
     # The API may be allowed to start in Dokploy recovery mode; the worker
     # must still refuse to run against a schema missing enterprise tables.
     command: sh -c "alembic upgrade head && exec python -m app.worker"
+
+  # The dedicated HTTPS MCP domain targets this edge. Business execution stays
+  # behind the private backend network and is signed with a separate secret.
+  mcp-edge:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      AI_REDIS_URL: ${AI_REDIS_URL:-redis://redis:6379/0}
+      MCP_EDGE_PORT: ${MCP_EDGE_PORT:-8011}
+      MCP_EXECUTOR_URL: ${MCP_EXECUTOR_URL:-http://backend:8000/v1/mcp-executor}
+      MCP_INTERNAL_SHARED_SECRET: ${MCP_INTERNAL_SHARED_SECRET:-}
+      MCP_INTERNAL_REQUIRE_MTLS: ${MCP_INTERNAL_REQUIRE_MTLS:-false}
+      MCP_INTERNAL_CA_FILE: ${MCP_INTERNAL_CA_FILE:-}
+      MCP_INTERNAL_CERT_FILE: ${MCP_INTERNAL_CERT_FILE:-}
+      MCP_INTERNAL_KEY_FILE: ${MCP_INTERNAL_KEY_FILE:-}
+      MCP_CATALOG_VERSION: ${MCP_CATALOG_VERSION:-2026-08-01.1}
+      MCP_TOKEN_ISSUER: ${MCP_TOKEN_ISSUER:-oyuns}
+      MCP_TOKEN_TTL_SECONDS: ${MCP_TOKEN_TTL_SECONDS:-120}
+      MCP_READS_PER_ACTOR_MINUTE: ${MCP_READS_PER_ACTOR_MINUTE:-60}
+      MCP_PREVIEWS_PER_ACTOR_MINUTE: ${MCP_PREVIEWS_PER_ACTOR_MINUTE:-10}
+      MCP_READS_PER_ORGANIZATION_MINUTE: ${MCP_READS_PER_ORGANIZATION_MINUTE:-600}
+      MCP_MAX_ORGANIZATION_CONCURRENT_READS: ${MCP_MAX_ORGANIZATION_CONCURRENT_READS:-50}
+    command: python -m app.mcp_server
+    ports:
+      - "127.0.0.1:${MCP_EDGE_PORT:-8011}:8011"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   frontend:
     build:

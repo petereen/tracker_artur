@@ -107,7 +107,7 @@ export function OyunsAssistant({ open, onClose }: { open: boolean; onClose: () =
 
   const confirmTaskAction = async (payload: Record<string, any>) => {
     try {
-      const result = await confirmAction.mutateAsync(payload.token)
+      const result = await confirmAction.mutateAsync(payload.action_reference || payload.token)
       if (result?.status !== 'ok') throw new Error(result?.data?.reason || 'Action unavailable')
       const created = result?.data?.created
       const updated = result?.data?.updated

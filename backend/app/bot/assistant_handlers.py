@@ -31,6 +31,8 @@ from app.core.enterprise_deps import actor_from_telegram_id
 from app.models.models import AssistantConversation, AssistantMessage, CompanyLibraryItem
 from app.services import enterprise_tools
 from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
+from app.services.mcp.catalog import gateway_tool_for
+from app.services.mcp.references import resolve_action_reference
 from app.services.attachment_storage import get_attachment
 from sqlalchemy import select
 
@@ -164,7 +166,8 @@ async def _enterprise_route(
         rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation.id).order_by(AssistantMessage.id.desc()).limit(12))).scalars().all()
         history = [{"role": row.role, "content": row.content} for row in reversed(rows)]
         db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-        grounding = await enterprise_tools.retrieve_turn_context(db, actor, text, channel="telegram", conversation_id=conversation.id)
+        mcp_tool = gateway_tool_for(actor, channel="telegram", conversation_id=conversation.id)
+        grounding = {"context": {}, "sources": []} if mcp_tool else await enterprise_tools.retrieve_turn_context(db, actor, text, channel="telegram", conversation_id=conversation.id)
         tool_sources: list[dict] = list(grounding.get("sources", []))
         tool_deliveries: list[dict] = []
         pending_action = None
@@ -180,19 +183,37 @@ async def _enterprise_route(
             return result
 
         try:
-            routed = await ai_gateway.respond(db, GatewayRequest(text=text, history=history, channel="telegram", language_hint="mn", tools=enterprise_tools.tool_specs(), execute_tool=execute_gateway_tool, conversation_id=conversation.id, grounding_context=grounding.get("context"), grounding_sources=grounding.get("sources", [])))
+            routed = await ai_gateway.respond(db, GatewayRequest(text=text, history=history, channel="telegram", language_hint="mn", tools=[] if mcp_tool else enterprise_tools.tool_specs(), execute_tool=None if mcp_tool else execute_gateway_tool, conversation_id=conversation.id, grounding_context=grounding.get("context"), grounding_sources=grounding.get("sources", []), mcp_tool=mcp_tool, mcp_context=conversation.mcp_context if mcp_tool else []))
         except GatewayError:
             await db.rollback()
             await _answer(message, "OYUNS live AI service is temporarily unavailable. Please try again shortly.")
             return True
+        for mcp_result in routed.tool_results:
+            tool_sources.extend(mcp_result.get("sources", []))
+            action_data = mcp_result.get("data", {}).get("pending_action")
+            pending_action = action_data or pending_action
         action = {"type": "task_action_preview", "payload": pending_action} if pending_action else None
-        source_map = {item["id"]: item for item in [*tool_sources, *routed.sources] if item.get("id")}
+        source_map = {str(item.get("id") or item.get("reference")): item for item in [*tool_sources, *routed.sources] if item.get("id") or item.get("reference")}
         result = {"answer": routed.answer, "action": pending_action, "sources": list(source_map.values()), "deliveries": tool_deliveries}
         attachments = enterprise_tools.attachment_metadata(tool_deliveries)
         db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=routed.answer, action=action, sources=result["sources"], attachments=attachments))
+        conversation.mcp_context = routed.mcp_context if mcp_tool else []
         conversation.updated_at = datetime.now(timezone.utc)
         await db.commit()
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Confirm task", callback_data=f"assistant-confirm:{result['action']['token']}")]]) if result.get("action") else None
+        action_reference = (result.get("action") or {}).get("action_reference")
+        legacy_token = (result.get("action") or {}).get("token")
+        if action_reference:
+            try:
+                # Telegram callback payloads are capped at 64 bytes. Resolve
+                # the MCP-only encrypted reference inside the trusted bot,
+                # then send the existing compact pending-action token only to
+                # Telegram (never back to the model or conversation record).
+                callback_token = resolve_action_reference(actor, action_reference, channel="telegram")
+            except ValueError:
+                callback_token = None
+        else:
+            callback_token = legacy_token
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Confirm task", callback_data=f"assistant-confirm:{callback_token}")]]) if callback_token else None
         await _answer(message, html.escape(result["answer"]), reply_markup=keyboard, parse_mode="HTML")
         protected_links = [delivery.get("url") for delivery in result.get("deliveries", []) if delivery.get("kind") == "authenticated_link" and delivery.get("url")]
         if protected_links:
