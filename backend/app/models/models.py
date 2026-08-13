@@ -1433,6 +1433,7 @@ class ERPAccessRole(Base):
     code = Column(String(64), nullable=False)
     description = Column(Text)
     is_system = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -1455,6 +1456,76 @@ class ERPAccountRole(Base):
     account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
     access_role_id = Column(Integer, ForeignKey("erp_access_roles.id", ondelete="CASCADE"), nullable=False)
     scope = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPTeamRole(Base):
+    """A role assignment inherited by active members of an organization team."""
+    __tablename__ = "erp_team_roles"
+    __table_args__ = (UniqueConstraint("team_id", "access_role_id", name="uq_erp_team_role"),)
+
+    id = Column(Integer, primary_key=True)
+    team_id = Column(Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    access_role_id = Column(Integer, ForeignKey("erp_access_roles.id", ondelete="CASCADE"), nullable=False)
+    scope = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPFormDefinition(Base):
+    """Immutable published form/workflow versions; one editable draft per operation."""
+    __tablename__ = "erp_form_definitions"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "operation", "version", name="uq_erp_form_definition_version"),
+        Index("ix_erp_form_definitions_org_operation_status", "organization_id", "operation", "status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    operation = Column(String(80), nullable=False)
+    version = Column(Integer, nullable=False)
+    status = Column(String(24), nullable=False, server_default="draft", default="draft")
+    fields = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    workflow = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    published_at = Column(DateTime(timezone=True))
+    archived_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ERPMasterRequest(Base):
+    __tablename__ = "erp_master_requests"
+    __table_args__ = (Index("ix_erp_master_requests_org_operation_state", "organization_id", "operation", "workflow_state"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    operation = Column(String(80), nullable=False)
+    definition_version = Column(Integer, nullable=False)
+    payload = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    workflow_state = Column(String(64), nullable=False, server_default="draft", default="draft")
+    scope = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    requested_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    materialized_entity_type = Column(String(40))
+    materialized_entity_id = Column(Integer)
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ERPWorkflowTransition(Base):
+    __tablename__ = "erp_workflow_transitions"
+    __table_args__ = (Index("ix_erp_workflow_transition_entity", "organization_id", "entity_type", "entity_id", "created_at"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    entity_type = Column(String(40), nullable=False)
+    entity_id = Column(Integer, nullable=False)
+    operation = Column(String(80), nullable=False)
+    definition_version = Column(Integer, nullable=False)
+    from_state = Column(String(64))
+    to_state = Column(String(64), nullable=False)
+    comment = Column(Text)
+    actor_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -1509,6 +1580,8 @@ class ERPParty(Base):
     contacts = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     addresses = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     custom = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    definition_version = Column(Integer, nullable=False, server_default="1", default=1)
+    workflow_state = Column(String(64), nullable=False, server_default="draft", default="draft")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

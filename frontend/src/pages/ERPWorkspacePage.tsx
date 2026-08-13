@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { BarChart3, Boxes, BriefcaseBusiness, Calculator, CheckCircle2, ClipboardList, Factory, HeartPulse, Landmark, Plus, ShieldCheck, ShoppingCart, UsersRound, Wrench } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { type ERPModule, useCreateERPDocument, useERPDashboard, useERPDocuments, useERPMetadata, useSubmitERPDocument, useUpdateERPModules } from '../api/enterprise'
+import { type ERPFieldType, type ERPFormField, type ERPModule, useCreateERPDocument, useCreateERPMasterRequest, useERPDashboard, useERPDocuments, useERPForm, useERPMetadata, useSubmitERPDocument, useUpdateERPModules } from '../api/enterprise'
 
 const MODULE_ICONS: Record<ERPModule, typeof Landmark> = {
   accounting: Calculator, selling: ShoppingCart, buying: BriefcaseBusiness, stock: Boxes, crm: UsersRound,
@@ -21,6 +21,14 @@ const MODULE_DOCUMENTS: Record<ERPModule, Array<{ type: string; label: string }>
 
 const MONEY = (amount: string | undefined, currency = 'MNT') => new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(Number(amount || 0))
 
+function CustomFieldInput({ field, value, onChange }: { field: ERPFormField; value: unknown; onChange: (value: unknown) => void }) {
+  const type = field.field_type as ERPFieldType
+  if (type === 'boolean') return <label className="erp-create-field checkbox"><input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} />{field.label}</label>
+  if (type === 'select' || type === 'multi_select') return <label className="erp-create-field">{field.label}<select value={type === 'multi_select' ? '' : String(value ?? '')} multiple={type === 'multi_select'} onChange={(event) => onChange(type === 'multi_select' ? Array.from(event.currentTarget.selectedOptions).map((option) => option.value) : event.target.value)} required={field.required}><option value="">Select…</option>{(field.options.choices || []).map((choice: string) => <option key={choice}>{choice}</option>)}</select>{field.help_text && <small>{field.help_text}</small>}</label>
+  if (type === 'long_text') return <label className="erp-create-field">{field.label}<textarea value={String(value ?? '')} onChange={(event) => onChange(event.target.value)} required={field.required} />{field.help_text && <small>{field.help_text}</small>}</label>
+  return <label className="erp-create-field">{field.label}<input type={type === 'date' ? 'date' : type === 'datetime' ? 'datetime-local' : type === 'number' || type === 'money' ? 'number' : 'text'} value={String(value ?? '')} onChange={(event) => onChange(event.target.value)} required={field.required} />{field.help_text && <small>{field.help_text}</small>}</label>
+}
+
 export function ERPWorkspacePage() {
   const metadata = useERPMetadata()
   const dashboard = useERPDashboard(Boolean(metadata.data && Object.values(metadata.data.modules).some(Boolean)))
@@ -32,6 +40,15 @@ export function ERPWorkspacePage() {
   const documents = useERPDocuments(documentType, Boolean(metadata.data?.modules[available]))
   const create = useCreateERPDocument(documentType)
   const submit = useSubmitERPDocument(documentType)
+  const form = useERPForm(documentType)
+  const [creating, setCreating] = useState(false)
+  const [custom, setCustom] = useState<Record<string, unknown>>({})
+  const [lineCustom, setLineCustom] = useState<Record<string, unknown>>({})
+  const [masterOperation, setMasterOperation] = useState<'party' | 'item'>('item')
+  const masterForm = useERPForm(masterOperation)
+  const createMasterRequest = useCreateERPMasterRequest(masterOperation)
+  const [masterPayload, setMasterPayload] = useState<Record<string, unknown>>({ item_type: 'product', unit: 'Nos', valuation_method: 'moving_average', is_stock_item: true })
+  const [masterCustom, setMasterCustom] = useState<Record<string, unknown>>({})
 
   const toggleModule = (target: ERPModule) => {
     if (!metadata.data) return
@@ -40,7 +57,7 @@ export function ERPWorkspacePage() {
       onError: (error: any) => toast.error(error.response?.data?.detail || 'Module settings could not be updated'),
     })
   }
-  const newDraft = () => create.mutate({ lines: [{ description: 'New line', quantity: 1, rate: 0, tax_rate: 0 }] }, { onSuccess: () => toast.success('Draft created'), onError: (error: any) => toast.error(error.response?.data?.detail || 'Draft could not be created') })
+  const newDraft = () => create.mutate({ custom, lines: [{ description: 'New line', quantity: 1, rate: 0, tax_rate: 0, data: lineCustom }] }, { onSuccess: () => { toast.success('Draft created'); setCreating(false); setCustom({}); setLineCustom({}) }, onError: (error: any) => toast.error(error.response?.data?.detail?.code || error.response?.data?.detail || 'Draft could not be created') })
 
   if (metadata.isLoading) return <div className="panel"><p>Loading ERP workspace…</p></div>
   if (metadata.isError || !metadata.data) return <div className="panel"><h2>ERP is not available</h2><p>Your account does not yet have access to the ERP service.</p></div>
@@ -62,8 +79,10 @@ export function ERPWorkspacePage() {
           ['Open customer queries', String(dashboard.data?.open_customer_queries ?? 0)], ['Payroll', dashboard.data?.payroll_total],
         ].map(([label, value]) => <article className="panel" key={label}><small>{label}</small><strong>{label === 'Open customer queries' ? value : MONEY(value, dashboard.data?.currency)}</strong></article>)}
       </section>
-      <section className="erp-document-panel panel"><div className="view-toolbar"><div><span className="eyebrow">DOCUMENT WORKBENCH</span><h3>{MODULE_DOCUMENTS[available].find((entry) => entry.type === documentType)?.label || 'Documents'}</h3></div><button className="primary-action compact" onClick={newDraft} disabled={create.isPending}><Plus size={15} />New draft</button></div>
+      <section className="panel erp-master-request"><div className="view-toolbar"><div><span className="eyebrow">MASTER DATA REQUEST</span><h3>Create product, item, or party request</h3><p>Master records are only created after their configured workflow approves the request.</p></div><select aria-label="Master data type" value={masterOperation} onChange={(event) => { setMasterOperation(event.target.value as 'party' | 'item'); setMasterPayload(event.target.value === 'party' ? { party_type: 'customer', currency: 'MNT' } : { item_type: 'product', unit: 'Nos', valuation_method: 'moving_average', is_stock_item: true }); setMasterCustom({}) }}><option value="item">Product / item</option><option value="party">Party</option></select></div><form className="erp-create-form" onSubmit={(event) => { event.preventDefault(); createMasterRequest.mutate({ payload: masterPayload, custom: masterCustom }, { onSuccess: () => { toast.success('Master-data request created'); setMasterCustom({}) }, onError: (error: any) => toast.error(error.response?.data?.detail?.code || error.response?.data?.detail || 'Request could not be created') }) }}><div className="erp-create-fields"><label className="erp-create-field">Code<input value={String(masterPayload.code || '')} onChange={(event) => setMasterPayload((current) => ({ ...current, code: event.target.value }))} required /></label><label className="erp-create-field">Name<input value={String(masterPayload.name || '')} onChange={(event) => setMasterPayload((current) => ({ ...current, name: event.target.value }))} required /></label>{masterOperation === 'party' ? <label className="erp-create-field">Type<select value={String(masterPayload.party_type || 'customer')} onChange={(event) => setMasterPayload((current) => ({ ...current, party_type: event.target.value }))}><option value="customer">Customer</option><option value="supplier">Supplier</option><option value="prospect">Prospect</option><option value="contact">Contact</option></select></label> : <label className="erp-create-field">Type<select value={String(masterPayload.item_type || 'product')} onChange={(event) => setMasterPayload((current) => ({ ...current, item_type: event.target.value }))}><option value="product">Product</option><option value="service">Service</option><option value="asset">Asset</option><option value="raw_material">Raw material</option><option value="finished_good">Finished good</option></select></label>}{masterForm.data?.fields.filter((field) => field.section === 'master').map((field) => <CustomFieldInput key={field.key} field={field} value={masterCustom[field.key]} onChange={(value) => setMasterCustom((current) => ({ ...current, [field.key]: value }))} />)}</div><button className="primary-action compact" disabled={createMasterRequest.isPending}>Create request</button></form></section>
+      <section className="erp-document-panel panel"><div className="view-toolbar"><div><span className="eyebrow">DOCUMENT WORKBENCH</span><h3>{MODULE_DOCUMENTS[available].find((entry) => entry.type === documentType)?.label || 'Documents'}</h3></div><button className="primary-action compact" onClick={() => setCreating((value) => !value)} disabled={create.isPending}><Plus size={15} />{creating ? 'Close form' : 'New draft'}</button></div>
         <div className="erp-document-tabs">{enabledModules.flatMap((enabledModule) => MODULE_DOCUMENTS[enabledModule]).map((entry) => <button key={entry.type} className={documentType === entry.type ? 'active' : ''} onClick={() => { setModule(Object.entries(MODULE_DOCUMENTS).find(([, entries]) => entries.some((item) => item.type === entry.type))?.[0] as ERPModule); setDocumentType(entry.type) }}>{entry.label}</button>)}</div>
+        {creating && <form className="erp-create-form" onSubmit={(event) => { event.preventDefault(); newDraft() }}><div><h4>Draft details</h4><div className="erp-create-fields">{form.data?.fields.filter((field) => field.section === 'header').map((field) => <CustomFieldInput key={field.key} field={field} value={custom[field.key]} onChange={(value) => setCustom((current) => ({ ...current, [field.key]: value }))} />)}</div></div>{form.data?.fields.some((field) => field.section === 'line') && <div><h4>Line item fields</h4><div className="erp-create-fields">{form.data.fields.filter((field) => field.section === 'line').map((field) => <CustomFieldInput key={field.key} field={field} value={lineCustom[field.key]} onChange={(value) => setLineCustom((current) => ({ ...current, [field.key]: value }))} />)}</div></div>}<button className="primary-action compact" disabled={create.isPending}>Save draft</button></form>}
         {documents.isLoading ? <p>Loading documents…</p> : documents.isError ? <p>Document permission is required for this workspace.</p> : <div className="erp-document-list">{documents.data?.length ? documents.data.map((document) => <article key={document.id}><div><strong>{document.number}</strong><span>{document.status} · {document.posting_date}</span></div><div><strong>{MONEY(document.grand_total, document.currency)}</strong>{document.status === 'draft' && <button className="secondary-action compact" onClick={() => submit.mutate(document.id, { onError: (error: any) => toast.error(error.response?.data?.detail || 'Document could not be submitted') })} disabled={submit.isPending}><CheckCircle2 size={14} />Submit</button>}</div></article>) : <div className="erp-empty"><ClipboardList size={24} /><p>No documents yet. Start with a draft.</p></div>}</div>}
       </section>
     </>}

@@ -11,6 +11,7 @@ import { AdminAccessPanel, ManagerSettingsPage } from './ManagerSettingsPage'
 import { KnowledgePage } from './KnowledgePage'
 import { OnboardingPage } from './OnboardingPage'
 import { DeveloperPage } from './DeveloperPage'
+import { ERPBuilderPanels } from '../components/ERPBuilderPanels'
 
 const SETTINGS = [
   { to: '/administration/workspace', title: 'Logo оруулах', text: 'Лого, light болон dark горим', icon: Settings2 },
@@ -94,7 +95,7 @@ export function WorkspaceIdentitySettingsPage() {
 }
 
 export function ERPSettingsPage() {
-  return <SettingsPage title="ERP модулиуд" description="ERP workflow-уудын харагдац болон байгууллагын тохиргоог удирдана."><ERPModuleSettingsPanel /></SettingsPage>
+  return <SettingsPage title="ERP модулиуд" description="ERP workflow-уудын харагдац, role болон үүсгэх маягтыг удирдана."><ERPModuleSettingsPanel /><ERPBuilderPanels /></SettingsPage>
 }
 
 export function CollaborationSettingsPage() {

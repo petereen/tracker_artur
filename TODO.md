@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Deliver the ERP access-role, versioned form, and workflow builders with scoped assignments and master-data requests (`backend/app/erp`, `backend/app/models/models.py`, `frontend/src`)
+- [x] Add ERP builder schema migration and backfill legacy custom fields into initial published definitions (`backend/alembic/versions`)
+- [x] Add ERP builder backend regression coverage for schemas, workflows, scopes, and requests (`backend/tests`)
+- [x] Build the ERP administration and schema-driven creation experience (`frontend/src`)
+- [ ] Run ERP builder backend pytest coverage (blocked in this environment because the `pytest` module is unavailable) (`backend/tests/test_erp_foundation.py`)
 - [x] Add an accessible admin path to enable ERP modules when all modules are disabled (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
 - [x] Deliver the configurable ERP foundation: tenant module settings, custom roles/capabilities, validated custom fields, and ERP metadata (`backend/app/erp`, `backend/app/models/models.py`, `frontend/src`)
 - [x] Deliver broad ERP MVP records and posting flows for accounting, sales, buying, stock, CRM, support, payroll, manufacturing, assets, maintenance, budgets, and reports (`backend/app/erp`, `backend/alembic/versions`)

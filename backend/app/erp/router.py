@@ -17,12 +17,12 @@ from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor
 from app.models.models import (
     ERPAccessRole, ERPAccount, ERPAccountRole, ERPCapability, ERPCustomField, ERPDocument, ERPDocumentLine,
-    ERPGeneralLedgerEntry, ERPApprovalRule, ERPImportBatch, ERPPaymentAllocation, ERPPostingPeriod, ERPItem, ERPParty, ERPStockLedgerEntry, ERPWarehouse, IdempotencyRecord, Organization,
+    Employee, ERPFormDefinition, ERPMasterRequest, ERPGeneralLedgerEntry, ERPApprovalRule, ERPImportBatch, ERPPaymentAllocation, ERPPostingPeriod, ERPItem, ERPParty, ERPStockLedgerEntry, ERPTeamRole, ERPWarehouse, ERPWorkflowTransition, IdempotencyRecord, Organization, Project, Team, TeamMember, UserAccount,
 )
 from app.services.enterprise_events import record_change
 from app.erp.service import (
     DOCUMENT_MODULES, DOCUMENT_TYPES, ERP_MODULES, MODULE_SETTINGS_KEY, VALID_ACTIONS, as_money, calculate_lines,
-    approval_required, bootstrap_organization, cancel_document, document_out, module_settings, next_number, post_document, require_capability, validate_custom_fields,
+    approval_required, bootstrap_organization, cancel_document, capability_scopes, default_workflow, document_out, ensure_definition, module_settings, next_number, operation_catalog, post_document, published_definition, record_workflow_transition, require_capability, scope_allows, validate_custom_fields, validate_definition_fields, validate_form_values, validate_workflow,
 )
 
 
@@ -58,6 +58,47 @@ class CustomFieldInput(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
     required: bool = False
     posting_relevant: bool = False
+
+
+class FormFieldInput(BaseModel):
+    key: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(min_length=1, max_length=120)
+    help_text: str | None = Field(default=None, max_length=500)
+    field_type: Literal["text", "long_text", "number", "money", "date", "datetime", "boolean", "select", "multi_select", "reference"]
+    section: Literal["header", "line", "master"]
+    required: bool = False
+    default: Any = None
+    options: dict[str, Any] = Field(default_factory=dict)
+    validation: dict[str, Any] = Field(default_factory=dict)
+    position: int = Field(default=0, ge=0)
+
+
+class FormDefinitionInput(BaseModel):
+    fields: list[FormFieldInput] = Field(default_factory=list, max_length=200)
+    workflow: dict[str, Any] = Field(default_factory=default_workflow)
+
+
+class RolePatchInput(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = None
+    capabilities: list[CapabilityInput] | None = None
+
+
+class TeamRoleInput(BaseModel):
+    team_id: int
+    scope: dict[str, Any] = Field(default_factory=dict)
+
+
+class MasterRequestInput(BaseModel):
+    payload: dict[str, Any] = Field(default_factory=dict)
+    custom: dict[str, Any] = Field(default_factory=dict)
+    scope: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowTransitionInput(BaseModel):
+    to_state: str = Field(min_length=1, max_length=64)
+    comment: str | None = Field(default=None, max_length=1000)
+    version: int = Field(ge=1)
 
 
 class PartyInput(BaseModel):
@@ -182,6 +223,67 @@ async def _document_lines(db: AsyncSession, document_id: int) -> list[ERPDocumen
     return (await db.execute(select(ERPDocumentLine).where(ERPDocumentLine.document_id == document_id).order_by(ERPDocumentLine.position))).scalars().all()
 
 
+def _definition_out(definition: ERPFormDefinition) -> dict[str, Any]:
+    return {"id": definition.id, "operation": definition.operation, "version": definition.version, "status": definition.status,
+            "fields": definition.fields or [], "workflow": definition.workflow or {}, "published_at": definition.published_at,
+            "archived_at": definition.archived_at, "updated_at": definition.updated_at}
+
+
+async def _validated_scope(db: AsyncSession, organization_id: int, scope: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"warehouse_ids", "project_ids", "branch_codes"}
+    unknown = set(scope).difference(allowed)
+    if unknown:
+        raise HTTPException(status_code=422, detail={"code": "erp_unknown_scope_dimension", "keys": sorted(unknown)})
+    if not all(isinstance(values, list) for values in scope.values()):
+        raise HTTPException(status_code=422, detail={"code": "erp_scope_values_must_be_lists"})
+    result = {key: list(dict.fromkeys(values)) for key, values in scope.items() if values}
+    warehouse_ids, project_ids = result.get("warehouse_ids", []), result.get("project_ids", [])
+    if warehouse_ids:
+        count = await db.scalar(select(func.count(ERPWarehouse.id)).where(ERPWarehouse.organization_id == organization_id, ERPWarehouse.id.in_(warehouse_ids)))
+        if count != len(warehouse_ids): raise HTTPException(status_code=422, detail={"code": "erp_invalid_scope_warehouse"})
+    if project_ids:
+        count = await db.scalar(select(func.count(Project.id)).where(Project.organization_id == organization_id, Project.id.in_(project_ids)))
+        if count != len(project_ids): raise HTTPException(status_code=422, detail={"code": "erp_invalid_scope_project"})
+    branches = result.get("branch_codes", [])
+    if branches:
+        known = set((await db.execute(select(Employee.work_branch).where(Employee.work_branch.isnot(None)))).scalars().all())
+        if not set(branches).issubset(known): raise HTTPException(status_code=422, detail={"code": "erp_invalid_scope_branch"})
+    return result
+
+
+async def _role_out(db: AsyncSession, role: ERPAccessRole) -> dict[str, Any]:
+    capabilities = (await db.execute(select(ERPCapability).where(ERPCapability.access_role_id == role.id))).scalars().all()
+    account_assignments = (await db.execute(select(ERPAccountRole).where(ERPAccountRole.access_role_id == role.id))).scalars().all()
+    team_assignments = (await db.execute(select(ERPTeamRole).where(ERPTeamRole.access_role_id == role.id))).scalars().all()
+    return {"id": role.id, "name": role.name, "code": role.code, "description": role.description, "is_system": role.is_system, "is_active": role.is_active,
+            "capabilities": [{"resource": cap.resource, "action": cap.action} for cap in capabilities],
+            "account_assignments": [{"id": assignment.id, "account_id": assignment.account_id, "scope": assignment.scope} for assignment in account_assignments],
+            "team_assignments": [{"id": assignment.id, "team_id": assignment.team_id, "scope": assignment.scope} for assignment in team_assignments]}
+
+
+async def _actor_erp_role_ids(db: AsyncSession, actor: ActorContext) -> set[int]:
+    direct = select(ERPAccountRole.access_role_id).where(ERPAccountRole.account_id == actor.account_id)
+    inherited = select(ERPTeamRole.access_role_id).join(TeamMember, TeamMember.team_id == ERPTeamRole.team_id).join(UserAccount, UserAccount.employee_id == TeamMember.employee_id).where(UserAccount.id == actor.account_id)
+    return set((await db.execute(direct.union(inherited))).scalars().all())
+
+
+async def _workflow_transition_allowed(db: AsyncSession, actor: ActorContext, workflow: dict[str, Any], current_state: str, to_state: str, requester_id: int | None) -> dict[str, Any]:
+    transition = next((item for item in workflow.get("transitions", []) if item.get("from") == current_state and item.get("to") == to_state), None)
+    if not transition: raise HTTPException(status_code=409, detail={"code": "erp_workflow_transition_not_allowed", "from_state": current_state, "to_state": to_state})
+    if requester_id == actor.account_id and transition.get("requester_allowed"):
+        return transition
+    required_role_ids = set(transition.get("role_ids") or [])
+    if required_role_ids and not required_role_ids.intersection(await _actor_erp_role_ids(db, actor)) and "admin" not in actor.roles:
+        raise HTTPException(status_code=403, detail={"code": "erp_workflow_role_required"})
+    return transition
+
+
+async def _assert_document_scope(db: AsyncSession, actor: ActorContext, resource: str, action: str, *, project_id: int | None, branch_code: str | None, warehouse_ids: list[int | None]) -> None:
+    scopes = await capability_scopes(db, actor, resource, action)
+    if not scope_allows(scopes, {"project_ids": project_id, "branch_codes": branch_code}) or any(not scope_allows(scopes, {"warehouse_ids": warehouse_id}) for warehouse_id in warehouse_ids):
+        raise HTTPException(status_code=403, detail={"code": "erp_scope_denied"})
+
+
 async def _write_document_lines(db: AsyncSession, document: ERPDocument, raw_lines: list[DocumentLineInput]) -> None:
     existing = await _document_lines(db, document.id)
     for line in existing:
@@ -266,6 +368,144 @@ async def meta(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends
     }
 
 
+@router.get("/catalog")
+async def catalog(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """The only operation/capability vocabulary accepted by ERP builder endpoints."""
+    await _organization(db, actor)
+    return operation_catalog()
+
+
+@router.get("/admin/forms/{operation}")
+async def get_form_definition(operation: str, include_history: bool = False, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_custom_fields", "administer")
+    if operation not in operation_catalog()["operations"]:
+        raise HTTPException(status_code=404, detail="Unknown ERP operation")
+    published = await ensure_definition(db, actor.organization_id, operation, actor.account_id)
+    current = await db.scalar(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id, ERPFormDefinition.operation == operation, ERPFormDefinition.status == "draft")) or published
+    result = _definition_out(current)
+    if include_history:
+        history = (await db.execute(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id, ERPFormDefinition.operation == operation).order_by(ERPFormDefinition.version.desc()))).scalars().all()
+        result["history"] = [_definition_out(item) for item in history]
+    await db.commit()
+    return result
+
+
+@router.get("/forms/{operation}")
+async def get_published_form(operation: str, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if operation not in operation_catalog()["operations"]:
+        raise HTTPException(status_code=404, detail="Unknown ERP operation")
+    resource = operation if operation in {"party", "item"} else operation
+    await require_capability(db, actor, resource, "create")
+    definition = await ensure_definition(db, actor.organization_id, operation, actor.account_id)
+    await db.commit()
+    return _definition_out(definition)
+
+
+@router.put("/admin/forms/{operation}")
+async def save_form_draft(operation: str, data: FormDefinitionInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_custom_fields", "administer")
+    catalog_entry = operation_catalog()["operations"].get(operation)
+    if not catalog_entry: raise HTTPException(status_code=404, detail="Unknown ERP operation")
+    published = await ensure_definition(db, actor.organization_id, operation, actor.account_id)
+    draft = await db.scalar(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id, ERPFormDefinition.operation == operation, ERPFormDefinition.status == "draft"))
+    fields = validate_definition_fields(operation, [field.model_dump() for field in data.fields])
+    roles = set((await db.execute(select(ERPAccessRole.id).where(ERPAccessRole.organization_id == actor.organization_id, ERPAccessRole.is_active.is_(True)))).scalars().all())
+    workflow = validate_workflow(data.workflow, roles, posting_capable=bool(catalog_entry["posting_capable"]))
+    if draft is None:
+        draft = ERPFormDefinition(organization_id=actor.organization_id, operation=operation, version=published.version + 1, status="draft", created_by_account_id=actor.account_id)
+        db.add(draft)
+    draft.fields, draft.workflow = fields, workflow
+    await db.commit(); await db.refresh(draft)
+    return _definition_out(draft)
+
+
+@router.post("/admin/forms/{operation}/publish")
+async def publish_form_draft(operation: str, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_custom_fields", "administer")
+    draft = await db.scalar(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id, ERPFormDefinition.operation == operation, ERPFormDefinition.status == "draft"))
+    if not draft: raise HTTPException(status_code=409, detail={"code": "erp_no_form_draft"})
+    catalog_entry = operation_catalog()["operations"].get(operation)
+    if not catalog_entry: raise HTTPException(status_code=404, detail="Unknown ERP operation")
+    roles = set((await db.execute(select(ERPAccessRole.id).where(ERPAccessRole.organization_id == actor.organization_id, ERPAccessRole.is_active.is_(True)))).scalars().all())
+    draft.fields = validate_definition_fields(operation, draft.fields or [])
+    draft.workflow = validate_workflow(draft.workflow or {}, roles, posting_capable=bool(catalog_entry["posting_capable"]))
+    current = await published_definition(db, actor.organization_id, operation)
+    if current: current.status, current.archived_at = "archived", datetime.now(timezone.utc)
+    draft.status, draft.published_at = "published", datetime.now(timezone.utc)
+    await record_change(db, actor=actor, topic="erp", aggregate_type="erp_form_definition", aggregate_id=draft.id, operation="published", after={"operation": operation, "version": draft.version})
+    await db.commit(); return _definition_out(draft)
+
+
+async def _materialize_master_request(db: AsyncSession, actor: ActorContext, request: ERPMasterRequest) -> tuple[str, int]:
+    if request.materialized_entity_id:
+        return request.materialized_entity_type or request.operation, request.materialized_entity_id
+    payload = dict(request.payload or {})
+    custom = payload.pop("custom", {})
+    if request.operation == "party":
+        data = PartyInput.model_validate({**payload, "custom": custom})
+        exists = await db.scalar(select(ERPParty.id).where(ERPParty.organization_id == actor.organization_id, ERPParty.code == data.code))
+        if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
+        item = ERPParty(organization_id=actor.organization_id, **data.model_dump())
+    elif request.operation == "item":
+        data = ItemInput.model_validate({**payload, "custom": custom})
+        exists = await db.scalar(select(ERPItem.id).where(ERPItem.organization_id == actor.organization_id, ERPItem.code == data.code))
+        if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
+        item = ERPItem(organization_id=actor.organization_id, **data.model_dump())
+    else:
+        raise HTTPException(status_code=422, detail={"code": "erp_invalid_master_request_operation"})
+    db.add(item); await db.flush()
+    request.materialized_entity_type, request.materialized_entity_id = request.operation, item.id
+    return request.operation, item.id
+
+
+@router.get("/master-requests/{operation}")
+async def list_master_requests(operation: Literal["party", "item"], db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, operation, "view")
+    rows = (await db.execute(select(ERPMasterRequest).where(ERPMasterRequest.organization_id == actor.organization_id, ERPMasterRequest.operation == operation).order_by(ERPMasterRequest.created_at.desc()))).scalars().all()
+    scopes = await capability_scopes(db, actor, operation, "view")
+    rows = [row for row in rows if all(all(scope_allows(scopes, {dimension: value}) for value in values) for dimension, values in (row.scope or {}).items())]
+    return [{"id": row.id, "operation": row.operation, "definition_version": row.definition_version, "workflow_state": row.workflow_state, "payload": row.payload, "scope": row.scope, "version": row.version, "materialized_entity_type": row.materialized_entity_type, "materialized_entity_id": row.materialized_entity_id, "created_at": row.created_at} for row in rows]
+
+
+@router.post("/master-requests/{operation}", status_code=status.HTTP_201_CREATED)
+async def create_master_request(operation: Literal["party", "item"], data: MasterRequestInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, operation, "create")
+    definition = await ensure_definition(db, actor.organization_id, operation, actor.account_id)
+    form_values = validate_form_values(definition.fields or [], data.custom, "master")
+    # Validate shape on creation, but do not materialize the ERP master until approved.
+    payload = {**data.payload, "custom": form_values}
+    (PartyInput if operation == "party" else ItemInput).model_validate(payload)
+    request_scope = await _validated_scope(db, actor.organization_id, data.scope)
+    scopes = await capability_scopes(db, actor, operation, "create")
+    if any(not scope_allows(scopes, {dimension: value}) for dimension, values in request_scope.items() for value in values): raise HTTPException(status_code=403, detail={"code": "erp_scope_denied"})
+    request = ERPMasterRequest(organization_id=actor.organization_id, operation=operation, definition_version=definition.version,
+                               payload=payload, workflow_state=(definition.workflow or {}).get("initial_state", "draft"),
+                               scope=request_scope, requested_by_account_id=actor.account_id)
+    db.add(request); await db.flush()
+    await record_workflow_transition(db, actor, entity_type="master_request", entity_id=request.id, operation=operation, definition_version=definition.version, from_state=None, to_state=request.workflow_state)
+    await db.commit()
+    return {"id": request.id, "operation": request.operation, "definition_version": request.definition_version, "workflow_state": request.workflow_state, "version": request.version}
+
+
+@router.post("/master-requests/by-id/{request_id}/transition")
+async def transition_master_request(request_id: int, data: WorkflowTransitionInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    request = await db.scalar(select(ERPMasterRequest).where(ERPMasterRequest.id == request_id, ERPMasterRequest.organization_id == actor.organization_id))
+    if not request: raise HTTPException(status_code=404, detail="ERP master request not found")
+    if data.version != request.version: raise HTTPException(status_code=409, detail={"code": "erp_version_conflict", "current_version": request.version})
+    await require_capability(db, actor, request.operation, "approve" if data.to_state in {"approved", "rejected"} else "edit")
+    scopes = await capability_scopes(db, actor, request.operation, "approve" if data.to_state in {"approved", "rejected"} else "edit")
+    if any(not scope_allows(scopes, {dimension: value}) for dimension, values in (request.scope or {}).items() for value in values): raise HTTPException(status_code=403, detail={"code": "erp_scope_denied"})
+    definition = await db.scalar(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id, ERPFormDefinition.operation == request.operation, ERPFormDefinition.version == request.definition_version))
+    if not definition: raise HTTPException(status_code=409, detail={"code": "erp_definition_version_missing"})
+    await _workflow_transition_allowed(db, actor, definition.workflow or {}, request.workflow_state, data.to_state, request.requested_by_account_id)
+    before = request.workflow_state
+    request.workflow_state, request.version = data.to_state, request.version + 1
+    if data.to_state == "approved": await _materialize_master_request(db, actor, request)
+    await record_workflow_transition(db, actor, entity_type="master_request", entity_id=request.id, operation=request.operation, definition_version=request.definition_version, from_state=before, to_state=data.to_state, comment=data.comment)
+    await db.commit()
+    return {"id": request.id, "workflow_state": request.workflow_state, "version": request.version, "materialized_entity_type": request.materialized_entity_type, "materialized_entity_id": request.materialized_entity_id}
+
+
 @router.put("/admin/modules")
 async def update_modules(data: ModulesInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "erp_settings", "administer")
@@ -285,18 +525,14 @@ async def update_modules(data: ModulesInput, db: AsyncSession = Depends(get_db),
 async def list_roles(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "erp_roles", "administer")
     roles = (await db.execute(select(ERPAccessRole).where(ERPAccessRole.organization_id == actor.organization_id).order_by(ERPAccessRole.name))).scalars().all()
-    result = []
-    for role in roles:
-        capabilities = (await db.execute(select(ERPCapability).where(ERPCapability.access_role_id == role.id))).scalars().all()
-        result.append({"id": role.id, "name": role.name, "code": role.code, "description": role.description, "is_system": role.is_system,
-            "capabilities": [{"resource": cap.resource, "action": cap.action} for cap in capabilities]})
-    return result
+    return [await _role_out(db, role) for role in roles]
 
 
 @router.post("/admin/roles", status_code=status.HTTP_201_CREATED)
 async def create_role(data: AccessRoleInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "erp_roles", "administer")
-    if any(cap.action not in VALID_ACTIONS and cap.action != "*" for cap in data.capabilities):
+    catalog_resources = set(operation_catalog()["operations"]) | {"*", "accounts", "parties", "items", "warehouses", "stock", "payroll", "erp_settings", "erp_roles", "erp_custom_fields", "erp_approval_rules", "erp_imports", "erp_dashboard"}
+    if any((cap.action not in VALID_ACTIONS and cap.action != "*") or cap.resource not in catalog_resources for cap in data.capabilities):
         raise HTTPException(status_code=422, detail="Unknown capability action")
     role = ERPAccessRole(organization_id=actor.organization_id, name=data.name, code=data.code, description=data.description)
     db.add(role)
@@ -304,7 +540,48 @@ async def create_role(data: AccessRoleInput, db: AsyncSession = Depends(get_db),
     db.add_all([ERPCapability(access_role_id=role.id, resource=cap.resource, action=cap.action) for cap in data.capabilities])
     await record_change(db, actor=actor, topic="erp", aggregate_type="erp_access_role", aggregate_id=role.id, operation="created", after={"code": role.code})
     await db.commit()
-    return {"id": role.id, "name": role.name, "code": role.code}
+    return await _role_out(db, role)
+
+
+@router.patch("/admin/roles/{role_id}")
+async def update_role(role_id: int, data: RolePatchInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_roles", "administer")
+    role = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
+    if not role: raise HTTPException(status_code=404, detail="ERP role not found")
+    if role.is_system: raise HTTPException(status_code=409, detail={"code": "erp_system_role_immutable"})
+    if data.name is not None: role.name = data.name
+    if data.description is not None: role.description = data.description
+    if data.capabilities is not None:
+        catalog_resources = set(operation_catalog()["operations"]) | {"*", "accounts", "parties", "items", "warehouses", "stock", "payroll", "erp_settings", "erp_roles", "erp_custom_fields", "erp_approval_rules", "erp_imports", "erp_dashboard"}
+        if any((cap.action not in VALID_ACTIONS and cap.action != "*") or cap.resource not in catalog_resources for cap in data.capabilities): raise HTTPException(status_code=422, detail="Unknown capability")
+        old = (await db.execute(select(ERPCapability).where(ERPCapability.access_role_id == role.id))).scalars().all()
+        for capability in old: await db.delete(capability)
+        db.add_all([ERPCapability(access_role_id=role.id, resource=cap.resource, action=cap.action) for cap in data.capabilities])
+    await db.commit(); return await _role_out(db, role)
+
+
+@router.post("/admin/roles/{role_id}/clone", status_code=status.HTTP_201_CREATED)
+async def clone_role(role_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_roles", "administer")
+    source = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
+    if not source: raise HTTPException(status_code=404, detail="ERP role not found")
+    copy = ERPAccessRole(organization_id=actor.organization_id, name=f"{source.name} copy", code=f"{source.code}-{int(datetime.now(timezone.utc).timestamp())}", description=source.description)
+    db.add(copy); await db.flush()
+    capabilities = (await db.execute(select(ERPCapability).where(ERPCapability.access_role_id == source.id))).scalars().all()
+    db.add_all([ERPCapability(access_role_id=copy.id, resource=cap.resource, action=cap.action) for cap in capabilities])
+    await db.commit(); return await _role_out(db, copy)
+
+
+@router.post("/admin/roles/{role_id}/deactivate")
+async def deactivate_role(role_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_roles", "administer")
+    role = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
+    if not role: raise HTTPException(status_code=404, detail="ERP role not found")
+    if role.is_system: raise HTTPException(status_code=409, detail={"code": "erp_system_role_immutable"})
+    active_definitions = (await db.execute(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id, ERPFormDefinition.status == "published"))).scalars().all()
+    if any(role_id in set(sum((transition.get("role_ids") or [] for transition in (definition.workflow or {}).get("transitions", [])), [])) for definition in active_definitions):
+        raise HTTPException(status_code=409, detail={"code": "erp_role_used_by_published_workflow"})
+    role.is_active = False; await db.commit(); return await _role_out(db, role)
 
 
 @router.post("/admin/roles/{role_id}/accounts", status_code=status.HTTP_201_CREATED)
@@ -313,10 +590,39 @@ async def assign_role(role_id: int, data: AccountRoleInput, db: AsyncSession = D
     role = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
     if not role:
         raise HTTPException(status_code=404, detail="ERP role not found")
-    assignment = ERPAccountRole(account_id=data.account_id, access_role_id=role.id, scope=data.scope)
+    account = await db.scalar(select(UserAccount).where(UserAccount.id == data.account_id, UserAccount.organization_id == actor.organization_id))
+    if not account: raise HTTPException(status_code=422, detail={"code": "erp_invalid_role_account"})
+    assignment = ERPAccountRole(account_id=data.account_id, access_role_id=role.id, scope=await _validated_scope(db, actor.organization_id, data.scope))
     db.add(assignment)
     await db.commit()
     return {"id": assignment.id, "role_id": role.id, "account_id": assignment.account_id, "scope": assignment.scope}
+
+
+@router.delete("/admin/roles/{role_id}/accounts/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unassign_account_role(role_id: int, assignment_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_roles", "administer")
+    assignment = await db.scalar(select(ERPAccountRole).join(ERPAccessRole).where(ERPAccountRole.id == assignment_id, ERPAccountRole.access_role_id == role_id, ERPAccessRole.organization_id == actor.organization_id))
+    if not assignment: raise HTTPException(status_code=404, detail="ERP role assignment not found")
+    await db.delete(assignment); await db.commit()
+
+
+@router.post("/admin/roles/{role_id}/teams", status_code=status.HTTP_201_CREATED)
+async def assign_team_role(role_id: int, data: TeamRoleInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_roles", "administer")
+    role = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
+    team = await db.scalar(select(Team).where(Team.id == data.team_id, Team.organization_id == actor.organization_id))
+    if not role or not team: raise HTTPException(status_code=404, detail="ERP role or team not found")
+    assignment = ERPTeamRole(team_id=team.id, access_role_id=role.id, scope=await _validated_scope(db, actor.organization_id, data.scope))
+    db.add(assignment); await db.commit()
+    return {"id": assignment.id, "role_id": role.id, "team_id": team.id, "scope": assignment.scope}
+
+
+@router.delete("/admin/roles/{role_id}/teams/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unassign_team_role(role_id: int, assignment_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_roles", "administer")
+    assignment = await db.scalar(select(ERPTeamRole).join(ERPAccessRole).where(ERPTeamRole.id == assignment_id, ERPTeamRole.access_role_id == role_id, ERPAccessRole.organization_id == actor.organization_id))
+    if not assignment: raise HTTPException(status_code=404, detail="ERP team role assignment not found")
+    await db.delete(assignment); await db.commit()
 
 
 @router.post("/admin/custom-fields", status_code=status.HTTP_201_CREATED)
@@ -565,7 +871,13 @@ async def list_documents(document_type: str, document_status: str | None = Query
     if document_status:
         statement = statement.where(ERPDocument.status == document_status)
     docs = (await db.execute(statement.order_by(ERPDocument.posting_date.desc(), ERPDocument.id.desc()))).scalars().all()
-    return [document_out(doc) for doc in docs]
+    scopes = await capability_scopes(db, actor, document_type, "view")
+    visible = []
+    for doc in docs:
+        lines = await _document_lines(db, doc.id)
+        if scope_allows(scopes, {"project_ids": doc.project_id, "branch_codes": (doc.payload or {}).get("branch_code")}) and all(scope_allows(scopes, {"warehouse_ids": line.warehouse_id}) for line in lines):
+            visible.append(document_out(doc, lines))
+    return visible
 
 
 @router.post("/documents/{document_type}", status_code=status.HTTP_201_CREATED)
@@ -573,19 +885,25 @@ async def create_document(document_type: str, data: DocumentInput, idempotency_k
     if document_type not in DOCUMENT_TYPES:
         raise HTTPException(status_code=404, detail="Unknown ERP document type")
     await require_capability(db, actor, document_type, "create")
+    await _assert_document_scope(db, actor, document_type, "create", project_id=data.project_id, branch_code=data.payload.get("branch_code"), warehouse_ids=[line.warehouse_id for line in data.lines])
     prior = await _idempotent_response(db, actor, f"erp.document.{document_type}.create", idempotency_key, data.model_dump(mode="json"))
     if prior:
         return prior
-    custom = await validate_custom_fields(db, actor.organization_id, f"document:{document_type}", data.custom)
+    definition = await ensure_definition(db, actor.organization_id, document_type, actor.account_id)
+    custom = validate_form_values(definition.fields or [], data.custom, "header")
     document = ERPDocument(
         organization_id=actor.organization_id, document_type=document_type, number=await next_number(db, actor.organization_id, document_type),
         party_id=data.party_id, project_id=data.project_id, source_document_id=data.source_document_id, currency=data.currency.upper(),
         exchange_rate=data.exchange_rate, posting_date=data.posting_date, due_date=data.due_date, payload=data.payload, custom=custom,
+        definition_version=definition.version, workflow_state=(definition.workflow or {}).get("initial_state", "draft"),
     )
     db.add(document)
     await db.flush()
+    for line in data.lines:
+        line.data = validate_form_values(definition.fields or [], line.data, "line")
     await _write_document_lines(db, document, data.lines)
     await db.flush()
+    await record_workflow_transition(db, actor, entity_type="document", entity_id=document.id, operation=document_type, definition_version=document.definition_version, from_state=None, to_state=document.workflow_state)
     result = document_out(document, await _document_lines(db, document.id))
     await _save_idempotent(db, actor, f"erp.document.{document_type}.create", idempotency_key, data.model_dump(mode="json"), result)
     await record_change(db, actor=actor, topic="erp", aggregate_type=f"erp_{document_type}", aggregate_id=document.id, operation="created", version=document.version, after={"number": document.number, "status": document.status})
@@ -597,6 +915,42 @@ async def create_document(document_type: str, data: DocumentInput, idempotency_k
 async def get_document(document_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     document = await _document(db, actor, document_id)
     await require_capability(db, actor, document.document_type, "view")
+    lines = await _document_lines(db, document.id)
+    await _assert_document_scope(db, actor, document.document_type, "view", project_id=document.project_id, branch_code=(document.payload or {}).get("branch_code"), warehouse_ids=[line.warehouse_id for line in lines])
+    result = document_out(document, lines)
+    definition = await db.scalar(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id, ERPFormDefinition.operation == document.document_type, ERPFormDefinition.version == document.definition_version))
+    history = (await db.execute(select(ERPWorkflowTransition).where(ERPWorkflowTransition.organization_id == actor.organization_id, ERPWorkflowTransition.entity_type == "document", ERPWorkflowTransition.entity_id == document.id).order_by(ERPWorkflowTransition.created_at))).scalars().all()
+    result["workflow"] = definition.workflow if definition else None
+    result["history"] = [{"from_state": row.from_state, "to_state": row.to_state, "comment": row.comment, "actor_account_id": row.actor_account_id, "created_at": row.created_at} for row in history]
+    return result
+
+
+@router.post("/documents/by-id/{document_id}/transition")
+async def transition_document(document_id: int, data: WorkflowTransitionInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    document = await _document(db, actor, document_id)
+    if data.version != document.version: raise HTTPException(status_code=409, detail={"code": "erp_version_conflict", "current_version": document.version})
+    action = "approve" if data.to_state in {"approved", "rejected"} else "cancel" if data.to_state == "cancelled" else "submit" if data.to_state == "submitted" else "edit"
+    await require_capability(db, actor, document.document_type, action)
+    scoped_lines = await _document_lines(db, document.id)
+    await _assert_document_scope(db, actor, document.document_type, action, project_id=document.project_id, branch_code=(document.payload or {}).get("branch_code"), warehouse_ids=[line.warehouse_id for line in scoped_lines])
+    definition = await db.scalar(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id, ERPFormDefinition.operation == document.document_type, ERPFormDefinition.version == document.definition_version))
+    if not definition: raise HTTPException(status_code=409, detail={"code": "erp_definition_version_missing"})
+    await _workflow_transition_allowed(db, actor, definition.workflow or {}, document.workflow_state, data.to_state, None)
+    before = document.workflow_state
+    document.workflow_state = data.to_state
+    if data.to_state == "approved":
+        if operation_catalog()["operations"][document.document_type]["posting_capable"]:
+            if await approval_required(db, document) and action != "approve": raise HTTPException(status_code=409, detail={"code": "erp_approval_required"})
+            await post_document(db, document, actor)
+        else:
+            document.status = "approved"; document.version += 1
+    elif data.to_state == "cancelled":
+        if document.status == "submitted": await cancel_document(db, document)
+        else: document.status, document.version = "cancelled", document.version + 1
+    else:
+        document.version += 1
+    await record_workflow_transition(db, actor, entity_type="document", entity_id=document.id, operation=document.document_type, definition_version=document.definition_version, from_state=before, to_state=data.to_state, comment=data.comment)
+    await db.commit()
     return document_out(document, await _document_lines(db, document.id))
 
 
@@ -604,17 +958,25 @@ async def get_document(document_id: int, db: AsyncSession = Depends(get_db), act
 async def update_document(document_id: int, data: DocumentPatchInput, if_match: int | None = Header(default=None, alias="If-Match"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     document = await _document(db, actor, document_id)
     await require_capability(db, actor, document.document_type, "edit")
+    current_lines = await _document_lines(db, document.id)
+    await _assert_document_scope(db, actor, document.document_type, "edit", project_id=document.project_id, branch_code=(document.payload or {}).get("branch_code"), warehouse_ids=[line.warehouse_id for line in current_lines])
     if document.status != "draft":
         raise HTTPException(status_code=409, detail={"code": "erp_submitted_document_immutable"})
     if if_match is None or if_match != document.version:
         raise HTTPException(status_code=409, detail={"code": "erp_version_conflict", "current_version": document.version})
+    definition = await db.scalar(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id, ERPFormDefinition.operation == document.document_type, ERPFormDefinition.version == document.definition_version))
+    if not definition: raise HTTPException(status_code=409, detail={"code": "erp_definition_version_missing"})
     values = data.model_dump(exclude_unset=True)
     if "custom" in values:
-        document.custom = await validate_custom_fields(db, actor.organization_id, f"document:{document.document_type}", values.pop("custom"))
+        document.custom = validate_form_values(definition.fields or [], values.pop("custom"), "header")
     lines = values.pop("lines", None)
+    if lines is not None:
+        await _assert_document_scope(db, actor, document.document_type, "edit", project_id=values.get("project_id", document.project_id), branch_code=(values.get("payload") or document.payload or {}).get("branch_code"), warehouse_ids=[line.warehouse_id for line in lines])
     for name, value in values.items():
         setattr(document, name, value)
     if lines is not None:
+        for line in lines:
+            line.data = validate_form_values(definition.fields or [], line.data, "line")
         await _write_document_lines(db, document, lines)
     document.version += 1
     await record_change(db, actor=actor, topic="erp", aggregate_type=f"erp_{document.document_type}", aggregate_id=document.id, operation="updated", version=document.version, after={"status": document.status})
@@ -641,6 +1003,7 @@ async def approve_document(document_id: int, db: AsyncSession = Depends(get_db),
         if not assigned:
             raise HTTPException(status_code=403, detail={"code": "erp_required_approver_role"})
     document.status = "approved"
+    document.workflow_state = "approved"
     document.version += 1
     await record_change(db, actor=actor, topic="erp", aggregate_type=f"erp_{document.document_type}", aggregate_id=document.id, operation="approved", version=document.version, after={"status": document.status})
     await db.commit()
@@ -656,6 +1019,7 @@ async def submit_document(document_id: int, db: AsyncSession = Depends(get_db), 
     if await approval_required(db, document) and document.status != "approved":
         raise HTTPException(status_code=409, detail={"code": "erp_approval_required"})
     await post_document(db, document, actor)
+    document.workflow_state = "approved"
     await record_change(db, actor=actor, topic="erp", aggregate_type=f"erp_{document.document_type}", aggregate_id=document.id, operation="submitted", version=document.version, after={"status": document.status, "grand_total": document.grand_total})
     await db.commit()
     return document_out(document, await _document_lines(db, document.id))
@@ -668,6 +1032,7 @@ async def cancel(document_id: int, db: AsyncSession = Depends(get_db), actor: Ac
     if document.status != "submitted":
         raise HTTPException(status_code=409, detail="Only submitted documents can be cancelled")
     await cancel_document(db, document)
+    document.workflow_state = "cancelled"
     await record_change(db, actor=actor, topic="erp", aggregate_type=f"erp_{document.document_type}", aggregate_id=document.id, operation="cancelled", version=document.version, after={"status": document.status})
     await db.commit()
     return document_out(document)

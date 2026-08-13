@@ -1,6 +1,9 @@
 from decimal import Decimal
 
-from app.erp.service import DEFAULT_ACCOUNTS, DOCUMENT_MODULES, ERP_MODULES, calculate_lines, module_settings
+import pytest
+from fastapi import HTTPException
+
+from app.erp.service import DEFAULT_ACCOUNTS, DOCUMENT_MODULES, ERP_MODULES, calculate_lines, module_settings, operation_catalog, validate_definition_fields, validate_form_values, validate_workflow
 from app.main import app
 from app.models.models import Base
 from app.services.mcp.catalog import CATALOG
@@ -11,6 +14,7 @@ def test_erp_schema_registers_tenant_scoped_configurable_records():
         "erp_access_roles", "erp_capabilities", "erp_account_roles", "erp_custom_fields", "erp_sequences",
         "erp_parties", "erp_items", "erp_warehouses", "erp_accounts", "erp_documents", "erp_document_lines",
         "erp_general_ledger_entries", "erp_stock_ledger_entries", "erp_posting_periods", "erp_approval_rules", "erp_payment_allocations", "erp_import_batches",
+        "erp_team_roles", "erp_form_definitions", "erp_master_requests", "erp_workflow_transitions",
     }
     assert required.issubset(Base.metadata.tables)
     assert Base.metadata.tables["erp_documents"].c.organization_id.nullable is False
@@ -43,12 +47,46 @@ def test_erp_routes_are_versioned_and_cover_meta_masters_documents_and_reports()
         "/v1/erp/reports/dashboard", "/v1/erp/reports/stock-balance", "/v1/erp/reports/general-ledger", "/v1/erp/reports/trial-balance",
         "/v1/erp/accounting/posting-periods", "/v1/erp/admin/approval-rules", "/v1/erp/stock/policy",
         "/v1/erp/imports/preview", "/v1/erp/imports/csv", "/v1/erp/imports/{batch_id}/commit", "/v1/erp/manufacturing/boms/{document_id}/costing",
+        "/v1/erp/catalog", "/v1/erp/admin/forms/{operation}", "/v1/erp/admin/forms/{operation}/publish", "/v1/erp/master-requests/{operation}", "/v1/erp/documents/by-id/{document_id}/transition",
     }.issubset(paths)
 
 
 def test_every_broad_mvp_document_domain_has_an_explicit_module():
     expected = {"journal_entry", "quotation", "purchase_invoice", "stock_entry", "lead", "support_ticket", "payroll_run", "work_order", "maintenance_schedule"}
     assert expected.issubset(DOCUMENT_MODULES)
+
+
+def test_erp_builder_catalog_is_server_owned_and_covers_documents_and_master_requests():
+    catalog = operation_catalog()
+    assert {"sales_order", "purchase_order", "stock_entry", "party", "item"}.issubset(catalog["operations"])
+    assert {"reference", "multi_select", "money"}.issubset(catalog["field_types"])
+    assert {"warehouse_ids", "project_ids", "branch_codes"}.issubset(catalog["scope_dimensions"])
+
+
+def test_form_field_validation_separates_document_lines_from_master_requests():
+    fields = validate_definition_fields("sales_order", [
+        {"key": "customer_note", "label": "Customer note", "field_type": "long_text", "section": "header"},
+        {"key": "batch", "label": "Batch", "field_type": "text", "section": "line", "required": True},
+    ])
+    assert validate_form_values(fields, {"batch": "A-1"}, "line") == {"batch": "A-1"}
+    with pytest.raises(HTTPException) as error:
+        validate_form_values(fields, {"other": "x"}, "line")
+    assert error.value.detail["code"] == "erp_unknown_form_field"
+    with pytest.raises(HTTPException) as error:
+        validate_definition_fields("item", [{"key": "bad", "label": "Bad", "field_type": "text", "section": "line"}])
+    assert error.value.detail["code"] == "erp_invalid_form_field"
+
+
+def test_workflow_validation_requires_safe_terminal_states_and_role_references():
+    workflow = {
+        "initial_state": "draft",
+        "states": [{"key": "draft"}, {"key": "approved", "terminal": True}, {"key": "rejected", "terminal": True}, {"key": "cancelled", "terminal": True}],
+        "transitions": [{"from": "draft", "to": "approved", "label": "Approve", "role_ids": [4]}],
+    }
+    assert validate_workflow(workflow, {4}, posting_capable=True)["initial_state"] == "draft"
+    with pytest.raises(HTTPException) as error:
+        validate_workflow(workflow, set(), posting_capable=True)
+    assert error.value.detail["code"] == "erp_unknown_workflow_role"
 
 
 def test_erp_default_chart_supports_invoice_payroll_and_asset_posting():
