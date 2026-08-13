@@ -16,6 +16,7 @@ import secrets
 import math
 from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
@@ -30,13 +31,14 @@ from app.models.models import (
     AssistantPendingAction, AssistantToolAudit, CalendarEntry, CompanyKnowledge, CompanyPlanItem,
     CompanyLibraryItem, KnowledgeChunk, KnowledgeDocument, Milestone,
     PersonalTimeBlock, Project, ProjectMember, ResourceGrant, ResourcePolicy,
-    Employee, Task, TaskAssignee, TaskReviewer, TeamMember, UserAccount, WorkReport, WorkTimeEntry,
+    Employee, ERPDocument, ERPStockLedgerEntry, Task, TaskAssignee, TaskReviewer, TeamMember, UserAccount, WorkReport, WorkTimeEntry,
 )
 from app.services.attachment_storage import get_attachment
 from app.services.collaboration_permissions import actor_can_assign_tasks
 from app.services.enterprise_events import record_change
 from app.services.user_notifications import create_notifications
 from app.services.secret_box import encrypt_secret
+from app.erp.service import DOCUMENT_TYPES, as_money, require_capability
 
 log = logging.getLogger(__name__)
 TOOL_STATUS = Literal["ok", "empty", "partial", "denied", "unavailable"]
@@ -129,6 +131,20 @@ class EmployeeDirectoryInput(_Strict):
     include_inactive: bool = False
 
 
+class ERPQueryInput(_Strict):
+    resource: Literal["dashboard", "documents", "stock_balance"] = "dashboard"
+    document_type: str | None = Field(default=None, max_length=64)
+    limit: int = Field(default=10, ge=1, le=25)
+
+    @model_validator(mode="after")
+    def _validate_document_type(self):
+        if self.document_type and self.document_type not in DOCUMENT_TYPES:
+            raise ValueError("Unknown ERP document type")
+        if self.resource == "documents" and not self.document_type:
+            raise ValueError("document_type is required when resource=documents")
+        return self
+
+
 class AssistantTaskInput(_Strict):
     title: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=6_000)
@@ -169,6 +185,7 @@ INPUT_MODELS = {
     "project_mgmt_tool": ProjectQueryInput,
     "calendar_tool": CalendarInput,
     "employee_directory_tool": EmployeeDirectoryInput,
+    "erp_query_tool": ERPQueryInput,
     "create_task": AssistantTaskInput,
     "delegate_task": DelegateTaskInput,
 }
@@ -210,6 +227,7 @@ def tool_specs() -> list[dict]:
         "project_mgmt_tool": "Retrieve scoped projects, approved company plans, tasks, blockers, and milestones.",
         "calendar_tool": "Retrieve scoped calendar events, schedules, or availability without exposing unauthorized private details.",
         "employee_directory_tool": "List active company employees, job titles, and Telegram usernames when available. Never expose Telegram IDs or other private fields.",
+        "erp_query_tool": "Read permission-scoped ERP dashboard totals, documents, or stock balances. Never prepare or submit financial, payroll, stock, or payment actions.",
         "create_task": (
             "Prepare a new task for confirmation. The title is required; assignee defaults "
             "to the current user, while description, reviewer, project, priority, and "
@@ -967,6 +985,34 @@ async def retrieve_turn_context(db: AsyncSession, actor: ActorContext, text: str
     return {"context": context, "sources": knowledge.get("sources", [])}
 
 
+async def erp_query(db: AsyncSession, actor: ActorContext, data: ERPQueryInput) -> dict:
+    """Read-only ERP adapter shared by Web and Telegram assistant flows."""
+    try:
+        if data.resource == "documents":
+            await require_capability(db, actor, data.document_type or "erp", "view")
+            rows = (await db.execute(select(ERPDocument).where(
+                ERPDocument.organization_id == actor.organization_id,
+                ERPDocument.document_type == data.document_type,
+            ).order_by(ERPDocument.posting_date.desc(), ERPDocument.id.desc()).limit(data.limit))).scalars().all()
+            return _result("ok" if rows else "empty", {"documents": [{
+                "number": row.number, "type": row.document_type, "status": row.status, "posting_date": row.posting_date.isoformat(),
+                "currency": row.currency, "grand_total": str(row.grand_total), "outstanding_amount": str(row.outstanding_amount),
+            } for row in rows]})
+        if data.resource == "stock_balance":
+            await require_capability(db, actor, "stock", "view")
+            rows = (await db.execute(select(
+                ERPStockLedgerEntry.item_id, ERPStockLedgerEntry.warehouse_id, func.sum(ERPStockLedgerEntry.quantity_delta), func.sum(ERPStockLedgerEntry.value_delta),
+            ).where(ERPStockLedgerEntry.organization_id == actor.organization_id).group_by(ERPStockLedgerEntry.item_id, ERPStockLedgerEntry.warehouse_id).limit(data.limit))).all()
+            return _result("ok" if rows else "empty", {"stock_balances": [{"item_id": row[0], "warehouse_id": row[1], "quantity": str(row[2]), "value": str(row[3])} for row in rows]})
+        await require_capability(db, actor, "erp_dashboard", "view")
+        rows = (await db.execute(select(ERPDocument).where(ERPDocument.organization_id == actor.organization_id, ERPDocument.status == "submitted"))).scalars().all()
+        revenue = sum((as_money(row.grand_total) for row in rows if row.document_type == "sales_invoice"), Decimal("0"))
+        expenses = sum((as_money(row.grand_total) for row in rows if row.document_type == "purchase_invoice"), Decimal("0"))
+        return _result("ok", {"dashboard": {"revenue": str(revenue), "expenses": str(expenses), "profit": str(revenue - expenses)}})
+    except HTTPException as exc:
+        return _result("denied", {"reason": str(exc.detail)})
+
+
 async def execute(db: AsyncSession, actor: ActorContext, tool_name: str, arguments: dict, *, channel: str, prompt: str, conversation_id: int | None = None) -> dict:
     try:
         if tool_name == "file_search_tool": result = await file_search(db, actor, FileSearchInput.model_validate(arguments))
@@ -992,6 +1038,7 @@ async def execute(db: AsyncSession, actor: ActorContext, tool_name: str, argumen
                 }
                 for employee in employees
             ]})
+        elif tool_name == "erp_query_tool": result = await erp_query(db, actor, ERPQueryInput.model_validate(arguments))
         else: result = _result("denied", {"reason": "Unknown tool"})
     except ValueError as exc:
         result = _result("denied", {"reason": str(exc)})

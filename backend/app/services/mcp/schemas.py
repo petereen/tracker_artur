@@ -90,6 +90,12 @@ class StatsGetInput(StrictInput):
     presentation: Literal["summary", "table"] = "summary"
 
 
+class ERPReadInput(StrictInput):
+    resource: Literal["dashboard", "documents"] = "dashboard"
+    document_type: str | None = Field(default=None, max_length=64)
+    limit: int = Field(default=10, ge=1, le=25)
+
+
 class TaskPrepareCreateInput(StrictInput):
     title: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=6000)
@@ -106,4 +112,3 @@ class TaskPrepareUpdateInput(StrictInput):
     priority: int | None = Field(default=None, ge=1, le=3)
     start_at: datetime | None = None
     deadline_at: datetime | None = None
-

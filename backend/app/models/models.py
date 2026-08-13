@@ -1416,6 +1416,298 @@ class IdempotencyRecord(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+# ─── Configurable ERP foundation ────────────────────────────────────────────
+#
+# ERP records deliberately use their own tables and are scoped directly to an
+# organization.  This keeps the product extractable and avoids changing the
+# compatibility contracts used by the original task/report application.
+
+
+class ERPAccessRole(Base):
+    __tablename__ = "erp_access_roles"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_access_roles_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    code = Column(String(64), nullable=False)
+    description = Column(Text)
+    is_system = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ERPCapability(Base):
+    __tablename__ = "erp_capabilities"
+    __table_args__ = (UniqueConstraint("access_role_id", "resource", "action", name="uq_erp_capability"),)
+
+    id = Column(Integer, primary_key=True)
+    access_role_id = Column(Integer, ForeignKey("erp_access_roles.id", ondelete="CASCADE"), nullable=False)
+    resource = Column(String(80), nullable=False)
+    action = Column(String(24), nullable=False)
+
+
+class ERPAccountRole(Base):
+    __tablename__ = "erp_account_roles"
+    __table_args__ = (UniqueConstraint("account_id", "access_role_id", name="uq_erp_account_role"),)
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    access_role_id = Column(Integer, ForeignKey("erp_access_roles.id", ondelete="CASCADE"), nullable=False)
+    scope = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPCustomField(Base):
+    __tablename__ = "erp_custom_fields"
+    __table_args__ = (UniqueConstraint("organization_id", "resource", "key", name="uq_erp_custom_field"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    resource = Column(String(80), nullable=False)
+    key = Column(String(64), nullable=False)
+    label = Column(Text, nullable=False)
+    field_type = Column(String(24), nullable=False)
+    options = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    required = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    posting_relevant = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+
+
+class ERPSequence(Base):
+    __tablename__ = "erp_sequences"
+    __table_args__ = (UniqueConstraint("organization_id", "key", name="uq_erp_sequence"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    key = Column(String(80), nullable=False)
+    prefix = Column(String(40), nullable=False, server_default="", default="")
+    next_number = Column(Integer, nullable=False, server_default="1", default=1)
+    padding = Column(Integer, nullable=False, server_default="5", default=5)
+
+
+class ERPParty(Base):
+    __tablename__ = "erp_parties"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "code", name="uq_erp_party_org_code"),
+        Index("ix_erp_parties_org_type", "organization_id", "party_type"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(UUID(as_uuid=True), nullable=False, unique=True, default=uuid.uuid4, server_default=sa_text("gen_random_uuid()"))
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    legacy_client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), unique=True)
+    party_type = Column(String(24), nullable=False)
+    code = Column(String(64), nullable=False)
+    name = Column(Text, nullable=False)
+    email = Column(Text)
+    phone = Column(Text)
+    tax_id = Column(Text)
+    credit_limit = Column(Numeric(18, 4))
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    status = Column(String(24), nullable=False, server_default="active", default="active")
+    contacts = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    addresses = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    custom = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ERPItem(Base):
+    __tablename__ = "erp_items"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_item_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(UUID(as_uuid=True), nullable=False, unique=True, default=uuid.uuid4, server_default=sa_text("gen_random_uuid()"))
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(64), nullable=False)
+    name = Column(Text, nullable=False)
+    item_type = Column(String(24), nullable=False, server_default="product", default="product")
+    item_group = Column(Text)
+    unit = Column(String(24), nullable=False, server_default="Nos", default="Nos")
+    valuation_method = Column(String(24), nullable=False, server_default="moving_average", default="moving_average")
+    standard_cost = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    reorder_level = Column(Numeric(18, 4))
+    is_stock_item = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    custom = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ERPWarehouse(Base):
+    __tablename__ = "erp_warehouses"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_warehouse_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(64), nullable=False)
+    name = Column(Text, nullable=False)
+    parent_id = Column(Integer, ForeignKey("erp_warehouses.id", ondelete="SET NULL"))
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+
+
+class ERPAccount(Base):
+    __tablename__ = "erp_accounts"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_account_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+    code = Column(String(64), nullable=False)
+    name = Column(Text, nullable=False)
+    account_type = Column(String(32), nullable=False)
+    is_group = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+
+
+class ERPDocument(Base):
+    __tablename__ = "erp_documents"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "document_type", "number", name="uq_erp_document_number"),
+        Index("ix_erp_documents_org_type_status", "organization_id", "document_type", "status"),
+        Index("ix_erp_documents_party", "organization_id", "party_id", "posting_date"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(UUID(as_uuid=True), nullable=False, unique=True, default=uuid.uuid4, server_default=sa_text("gen_random_uuid()"))
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    document_type = Column(String(64), nullable=False)
+    number = Column(String(80), nullable=False)
+    status = Column(String(24), nullable=False, server_default="draft", default="draft")
+    party_id = Column(Integer, ForeignKey("erp_parties.id", ondelete="SET NULL"))
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"))
+    source_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="SET NULL"))
+    amended_from_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="SET NULL"))
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    exchange_rate = Column(Numeric(24, 10), nullable=False, server_default="1", default=1)
+    posting_date = Column(Date, nullable=False, server_default=func.current_date())
+    due_date = Column(Date)
+    net_total = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    tax_total = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    grand_total = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    outstanding_amount = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    payload = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    custom = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    submitted_at = Column(DateTime(timezone=True))
+    submitted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    cancelled_at = Column(DateTime(timezone=True))
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ERPDocumentLine(Base):
+    __tablename__ = "erp_document_lines"
+    __table_args__ = (Index("ix_erp_document_lines_document", "document_id", "position"),)
+
+    id = Column(Integer, primary_key=True)
+    document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("erp_items.id", ondelete="SET NULL"))
+    warehouse_id = Column(Integer, ForeignKey("erp_warehouses.id", ondelete="SET NULL"))
+    account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+    description = Column(Text, nullable=False)
+    quantity = Column(Numeric(18, 6), nullable=False, server_default="1", default=1)
+    rate = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    amount = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    tax_rate = Column(Numeric(9, 4), nullable=False, server_default="0", default=0)
+    tax_amount = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+    data = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+
+
+class ERPGeneralLedgerEntry(Base):
+    __tablename__ = "erp_general_ledger_entries"
+    __table_args__ = (Index("ix_erp_gl_org_account_date", "organization_id", "account_id", "posting_date"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="RESTRICT"), nullable=False)
+    party_id = Column(Integer, ForeignKey("erp_parties.id", ondelete="SET NULL"))
+    posting_date = Column(Date, nullable=False)
+    debit = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    credit = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    memo = Column(Text)
+    reversal_of_id = Column(Integer, ForeignKey("erp_general_ledger_entries.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPStockLedgerEntry(Base):
+    __tablename__ = "erp_stock_ledger_entries"
+    __table_args__ = (Index("ix_erp_stock_org_item_warehouse_date", "organization_id", "item_id", "warehouse_id", "posting_date"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    item_id = Column(Integer, ForeignKey("erp_items.id", ondelete="RESTRICT"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("erp_warehouses.id", ondelete="RESTRICT"), nullable=False)
+    posting_date = Column(Date, nullable=False)
+    quantity_delta = Column(Numeric(18, 6), nullable=False)
+    value_delta = Column(Numeric(18, 4), nullable=False)
+    valuation_rate = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPPostingPeriod(Base):
+    __tablename__ = "erp_posting_periods"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_erp_posting_period_name"),
+        Index("ix_erp_posting_period_dates", "organization_id", "starts_on", "ends_on"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(80), nullable=False)
+    starts_on = Column(Date, nullable=False)
+    ends_on = Column(Date, nullable=False)
+    status = Column(String(24), nullable=False, server_default="open", default="open")
+    closed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    closed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPApprovalRule(Base):
+    __tablename__ = "erp_approval_rules"
+    __table_args__ = (UniqueConstraint("organization_id", "resource", "priority", name="uq_erp_approval_rule_priority"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    resource = Column(String(80), nullable=False)
+    minimum_amount = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    required_access_role_id = Column(Integer, ForeignKey("erp_access_roles.id", ondelete="SET NULL"))
+    priority = Column(Integer, nullable=False, server_default="100", default=100)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPPaymentAllocation(Base):
+    __tablename__ = "erp_payment_allocations"
+    __table_args__ = (UniqueConstraint("payment_document_id", "invoice_document_id", name="uq_erp_payment_allocation"),)
+
+    id = Column(Integer, primary_key=True)
+    payment_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="CASCADE"), nullable=False)
+    invoice_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    amount = Column(Numeric(18, 4), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPImportBatch(Base):
+    __tablename__ = "erp_import_batches"
+    __table_args__ = (Index("ix_erp_import_batches_org_state", "organization_id", "state", "created_at"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    entity = Column(String(40), nullable=False)
+    source_format = Column(String(32), nullable=False, server_default="generic", default="generic")
+    state = Column(String(24), nullable=False, server_default="draft", default="draft")
+    rows = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    validation_errors = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    committed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class CalendarConnection(Base):
     __tablename__ = "calendar_connections"
     __table_args__ = (UniqueConstraint("account_id", "provider", name="uq_calendar_connections_account_provider"),)

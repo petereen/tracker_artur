@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add an accessible admin path to enable ERP modules when all modules are disabled (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
+- [x] Deliver the configurable ERP foundation: tenant module settings, custom roles/capabilities, validated custom fields, and ERP metadata (`backend/app/erp`, `backend/app/models/models.py`, `frontend/src`)
+- [x] Deliver broad ERP MVP records and posting flows for accounting, sales, buying, stock, CRM, support, payroll, manufacturing, assets, maintenance, budgets, and reports (`backend/app/erp`, `backend/alembic/versions`)
+- [x] Add ERP workspace navigation, administration controls, dashboards, and responsive document workspaces (`frontend/src`)
+- [ ] Add ERP migration/import adapters and regression/acceptance coverage, excluding AI/MCP integrations (`backend/tests`, `frontend/e2e`, `docs`)
 - [x] Define the versioned MCP catalog, strict schemas, result envelope, opaque references, and adapters over existing enterprise tool services (`backend/app/services/mcp`, `backend/app/services/enterprise_tools.py`)
 - [x] Add short-lived actor-scoped MCP tokens, per-request replay protection, internal executor authentication, and Redis-backed limits (`backend/app/core`, `backend/app/services/mcp`)
 - [x] Build the stateless Streamable HTTP MCP edge with dynamic actor-scoped discovery and bounded read/preview execution (`backend/app/mcp_server.py`, `backend/tests`)

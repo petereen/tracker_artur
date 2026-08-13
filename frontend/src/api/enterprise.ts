@@ -635,6 +635,28 @@ export function useWorkerPerformance(employeeId?: number, period?: DateRange, en
   return useQuery<any>({ queryKey: ['v1', 'workers', employeeId, 'performance', period], queryFn: () => api.get(`/v1/workers/${employeeId}/performance`, { params: period }).then((response) => response.data), enabled: Boolean(employeeId) && enabled })
 }
 
+export type ERPModule = 'accounting' | 'selling' | 'buying' | 'stock' | 'crm' | 'support' | 'payroll' | 'manufacturing' | 'assets_maintenance'
+export interface ERPMetadata {
+  modules: Record<ERPModule, boolean>
+  module_labels: Record<ERPModule, string>
+  document_modules: Record<string, ERPModule>
+  actions: string[]
+  currency: string
+  custom_fields: Array<{ resource: string; key: string; label: string; field_type: string; options: Record<string, unknown>; required: boolean; posting_relevant: boolean }>
+  roles: Array<{ id: number; name: string; code: string; description: string | null }>
+  module_visibility_is_not_authorization: boolean
+}
+export interface ERPDocumentLineInput { item_id?: number; warehouse_id?: number; account_id?: number; description: string; quantity?: string | number; rate?: string | number; tax_rate?: string | number; data?: Record<string, unknown> }
+export interface ERPDocument { id: number; public_id: string; document_type: string; number: string; status: string; party_id: number | null; project_id: number | null; source_document_id: number | null; amended_from_id: number | null; currency: string; exchange_rate: string; posting_date: string; due_date: string | null; net_total: string; tax_total: string; grand_total: string; outstanding_amount: string; payload: Record<string, unknown>; custom: Record<string, unknown>; version: number; lines?: ERPDocumentLineInput[] }
+export interface ERPDashboard { currency: string; revenue: string; expenses: string; profit: string; cash_collected: string; inventory_value: string; open_customer_queries: number; payroll_total: string; production_cost: string; upcoming_maintenance: number }
+
+export function useERPMetadata(enabled = true) { return useQuery<ERPMetadata>({ queryKey: ['v1', 'erp', 'meta'], queryFn: () => api.get('/v1/erp/meta').then((r) => r.data), enabled, retry: false }) }
+export function useUpdateERPModules() { const qc = useQueryClient(); return useMutation({ mutationFn: (modules: Record<ERPModule, boolean>) => api.put('/v1/erp/admin/modules', { modules }).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp'] }) }) }
+export function useERPDocuments(documentType: string, enabled = true) { return useQuery<ERPDocument[]>({ queryKey: ['v1', 'erp', 'documents', documentType], queryFn: () => api.get(`/v1/erp/documents/${documentType}`).then((r) => r.data), enabled: enabled && Boolean(documentType), retry: false }) }
+export function useCreateERPDocument(documentType: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { party_id?: number; due_date?: string; payload?: Record<string, unknown>; custom?: Record<string, unknown>; lines?: ERPDocumentLineInput[] }) => api.post(`/v1/erp/documents/${documentType}`, input, { headers: { 'Idempotency-Key': crypto.randomUUID() } }).then((r) => r.data as ERPDocument), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'documents', documentType] }) }) }
+export function useSubmitERPDocument(documentType: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.post(`/v1/erp/documents/by-id/${id}/submit`).then((r) => r.data as ERPDocument), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'erp'] }); qc.invalidateQueries({ queryKey: ['v1', 'erp', 'documents', documentType] }) } }) }
+export function useERPDashboard(enabled = true) { return useQuery<ERPDashboard>({ queryKey: ['v1', 'erp', 'dashboard'], queryFn: () => api.get('/v1/erp/reports/dashboard').then((r) => r.data), enabled, retry: false }) }
+
 export function useWorkerProfile(employeeId?: number) {
   return useQuery<any>({ queryKey: ['v1', 'workers', employeeId, 'profile'], queryFn: () => api.get(`/v1/auth/workers/${employeeId}/profile`).then((response) => response.data), enabled: Boolean(employeeId) })
 }

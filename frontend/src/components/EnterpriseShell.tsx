@@ -3,10 +3,10 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
-  BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal, KeyRound,
+  BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal, KeyRound, Landmark,
   FolderArchive, LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
-import { useActor, useBrandingSettings, useEnterpriseLogout, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
+import { useActor, useBrandingSettings, useEnterpriseLogout, useERPMetadata, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { periodFromPreset } from './TimePeriodFilter'
 import { OyunsAssistant } from './OyunsAssistant'
@@ -31,10 +31,12 @@ const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
   '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
+  '/erp': 'ERP үйл ажиллагаа',
   '/administration/workspace': 'Logo оруулах',
   '/administration/collaboration': 'Чек ин тохиргоо',
   '/administration/access': 'Хандалтын удирдлага',
   '/administration/automation': 'Автоматжуулалт ба интеграци',
+  '/administration/erp': 'ERP модулиуд',
   '/administration/admin-access': 'Админ хандалт',
   '/administration/oyuns': 'OYUNS agent-ын тохиргоо',
   '/profile': 'Миний профайл',
@@ -60,7 +62,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         const event = JSON.parse(message.data)
         cursor = event.id
         sessionStorage.setItem('oyuns-event-cursor', String(cursor))
-        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', okrs: 'objectives', notifications: 'notifications', company_files: 'company-files' }
+        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', okrs: 'objectives', notifications: 'notifications', company_files: 'company-files', erp: 'erp' }
         const key = topicMap[event.topic]
         if (key) queryClient.invalidateQueries({ queryKey: ['v1', key] })
       }
@@ -93,6 +95,7 @@ export function EnterpriseShell() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('oyuns-theme') as 'light' | 'dark') || 'light')
   const workers = useWorkerDirectory()
   const branding = useBrandingSettings()
+  const erp = useERPMetadata(Boolean(token))
 
   useEffect(() => setMobileOpen(false), [location.pathname])
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('oyuns-theme', theme) }, [theme])
@@ -113,7 +116,11 @@ export function EnterpriseShell() {
   useEffect(() => {
     if (actorQuery.data?.locale && i18n.language !== actorQuery.data.locale) i18n.changeLanguage(actorQuery.data.locale)
   }, [actorQuery.data?.locale, i18n])
-  const nav = useMemo(() => NAV.filter((item) => !item.roles.length || item.roles.some((role) => roles.includes(role))), [roles])
+  const nav = useMemo(() => {
+    const base = NAV.filter((item) => !item.roles.length || item.roles.some((role) => roles.includes(role)))
+    const canAccessERP = roles.includes('admin') || Boolean(erp.data && Object.values(erp.data.modules).some(Boolean))
+    return canAccessERP ? [...base.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, base[base.length - 1]] : base
+  }, [erp.data, roles])
   const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const workerPerformance = useWorkerPerformance(selectedWorker, periodFromPreset('week'), canReviewWorkers)
   const workerProfile = useWorkerProfile(selectedWorker)

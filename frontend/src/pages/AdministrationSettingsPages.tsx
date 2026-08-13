@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, BookOpen, CalendarClock, CalendarDays, ClipboardList, Code2, KeyRound, Settings2, ShieldCheck, UserPlus, UserRoundCog, Users2 } from 'lucide-react'
+import { ArrowLeft, Bot, BookOpen, Boxes, CalendarClock, CalendarDays, ClipboardList, Code2, KeyRound, Landmark, Settings2, ShieldCheck, UserPlus, UserRoundCog, Users2 } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { useBrandingSettings, useCreateManagedAccount, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useManagedAccounts, usePermissionSettings, useUpdateBrandingSettings, useUpdateManagedAccount, useUpdatePermissionSettings, useUploadBrandingLogo } from '../api/enterprise'
+import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useManagedAccounts, usePermissionSettings, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUploadBrandingLogo } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { EmployeesPage } from './EmployeesPage'
 import { QuestionsPage } from './QuestionsPage'
@@ -17,6 +17,7 @@ const SETTINGS = [
   { to: '/administration/collaboration', title: 'Чек ин тохиргоо', text: 'Даалгавар, check-in болон ажлын хуваарь', icon: UserRoundCog },
   { to: '/administration/access', title: 'Хандалтын удирдлага', text: 'Ажилтан, Telegram холболт, эрх ба төлөв', icon: ShieldCheck },
   { to: '/administration/automation', title: 'Автоматжуулалт ба интеграци', text: 'Telegram мэдэгдэл, календарь, онбординг', icon: CalendarClock },
+  { to: '/administration/erp', title: 'ERP модулиуд', text: 'Санхүү, борлуулалт, агуулах болон бусад workflow', icon: Landmark },
   { to: '/administration/admin-access', title: 'Админ хандалт', text: 'Админ хэрэглэгч, нууц үг болон эрх', icon: KeyRound },
   { to: '/administration/oyuns', title: 'OYUNS agent', text: 'Компаний өгөгдлийн сан ба агентын сургалт', icon: Bot },
 ]
@@ -54,12 +55,46 @@ function BrandingSettingsPanel() {
   })}</div></section>
 }
 
+function ERPModuleSettingsPanel() {
+  const metadata = useERPMetadata()
+  const updateModules = useUpdateERPModules()
+  const modules = metadata.data ? (Object.keys(metadata.data.modules) as ERPModule[]) : []
+
+  const toggleModule = (module: ERPModule) => {
+    if (!metadata.data) return
+    updateModules.mutate({ ...metadata.data.modules, [module]: !metadata.data.modules[module] }, {
+      onSuccess: () => toast.success('ERP module visibility updated'),
+      onError: (error: any) => toast.error(error.response?.data?.detail || 'Module settings could not be updated'),
+    })
+  }
+
+  if (metadata.isLoading) return <section className="account-admin panel"><p>ERP тохиргоог уншиж байна…</p></section>
+  if (metadata.isError || !metadata.data) return <section className="account-admin panel"><div className="panel-heading"><div><span className="eyebrow">Configurable ERP</span><h2>ERP үйлчилгээ холбогдсонгүй</h2><p>ERP migration болон backend service ажиллаж байгаа эсэхийг шалгана уу.</p></div><Landmark /></div></section>
+
+  return <section className="account-admin panel erp-admin-panel">
+    <div className="panel-heading"><div><span className="eyebrow">Configurable ERP</span><h2>ERP модулиуд</h2><p>Эндээс байгууллагадаа хэрэгтэй workflow-уудыг асаана. Visibility нь permission/security control биш.</p></div><Boxes /></div>
+    <div className="erp-module-grid" aria-label="ERP module visibility">
+      {modules.map((module) => {
+        const enabled = metadata.data.modules[module]
+        const label = metadata.data.module_labels[module] || module
+        return <article key={module} className={`panel erp-module-card ${enabled ? 'enabled' : ''}`}><Landmark size={21} /><div><strong>{label}</strong><small>{enabled ? 'Workspace-д харагдана' : 'Workspace-ээс нуусан'}</small></div><button className="erp-toggle" onClick={() => toggleModule(module)} disabled={updateModules.isPending} aria-label={`${label} ${enabled ? 'disable' : 'enable'}`}><span /></button></article>
+      })}
+    </div>
+    <p className="erp-settings-notice"><ShieldCheck size={15} /> API, posting, audit болон integrations нь capability-ээр хамгаалагдсан хэвээр.</p>
+    <Link className="secondary-action compact erp-admin-open" to="/erp">ERP workspace нээх</Link>
+  </section>
+}
+
 export function AdministrationHubPage() {
   return <div className="settings-overview"><div className="view-toolbar"><div><h2>Системийн тохиргоо</h2><p></p></div><Settings2 /></div><div className="settings-category-grid">{SETTINGS.map(({ to, title, text, icon: Icon }) => <Link to={to} key={to}><Icon /><div><strong>{title}</strong><span>{text}</span></div></Link>)}</div></div>
 }
 
 export function WorkspaceIdentitySettingsPage() {
   return <SettingsPage title="Logo оруулах" description="Танай байгууллагын лого болон theme бүрийн харагдах байдлыг удирдана."><BrandingSettingsPanel /></SettingsPage>
+}
+
+export function ERPSettingsPage() {
+  return <SettingsPage title="ERP модулиуд" description="ERP workflow-уудын харагдац болон байгууллагын тохиргоог удирдана."><ERPModuleSettingsPanel /></SettingsPage>
 }
 
 export function CollaborationSettingsPage() {

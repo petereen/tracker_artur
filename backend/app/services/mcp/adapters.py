@@ -189,6 +189,16 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
             result = await enterprise_tools.execute(db, actor, "get_stats_tool", {"metrics": data.metrics, "timeframe": data.timeframe, "date_from": data.date_from, "date_to": data.date_to, "employee_id": int(employee_id) if employee_id is not None else None, "project_id": int(project_id) if project_id is not None else None, "compare_previous": data.compare_previous, "presentation": data.presentation}, channel=channel, prompt="MCP statistics query", conversation_id=conversation_id)
             return envelope(result=result, request_id=request_id, summary=_summary(result, "Returned authorized OYUNS metrics."))
 
+        if tool_name == "oyuns_erp_read":
+            data = schemas.ERPReadInput.model_validate(arguments)
+            result = await enterprise_tools.execute(db, actor, "erp_query_tool", data.model_dump(mode="json"), channel=channel, prompt="MCP ERP read", conversation_id=conversation_id)
+            # ERP document numbers and totals are business identifiers, not
+            # database references. The adapter intentionally strips all IDs.
+            safe = result.get("data", {})
+            if "stock_balances" in safe:
+                safe = {"stock_balances": [{"quantity": row.get("quantity"), "value": row.get("value")} for row in safe["stock_balances"]]}
+            return envelope(result=result, request_id=request_id, summary=_summary(result, "Returned authorized ERP data."), data=safe)
+
         if tool_name == "oyuns_tasks_prepare_create":
             data = schemas.TaskPrepareCreateInput.model_validate(arguments)
             action_type = "delegate_task" if data.assignee and data.assignee.casefold() not in {"self", "me", "myself", "би", "өөрөө", "надад", "өөртөө"} else "create_task"

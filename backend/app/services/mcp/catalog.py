@@ -42,6 +42,7 @@ CATALOG: tuple[ToolDefinition, ...] = (
     ToolDefinition("oyuns_projects_search", "Search projects", "Search projects, plans, and milestones in the caller's permitted scope.", schemas.ProjectsSearchInput, "projects", "read"),
     ToolDefinition("oyuns_calendar_availability", "Get calendar availability", "Retrieve authorized availability; private events are reduced to free/busy when required.", schemas.CalendarAvailabilityInput, "calendar", "read"),
     ToolDefinition("oyuns_stats_get", "Get governed statistics", "Return authorized OYUNS ERP metrics; unsupported metrics are rejected.", schemas.StatsGetInput, "analytics", "read"),
+    ToolDefinition("oyuns_erp_read", "Read ERP records", "Read authorized ERP dashboard totals or documents. This never creates, posts, pays, or finalizes payroll.", schemas.ERPReadInput, "erp", "read"),
     ToolDefinition("oyuns_tasks_prepare_create", "Prepare task creation", "Prepare a task for explicit Web or Telegram confirmation. This never creates a task directly.", schemas.TaskPrepareCreateInput, "tasks", "preview"),
     ToolDefinition("oyuns_tasks_prepare_update", "Prepare task update", "Prepare a task update for explicit Web or Telegram confirmation. This never changes a task directly.", schemas.TaskPrepareUpdateInput, "tasks", "preview"),
 )

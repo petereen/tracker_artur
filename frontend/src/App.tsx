@@ -13,6 +13,7 @@ const EnterpriseTasksPage = lazy(() => import('./pages/EnterpriseTasksPage').the
 const CalendarWorkspacePage = lazy(() => import('./pages/CalendarWorkspacePage').then((module) => ({ default: module.CalendarWorkspacePage })))
 const StatsWorkspacePage = lazy(() => import('./pages/StatsWorkspacePage').then((module) => ({ default: module.StatsWorkspacePage })))
 const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
+const ERPWorkspacePage = lazy(() => import('./pages/ERPWorkspacePage').then((module) => ({ default: module.ERPWorkspacePage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
 const PlansPage = lazy(() => import('./pages/PlansPage').then((module) => ({ default: module.PlansPage })))
 const AdministrationHubPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdministrationHubPage })))
@@ -20,6 +21,7 @@ const WorkspaceIdentitySettingsPage = lazy(() => import('./pages/AdministrationS
 const CollaborationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.CollaborationSettingsPage })))
 const AccessControlSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AccessControlSettingsPage })))
 const AutomationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AutomationSettingsPage })))
+const ERPSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.ERPSettingsPage })))
 const AdminAccessSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdminAccessSettingsPage })))
 const OyunsAssistantSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.OyunsAssistantSettingsPage })))
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })))
@@ -51,11 +53,13 @@ function AuthenticatedApp() {
         <Route path="plans" element={<PlansPage />} />
         <Route path="okrs" element={<Navigate to="/plans" replace />} />
         <Route path="analytics" element={<StatsWorkspacePage />} />
+        <Route path="erp" element={<ERPWorkspacePage />} />
         <Route path="administration" element={<AdministrationHubPage />} />
         <Route path="administration/workspace" element={<WorkspaceIdentitySettingsPage />} />
         <Route path="administration/collaboration" element={<CollaborationSettingsPage />} />
         <Route path="administration/access" element={<AccessControlSettingsPage />} />
         <Route path="administration/automation" element={<AutomationSettingsPage />} />
+        <Route path="administration/erp" element={<ERPSettingsPage />} />
         <Route path="administration/admin-access" element={<AdminAccessSettingsPage />} />
         <Route path="administration/oyuns" element={<OyunsAssistantSettingsPage />} />
         <Route path="profile" element={<ProfilePage />} />

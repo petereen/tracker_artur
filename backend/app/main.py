@@ -12,6 +12,7 @@ from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
 from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssignment, UserAccount
 from app.routers import assistant_learning, auth, company_files, company_plans, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, onboarding, questions, realtime, schedules, tasks, work_reports
+from app.erp import router as erp
 from app import mcp_executor
 from sqlalchemy import func, or_, select
 
@@ -106,6 +107,7 @@ app.include_router(enterprise_auth.router, prefix="/v1/auth", tags=["v1-auth"])
 app.include_router(realtime.router, prefix="/v1", tags=["v1-realtime"])
 app.include_router(company_files.router, prefix="/v1/company-files", tags=["v1-company-files"])
 app.include_router(enterprise.router, prefix="/v1", tags=["v1-enterprise"])
+app.include_router(erp.router, prefix="/v1/erp", tags=["v1-erp"])
 app.include_router(mcp_executor.router, prefix="/v1/mcp-executor", tags=["v1-mcp-executor"])
 
 
