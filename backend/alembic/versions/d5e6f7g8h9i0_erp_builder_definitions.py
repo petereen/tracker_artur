@@ -71,7 +71,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_erp_workflow_transition_entity", "erp_workflow_transitions", ["organization_id", "entity_type", "entity_id", "created_at"])
     # Preserve legacy custom fields as the first immutable published definition for their resource.
-    op.execute("""
+    op.get_bind().exec_driver_sql("""
         INSERT INTO erp_form_definitions (organization_id, operation, version, status, fields, workflow, published_at)
         SELECT organization_id,
                replace(resource, 'document:', ''),
@@ -79,7 +79,16 @@ def upgrade() -> None:
                jsonb_agg(jsonb_build_object('key', key, 'label', label, 'field_type', field_type,
                    'section', CASE WHEN resource IN ('party', 'item') THEN 'master' ELSE 'header' END,
                    'required', required, 'options', options, 'position', 0)),
-               '{"initial_state":"draft","states":[{"key":"draft","terminal":false},{"key":"approved","terminal":true},{"key":"rejected","terminal":true},{"key":"cancelled","terminal":true}],"transitions":[]}'::jsonb,
+               jsonb_build_object(
+                   'initial_state', 'draft',
+                   'states', jsonb_build_array(
+                       jsonb_build_object('key', 'draft', 'terminal', false),
+                       jsonb_build_object('key', 'approved', 'terminal', true),
+                       jsonb_build_object('key', 'rejected', 'terminal', true),
+                       jsonb_build_object('key', 'cancelled', 'terminal', true)
+                   ),
+                   'transitions', '[]'::jsonb
+               ),
                now()
         FROM erp_custom_fields
         GROUP BY organization_id, resource
