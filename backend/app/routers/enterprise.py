@@ -1485,7 +1485,7 @@ async def list_deadlines(db: AsyncSession = Depends(get_db), actor: ActorContext
     for project in projects:
         items.append({"id": f"project-{project.id}", "entity_id": project.id, "type": "project", "title": project.name, "due_date": str(project.ends_on) if project.ends_on else None, "status": project.status, "owner": people.get(project.manager_id), "project_id": project.id, "project_name": project.name})
     for task in tasks:
-        items.append({"id": f"task-{task.id}", "entity_id": task.id, "type": "subtask" if task.parent_task_id else "task", "title": task.title, "due_date": task.deadline_at.isoformat() if task.deadline_at else None, "status": task.workflow_status, "owner": people.get(task.assignee_id), "project_id": task.project_id, "project_name": project_names.get(task.project_id)})
+        items.append({"id": f"task-{task.id}", "entity_id": task.id, "type": "subtask" if task.parent_task_id else "task", "title": task.title, "due_date": task.deadline_at.isoformat() if task.deadline_at else None, "status": task.workflow_status, "owner": people.get(task.assignee_id), "project_id": task.project_id, "project_name": project_names.get(task.project_id), "version": task.version})
     for item in plan_items:
         items.append({"id": f"plan-{item.id}", "entity_id": item.id, "type": "plan", "title": item.title, "due_date": str(item.due_date) if item.due_date else None, "status": item.status, "owner": None, "project_id": None, "project_name": None})
     for item in items:

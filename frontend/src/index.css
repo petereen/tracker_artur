@@ -4842,6 +4842,98 @@ a {
   gap: 7px;
   justify-content: flex-end;
 }
+.deadline-select-all,
+.deadline-batch-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+}
+.deadline-select-all {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.deadline-batch-actions {
+  background: var(--color-accent-soft);
+  border-radius: 9px;
+  padding: 4px 6px 4px 9px;
+  white-space: nowrap;
+}
+.deadline-batch-actions > span {
+  color: var(--color-accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.deadline-batch-actions select {
+  min-height: 30px;
+}
+.deadline-groups .deadline-task-row {
+  grid-template-columns: 18px 76px minmax(180px, 1fr) 130px 100px 38px;
+}
+.deadline-task-row > input {
+  accent-color: var(--color-accent);
+  height: 15px;
+  width: 15px;
+}
+.deadline-row-menu {
+  position: relative;
+}
+.deadline-row-menu .icon-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--color-muted);
+  display: inline-flex;
+  justify-content: center;
+  min-height: 32px;
+  min-width: 32px;
+}
+.deadline-row-menu .icon-button:hover,
+.deadline-row-menu .icon-button[aria-expanded="true"] {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+.deadline-action-menu {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  display: grid;
+  gap: 3px;
+  min-width: 145px;
+  padding: 5px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+}
+.deadline-action-menu button,
+.deadline-action-menu label {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: inherit;
+  font-size: 0.75rem;
+  padding: 8px 9px;
+  text-align: left;
+  width: 100%;
+}
+.deadline-action-menu button:hover,
+.deadline-action-menu label:hover {
+  background: var(--color-surface-2);
+}
+.deadline-action-menu label {
+  display: grid;
+  gap: 4px;
+}
+.deadline-action-menu select {
+  min-height: 28px;
+  width: 100%;
+}
+.deadline-action-menu .danger {
+  color: var(--color-red);
+}
 .deadline-groups {
   display: grid;
   gap: 13px;

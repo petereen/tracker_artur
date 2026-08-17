@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add admin task row menus and batch actions to the organizational deadline control (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise.py`, `frontend/src/index.css`)
 - [x] Increase notification popover background opacity (`frontend/src/index.css`)
 - [x] Fix visual overflow and boundary clipping for multi-day task range bars in the Calendar Month/Grid view (`frontend/src/index.css`)
 - [x] Show task creator metadata in web task cards/details and Telegram assignment alerts (`frontend/src/pages/EnterpriseTasksPage.tsx`, `backend/app/routers/enterprise.py`, `backend/app/services/reminder_service.py`)

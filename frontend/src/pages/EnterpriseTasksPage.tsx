@@ -26,6 +26,7 @@ import {
   ListChecks,
   MapPin,
   MessageSquare,
+  MoreVertical,
   Paperclip,
   Plus,
   Rows3,
@@ -478,6 +479,7 @@ export function EnterpriseTasksPage() {
     "board",
   );
   const [selected, setSelected] = useState<EnterpriseTask | null>(null);
+  const [deadlineTaskId, setDeadlineTaskId] = useState<number | undefined>();
   const [creating, setCreating] = useState(false);
   const [returnToTask, setReturnToTask] = useState<EnterpriseTask | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -509,6 +511,7 @@ export function EnterpriseTasksPage() {
     filters,
   );
   const deepLinkedTask = useEnterpriseTask(params.get("task") ? Number(params.get("task")) : undefined);
+  const deadlineTask = useEnterpriseTask(deadlineTaskId);
   const projects = useProjects();
   const workers = useWorkerDirectory();
   const createTask = useCreateEnterpriseTask();
@@ -623,6 +626,12 @@ export function EnterpriseTasksPage() {
   useEffect(() => {
     if (deepLinkedTask.data && !selected) openTask(deepLinkedTask.data);
   }, [deepLinkedTask.data]);
+  useEffect(() => {
+    if (deadlineTaskId && deadlineTask.data) {
+      openTask(deadlineTask.data);
+      setDeadlineTaskId(undefined);
+    }
+  }, [deadlineTask.data, deadlineTaskId]);
   useEffect(() => {
     if (params.get("create") === "1") openCreate();
   }, []);
@@ -915,7 +924,7 @@ export function EnterpriseTasksPage() {
     </>
   );
   if (section === "deadlines")
-    return <Deadlines onBack={() => setSection("tasks")} />;
+    return <Deadlines onBack={() => setSection("tasks")} onEditTask={(id) => setDeadlineTaskId(id)} />;
   const resetFilters = () => {
     setFilters({ kind: "all", scope: "mine" });
     setFilterProjectId(projectId);
@@ -1404,12 +1413,16 @@ function Timeline({
   );
 }
 
-function Deadlines({ onBack }: { onBack: () => void }) {
+function Deadlines({ onBack, onEditTask }: { onBack: () => void; onEditTask: (id: number) => void }) {
   const deadlines = useDeadlines();
+  const updateTask = useUpdateEnterpriseTask();
+  const deleteTask = useDeleteEnterpriseTask();
   const [type, setType] = useState("all");
   const [project, setProject] = useState("all");
   const [status, setStatus] = useState("all");
   const [owner, setOwner] = useState("all");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const all = deadlines.data || [];
   const projects = Array.from(
     new Set(all.map((item) => item.project_name).filter(Boolean)),
@@ -1427,6 +1440,26 @@ function Deadlines({ onBack }: { onBack: () => void }) {
       (status === "all" || item.status === status) &&
       (owner === "all" || item.owner === owner),
   );
+  const visibleTasks = visible.filter((item) => item.type === "task" || item.type === "subtask");
+  const selectedTasks = visibleTasks.filter((item) => selectedIds.includes(item.entity_id));
+  const allVisibleSelected = visibleTasks.length > 0 && visibleTasks.every((item) => selectedIds.includes(item.entity_id));
+  const toggleSelected = (id: number) => setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const changeStatus = async (item: (typeof all)[number], workflow_status: WorkflowStatus) => {
+    if (item.version == null) return;
+    await updateTask.mutateAsync({ id: item.entity_id, version: item.version, workflow_status });
+    setOpenMenu(null);
+  };
+  const batchStatus = async (workflow_status: WorkflowStatus) => {
+    for (const item of selectedTasks) {
+      if (item.version != null) await updateTask.mutateAsync({ id: item.entity_id, version: item.version, workflow_status });
+    }
+    setSelectedIds([]);
+  };
+  const batchDelete = async () => {
+    if (!selectedTasks.length || !window.confirm(`${selectedTasks.length} даалгаврыг устгах уу?`)) return;
+    for (const item of selectedTasks) await deleteTask.mutateAsync(item.entity_id);
+    setSelectedIds([]);
+  };
   const buckets = [
     { id: "overdue", label: "Хугацаа хэтэрсэн" },
     { id: "soon", label: "7 хоногт" },
@@ -1443,6 +1476,15 @@ function Deadlines({ onBack }: { onBack: () => void }) {
           <h2>Байгууллагын хугацааны хяналт</h2>
         </div>
         <div className="deadline-filters">
+          {visibleTasks.length > 0 && <label className="deadline-select-all"><input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedIds(allVisibleSelected ? [] : visibleTasks.map((item) => item.entity_id))} />Бүгдийг сонгох</label>}
+          {selectedTasks.length > 0 && <div className="deadline-batch-actions" aria-label="Сонгосон даалгаврын багц үйлдэл">
+            <span>{selectedTasks.length} сонгосон</span>
+            <select aria-label="Сонгосон даалгаврын төлөв" defaultValue="" onChange={(event) => { if (event.target.value) void batchStatus(event.target.value as WorkflowStatus); }} disabled={updateTask.isPending}>
+              <option value="">Төлөв өөрчлөх</option>
+              {COLUMNS.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}
+            </select>
+            <button type="button" className="danger-action compact" onClick={() => void batchDelete()} disabled={deleteTask.isPending}><Trash2 size={14} />Устгах</button>
+          </div>}
           <select
             value={type}
             onChange={(event) => setType(event.target.value)}
@@ -1494,7 +1536,8 @@ function Deadlines({ onBack }: { onBack: () => void }) {
             {visible
               .filter((item) => item.bucket === bucket.id)
               .map((item) => (
-                <article key={item.id}>
+                <article key={item.id} className={item.type === "task" || item.type === "subtask" ? "deadline-task-row" : ""}>
+                  {(item.type === "task" || item.type === "subtask") && <input type="checkbox" aria-label={`${item.title} сонгох`} checked={selectedIds.includes(item.entity_id)} onChange={() => toggleSelected(item.entity_id)} />}
                   <span className={`deadline-type ${item.type}`}>
                     {item.type}
                   </span>
@@ -1509,7 +1552,15 @@ function Deadlines({ onBack }: { onBack: () => void }) {
                       ? new Date(item.due_date).toLocaleDateString("mn-MN")
                       : "—"}
                   </time>
-                  <span>{item.status}</span>
+                  <span className={`status-pill ${item.status}`}>{statusLabel(item.status as WorkflowStatus)}</span>
+                  {(item.type === "task" || item.type === "subtask") && <div className="deadline-row-menu">
+                    <button type="button" className="icon-button" aria-label={`${item.title} үйлдлүүд`} aria-expanded={openMenu === item.id} onClick={() => setOpenMenu(openMenu === item.id ? null : item.id)}><MoreVertical size={18} /></button>
+                    {openMenu === item.id && <div className="deadline-action-menu">
+                      <button type="button" onClick={() => onEditTask(item.entity_id)}>Засах</button>
+                      <label>Төлөв<select value={item.status} onChange={(event) => void changeStatus(item, event.target.value as WorkflowStatus)} disabled={updateTask.isPending}>{COLUMNS.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}</select></label>
+                      <button type="button" className="danger" onClick={() => { if (window.confirm(`“${item.title}” даалгаврыг устгах уу?`)) void deleteTask.mutateAsync(item.entity_id).then(() => setOpenMenu(null)); }}>Устгах</button>
+                    </div>}
+                  </div>}
                 </article>
               ))}
           </section>

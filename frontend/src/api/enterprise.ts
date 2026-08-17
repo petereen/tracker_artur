@@ -51,6 +51,20 @@ export interface EnterpriseTask {
   can_manage_collaboration?: boolean
 }
 
+export interface DeadlineItem {
+  id: string
+  entity_id: number
+  type: 'project' | 'plan' | 'task' | 'subtask'
+  title: string
+  due_date: string | null
+  status: string
+  owner: string | null
+  project_id: number | null
+  project_name: string | null
+  bucket: 'overdue' | 'soon' | 'later' | 'none'
+  version?: number
+}
+
 export interface Project {
   id: number
   public_id: string
@@ -384,7 +398,7 @@ export function useGlobalSearch(query: string) {
 }
 
 export function useDeadlines(enabled = true) {
-  return useQuery<any[]>({ queryKey: ['v1', 'deadlines'], queryFn: () => api.get('/v1/deadlines').then((response) => response.data), enabled })
+  return useQuery<DeadlineItem[]>({ queryKey: ['v1', 'deadlines'], queryFn: () => api.get('/v1/deadlines').then((response) => response.data), enabled })
 }
 
 export function useCreateEnterpriseTask() {
@@ -410,7 +424,7 @@ export function useUpdateEnterpriseTask() {
       context?.snapshots.forEach(([key, tasks]) => queryClient.setQueryData(key, tasks))
       toast.error(error.response?.status === 409 ? 'Даалгаврыг өөр хүн шинэчилсэн. Хамгийн сүүлийн хувилбарыг авлаа.' : 'Шинэчлэлт хадгалагдсангүй')
     },
-    onSettled: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }) },
+    onSettled: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'deadlines'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }) },
   })
 }
 
@@ -418,7 +432,7 @@ export function useDeleteEnterpriseTask() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/v1/tasks/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success('Даалгавар устгагдлаа') },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'deadlines'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success('Даалгавар устгагдлаа') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Даалгавар устгагдсангүй'),
   })
 }
