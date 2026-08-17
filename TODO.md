@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Increase notification popover background opacity (`frontend/src/index.css`)
 - [x] Fix visual overflow and boundary clipping for multi-day task range bars in the Calendar Month/Grid view (`frontend/src/index.css`)
 - [x] Show task creator metadata in web task cards/details and Telegram assignment alerts (`frontend/src/pages/EnterpriseTasksPage.tsx`, `backend/app/routers/enterprise.py`, `backend/app/services/reminder_service.py`)
 - [x] Add contract composer attachments and OYUNS icon-only action buttons (`frontend/src/pages/ContractsWorkspacePage.tsx`, `frontend/src/index.css`, `frontend/src/pages/ContractsWorkspacePage.test.tsx`)
@@ -25,6 +26,7 @@
 - [x] Source Today mini-calendar tasks, events, reminders, and time blocks from the visible-month calendar feed (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Keep primary-owner tasks in the private calendar feed so they appear in the Today mini calendar (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Merge private, company, assigned, and delegated Today mini-calendar sources and render explicit typed markers (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
+- [x] Render start-and-due tasks exclusively as solid continuous mini-calendar strokes with rounded true endpoints (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Add OYUNS ERP core-operations migration and normalized operational entities (`backend/app/models/models.py`, `backend/alembic/versions`)
 - [x] Add contextual buying/selling/stock/accounting master-data request schemas, permissions, materializers, and audit responses (`backend/app/erp`)
 - [x] Add discount-aware buying/selling document workflows, branch conversions, archive/restore, and inventory synchronization (`backend/app/erp`)
@@ -210,6 +212,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Render start-and-due tasks exclusively as solid continuous mini-calendar strokes with rounded true endpoints (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Merge private, company, assigned, and delegated Today mini-calendar sources and render explicit typed markers (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Fix visual overflow and boundary clipping for multi-day task range bars in the Calendar Month/Grid view (`frontend/src/index.css`)
 - [x] Keep primary-owner tasks in the private calendar feed so they appear in the Today mini calendar (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)

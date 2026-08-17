@@ -197,6 +197,7 @@ describe("Today work-hour timer", () => {
     expect(bars).toHaveLength(2);
     expect(bars.some((bar) => bar.classList.contains("range-start") && bar.classList.contains("range-end"))).toBe(true);
     expect(bars.some((bar) => !bar.classList.contains("range-start") && bar.classList.contains("range-end"))).toBe(true);
+    expect(container.querySelector(".mini-day-marker.task")).not.toBeInTheDocument();
   });
 
   it("renders visible markers for monthly tasks, events, and reminders", () => {

@@ -377,8 +377,8 @@ export function EnterpriseDashboardPage() {
       dates.get(key)!.add(kind);
     };
     miniCalendarVisibleTasks.forEach((task) => {
+      if (task.start_at && task.deadline_at) return;
       add(task.start_at || task.deadline_at, "task");
-      if (task.deadline_at) add(task.deadline_at, "task");
     });
     [...(miniCalendarEvents.data?.entries ?? []), ...(miniCalendarCompanyEvents.data?.entries ?? []), ...(agenda.data?.entries ?? [])].forEach((item: any) => add(item.remind_at || item.starts_at || item.start_at, item.kind === "reminder" ? "reminder" : "event"));
     [...(miniCalendarEvents.data?.time_blocks ?? []), ...(miniCalendarCompanyEvents.data?.time_blocks ?? [])].forEach((item: any) => add(item.starts_at || item.start_at, "time-block"));
