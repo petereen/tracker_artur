@@ -6173,6 +6173,33 @@ a {
   font-size: 0.8rem;
   line-height: 1.45;
 }
+.collaboration-icon-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: transform 140ms ease-out, border-color 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+.collaboration-icon-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.collaboration-icon-button:active,
+.composer-submit:active {
+  transform: scale(0.96);
+}
+.collaboration-add-button {
+  width: 36px;
+  height: 36px;
+}
 .collaboration-list {
   display: grid;
   gap: 0.45rem;
@@ -6333,9 +6360,55 @@ a {
 .inline-compose input {
   flex: 1;
 }
+.collaboration-pill-composer,
+.comment-input-wrap {
+  position: relative;
+}
+.collaboration-pill-composer {
+  display: flex;
+  align-items: center;
+}
 .collaboration-composer input,
 .relationship-composer select {
   min-height: 38px;
+}
+.collaboration-pill-composer input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0.65rem 3.35rem 0.65rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--surface-secondary);
+  color: var(--text);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+.collaboration-pill-composer input:focus {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  background: var(--surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+  outline: none;
+}
+.composer-submit {
+  position: absolute;
+  right: 7px;
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--surface);
+  cursor: pointer;
+  transition: transform 140ms ease-out, background 160ms ease, opacity 160ms ease;
+}
+.composer-submit:hover {
+  background: color-mix(in srgb, var(--accent) 86%, #000);
+}
+.composer-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 .relationship-composer select {
   min-width: 0;
@@ -6348,13 +6421,23 @@ a {
 }
 .comment-composer textarea {
   width: 100%;
-  min-height: 76px;
+  min-height: 56px;
+  padding: 0.8rem 3.35rem 0.8rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--surface-secondary);
+  color: var(--text);
   resize: vertical;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
-
-.comment-input-wrap {
-  position: relative;
-  display: block;
+.comment-composer textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  background: var(--surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+  outline: none;
+}
+.comment-input-wrap .composer-submit {
+  top: 9px;
 }
 
 .mention-suggestions {
@@ -6421,6 +6504,30 @@ a {
 }
 .collaboration-upload:active {
   transform: scale(0.99);
+}
+.collaboration-attach-button {
+  position: relative;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: var(--accent);
+  color: var(--surface);
+  box-shadow: 0 7px 16px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.collaboration-attach-button:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 86%, #000);
+  color: var(--surface);
+  box-shadow: 0 9px 20px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.collaboration-attach-button.uploading {
+  cursor: wait;
+  opacity: 0.7;
+}
+.collaboration-attach-button input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 .collaboration-upload span {
   display: grid;

@@ -13,6 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { AnimatePresence, motion } from "motion/react";
 import {
   CalendarDays,
+  ArrowUp,
   Check,
   CheckSquare2,
   Download,
@@ -343,7 +344,7 @@ function TaskCollaboration({
           <>
             <div className="collaboration-panel-copy">
               <p>Том ажлыг жижиг, хянахад хялбар алхмуудад хуваана.</p>
-              {canManage && <button type="button" className="secondary-action compact" onClick={onCreateSubtask}><Plus size={15} />Дэд ажил нэмэх</button>}
+              {canManage && <button type="button" className="collaboration-icon-button collaboration-add-button" aria-label="Дэд ажил нэмэх" title="Дэд ажил нэмэх" onClick={onCreateSubtask}><Plus size={17} /></button>}
             </div>
             {subtasks.length ? <div className="collaboration-list subtask-list">
               {subtasks.map((item) => <article key={item.id}>
@@ -372,9 +373,9 @@ function TaskCollaboration({
                 <button type="button" aria-label="Checklist устгах" disabled={deleteCheck.isPending} onClick={() => deleteCheck.mutate({ taskId: task.id, id: item.id })}><Trash2 size={14} /></button>
               </article>)}
             </div> : <div className="collaboration-empty"><ListChecks size={20} /><p>Checklist хоосон байна.</p></div>}
-            <div className="collaboration-composer inline-compose">
+            <div className="collaboration-composer collaboration-pill-composer">
               <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Checklist-д ажил нэмэх" onKeyDown={(event) => { if (event.key === "Enter") submitText(); }} />
-              <button type="button" className="primary-action compact" onClick={submitText} disabled={!text.trim() || addCheck.isPending}><Plus size={15} />Нэмэх</button>
+              <button type="button" className="composer-submit" aria-label="Checklist нэмэх" title="Checklist нэмэх" onClick={submitText} disabled={!text.trim() || addCheck.isPending}><ArrowUp size={17} /></button>
             </div>
           </>
         )}
@@ -389,7 +390,8 @@ function TaskCollaboration({
             </div> : <div className="collaboration-empty"><MessageSquare size={20} /><p>Сэтгэгдэл алга байна.</p></div>}
             <div className="comment-composer">
               <div className="comment-input-wrap">
-                <textarea ref={commentInput} rows={3} value={text} onChange={(e) => { setText(e.target.value); setMentionQuery(commentMentionQuery(e.target.value, e.target.selectionStart)); }} onClick={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} onKeyUp={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} placeholder="Сэтгэгдэл бичих…" />
+                <textarea ref={commentInput} rows={1} value={text} onChange={(e) => { setText(e.target.value); setMentionQuery(commentMentionQuery(e.target.value, e.target.selectionStart)); }} onClick={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} onKeyUp={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} placeholder="Сэтгэгдэл бичих…" />
+                <button type="button" className="composer-submit" aria-label="Сэтгэгдэл илгээх" title="Сэтгэгдэл илгээх" onClick={submitText} disabled={!text.trim() || addComment.isPending}><ArrowUp size={17} /></button>
                 {mentionQuery !== null && workers.filter((worker) => worker.name.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())).slice(0, 6).length > 0 && (
                   <div className="mention-suggestions" role="listbox" aria-label="Дурдах ажилтан">
                     {workers.filter((worker) => worker.name.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())).slice(0, 6).map((worker) => (
@@ -409,17 +411,16 @@ function TaskCollaboration({
                 )}
               </div>
               <UserTagPicker label="Дурдсан хүмүүс" value={commentMentionIds} users={workers} onChange={setCommentMentionIds} />
-              <div><span>Дурдсан хүмүүс web мэдэгдэл авна.</span><button type="button" className="primary-action compact" onClick={submitText} disabled={!text.trim() || addComment.isPending}><MessageSquare size={15} />Илгээх</button></div>
+              <div><span>Дурдсан хүмүүс web мэдэгдэл авна.</span></div>
             </div>
           </>
         )}
         {tab === "files" && (
           <>
-            <div className="collaboration-panel-copy"><p>Холбогдох баримт, эх файлаа аюулгүйгээр хавсаргана.</p></div>
-            <label className={`file-upload collaboration-upload ${upload.isPending ? "uploading" : ""}`}>
-              <Paperclip size={18} /><span><strong>{upload.isPending ? "Файл байршуулж байна…" : "Файл хавсаргах"}</strong><small>Файл сонгох эсвэл энд дарна уу</small></span>
+            <div className="collaboration-panel-copy"><p>Холбогдох баримт, эх файлаа аюулгүйгээр хавсаргана.</p><label className={`collaboration-icon-button collaboration-attach-button ${upload.isPending ? "uploading" : ""}`} aria-label="Файл хавсаргах" title={upload.isPending ? "Файл байршуулж байна…" : "Файл хавсаргах"}>
+              <Paperclip size={18} />
               <input type="file" disabled={upload.isPending} onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; try { await upload.mutateAsync({ objectType: "task", objectId: task.id, file, onProgress: setProgress }); e.currentTarget.value = ""; setProgress(0); } catch { /* the hook displays the error */ } }} />
-            </label>
+            </label></div>
             {upload.isPending && <div className="upload-progress"><i style={{ width: `${progress}%` }} /></div>}
             {files.isLoading ? <p className="collaboration-state">Файл ачаалж байна…</p> : files.isError ? <p className="collaboration-state error">Файл ачаалж чадсангүй.</p> : files.data?.length ? <div className="collaboration-list file-list">
               {files.data.map((file) => <article key={file.id}><div><FileText size={17} /><div><strong>{file.filename}</strong><small>{Math.ceil(file.size / 1024)} KB</small></div></div><div><span className={`file-scan ${file.scan_status}`}>{file.scan_status}</span><button type="button" aria-label="Татах" onClick={() => downloadAttachment(file.id, file.filename)}><Download size={14} /></button><button type="button" aria-label="Файл устгах" disabled={deleteFile.isPending} onClick={() => deleteFile.mutate({ id: file.id, objectType: "task", objectId: task.id })}><Trash2 size={14} /></button></div></article>)}

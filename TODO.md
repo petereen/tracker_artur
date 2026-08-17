@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Modernize task-detail Collaboration inputs and icon-only actions (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
 - [x] Fix checklist item creation persistence and return shape, including tenant-safe assignee validation (`backend/app/routers/enterprise.py`)
 - [x] Remove task Links collaboration UI and add comment author metadata, status toggles, and confirmed deletion (`backend/app/routers/enterprise.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
 - [x] Add inline subtask edit/delete actions and a simplified subtask detail modal (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
@@ -176,6 +177,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Modernize task-detail Collaboration inputs and icon-only actions (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
 - [x] Let the AI assistant attach ACL-authorized company files in web and Telegram messages, persist message attachments, and expose authenticated web downloads (`backend/app/services/enterprise_tools.py`, `backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`, `frontend/src/components/OyunsAssistant.tsx`, `backend/alembic/versions/f5g6h7i8j9k0_assistant_file_attachments.py`)
 - [x] Route Telegram task-intake messages through the legacy draft state with confirm, edit, and delete controls while keeping Web on the enterprise assistant flow (`backend/app/bot/assistant_handlers.py`, `backend/app/bot/tasks_handlers.py`, `backend/app/services/assistant_ai.py`, `backend/tests`)
 - [x] Keep ACL-scoped task tools available across web and Telegram even when live routing misclassifies a task request, bypass stale text-only cache entries, and clarify minimal task-draft inputs (`backend/app/services/ai_gateway/gateway.py`, `backend/app/services/enterprise_tools.py`, `backend/tests/test_ai_gateway.py`)
