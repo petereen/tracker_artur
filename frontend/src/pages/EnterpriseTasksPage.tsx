@@ -1262,7 +1262,7 @@ export function EnterpriseTasksPage() {
                 <section className="task-creator-meta" aria-label="Даалгавар үүсгэсэн мэдээлэл">
                   <TaskCreatorAvatar task={selected} large />
                   <div>
-                    <span className="eyebrow">Даалгаврын зохиогч</span>
+                    <span className="eyebrow">Даалгавар үүсгэгч</span>
                     <strong>
                       Үүсгэсэн: {taskCreatorName(selected)} <span aria-hidden="true">•</span>{" "}
                       <time dateTime={selected.created_at}>{formatTaskCreatedAt(selected.created_at)}</time>

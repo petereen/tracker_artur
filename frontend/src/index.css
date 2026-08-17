@@ -417,10 +417,13 @@
   display: grid;
   grid-template-columns: repeat(7, minmax(var(--calendar-day-min), 1fr));
   overflow-x: auto;
+  overflow-y: clip;
   padding: 0;
   position: relative;
+  box-sizing: border-box;
 }
 .planning-calendar > section {
+  box-sizing: border-box;
   min-height: 150px;
   padding: 9px;
   border-right: 1px solid var(--border);
@@ -505,10 +508,12 @@
   text-overflow: ellipsis;
 }
 .calendar-range-layer {
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: repeat(7, minmax(var(--calendar-day-min), 1fr));
   grid-template-rows: repeat(6, minmax(var(--calendar-row-min), 1fr));
   inset: 0;
+  overflow: clip;
   pointer-events: none;
   position: absolute;
   z-index: 2;
@@ -516,7 +521,8 @@
 .calendar-item.calendar-range {
   align-self: start;
   border-radius: 0;
-  margin: 35px -1px 0;
+  box-sizing: border-box;
+  margin: 35px 0 0;
   min-width: 0;
   pointer-events: auto;
   transform: translateY(calc(var(--range-lane) * 50px));

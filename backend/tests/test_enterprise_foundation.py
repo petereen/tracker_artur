@@ -17,7 +17,7 @@ from app.core.enterprise_deps import ActorContext
 from app.main import app
 from app.models.models import Base, Task
 from app.routers import enterprise
-from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _holiday_provider_rows, _task_out
+from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _calendar_task_visible_to_employee, _holiday_provider_rows, _task_out
 from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE
 from app.services.enterprise_events import _json_safe, _redact
 from app.services.work_report_service import summarize_work_time
@@ -84,6 +84,12 @@ def test_calendar_internal_task_query_uses_a_concrete_empty_priority():
     finally:
         enterprise.list_tasks = original
     assert captured["priority"] is None
+
+
+def test_private_calendar_keeps_primary_owner_tasks_without_assignee_link_rows():
+    assert _calendar_task_visible_to_employee({"primary_owner_id": 7, "assignee_ids": []}, 7)
+    assert _calendar_task_visible_to_employee({"primary_owner_id": None, "assignee_ids": [7]}, 7)
+    assert not _calendar_task_visible_to_employee({"primary_owner_id": 8, "assignee_ids": []}, 7)
 
 
 def test_refresh_tokens_are_random_and_only_hash_is_persisted():

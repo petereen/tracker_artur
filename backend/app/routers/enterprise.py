@@ -1562,6 +1562,14 @@ async def _sync_holiday_year(db: AsyncSession, organization_id: int, country: st
     return added
 
 
+def _calendar_task_visible_to_employee(task: dict, employee_id: int | None) -> bool:
+    """Accept both the primary-owner field and normalized assignee links."""
+    return bool(employee_id and (
+        task.get("primary_owner_id") == employee_id
+        or employee_id in task.get("assignee_ids", [])
+    ))
+
+
 @router.get("/calendar/events")
 async def calendar_events(scope: Literal["private", "corporate"] = "private", date_from: date | None = None, date_to: date | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     period_start = date_from or date.today() - timedelta(days=14)
@@ -1572,8 +1580,8 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
     # must provide the concrete value rather than passing that marker to SQL.
     task_rows = await list_tasks(scope=task_scope, priority=None, date_from=period_start, date_to=period_end, db=db, actor=actor)
     if scope == "private":
-        task_rows = [row for row in task_rows if actor.employee_id and actor.employee_id in row.get("assignee_ids", [])]
-    task_events = [{"kind": "task", "visibility": "company" if scope == "corporate" else "private", "can_edit": actor.has_any_role(*MANAGEMENT_ROLES) or actor.employee_id in row.get("assignee_ids", []), **row} for row in task_rows if row.get("start_at") or row.get("deadline_at")]
+        task_rows = [row for row in task_rows if _calendar_task_visible_to_employee(row, actor.employee_id)]
+    task_events = [{"kind": "task", "visibility": "company" if scope == "corporate" else "private", "can_edit": actor.has_any_role(*MANAGEMENT_ROLES) or _calendar_task_visible_to_employee(row, actor.employee_id), **row} for row in task_rows if row.get("start_at") or row.get("deadline_at")]
     project_query = select(Project).where(
         Project.organization_id == actor.organization_id,
         Project.archived_at.is_(None),
