@@ -6,7 +6,6 @@ describe('task collaboration workspace', () => {
     expect(taskCollaborationLabels).toEqual({
       subtasks: 'Дэд ажил',
       checklist: 'Checklist',
-      dependencies: 'Холбоос',
       comments: 'Сэтгэгдэл',
       files: 'Файл',
       activity: 'Түүх',

@@ -21,7 +21,6 @@ import {
   GripVertical,
   History,
   LayoutGrid,
-  Link2,
   List,
   ListChecks,
   MapPin,
@@ -40,14 +39,13 @@ import {
   TaskFilters,
   useAddTaskCheckItem,
   useAddTaskComment,
-  useAddTaskDependency,
   useAttachments,
   useCreateEnterpriseTask,
   useDeleteEnterpriseTask,
   useDeadlines,
   useDeleteAttachment,
   useDeleteTaskCheckItem,
-  useDeleteTaskDependency,
+  useDeleteTaskComment,
   useEnterpriseTasks,
   useEnterpriseTask,
   useProjects,
@@ -55,7 +53,6 @@ import {
   useTaskActivity,
   useTaskCheckItems,
   useTaskComments,
-  useTaskDependencies,
   useUpdateEnterpriseTask,
   useUpdateTaskCheckItem,
   useUploadAttachment,
@@ -218,12 +215,11 @@ function Column({
   );
 }
 
-type CollaborationTab = "subtasks" | "checklist" | "dependencies" | "comments" | "files" | "activity";
+type CollaborationTab = "subtasks" | "checklist" | "comments" | "files" | "activity";
 
 export const taskCollaborationLabels: Record<CollaborationTab, string> = {
   subtasks: "Дэд ажил",
   checklist: "Checklist",
-  dependencies: "Холбоос",
   comments: "Сэтгэгдэл",
   files: "Файл",
   activity: "Түүх",
@@ -249,6 +245,8 @@ function TaskCollaboration({
   conflict,
   resolveConflict,
   onCreateSubtask,
+  onOpenSubtask,
+  onDeleteSubtask,
   workers,
 }: {
   task: EnterpriseTask;
@@ -257,12 +255,13 @@ function TaskCollaboration({
   conflict: EnterpriseTask | null;
   resolveConflict: (reapply: boolean) => void;
   onCreateSubtask: () => void;
+  onOpenSubtask: (task: EnterpriseTask) => void;
+  onDeleteSubtask: (task: EnterpriseTask) => void;
   workers: { id: number; name: string }[];
 }) {
   const [tab, setTab] = useState<CollaborationTab>("subtasks");
   const [text, setText] = useState("");
   const [progress, setProgress] = useState(0);
-  const [relationshipType, setRelationshipType] = useState<"blocks" | "related">("blocks");
   const [commentMentionIds, setCommentMentionIds] = useState<number[]>([]);
   const commentInput = useRef<HTMLTextAreaElement>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -270,12 +269,10 @@ function TaskCollaboration({
   const addCheck = useAddTaskCheckItem();
   const updateCheck = useUpdateTaskCheckItem();
   const deleteCheck = useDeleteTaskCheckItem();
-  const dependencies = useTaskDependencies(task.id);
-  const addDependency = useAddTaskDependency();
-  const deleteDependency = useDeleteTaskDependency();
   const comments = useTaskComments(task.id);
   const addComment = useAddTaskComment();
   const resolveComment = useResolveTaskComment();
+  const deleteComment = useDeleteTaskComment();
   const files = useAttachments("task", task.id);
   const upload = useUploadAttachment();
   const deleteFile = useDeleteAttachment();
@@ -287,7 +284,6 @@ function TaskCollaboration({
   const tabs: { id: CollaborationTab; Icon: typeof ListChecks; count?: number }[] = [
     { id: "subtasks", Icon: CheckSquare2, count: subtasks.length },
     { id: "checklist", Icon: ListChecks, count: totalChecks },
-    { id: "dependencies", Icon: Link2, count: dependencies.data?.length },
     { id: "comments", Icon: MessageSquare, count: comments.data?.filter((item) => !item.is_resolved).length },
     { id: "files", Icon: FileText, count: files.data?.length },
     { id: "activity", Icon: History, count: activity.data?.length },
@@ -306,7 +302,7 @@ function TaskCollaboration({
     }
   };
   return (
-    <section className="task-collaboration" aria-label="Даалгаврын хамтын ажиллагаа">
+    <section className="task-collaboration" aria-label="Даалгаврын collaboration">
       {conflict && (
         <div className="conflict-banner" role="alert">
           <strong>Даалгавар өөр төхөөрөмж дээр шинэчлэгдсэн.</strong>
@@ -320,7 +316,7 @@ function TaskCollaboration({
       )}
       <div className="collaboration-heading">
         <div>
-          <span className="eyebrow">Хамтын ажиллагаа</span>
+          <span className="eyebrow">Collaboration</span>
           <h3>{taskCollaborationLabels[tab]}</h3>
         </div>
         {tab === "checklist" && totalChecks > 0 && <span className="collaboration-summary">{completedChecks}/{totalChecks} дууссан</span>}
@@ -352,10 +348,10 @@ function TaskCollaboration({
             {subtasks.length ? <div className="collaboration-list subtask-list">
               {subtasks.map((item) => <article key={item.id}>
                 <div>
-                  <strong>{item.title}</strong>
+                  <button type="button" className="subtask-title-button" onClick={() => onOpenSubtask(item)}><strong>{item.title}</strong></button>
                   <small>{item.primary_owner_name || "Хариуцагч сонгоогүй"} · {item.deadline_at ? new Date(item.deadline_at).toLocaleDateString("mn-MN") : "Хугацаагүй"}</small>
                 </div>
-                <span className="collaboration-status">{item.workflow_status}</span>
+                <div className="subtask-list-actions"><span className="collaboration-status">{item.workflow_status}</span>{canManage && <><button type="button" aria-label="Дэд ажлыг засах" title="Засах" onClick={() => onOpenSubtask(item)}><Save size={14} /></button><button type="button" aria-label="Дэд ажлыг устгах" title="Устгах" onClick={() => onDeleteSubtask(item)}><Trash2 size={14} /></button></>}</div>
               </article>)}
             </div> : <div className="collaboration-empty"><CheckSquare2 size={20} /><p>Одоогоор дэд ажил алга.</p></div>}
           </>
@@ -382,28 +378,13 @@ function TaskCollaboration({
             </div>
           </>
         )}
-        {tab === "dependencies" && (
-          <>
-            <div className="collaboration-panel-copy"><p>Даалгавруудын уялдаа, блоклох дарааллыг нэг дороос удирдана.</p></div>
-            {dependencies.isLoading ? <p className="collaboration-state">Холбоос ачаалж байна…</p> : dependencies.isError ? <p className="collaboration-state error">Холбоос ачаалж чадсангүй.</p> : dependencies.data?.length ? <div className="collaboration-list relationship-list">
-              {dependencies.data.map((item) => <article key={item.id}>
-                <div><strong>{item.related_task_title || item.predecessor_title}</strong><small>Даалгаврын холбоос</small></div>
-                <div><span className={`relationship-chip ${item.relation_type}`}>{item.relation_type === "related" ? "Холбоотой" : "Блоклосон"}</span>{canManage && <button type="button" aria-label="Холбоос устгах" disabled={deleteDependency.isPending} onClick={() => deleteDependency.mutate({ taskId: task.id, id: item.id })}><Trash2 size={14} /></button>}</div>
-              </article>)}
-            </div> : <div className="collaboration-empty"><Link2 size={20} /><p>Холбоотой даалгавар алга.</p></div>}
-            {canManage && <div className="relationship-composer inline-compose">
-              <select value={relationshipType} aria-label="Холбоосын төрөл" onChange={(e) => setRelationshipType(e.target.value as "blocks" | "related")}><option value="blocks">Блоклосон ажил</option><option value="related">Энгийн холбоос</option></select>
-              <select defaultValue="" aria-label="Холбох даалгавар" disabled={addDependency.isPending} onChange={async (e) => { if (!e.target.value) return; try { await addDependency.mutateAsync({ taskId: task.id, predecessor_task_id: Number(e.target.value), dependency_type: relationshipType }); e.target.value = ""; } catch { /* the hook displays the error */ } }}><option value="">Даалгавар сонгох</option>{tasks.filter((item) => item.id !== task.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select>
-            </div>}
-          </>
-        )}
         {tab === "comments" && (
           <>
             <div className="collaboration-panel-copy"><p>Шийдвэр, асуултаа нэг газар үлдээгээд холбогдох хүнээ дурдана.</p></div>
             {comments.isLoading ? <p className="collaboration-state">Сэтгэгдэл ачаалж байна…</p> : comments.isError ? <p className="collaboration-state error">Сэтгэгдэл ачаалж чадсангүй.</p> : comments.data?.length ? <div className="collaboration-list comment-list">
               {comments.data.map((item) => <article className={item.is_resolved ? "resolved" : ""} key={item.id}>
-                <div><MessageSquare size={16} /><div><span>{item.text}</span><small>{new Date(item.created_at).toLocaleString("mn-MN")}</small></div></div>
-                <button type="button" disabled={resolveComment.isPending} onClick={() => resolveComment.mutate({ taskId: task.id, id: item.id, is_resolved: !item.is_resolved })}>{item.is_resolved ? "Нээх" : "Шийдсэн"}</button>
+                <div><span className="comment-avatar">{item.author_avatar_url ? <img src={item.author_avatar_url} alt="" /> : (item.author_name || "?").slice(0, 1)}</span><div><strong>{item.author_name || "Тодорхойгүй хэрэглэгч"}</strong><span>{item.text}</span><small>{new Date(item.created_at).toLocaleString("mn-MN")}</small></div></div>
+                <div className="comment-actions"><button type="button" className={`comment-status-toggle ${item.is_resolved ? "is-resolved" : ""}`} aria-label={item.is_resolved ? "Сэтгэгдлийг дахин нээх" : "Сэтгэгдлийг шийдсэн гэж тэмдэглэх"} title={item.is_resolved ? "Нээх" : "Шийдсэн"} disabled={resolveComment.isPending} onClick={() => resolveComment.mutate({ taskId: task.id, id: item.id, is_resolved: !item.is_resolved })}><Check size={15} /></button><button type="button" className="icon-danger" aria-label="Сэтгэгдэл устгах" title="Устгах" disabled={deleteComment.isPending} onClick={() => { if (window.confirm("Энэ сэтгэгдлийг устгах уу?")) deleteComment.mutate({ taskId: task.id, id: item.id }); }}><Trash2 size={15} /></button></div>
               </article>)}
             </div> : <div className="collaboration-empty"><MessageSquare size={20} /><p>Сэтгэгдэл алга байна.</p></div>}
             <div className="comment-composer">
@@ -898,6 +879,16 @@ export function EnterpriseTasksPage() {
       </label>
     </>
   );
+  const simplifiedFormFields = (
+    <>
+      <label>Нэр<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+      <label>Тайлбар<textarea rows={4} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+      <div className="form-row"><label>Эхлэх огноо<input type="datetime-local" value={form.start_at} onChange={(event) => setForm({ ...form, start_at: event.target.value })} /></label><label>Дуусах огноо<input type="datetime-local" value={form.deadline_at} onChange={(event) => setForm({ ...form, deadline_at: event.target.value })} /></label></div>
+      <label>Тэргүүлэх зэрэг<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="1">1 — Нэн яаралтай</option><option value="2">2 — Дундаж</option><option value="3">3 — Яаралтай бус</option></select></label>
+      <label>Хэн хариуцах вэ?<select value={form.primary_owner_id} onChange={(event) => setForm({ ...form, primary_owner_id: event.target.value })}><option value="">Хариуцагчгүй</option>{workers.data?.map((worker) => <option key={worker.id} value={worker.id}>{worker.name}</option>)}</select></label>
+      <UserTagPicker label="Оролцогчид" value={form.assignee_ids} users={workers.data || []} onChange={(assignee_ids) => setForm({ ...form, assignee_ids })} />
+    </>
+  );
   if (section === "deadlines")
     return <Deadlines onBack={() => setSection("tasks")} />;
   const resetFilters = () => {
@@ -1249,7 +1240,7 @@ export function EnterpriseTasksPage() {
                 </button>
               </div>
               <form className="sheet-form" onSubmit={selected ? save : submit}>
-                {formFields}
+                {selected?.parent_task_id ? simplifiedFormFields : formFields}
                 <UserTagPicker label="Хянагч" value={form.reviewer_ids} users={workers.data || []} onChange={(reviewer_ids) => setForm({ ...form, reviewer_ids })} />
                 {selected ? (
                   <div className="task-settings-actions">
@@ -1280,7 +1271,7 @@ export function EnterpriseTasksPage() {
                   </button>
                 )}
               </form>
-              {selected && (
+              {selected && !selected.parent_task_id && (
                 <TaskCollaboration
                   task={selected}
                   tasks={tasks.data ?? []}
@@ -1288,6 +1279,8 @@ export function EnterpriseTasksPage() {
                   conflict={conflict}
                   resolveConflict={resolveConflict}
                   onCreateSubtask={() => openSubtaskCreate(selected)}
+                  onOpenSubtask={openTask}
+                  onDeleteSubtask={(subtask) => { if (window.confirm("Энэ дэд ажлыг устгах уу?")) deleteTask.mutate(subtask.id); }}
                   workers={workers.data ?? []}
                 />
               )}

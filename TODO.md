@@ -1,6 +1,10 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Fix checklist item creation persistence and return shape, including tenant-safe assignee validation (`backend/app/routers/enterprise.py`)
+- [x] Remove task Links collaboration UI and add comment author metadata, status toggles, and confirmed deletion (`backend/app/routers/enterprise.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
+- [x] Add inline subtask edit/delete actions and a simplified subtask detail modal (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
+- [x] Update collaboration contract tests for the removed Links tab and comment deletion route (`backend/tests/test_task_collaboration_contract.py`, `frontend/src/pages/EnterpriseTasksPage.test.ts`)
 - [x] Skip Telegram worker daily digests on each worker's non-working days (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
 - [x] Nest Kanban subtasks inside parent task cards with compact status controls (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
 - [x] Repair task collaboration 500s and add inline @mention suggestions (`backend/app/routers/enterprise.py`, `frontend/src/pages/EnterpriseTasksPage.tsx`)
@@ -133,6 +137,7 @@
 - [x] Unify next-month planning with Plans, refine report submission/approval rules, streamline project tasks/completion, highlight calendar today, and open task delegation to all members (`backend/app/routers/enterprise.py`, `frontend/src/pages`)
 - [x] Make check-ins configuration-dependent and add platform report creation with submission-aware reminders (`backend/app/bot`, `backend/app/routers/enterprise.py`, `frontend/src/pages/EnterpriseReportsPage.tsx`)
 - [x] Replace project approval requests with direct member project creation and member notifications (`backend/app/routers/enterprise.py`, `frontend/src/api/enterprise.ts`)
+Collaboration
 - [x] Add configurable cross-channel task assignment permissions with all workers enabled by default (`backend/app/routers/enterprise.py`, `backend/app/bot`, `frontend/src/pages/AdministrationHubPage.tsx`)
 - [x] Complete project, plan, calendar, and report Telegram notification coverage (`backend/app/services`, `backend/app/routers`)
 - [x] Add leased Telegram outbox retries, regression coverage, and full validation (`backend/app/services/task_service.py`, `backend/tests`, `frontend/src`)

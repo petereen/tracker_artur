@@ -1784,13 +1784,25 @@ async def remove_dependency(task_id: int, dependency_id: int, db: AsyncSession =
 @router.post("/tasks/{task_id}/check-items", status_code=status.HTTP_201_CREATED)
 async def add_check_item(task_id: int, data: CheckItemInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     task = await _task_for_actor(db, task_id, actor, write=True)
+    if data.assignee_id is not None:
+        assignee = await db.scalar(select(Employee).where(
+            Employee.id == data.assignee_id,
+            Employee.is_active.is_(True),
+            Employee.id.in_(select(UserAccount.employee_id).where(
+                UserAccount.organization_id == actor.organization_id,
+                UserAccount.employee_id.isnot(None),
+                UserAccount.status == "active",
+            )),
+        ))
+        if assignee is None:
+            raise HTTPException(status_code=422, detail="Checklist assignee not found")
     item = TaskCheckItem(task_id=task_id, **data.model_dump())
     db.add(item)
     await db.flush()
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task_check_item", aggregate_id=item.id, operation="created", after={"task_id": task_id, "text": item.text})
     await _notify_task_collaboration(db, task=task, actor=actor, source_event_id=source_event.id, action="checklist_created", summary=f"Checklist-д “{item.text}” нэмлээ.")
     await db.commit()
-    return {"id": item.id, "task_id": task_id, **data.model_dump()}
+    return {"id": item.id, "task_id": item.task_id, "text": item.text, "is_completed": item.is_completed, "assignee_id": item.assignee_id, "position": _decimal(item.position), "completed_at": item.completed_at, "created_at": item.created_at}
 
 
 @router.get("/tasks/{task_id}/check-items")
@@ -1850,8 +1862,8 @@ async def task_activity(task_id: int, limit: int = Query(default=100, ge=1, le=2
 @router.get("/tasks/{task_id}/comments")
 async def list_task_comments(task_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await _task_for_actor(db, task_id, actor)
-    rows = (await db.execute(select(TaskComment).where(TaskComment.task_id == task_id).order_by(TaskComment.created_at))).scalars().all()
-    return [{"id": row.id, "task_id": row.task_id, "author_account_id": row.author_account_id, "author_employee_id": row.author_id, "text": row.text, "mentions": row.mentions, "is_resolved": row.is_resolved, "edited_at": row.edited_at, "created_at": row.created_at} for row in rows]
+    rows = (await db.execute(select(TaskComment, Employee).outerjoin(Employee, Employee.id == TaskComment.author_id).where(TaskComment.task_id == task_id).order_by(TaskComment.created_at))).all()
+    return [{"id": row.id, "task_id": row.task_id, "author_account_id": row.author_account_id, "author_employee_id": row.author_id, "author_name": employee.name if employee else None, "author_avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None, "text": row.text, "mentions": row.mentions, "is_resolved": row.is_resolved, "edited_at": row.edited_at, "created_at": row.created_at} for row, employee in rows]
 
 
 @router.post("/tasks/{task_id}/comments", status_code=status.HTTP_201_CREATED)
@@ -1890,6 +1902,19 @@ async def update_task_comment(task_id: int, comment_id: int, data: TaskCommentPa
     await record_change(db, actor=actor, topic="tasks", aggregate_type="task_comment", aggregate_id=comment.id, operation="updated", after={"task_id": task_id, "text": comment.text, "is_resolved": comment.is_resolved})
     await db.commit()
     return {"id": comment.id, "text": comment.text, "is_resolved": comment.is_resolved, "edited_at": comment.edited_at}
+
+
+@router.delete("/tasks/{task_id}/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task_comment(task_id: int, comment_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await _task_for_actor(db, task_id, actor, write=True)
+    comment = await db.get(TaskComment, comment_id, with_for_update=True)
+    if not comment or comment.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    if comment.author_account_id != actor.account_id and not actor.has_any_role(*MANAGEMENT_ROLES):
+        raise HTTPException(status_code=403, detail="Only the author can delete this comment")
+    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_comment", aggregate_id=comment.id, operation="deleted", before={"task_id": task_id, "text": comment.text})
+    await db.delete(comment)
+    await db.commit()
 
 
 async def _authorize_attachment_object(db: AsyncSession, object_type: str, object_id: int, actor: ActorContext, *, write: bool = False) -> None:

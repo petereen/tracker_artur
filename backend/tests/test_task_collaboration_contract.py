@@ -15,6 +15,7 @@ def test_task_collaboration_routes_and_relationship_types_are_public():
         ("/v1/tasks/{task_id}/dependencies", "POST"),
         ("/v1/tasks/{task_id}/check-items", "POST"),
         ("/v1/tasks/{task_id}/comments", "POST"),
+        ("/v1/tasks/{task_id}/comments/{comment_id}", "DELETE"),
         ("/v1/tasks/{task_id}/activity", "GET"),
         ("/v1/attachments", "POST"),
     }.issubset(paths)

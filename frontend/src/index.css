@@ -6190,6 +6190,70 @@ a {
 .collaboration-list article.resolved {
   opacity: 0.62;
 }
+.subtask-title-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.subtask-title-button:hover strong,
+.subtask-title-button:focus-visible strong {
+  color: var(--accent);
+}
+.subtask-list-actions,
+.comment-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+.subtask-list-actions button,
+.comment-actions button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.subtask-list-actions button:hover,
+.comment-actions button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.comment-avatar {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.comment-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.comment-status-toggle.is-resolved {
+  border-color: color-mix(in srgb, #35a56b 45%, var(--border));
+  background: color-mix(in srgb, #35a56b 14%, var(--surface));
+  color: #278656;
+}
+.comment-actions .icon-danger:hover {
+  border-color: var(--danger, #d34e5c);
+  color: var(--danger, #d34e5c);
+}
 .collaboration-list article > div,
 .collaboration-list article label {
   display: flex;
