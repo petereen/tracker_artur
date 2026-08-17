@@ -13,11 +13,17 @@ import { CSS } from "@dnd-kit/utilities";
 import { AnimatePresence, motion } from "motion/react";
 import {
   CalendarDays,
+  Check,
+  CheckSquare2,
   Download,
+  FileText,
   Filter,
   GripVertical,
+  History,
   LayoutGrid,
+  Link2,
   List,
+  ListChecks,
   MapPin,
   MessageSquare,
   Paperclip,
@@ -174,6 +180,24 @@ function Column({
   );
 }
 
+type CollaborationTab = "subtasks" | "checklist" | "dependencies" | "comments" | "files" | "activity";
+
+export const taskCollaborationLabels: Record<CollaborationTab, string> = {
+  subtasks: "Дэд ажил",
+  checklist: "Checklist",
+  dependencies: "Холбоос",
+  comments: "Сэтгэгдэл",
+  files: "Файл",
+  activity: "Түүх",
+};
+
+export function taskActivitySummary(item: { entity_type: string; action: string; after: Record<string, unknown>; before: Record<string, unknown> }) {
+  const detail = item.after.text || item.before.text || item.after.filename || item.before.filename;
+  const verb = item.action === "created" ? "нэмэгдлээ" : item.action === "deleted" ? "устгагдлаа" : item.action === "updated" ? "шинэчлэгдлээ" : item.action;
+  const subject = item.entity_type === "task_check_item" ? "Checklist" : item.entity_type === "task_comment" ? "Сэтгэгдэл" : item.entity_type === "task_dependency" ? "Холбоос" : item.entity_type === "attachment" ? "Файл" : item.entity_type === "task" ? "Даалгавар" : item.entity_type;
+  return detail ? `${subject}: “${detail}” ${verb}` : `${subject} ${verb}`;
+}
+
 function TaskCollaboration({
   task,
   tasks,
@@ -191,14 +215,7 @@ function TaskCollaboration({
   onCreateSubtask: () => void;
   workers: { id: number; name: string }[];
 }) {
-  const [tab, setTab] = useState<
-    | "subtasks"
-    | "checklist"
-    | "dependencies"
-    | "comments"
-    | "files"
-    | "activity"
-  >("subtasks");
+  const [tab, setTab] = useState<CollaborationTab>("subtasks");
   const [text, setText] = useState("");
   const [progress, setProgress] = useState(0);
   const [relationshipType, setRelationshipType] = useState<"blocks" | "related">("blocks");
@@ -218,6 +235,17 @@ function TaskCollaboration({
   const deleteFile = useDeleteAttachment();
   const activity = useTaskActivity(task.id);
   const subtasks = tasks.filter((item) => item.parent_task_id === task.id);
+  const completedChecks = checks.data?.filter((item) => item.is_completed).length ?? 0;
+  const totalChecks = checks.data?.length ?? 0;
+  const checklistPercent = totalChecks ? Math.round((completedChecks / totalChecks) * 100) : 0;
+  const tabs: { id: CollaborationTab; Icon: typeof ListChecks; count?: number }[] = [
+    { id: "subtasks", Icon: CheckSquare2, count: subtasks.length },
+    { id: "checklist", Icon: ListChecks, count: totalChecks },
+    { id: "dependencies", Icon: Link2, count: dependencies.data?.length },
+    { id: "comments", Icon: MessageSquare, count: comments.data?.filter((item) => !item.is_resolved).length },
+    { id: "files", Icon: FileText, count: files.data?.length },
+    { id: "activity", Icon: History, count: activity.data?.length },
+  ];
   const submitText = async () => {
     if (!text.trim()) return;
     try {
@@ -232,7 +260,7 @@ function TaskCollaboration({
     }
   };
   return (
-    <section className="task-collaboration">
+    <section className="task-collaboration" aria-label="Даалгаврын хамтын ажиллагаа">
       {conflict && (
         <div className="conflict-banner" role="alert">
           <strong>Даалгавар өөр төхөөрөмж дээр шинэчлэгдсэн.</strong>
@@ -244,247 +272,123 @@ function TaskCollaboration({
           </button>
         </div>
       )}
-      <nav aria-label="Даалгаврын дэлгэрэнгүй">
-        {(
-          [
-            "subtasks",
-            "checklist",
-            "dependencies",
-            "comments",
-            "files",
-            "activity",
-          ] as const
-        ).map((name) => (
+      <div className="collaboration-heading">
+        <div>
+          <span className="eyebrow">Хамтын ажиллагаа</span>
+          <h3>{taskCollaborationLabels[tab]}</h3>
+        </div>
+        {tab === "checklist" && totalChecks > 0 && <span className="collaboration-summary">{completedChecks}/{totalChecks} дууссан</span>}
+      </div>
+      <nav className="collaboration-tabs" role="tablist" aria-label="Даалгаврын дэлгэрэнгүй">
+        {tabs.map(({ id, Icon, count }) => (
           <button
             type="button"
-            className={tab === name ? "active" : ""}
-            key={name}
-            onClick={() => setTab(name)}
+            className={tab === id ? "active" : ""}
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            aria-controls={`task-collaboration-${id}`}
+            onClick={() => setTab(id)}
           >
-            {
-              {
-                subtasks: "Дэд ажил",
-                checklist: "Checklist",
-                dependencies: "Хамаарал",
-                comments: "Сэтгэгдэл",
-                files: "Файл",
-                activity: "Түүх",
-              }[name]
-            }
+            <Icon size={15} />
+            <span>{taskCollaborationLabels[id]}</span>
+            {typeof count === "number" && <b>{count}</b>}
           </button>
         ))}
       </nav>
-      {tab === "subtasks" && (
-        <>
-          <div className="collaboration-list">
-            {subtasks.length ? (
-              subtasks.map((item) => (
-                <article key={item.id}>
-                  <strong>{item.title}</strong>
-                  <span>{item.workflow_status}</span>
-                </article>
-              ))
-            ) : (
-              <p>Дэд даалгавар байхгүй байна.</p>
-            )}
-          </div>
-          {canManage && <button type="button" className="secondary-action compact" onClick={onCreateSubtask}>Дэд даалгавар нэмэх</button>}
-        </>
-      )}
-      {tab === "checklist" && (
-        <>
-          <div className="collaboration-list">
-            {checks.data?.map((item) => (
-              <article key={item.id}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={item.is_completed}
-                    onChange={() =>
-                      updateCheck.mutate({
-                        taskId: task.id,
-                        id: item.id,
-                        is_completed: !item.is_completed,
-                      })
-                    }
-                  />
-                  {item.text}
-                </label>
-                <button
-                  type="button"
-                  aria-label="Checklist устгах"
-                  onClick={() =>
-                    deleteCheck.mutate({ taskId: task.id, id: item.id })
-                  }
-                >
-                  <Trash2 size={14} />
-                </button>
-              </article>
-            ))}
-          </div>
-          <div className="inline-compose">
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Checklist нэмэх"
-            />
-            <button type="button" onClick={submitText} disabled={addCheck.isPending}>
-              Нэмэх
-            </button>
-          </div>
-        </>
-      )}
-      {tab === "dependencies" && (
-        <>
-          <div className="collaboration-list">
-            {dependencies.data?.map((item) => (
-              <article key={item.id}>
-                <strong>{item.related_task_title || item.predecessor_title}</strong>
-                <span>{item.relation_type === "related" ? "Холбоотой" : "Хамааралтай"}</span>
-                {canManage && (
-                  <button
-                    type="button"
-                    aria-label="Хамаарал устгах"
-                    onClick={() =>
-                      deleteDependency.mutate({ taskId: task.id, id: item.id })
-                    }
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </article>
-            ))}
-          </div>
-          {canManage && (
-            <div className="inline-compose">
-              <select value={relationshipType} onChange={(e) => setRelationshipType(e.target.value as "blocks" | "related")}>
-                <option value="blocks">Өмнөх ажил блоклоно</option>
-                <option value="related">Энгийн холбоотой</option>
-              </select>
-              <select defaultValue="" disabled={addDependency.isPending} onChange={async (e) => {
-                if (!e.target.value) return;
-                try {
-                  await addDependency.mutateAsync({ taskId: task.id, predecessor_task_id: Number(e.target.value), dependency_type: relationshipType });
-                  e.target.value = "";
-                } catch { /* hook reports */ }
-              }}>
-                <option value="">Даалгавар холбох</option>
-                {tasks.filter((item) => item.id !== task.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-              </select>
+      <div className="collaboration-panel" id={`task-collaboration-${tab}`} role="tabpanel">
+        {tab === "subtasks" && (
+          <>
+            <div className="collaboration-panel-copy">
+              <p>Том ажлыг жижиг, хянахад хялбар алхмуудад хуваана.</p>
+              {canManage && <button type="button" className="secondary-action compact" onClick={onCreateSubtask}><Plus size={15} />Дэд ажил нэмэх</button>}
             </div>
-          )}
-        </>
-      )}
-      {tab === "comments" && (
-        <>
-          <div className="collaboration-list">
-            {comments.data?.map((item) => (
-              <article
-                className={item.is_resolved ? "resolved" : ""}
-                key={item.id}
-              >
+            {subtasks.length ? <div className="collaboration-list subtask-list">
+              {subtasks.map((item) => <article key={item.id}>
                 <div>
-                  <MessageSquare size={14} />
+                  <strong>{item.title}</strong>
+                  <small>{item.primary_owner_name || "Хариуцагч сонгоогүй"} · {item.deadline_at ? new Date(item.deadline_at).toLocaleDateString("mn-MN") : "Хугацаагүй"}</small>
+                </div>
+                <span className="collaboration-status">{item.workflow_status}</span>
+              </article>)}
+            </div> : <div className="collaboration-empty"><CheckSquare2 size={20} /><p>Одоогоор дэд ажил алга.</p></div>}
+          </>
+        )}
+        {tab === "checklist" && (
+          <>
+            <div className="collaboration-panel-copy">
+              <p>Гүйцэтгэлийг жижиг алхмуудаар тэмдэглэж, явцыг шууд хянаарай.</p>
+              <span className="collaboration-summary">{checklistPercent}%</span>
+            </div>
+            <div className="checklist-progress" aria-label={`Checklist ${checklistPercent}%`}><i style={{ width: `${checklistPercent}%` }} /></div>
+            {checks.isLoading ? <p className="collaboration-state">Checklist ачаалж байна…</p> : checks.isError ? <p className="collaboration-state error">Checklist ачаалж чадсангүй.</p> : totalChecks ? <div className="collaboration-list checklist-list">
+              {checks.data?.map((item) => <article key={item.id}>
+                <label>
+                  <input type="checkbox" checked={item.is_completed} disabled={updateCheck.isPending} onChange={() => updateCheck.mutate({ taskId: task.id, id: item.id, is_completed: !item.is_completed })} />
                   <span>{item.text}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    resolveComment.mutate({
-                      taskId: task.id,
-                      id: item.id,
-                      is_resolved: !item.is_resolved,
-                    })
-                  }
-                >
-                  {item.is_resolved ? "Нээх" : "Шийдсэн"}
-                </button>
-              </article>
-            ))}
-          </div>
-          <div className="inline-compose">
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="@mention бүхий сэтгэгдэл"
-            />
-            <button type="button" onClick={submitText} disabled={addComment.isPending}>
-              Илгээх
-            </button>
-          </div>
-          <UserTagPicker label="Дурдах хэрэглэгч" value={commentMentionIds} users={workers} onChange={setCommentMentionIds} />
-        </>
-      )}
-      {tab === "files" && (
-        <>
-          <label className="file-upload">
-            <Paperclip size={15} />
-            Файл нэмэх
-            <input
-              type="file"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                try {
-                  await upload.mutateAsync({
-                    objectType: "task",
-                    objectId: task.id,
-                    file,
-                    onProgress: setProgress,
-                  });
-                  e.currentTarget.value = "";
-                  setProgress(0);
-                } catch { /* hook reports */ }
-              }}
-            />
-          </label>
-          {upload.isPending && <progress value={progress} max="100" />}
-          <div className="collaboration-list">
-            {files.data?.map((file) => (
-              <article key={file.id}>
-                <span>
-                  {file.filename} · {Math.ceil(file.size / 1024)} KB ·{" "}
-                  {file.scan_status}
-                </span>
-                <div>
-                  <button
-                    type="button"
-                    aria-label="Татах"
-                    onClick={() => downloadAttachment(file.id, file.filename)}
-                  >
-                    <Download size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Файл устгах"
-                    onClick={() =>
-                      deleteFile.mutate({
-                        id: file.id,
-                        objectType: "task",
-                        objectId: task.id,
-                      })
-                    }
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </>
-      )}
-      {tab === "activity" && (
-        <div className="collaboration-list">
-          {activity.data?.map((item) => (
-            <article key={item.id}>
-              <span>
-                {item.entity_type}: {item.action}
-              </span>
-              <time>{new Date(item.created_at).toLocaleString("mn-MN")}</time>
-            </article>
-          ))}
-        </div>
-      )}
+                </label>
+                <button type="button" aria-label="Checklist устгах" disabled={deleteCheck.isPending} onClick={() => deleteCheck.mutate({ taskId: task.id, id: item.id })}><Trash2 size={14} /></button>
+              </article>)}
+            </div> : <div className="collaboration-empty"><ListChecks size={20} /><p>Checklist хоосон байна.</p></div>}
+            <div className="collaboration-composer inline-compose">
+              <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Checklist-д ажил нэмэх" onKeyDown={(event) => { if (event.key === "Enter") submitText(); }} />
+              <button type="button" className="primary-action compact" onClick={submitText} disabled={!text.trim() || addCheck.isPending}><Plus size={15} />Нэмэх</button>
+            </div>
+          </>
+        )}
+        {tab === "dependencies" && (
+          <>
+            <div className="collaboration-panel-copy"><p>Даалгавруудын уялдаа, блоклох дарааллыг нэг дороос удирдана.</p></div>
+            {dependencies.isLoading ? <p className="collaboration-state">Холбоос ачаалж байна…</p> : dependencies.isError ? <p className="collaboration-state error">Холбоос ачаалж чадсангүй.</p> : dependencies.data?.length ? <div className="collaboration-list relationship-list">
+              {dependencies.data.map((item) => <article key={item.id}>
+                <div><strong>{item.related_task_title || item.predecessor_title}</strong><small>Даалгаврын холбоос</small></div>
+                <div><span className={`relationship-chip ${item.relation_type}`}>{item.relation_type === "related" ? "Холбоотой" : "Блоклосон"}</span>{canManage && <button type="button" aria-label="Холбоос устгах" disabled={deleteDependency.isPending} onClick={() => deleteDependency.mutate({ taskId: task.id, id: item.id })}><Trash2 size={14} /></button>}</div>
+              </article>)}
+            </div> : <div className="collaboration-empty"><Link2 size={20} /><p>Холбоотой даалгавар алга.</p></div>}
+            {canManage && <div className="relationship-composer inline-compose">
+              <select value={relationshipType} aria-label="Холбоосын төрөл" onChange={(e) => setRelationshipType(e.target.value as "blocks" | "related")}><option value="blocks">Блоклосон ажил</option><option value="related">Энгийн холбоос</option></select>
+              <select defaultValue="" aria-label="Холбох даалгавар" disabled={addDependency.isPending} onChange={async (e) => { if (!e.target.value) return; try { await addDependency.mutateAsync({ taskId: task.id, predecessor_task_id: Number(e.target.value), dependency_type: relationshipType }); e.target.value = ""; } catch { /* the hook displays the error */ } }}><option value="">Даалгавар сонгох</option>{tasks.filter((item) => item.id !== task.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select>
+            </div>}
+          </>
+        )}
+        {tab === "comments" && (
+          <>
+            <div className="collaboration-panel-copy"><p>Шийдвэр, асуултаа нэг газар үлдээгээд холбогдох хүнээ дурдана.</p></div>
+            {comments.isLoading ? <p className="collaboration-state">Сэтгэгдэл ачаалж байна…</p> : comments.isError ? <p className="collaboration-state error">Сэтгэгдэл ачаалж чадсангүй.</p> : comments.data?.length ? <div className="collaboration-list comment-list">
+              {comments.data.map((item) => <article className={item.is_resolved ? "resolved" : ""} key={item.id}>
+                <div><MessageSquare size={16} /><div><span>{item.text}</span><small>{new Date(item.created_at).toLocaleString("mn-MN")}</small></div></div>
+                <button type="button" disabled={resolveComment.isPending} onClick={() => resolveComment.mutate({ taskId: task.id, id: item.id, is_resolved: !item.is_resolved })}>{item.is_resolved ? "Нээх" : "Шийдсэн"}</button>
+              </article>)}
+            </div> : <div className="collaboration-empty"><MessageSquare size={20} /><p>Сэтгэгдэл алга байна.</p></div>}
+            <div className="comment-composer">
+              <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="Сэтгэгдэл бичих…" />
+              <UserTagPicker label="Дурдах хэрэглэгч" value={commentMentionIds} users={workers} onChange={setCommentMentionIds} />
+              <div><span>Дурдсан хүмүүс web мэдэгдэл авна.</span><button type="button" className="primary-action compact" onClick={submitText} disabled={!text.trim() || addComment.isPending}><MessageSquare size={15} />Илгээх</button></div>
+            </div>
+          </>
+        )}
+        {tab === "files" && (
+          <>
+            <div className="collaboration-panel-copy"><p>Холбогдох баримт, эх файлаа аюулгүйгээр хавсаргана.</p></div>
+            <label className={`file-upload collaboration-upload ${upload.isPending ? "uploading" : ""}`}>
+              <Paperclip size={18} /><span><strong>{upload.isPending ? "Файл байршуулж байна…" : "Файл хавсаргах"}</strong><small>Файл сонгох эсвэл энд дарна уу</small></span>
+              <input type="file" disabled={upload.isPending} onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; try { await upload.mutateAsync({ objectType: "task", objectId: task.id, file, onProgress: setProgress }); e.currentTarget.value = ""; setProgress(0); } catch { /* the hook displays the error */ } }} />
+            </label>
+            {upload.isPending && <div className="upload-progress"><i style={{ width: `${progress}%` }} /></div>}
+            {files.isLoading ? <p className="collaboration-state">Файл ачаалж байна…</p> : files.isError ? <p className="collaboration-state error">Файл ачаалж чадсангүй.</p> : files.data?.length ? <div className="collaboration-list file-list">
+              {files.data.map((file) => <article key={file.id}><div><FileText size={17} /><div><strong>{file.filename}</strong><small>{Math.ceil(file.size / 1024)} KB</small></div></div><div><span className={`file-scan ${file.scan_status}`}>{file.scan_status}</span><button type="button" aria-label="Татах" onClick={() => downloadAttachment(file.id, file.filename)}><Download size={14} /></button><button type="button" aria-label="Файл устгах" disabled={deleteFile.isPending} onClick={() => deleteFile.mutate({ id: file.id, objectType: "task", objectId: task.id })}><Trash2 size={14} /></button></div></article>)}
+            </div> : <div className="collaboration-empty"><FileText size={20} /><p>Хавсаргасан файл алга.</p></div>}
+          </>
+        )}
+        {tab === "activity" && (
+          <>
+            <div className="collaboration-panel-copy"><p>Энэ даалгаварт хийсэн өөрчлөлт бүр энд дарааллаар хадгалагдана.</p></div>
+            {activity.isLoading ? <p className="collaboration-state">Түүх ачаалж байна…</p> : activity.isError ? <p className="collaboration-state error">Түүх ачаалж чадсангүй.</p> : activity.data?.length ? <div className="activity-list">
+              {activity.data.map((item) => <article key={item.id}><span className="activity-icon">{item.action === "created" ? <Plus size={14} /> : item.action === "updated" ? <Check size={14} /> : <History size={14} />}</span><div><strong>{taskActivitySummary(item)}</strong><time>{new Date(item.created_at).toLocaleString("mn-MN")}</time></div></article>)}
+            </div> : <div className="collaboration-empty"><History size={20} /><p>Түүхийн бичлэг алга байна.</p></div>}
+          </>
+        )}
+      </div>
     </section>
   );
 }

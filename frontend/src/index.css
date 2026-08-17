@@ -5996,24 +5996,102 @@ a {
 .task-collaboration {
   border-top: 1px solid var(--border);
   padding: 1rem;
+  background: color-mix(in srgb, var(--surface) 94%, var(--surface-secondary));
+}
+.collaboration-heading,
+.collaboration-panel-copy,
+.collaboration-panel-copy > div,
+.comment-composer > div,
+.collaboration-list article > div,
+.file-list article > div,
+.activity-list article {
+  display: flex;
+  align-items: center;
+}
+.collaboration-heading {
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+.collaboration-heading h3 {
+  margin: 0.1rem 0 0;
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+}
+.collaboration-summary {
+  flex: 0 0 auto;
+  padding: 0.32rem 0.55rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 750;
 }
 .task-collaboration nav {
   display: flex;
-  gap: 0.35rem;
+  gap: 0.3rem;
   overflow-x: auto;
-  padding-bottom: 0.75rem;
+  padding: 0.15rem 0 0.85rem;
+  scrollbar-width: none;
+}
+.task-collaboration nav::-webkit-scrollbar {
+  display: none;
 }
 .task-collaboration nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  min-height: 34px;
   white-space: nowrap;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 999px;
-  padding: 0.45rem 0.7rem;
+  padding: 0.38rem 0.62rem;
   background: var(--surface-secondary);
   color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 680;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 120ms ease-out;
+}
+.task-collaboration nav button b {
+  display: grid;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+  font-size: 0.65rem;
 }
 .task-collaboration nav button.active {
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
   background: var(--accent-soft);
   color: var(--accent);
+}
+.task-collaboration nav button:active,
+.collaboration-panel button:active {
+  transform: scale(0.97);
+}
+.task-collaboration nav button:focus-visible,
+.collaboration-panel :is(button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.collaboration-panel {
+  display: grid;
+  gap: 0.72rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--surface);
+}
+.collaboration-panel-copy {
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.collaboration-panel-copy p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 .collaboration-list {
   display: grid;
@@ -6026,7 +6104,8 @@ a {
   gap: 0.75rem;
   padding: 0.6rem 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, var(--surface-secondary) 45%, var(--surface));
 }
 .collaboration-list article.resolved {
   opacity: 0.62;
@@ -6037,19 +6116,135 @@ a {
   align-items: center;
   gap: 0.45rem;
 }
+.collaboration-list article > div:first-child,
+.collaboration-list article label > div {
+  min-width: 0;
+}
+.collaboration-list strong,
+.collaboration-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.collaboration-list small,
+.comment-list small,
+.file-list small {
+  display: block;
+  margin-top: 0.12rem;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+.collaboration-status,
+.relationship-chip,
+.file-scan {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface-secondary);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.relationship-chip.related {
+  background: color-mix(in srgb, #8967e9 16%, var(--surface));
+  color: #7452d1;
+}
+.relationship-chip.blocks {
+  background: color-mix(in srgb, var(--warning, #d99b2b) 15%, var(--surface));
+  color: var(--warning, #a66d09);
+}
+.file-scan.clean {
+  background: color-mix(in srgb, #35a56b 16%, var(--surface));
+  color: #278656;
+}
+.file-scan.pending {
+  background: color-mix(in srgb, var(--warning, #d99b2b) 15%, var(--surface));
+  color: var(--warning, #a66d09);
+}
+.checklist-list label span {
+  text-decoration: none;
+}
+.checklist-list input:checked + span {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+.checklist-progress,
+.upload-progress {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-secondary);
+}
+.checklist-progress i,
+.upload-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease-out;
+}
 .inline-compose {
   display: flex;
   gap: 0.5rem;
-  margin-top: 0.65rem;
 }
 .inline-compose input {
   flex: 1;
 }
+.collaboration-composer input,
+.relationship-composer select {
+  min-height: 38px;
+}
+.relationship-composer select {
+  min-width: 0;
+  flex: 1;
+}
+.comment-composer {
+  display: grid;
+  gap: 0.6rem;
+  padding-top: 0.15rem;
+}
+.comment-composer textarea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+}
+.comment-composer > div:last-child {
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+.comment-list article > div:first-child {
+  align-items: flex-start;
+}
 .file-upload {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.65rem;
   cursor: pointer;
+}
+.collaboration-upload {
+  min-height: 68px;
+  padding: 0.7rem 0.8rem;
+  border: 1px dashed color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--accent-soft) 38%, var(--surface));
+  color: var(--accent);
+  transition: border-color 160ms ease, background 160ms ease, transform 120ms ease-out;
+}
+.collaboration-upload:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.collaboration-upload:active {
+  transform: scale(0.99);
+}
+.collaboration-upload span {
+  display: grid;
+  gap: 0.12rem;
+}
+.collaboration-upload small {
+  color: var(--text-secondary);
+  font-size: 0.73rem;
 }
 .file-upload input {
   position: absolute;
@@ -6058,10 +6253,79 @@ a {
   overflow: hidden;
   clip-path: inset(50%);
 }
-.task-collaboration progress {
+.file-list article > div:last-child,
+.relationship-list article > div:last-child {
+  gap: 0.35rem;
+}
+.collaboration-empty,
+.collaboration-state {
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 1.1rem 0.8rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  text-align: center;
+}
+.collaboration-empty p,
+.collaboration-state {
+  margin: 0;
+}
+.collaboration-state.error {
+  border-color: color-mix(in srgb, var(--danger, #d34b5e) 42%, var(--border));
+  color: var(--danger, #c23449);
+}
+.activity-list {
+  display: grid;
+  gap: 0.65rem;
+}
+.activity-list article {
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.activity-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 1.7rem;
+  height: 1.7rem;
+  place-items: center;
+  border-radius: 0.52rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.activity-list strong {
   display: block;
-  width: 100%;
-  margin: 0.5rem 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.activity-list time {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+@media (max-width: 479px) {
+  .task-collaboration {
+    padding: 0.8rem;
+  }
+  .collaboration-panel {
+    padding: 0.72rem;
+  }
+  .collaboration-panel-copy,
+  .comment-composer > div:last-child {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .inline-compose {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .inline-compose button {
+    justify-content: center;
+  }
 }
 .conflict-banner,
 .undo-banner {

@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Revamp the compact Mongolian task collaboration workspace and its responsive interaction states (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
 - [x] Repair task collaboration persistence, activity history, and web-only participant notifications (`backend/app/routers/enterprise.py`, `frontend/src/pages/EnterpriseTasksPage.tsx`)
 - [x] Add task collaboration API and UI regression coverage (`backend/tests`, `frontend/src`)
 - [x] Deliver the ERP access-role, versioned form, and workflow builders with scoped assignments and master-data requests (`backend/app/erp`, `backend/app/models/models.py`, `frontend/src`)
