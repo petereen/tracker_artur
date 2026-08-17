@@ -59,11 +59,7 @@ export function StatsWorkspacePage() {
   const [, startTransition] = useTransition();
   return (
     <div className="stats-workspace">
-      <div className="view-toolbar">
-        <div>
-          <h2>Гүйцэтгэлийн үзүүлэлт</h2>
-          <p>Ажлын цаг болон даалгаврын түүхэн зураглал.</p>
-        </div>
+      <div className="workspace-toolbar analytics-toolbar">
         <div className="toolbar-cluster">
           {canReview && (
             <DropdownSelect

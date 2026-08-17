@@ -16,6 +16,8 @@ const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage')
 const ERPWorkspacePage = lazy(() => import('./pages/ERPWorkspacePage').then((module) => ({ default: module.ERPWorkspacePage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
 const PlansPage = lazy(() => import('./pages/PlansPage').then((module) => ({ default: module.PlansPage })))
+const ContractsWorkspacePage = lazy(() => import('./pages/ContractsWorkspacePage').then((module) => ({ default: module.ContractsWorkspacePage })))
+const ContractPrintPage = lazy(() => import('./pages/ContractsWorkspacePage').then((module) => ({ default: module.ContractPrintPage })))
 const AdministrationHubPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdministrationHubPage })))
 const WorkspaceIdentitySettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.WorkspaceIdentitySettingsPage })))
 const CollaborationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.CollaborationSettingsPage })))
@@ -51,6 +53,8 @@ function AuthenticatedApp() {
         <Route path="reports" element={<EnterpriseReportsPage />} />
         <Route path="capacity" element={<CapacityWorkspacePage />} />
         <Route path="plans" element={<PlansPage />} />
+        <Route path="contracts" element={<ContractsWorkspacePage />} />
+        <Route path="contracts/:publicId" element={<ContractsWorkspacePage />} />
         <Route path="okrs" element={<Navigate to="/plans" replace />} />
         <Route path="analytics" element={<StatsWorkspacePage />} />
         <Route path="erp" element={<ERPWorkspacePage />} />
@@ -72,6 +76,7 @@ function AuthenticatedApp() {
         <Route path="legacy/onboarding" element={<Navigate to="/administration/automation" replace />} />
         <Route path="legacy/developer" element={<Navigate to="/administration/oyuns" replace />} />
       </Route>
+      <Route path="contracts/:publicId/print" element={<ContractPrintPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

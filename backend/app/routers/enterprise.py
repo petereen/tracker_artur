@@ -15,8 +15,8 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -81,7 +81,19 @@ from app.services.enterprise_events import record_change
 from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
 from app.core.config import settings
 from app.services import voice_service
-from app.services.google_calendar import account_from_state, authorization_url as google_authorization_url, exchange_code as google_exchange_code, is_configured as google_is_configured, stop_watch as google_stop_watch
+from app.services.google_calendar import (
+    account_from_state,
+    authorization_url as google_authorization_url,
+    consume_oauth_state as google_consume_oauth_state,
+    create_oauth_state as google_create_oauth_state,
+    exchange_code as google_exchange_code,
+    fetch_connection_metadata as google_fetch_connection_metadata,
+    is_configured as google_is_configured,
+    list_calendars as google_list_calendars,
+    queue_account_sync as google_queue_account_sync,
+    queue_entity_sync as google_queue_entity_sync,
+    stop_watch as google_stop_watch,
+)
 from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services import assistant_ai, exchange_rate_service
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
@@ -278,7 +290,7 @@ def _task_out(item: Task) -> dict:
         "parent_task_id": item.parent_task_id, "title": item.title,
         "description": item.description, "workflow_status": item.workflow_status,
         "priority": item.priority, "primary_owner_id": item.assignee_id, "reviewer_id": getattr(item, "reviewer_id", None), "reviewer_ids": [],
-        "start_at": item.start_at, "deadline_at": item.deadline_at,
+        "start_at": item.start_at, "deadline_at": item.deadline_at, "is_all_day": item.is_all_day,
         "estimate_minutes": item.estimate_minutes, "sort_position": _decimal(item.sort_position),
         "work_location_type": item.work_location_type, "work_location": item.work_location,
         "version": item.version, "is_archived": item.is_archived,
@@ -429,6 +441,7 @@ class EnterpriseTaskInput(BaseModel):
     reviewer_ids: list[int] = Field(default_factory=list)
     start_at: datetime | None = None
     deadline_at: datetime | None = None
+    is_all_day: bool = False
     estimate_minutes: int | None = Field(default=None, ge=0)
     work_location_type: Literal["office", "remote", "custom"] | None = None
     work_location: str | None = Field(default=None, max_length=500)
@@ -448,6 +461,7 @@ class EnterpriseTaskPatch(BaseModel):
     reviewer_ids: list[int] | None = None
     start_at: datetime | None = None
     deadline_at: datetime | None = None
+    is_all_day: bool | None = None
     estimate_minutes: int | None = Field(default=None, ge=0)
     work_location_type: Literal["office", "remote", "custom"] | None = None
     work_location: str | None = Field(default=None, max_length=500)
@@ -660,6 +674,20 @@ class CalendarEntryInput(BaseModel):
     description: str | None = Field(default=None, max_length=6000)
     starts_at: datetime
     ends_at: datetime
+    is_all_day: bool = False
+    recurrence_rule: str | None = Field(default=None, max_length=2000)
+    remind_at: datetime | None = None
+
+
+class CalendarEntryPatch(BaseModel):
+    kind: Literal["reminder", "event"] | None = None
+    visibility: Literal["private", "company"] | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=6000)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    is_all_day: bool | None = None
+    recurrence_rule: str | None = Field(default=None, max_length=2000)
     remind_at: datetime | None = None
 
 
@@ -674,11 +702,20 @@ class HolidayCountryInput(BaseModel):
 
 
 class CalendarSyncInput(BaseModel):
-    task_id: int
+    task_id: int | None = None
 
 
 class CalendarSyncModeInput(BaseModel):
     sync_mode: Literal["outbound", "bidirectional"]
+
+
+class GoogleCalendarCallbackInput(BaseModel):
+    code: str = Field(min_length=1, max_length=4096)
+    state: str = Field(min_length=1, max_length=4096)
+
+
+class GoogleCalendarSelectionInput(BaseModel):
+    calendar_id: str = Field(min_length=1, max_length=500)
 
 
 async def _daily_report(db: AsyncSession, employee: Employee, local_day: date) -> WorkReport:
@@ -1251,7 +1288,7 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         organization_id=actor.organization_id, project_id=project_id, parent_task_id=data.parent_task_id,
         title=data.title, description=data.description, workflow_status=data.workflow_status,
         status=LEGACY_STATUS[data.workflow_status], priority=data.priority, assignee_id=owner_id,
-        start_at=data.start_at, deadline_at=data.deadline_at, estimate_minutes=data.estimate_minutes,
+        start_at=data.start_at, deadline_at=data.deadline_at, is_all_day=data.is_all_day, estimate_minutes=data.estimate_minutes,
         work_location_type=data.work_location_type, work_location=data.work_location,
         sort_position=data.sort_position, created_by_id=actor.employee_id, reviewer_id=reviewer_ids[0] if reviewer_ids else None,
     )
@@ -1267,6 +1304,7 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
     owner = await db.get(Employee, owner_id) if owner_id else None
     output = {**_task_out(task), "assignee_ids": sorted(assignees), "reviewer_ids": reviewer_ids, "primary_owner_name": owner.name if owner else None, "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after={**output, "task_id": task.id})
+    await google_queue_entity_sync(db, actor.account_id, "task", task.id, task.version)
     await create_notifications(
         db, organization_id=actor.organization_id, employee_ids=assignees,
         kind="task_assigned", title="Шинэ даалгавар",
@@ -1368,6 +1406,7 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
         current_reviewers.append(task.reviewer_id)
     output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees)), "reviewer_ids": sorted(set(current_reviewers)), "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before={**before, "task_id": task.id}, after={**output, "task_id": task.id})
+    await google_queue_entity_sync(db, actor.account_id, "task", task.id, task.version)
     if next_workflow == "review" and before["workflow_status"] != "review" and current_reviewers:
         assignee = await db.get(Employee, task.assignee_id) if task.assignee_id else None
         task_url = f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"
@@ -1403,6 +1442,7 @@ async def delete_task(task_id: int, db: AsyncSession = Depends(get_db), actor: A
     if not can_manage:
         raise HTTPException(status_code=403, detail="Only the task creator or management can delete this task")
     before = _task_out(task)
+    await google_queue_entity_sync(db, actor.account_id, "task", task.id, task.version, "delete")
     await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="deleted", version=task.version, before=before)
     await db.delete(task)
     await db.commit()
@@ -1455,7 +1495,7 @@ def _time_block_out(item: PersonalTimeBlock) -> dict:
 
 
 def _calendar_entry_out(item: CalendarEntry) -> dict:
-    return {"id": item.id, "kind": item.kind, "visibility": item.visibility, "title": item.title, "description": item.description, "starts_at": item.starts_at, "ends_at": item.ends_at, "remind_at": item.remind_at, "version": item.version, "can_edit": item.created_by_account_id is None or item.created_by_account_id == item.account_id}
+    return {"id": item.id, "kind": item.kind, "visibility": item.visibility, "title": item.title, "description": item.description, "starts_at": item.starts_at, "ends_at": item.ends_at, "is_all_day": item.is_all_day, "recurrence_rule": item.recurrence_rule, "remind_at": item.remind_at, "version": item.version, "can_edit": item.created_by_account_id is None or item.created_by_account_id == item.account_id}
 
 
 def _holiday_provider_rows(payload: object) -> list[tuple[date, str, str | None]]:
@@ -1582,8 +1622,53 @@ async def create_calendar_entry(data: CalendarEntryInput, db: AsyncSession = Dep
     db.add(entry)
     await db.flush()
     await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="created", after=_calendar_entry_out(entry))
+    await google_queue_entity_sync(db, actor.account_id, "calendar_entry", entry.id, entry.version)
     await db.commit()
     return _calendar_entry_out(entry)
+
+
+@router.patch("/calendar/entries/{entry_id}")
+async def update_calendar_entry(entry_id: int, data: CalendarEntryPatch, if_match: str | None = Header(default=None, alias="If-Match"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    entry = await db.get(CalendarEntry, entry_id, with_for_update=True)
+    if not entry or entry.organization_id != actor.organization_id or (entry.visibility == "private" and entry.account_id != actor.account_id):
+        raise HTTPException(status_code=404, detail="Calendar entry not found")
+    if entry.visibility == "company" and not actor.has_any_role(*MANAGEMENT_ROLES):
+        raise HTTPException(status_code=403, detail="Only supervisors can edit company events")
+    if if_match is not None:
+        try:
+            expected = int(if_match.strip('W/"'))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="If-Match must contain a version") from exc
+        if entry.version != expected:
+            raise HTTPException(status_code=409, detail="Calendar entry changed")
+    patch = data.model_dump(exclude_unset=True)
+    starts_at = patch.get("starts_at", entry.starts_at)
+    ends_at = patch.get("ends_at", entry.ends_at)
+    if ends_at <= starts_at:
+        raise HTTPException(status_code=400, detail="Calendar entry must end after it starts")
+    if patch.get("visibility") == "company" and not actor.has_any_role(*MANAGEMENT_ROLES):
+        raise HTTPException(status_code=403, detail="Only supervisors can publish company events")
+    for field, value in patch.items():
+        setattr(entry, field, value)
+    entry.version += 1
+    await db.flush()
+    await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="updated", version=entry.version, after=_calendar_entry_out(entry))
+    await google_queue_entity_sync(db, actor.account_id, "calendar_entry", entry.id, entry.version)
+    await db.commit()
+    return _calendar_entry_out(entry)
+
+
+@router.delete("/calendar/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_calendar_entry(entry_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    entry = await db.get(CalendarEntry, entry_id, with_for_update=True)
+    if not entry or entry.organization_id != actor.organization_id or (entry.visibility == "private" and entry.account_id != actor.account_id):
+        raise HTTPException(status_code=404, detail="Calendar entry not found")
+    if entry.visibility == "company" and not actor.has_any_role(*MANAGEMENT_ROLES):
+        raise HTTPException(status_code=403, detail="Only supervisors can delete company events")
+    await google_queue_entity_sync(db, actor.account_id, "calendar_entry", entry.id, entry.version, "delete")
+    await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="deleted", before=_calendar_entry_out(entry))
+    await db.delete(entry)
+    await db.commit()
 
 
 @router.post("/calendar/holidays/sync")
@@ -3166,11 +3251,18 @@ async def assistant_speech(data: AssistantChatInput, db: AsyncSession = Depends(
     return Response(content=audio, media_type="audio/wav", headers={"Content-Disposition": "inline; filename=oyuns-answer.wav"})
 
 
-@router.get("/integrations/google-calendar/connect")
-async def google_calendar_connect(actor: ActorContext = Depends(get_actor)):
+@router.get("/integrations/google-calendar/auth-url")
+async def google_calendar_auth_url(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if not google_is_configured():
-        return {"provider": "google", "status": "configuration_required", "fallback": "calendar_template_url", "message": "Configure Google OAuth client credentials to enable synchronized calendars."}
-    return {"provider": "google", "status": "ready", "authorization_url": google_authorization_url(actor.account_id)}
+        return {"provider": "google", "status": "configuration_required", "message": "Configure Google OAuth client credentials to enable synchronized calendars."}
+    authorization = await google_create_oauth_state(db, actor.account_id)
+    await db.commit()
+    return {"provider": "google", "status": "ready", "authorization_url": authorization}
+
+
+@router.get("/integrations/google-calendar/connect")
+async def google_calendar_connect(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    return await google_calendar_auth_url(db, actor)
 
 
 @router.get("/integrations/google-calendar/status")
@@ -3178,7 +3270,30 @@ async def google_calendar_status(db: AsyncSession = Depends(get_db), actor: Acto
     connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == actor.account_id, CalendarConnection.provider == "google"))).scalar_one_or_none()
     if not connection:
         return {"provider": "google", "status": "disconnected", "sync_mode": "outbound", "configured": google_is_configured()}
-    return {"provider": "google", "status": connection.status, "sync_mode": connection.sync_mode, "configured": google_is_configured(), "calendar_id": connection.calendar_id, "watch_active": bool(connection.webhook_channel_id and connection.channel_expires_at and connection.channel_expires_at > datetime.now(timezone.utc)), "watch_expires_at": connection.channel_expires_at, "last_synced_at": connection.last_synced_at, "last_error": connection.last_error, "sync_failure_count": connection.sync_failure_count}
+    return {"provider": "google", "status": connection.status, "sync_mode": connection.sync_mode, "configured": google_is_configured(), "calendar_id": connection.calendar_id, "calendar_name": connection.calendar_name, "calendar_timezone": connection.calendar_timezone, "account_email": connection.google_account_email, "watch_active": bool(connection.webhook_channel_id and connection.channel_expires_at and connection.channel_expires_at > datetime.now(timezone.utc)), "watch_expires_at": connection.channel_expires_at, "last_synced_at": connection.last_synced_at, "last_error": connection.last_error, "sync_failure_count": connection.sync_failure_count}
+
+
+@router.get("/integrations/google-calendar/calendars")
+async def google_calendar_calendars(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == actor.account_id, CalendarConnection.provider == "google", CalendarConnection.status == "active"))).scalar_one_or_none()
+    if not connection:
+        raise HTTPException(status_code=409, detail="Connect Google Calendar first")
+    try:
+        return {"items": await google_list_calendars(db, connection), "selected_id": connection.calendar_id}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.put("/integrations/google-calendar/calendar")
+async def google_calendar_select(data: GoogleCalendarSelectionInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == actor.account_id, CalendarConnection.provider == "google", CalendarConnection.status == "active"))).scalar_one_or_none()
+    if not connection:
+        raise HTTPException(status_code=409, detail="Connect Google Calendar first")
+    connection.calendar_id = data.calendar_id
+    connection.sync_cursor = None
+    await google_fetch_connection_metadata(db, connection)
+    await db.commit()
+    return {"calendar_id": connection.calendar_id, "calendar_name": connection.calendar_name, "calendar_timezone": connection.calendar_timezone}
 
 
 @router.put("/integrations/google-calendar/sync-mode")
@@ -3191,15 +3306,9 @@ async def google_calendar_sync_mode(data: CalendarSyncModeInput, db: AsyncSessio
     return {"status": connection.status, "sync_mode": connection.sync_mode}
 
 
-@router.get("/integrations/google-calendar/callback")
-async def google_calendar_callback(code: str | None = None, state: str | None = None, error: str | None = None, db: AsyncSession = Depends(get_db)):
-    if error or not code or not state or not google_is_configured():
-        return RedirectResponse(f"{settings.PUBLIC_APP_URL.rstrip('/')}/administration?calendar=error", status_code=303)
-    try:
-        account_id = account_from_state(state)
-        token = await google_exchange_code(code)
-    except (ValueError, RuntimeError):
-        return RedirectResponse(f"{settings.PUBLIC_APP_URL.rstrip('/')}/administration?calendar=error", status_code=303)
+async def _complete_google_callback(code: str, state: str, db: AsyncSession) -> dict:
+    account_id, verifier = await google_consume_oauth_state(db, state)
+    token = await google_exchange_code(code, verifier)
     connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == account_id, CalendarConnection.provider == "google"))).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if not connection:
@@ -3213,24 +3322,61 @@ async def google_calendar_callback(code: str | None = None, state: str | None = 
     connection.status = "active"
     connection.last_error = None
     await db.flush()
-    db.add(JobQueue(job_type="calendar_watch", payload={"connection_id": connection.id}, dedup_key=f"calendar-watch:{connection.id}:initial:{uuid.uuid4().hex}"))
+    try:
+        await google_fetch_connection_metadata(db, connection)
+    except Exception as exc:
+        connection.last_error = str(exc)[:1000]
+    watch_key = f"calendar-watch:{connection.id}:initial"
+    if not await db.scalar(select(JobQueue.id).where(JobQueue.dedup_key == watch_key)):
+        db.add(JobQueue(job_type="calendar_watch", payload={"connection_id": connection.id}, dedup_key=watch_key))
+    await google_queue_account_sync(db, connection.id)
     await db.commit()
-    return RedirectResponse(f"{settings.PUBLIC_APP_URL.rstrip('/')}/administration?calendar=connected", status_code=303)
+    return {"status": "connected", "account_email": connection.google_account_email}
+
+
+def _google_callback_page(result: str) -> HTMLResponse:
+    safe_origin = settings.PUBLIC_APP_URL.rstrip("/")
+    return HTMLResponse(f"""<!doctype html><meta charset='utf-8'><title>Google Calendar</title><script>window.opener?.postMessage({{source:'oyuns-google-calendar',status:'{result}'}},'{safe_origin}');window.close();</script><p>Google Calendar холболт дууслаа. Энэ цонхыг хааж болно.</p>""")
+
+
+@router.post("/integrations/google-calendar/callback")
+async def google_calendar_callback_post(data: GoogleCalendarCallbackInput, db: AsyncSession = Depends(get_db)):
+    if not google_is_configured():
+        raise HTTPException(status_code=503, detail="Google OAuth is not configured")
+    try:
+        return await _complete_google_callback(data.code, data.state, db)
+    except (ValueError, RuntimeError) as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/integrations/google-calendar/callback")
+async def google_calendar_callback(code: str | None = None, state: str | None = None, error: str | None = None, db: AsyncSession = Depends(get_db)):
+    if error or not code or not state or not google_is_configured():
+        return _google_callback_page("error")
+    try:
+        await _complete_google_callback(code, state, db)
+        return _google_callback_page("connected")
+    except (ValueError, RuntimeError):
+        await db.rollback()
+        return _google_callback_page("error")
 
 
 @router.post("/integrations/google-calendar/sync", status_code=status.HTTP_202_ACCEPTED)
-async def google_calendar_sync(data: CalendarSyncInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def google_calendar_sync(data: CalendarSyncInput | None = Body(default=None), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == actor.account_id, CalendarConnection.provider == "google", CalendarConnection.status == "active"))).scalar_one_or_none()
     if not connection:
         raise HTTPException(status_code=409, detail="Connect Google Calendar first")
-    await _task_for_actor(db, data.task_id, actor)
-    job = JobQueue(job_type="calendar_sync", payload={"account_id": actor.account_id, "task_id": data.task_id}, dedup_key=f"calendar-sync:{actor.account_id}:{data.task_id}:{uuid.uuid4().hex}")
-    db.add(job)
+    if data and data.task_id:
+        await _task_for_actor(db, data.task_id, actor)
+        await google_queue_entity_sync(db, actor.account_id, "task", data.task_id, None)
+    else:
+        await google_queue_account_sync(db, connection.id)
     await db.commit()
-    return {"status": "queued", "task_id": data.task_id}
+    return {"status": "queued", "connection_id": connection.id}
 
 
-@router.post("/integrations/google-calendar/disconnect", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/integrations/google-calendar/disconnect", status_code=status.HTTP_204_NO_CONTENT)
 async def google_calendar_disconnect(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == actor.account_id, CalendarConnection.provider == "google"))).scalar_one_or_none()
     if connection:
@@ -3240,6 +3386,11 @@ async def google_calendar_disconnect(db: AsyncSession = Depends(get_db), actor: 
             pass
         await db.delete(connection)
         await db.commit()
+
+
+@router.post("/integrations/google-calendar/disconnect", status_code=status.HTTP_204_NO_CONTENT)
+async def google_calendar_disconnect_compat(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    return await google_calendar_disconnect(db, actor)
 
 
 @router.post("/integrations/google-calendar/webhook", status_code=status.HTTP_202_ACCEPTED)

@@ -363,7 +363,7 @@ export function EnterpriseDashboardPage() {
     const segments: MiniCalendarRange[] = [];
 
     const tasks = new Map<number, EnterpriseTask>();
-    [...(miniCalendarTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
+    [...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
     tasks.forEach((task) => {
       if (!task.start_at || !task.deadline_at) return;
       let taskStart = dateKey(task.start_at)!;

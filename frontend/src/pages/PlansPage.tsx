@@ -5,7 +5,6 @@ import {
   Card,
   Input,
   Modal,
-  PageHeader,
   Select,
 } from "../components/ui";
 import {
@@ -103,12 +102,7 @@ export function PlansPage() {
 
   return (
     <div className="plans-workspace">
-      <PageHeader
-        className="workspace-page-header"
-        title="Төлөвлөгөө"
-        sub={`${month} сарын компаний төлөвлөгөө`}
-      />
-      <div className="plan-toolbar">
+      <div className="workspace-toolbar plan-toolbar">
         <div className="segmented-control">
           <button
             onClick={() => setTab("ideas")}

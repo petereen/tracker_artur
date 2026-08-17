@@ -1,5 +1,8 @@
 import asyncio
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 from app.core.config import settings
 from app.main import app
@@ -19,7 +22,11 @@ def test_followup_schema_and_routes_are_registered():
         "/v1/attachments",
         "/v1/saved-views",
         "/v1/integrations/google-calendar/callback",
+        "/v1/integrations/google-calendar/auth-url",
         "/v1/integrations/google-calendar/sync",
+        "/v1/integrations/google-calendar/disconnect",
+        "/v1/integrations/google-calendar/calendars",
+        "/v1/integrations/google-calendar/calendar",
         "/v1/integrations/google-calendar/status",
         "/v1/integrations/google-calendar/sync-mode",
         "/v1/integrations/google-calendar/webhook",
@@ -42,6 +49,8 @@ def test_google_oauth_url_uses_signed_state_and_minimal_offline_scope(monkeypatc
     query = parse_qs(urlparse(url).query)
     assert query["access_type"] == ["offline"]
     assert query["scope"] == [google_calendar.SCOPE]
+    assert query["code_challenge_method"] == ["S256"]
+    assert query["code_challenge"]
     assert query["redirect_uri"] == [settings.GOOGLE_REDIRECT_URI]
     assert google_calendar.account_from_state(query["state"][0]) == 27
 
@@ -55,6 +64,21 @@ def test_google_webhook_url_defaults_to_public_dokploy_domain(monkeypatch):
 def test_google_event_datetime_requires_timed_events():
     assert google_calendar._event_datetime({"date": "2026-08-10"}) is None
     assert google_calendar._event_datetime({"dateTime": "2026-08-10T09:30:00Z"}).isoformat() == "2026-08-10T09:30:00+00:00"
+
+
+def test_google_event_body_preserves_all_day_boundaries_and_platform_tags():
+    task = SimpleNamespace(id=42, title="All day task", description="Details", start_at=datetime(2026, 8, 10, tzinfo=timezone.utc), deadline_at=datetime(2026, 8, 12, tzinfo=timezone.utc), is_all_day=True, is_archived=False, workflow_status="to_do")
+    body = google_calendar._event_body("task", task, ZoneInfo("Asia/Ulaanbaatar"), "fingerprint")
+    assert body["start"] == {"date": "2026-08-10"}
+    assert body["end"] == {"date": "2026-08-12"}
+    assert body["extendedProperties"]["private"]["oyunsPlatformFingerprint"] == "fingerprint"
+
+
+def test_google_import_range_converts_all_day_dates_to_user_timezone():
+    starts_at, ends_at, is_all_day = google_calendar._event_range({"start": {"date": "2026-08-10"}, "end": {"date": "2026-08-11"}}, ZoneInfo("Asia/Ulaanbaatar"))
+    assert is_all_day is True
+    assert starts_at.isoformat() == "2026-08-10T00:00:00+08:00"
+    assert ends_at.isoformat() == "2026-08-11T00:00:00+08:00"
 
 
 def test_local_attachment_storage_never_uses_user_filenames(tmp_path, monkeypatch):

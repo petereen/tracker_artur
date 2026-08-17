@@ -17,3 +17,14 @@ from app.models.models import (  # noqa: F401
     AssistantContextExample,
     UnknownAssistantRequest,
 )
+from app.models.contracts import (  # noqa: F401
+    CONTRACT_DOCUMENT_TYPES,
+    CONTRACT_FILE_PURPOSES,
+    CONTRACT_REVIEW_DECISIONS,
+    CONTRACT_STATUSES,
+    ContractComment,
+    ContractDocument,
+    ContractFile,
+    ContractReview,
+    ContractRevision,
+)

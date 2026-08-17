@@ -36,6 +36,7 @@ export interface EnterpriseTask {
   project_name: string | null
   start_at: string | null
   deadline_at: string | null
+  is_all_day: boolean
   estimate_minutes: number | null
   work_location_type: 'office' | 'remote' | 'custom' | null
   work_location: string | null
@@ -89,6 +90,44 @@ export interface EnterpriseAttachment { id: number; filename: string; content_ty
 export interface TaskActivity { id: number; action: string; entity_type: string; actor_account_id: number | null; actor_employee_id: number | null; before: Record<string, unknown>; after: Record<string, unknown>; created_at: string }
 export interface SavedView { id: number; module: string; name: string; view_type: string; filters: Record<string, unknown>; grouping: Record<string, unknown>; visible_columns: string[]; sort: Record<string, unknown>[]; is_shared: boolean }
 
+export type ContractStatus = 'DRAFT' | 'PENDING_REVIEW' | 'CHANGES_REQUESTED' | 'APPROVED' | 'REJECTED' | 'SIGNED_AND_STAMPED'
+export type ContractDocumentType = 'contract' | 'agreement' | 'official_letter' | 'other'
+export interface ContractSummary {
+  id: number; public_id: string; title: string; document_type: ContractDocumentType; status: ContractStatus
+  author_account_id: number; author_name?: string | null; project_id: number | null; task_id: number | null
+  effective_start_on?: string | null; effective_end_on?: string | null; submission_round: number; version: number
+  current_revision_id: number | null; approved_revision_id: number | null; approved_at?: string | null; signed_at?: string | null
+  excerpt?: string; created_at: string; updated_at: string
+}
+export interface ContractReview { id: number; round_number: number; reviewer_account_id: number; reviewer_employee_id: number | null; reviewer_name: string; decision: 'pending' | 'approved' | 'changes_requested' | 'rejected'; remark: string | null; acted_at: string | null }
+export interface ContractRevision { id: number; revision_number: number; title: string; body_json: Record<string, unknown>; plain_text: string; checksum: string; created_at: string; author_account_id: number | null }
+export interface ContractComment { id: number; revision_id: number; parent_id: number | null; author_account_id: number | null; body: string; anchor: { from?: number; to?: number; quote?: string } | null; is_resolved: boolean; created_at: string }
+export interface ContractFile { id: number; purpose: 'supporting' | 'signed_final'; filename: string; content_type: string; size: number; checksum: string; scan_status: string; confirmed_at: string | null; created_at: string }
+export interface ContractDetail extends ContractSummary { body_json: Record<string, unknown> | null; approved_body_json: Record<string, unknown> | null; reviewer_account_ids: number[]; revisions: ContractRevision[]; reviews: ContractReview[]; comments: ContractComment[]; files: ContractFile[]; timeline: Array<{ id: number; operation: string; actor_account_id: number | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; created_at: string }> }
+export interface ContractListResponse { items: ContractSummary[]; counts: Record<'all' | 'drafts' | 'pending_my_approval' | 'submitted_by_me' | 'approved' | 'signed' | 'returned', number> }
+export interface ContractReviewerCandidate { account_id: number; employee_id: number; name: string; job_title: string | null }
+
+const contractKeys = ['v1', 'contracts'] as const
+export function useContractList(view: string) { return useQuery<ContractListResponse>({ queryKey: [...contractKeys, view], queryFn: () => api.get('/v1/contracts', { params: { view } }).then((r) => r.data) }) }
+export function useContractDetail(publicId?: string) { return useQuery<ContractDetail>({ queryKey: [...contractKeys, 'detail', publicId], queryFn: () => api.get(`/v1/contracts/${publicId}`).then((r) => r.data), enabled: Boolean(publicId) }) }
+export function useContractReviewerCandidates() { return useQuery<ContractReviewerCandidate[]>({ queryKey: [...contractKeys, 'reviewer-candidates'], queryFn: () => api.get('/v1/contracts/reviewer-candidates').then((r) => r.data) }) }
+export function useCreateContract() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { title: string; document_type: ContractDocumentType; body_json: Record<string, unknown>; reviewer_account_ids: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null }) => api.post('/v1/contracts', input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: contractKeys }) }) }
+export function useUpdateContract() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, version, ...input }: { publicId: string; version: number; title?: string; document_type?: ContractDocumentType; body_json?: Record<string, unknown>; reviewer_account_ids?: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null }) => api.patch(`/v1/contracts/${publicId}`, input, { headers: { 'If-Match': String(version) } }).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }) }
+function contractAction(path: string) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, remark }: { publicId: string; remark?: string }) => api.post(`/v1/contracts/${publicId}/${path}`, remark === undefined ? {} : { remark }).then((r) => r.data), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Үйлдэл амжилтгүй боллоо') }) }
+export function useSubmitContract() { return contractAction('submit') }
+export function useResubmitContract() { return contractAction('resubmit') }
+export function useRecallContract() { return contractAction('recall') }
+export function useApproveContract() { return contractAction('approve') }
+export function useRequestContractChanges() { return contractAction('request-changes') }
+export function useRejectContract() { return contractAction('reject') }
+export function useDuplicateContract() { const qc = useQueryClient(); return useMutation({ mutationFn: (publicId: string) => api.post(`/v1/contracts/${publicId}/duplicate`).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: contractKeys }) }) }
+export function useAddContractComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, ...input }: { publicId: string; revision_id: number; body: string; parent_id?: number | null; anchor?: Record<string, unknown> | null }) => api.post(`/v1/contracts/${publicId}/comments`, input).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }) }
+export function useResolveContractComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, id, is_resolved }: { publicId: string; id: number; is_resolved: boolean }) => api.patch(`/v1/contracts/${publicId}/comments/${id}`, null, { params: { is_resolved } }).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }) }
+export function useUploadContractFile() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, purpose, file }: { publicId: string; purpose: 'supporting' | 'signed_final'; file: File }) => { const form = new FormData(); form.append('file', file); return api.post(`/v1/contracts/${publicId}/files`, form, { params: { purpose } }).then((r) => r.data) }, onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }) }
+export function useConfirmContractFinal() { const qc = useQueryClient(); return useMutation({ mutationFn: (publicId: string) => api.post(`/v1/contracts/${publicId}/confirm-final`).then((r) => r.data), onSuccess: (_d, publicId) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', publicId] }) } }) }
+export function useMarkContractPrinted() { return useMutation({ mutationFn: (publicId: string) => api.post(`/v1/contracts/${publicId}/mark-printed`).then((r) => r.data) }) }
+export async function downloadContractFile(publicId: string, id: number, filename: string) { const response = await api.get(`/v1/contracts/${publicId}/files/${id}/download`, { responseType: 'blob' }); const url = URL.createObjectURL(response.data); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url) }
+
 export function useEnterpriseLogin() {
   return useMutation({
     mutationFn: (input: { email: string; password: string }) => api.post('/v1/auth/login', input).then((response) => response.data),
@@ -117,13 +156,17 @@ export function usePasswordResetConfirm() {
 
 export function useGoogleCalendarConnect() {
   return useMutation({
-    mutationFn: () => api.get('/v1/integrations/google-calendar/connect').then((response) => response.data),
+    mutationFn: () => api.get('/v1/integrations/google-calendar/auth-url').then((response) => response.data),
   })
 }
-export interface CalendarConnectionStatus { provider: 'google'; status: string; sync_mode: 'outbound' | 'bidirectional'; configured: boolean; calendar_id?: string; watch_active?: boolean; watch_expires_at?: string | null; last_synced_at?: string | null; last_error?: string | null; sync_failure_count?: number }
+export interface CalendarConnectionStatus { provider: 'google'; status: string; sync_mode: 'outbound' | 'bidirectional'; configured: boolean; calendar_id?: string; calendar_name?: string | null; calendar_timezone?: string | null; account_email?: string | null; watch_active?: boolean; watch_expires_at?: string | null; last_synced_at?: string | null; last_error?: string | null; sync_failure_count?: number }
 export function useGoogleCalendarStatus() { return useQuery<CalendarConnectionStatus>({ queryKey: ['v1', 'integrations', 'google-calendar'], queryFn: () => api.get('/v1/integrations/google-calendar/status').then((r) => r.data) }) }
 export function useGoogleCalendarSyncMode() { const qc = useQueryClient(); return useMutation({ mutationFn: (sync_mode: 'outbound' | 'bidirectional') => api.put('/v1/integrations/google-calendar/sync-mode', { sync_mode }).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'integrations', 'google-calendar'] }) }) }
-export function useGoogleCalendarDisconnect() { const qc = useQueryClient(); return useMutation({ mutationFn: () => api.post('/v1/integrations/google-calendar/disconnect'), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'integrations', 'google-calendar'] }) }) }
+export interface GoogleCalendarOption { id: string; name: string; time_zone?: string | null; primary?: boolean }
+export function useGoogleCalendarList(enabled = true) { return useQuery<{ items: GoogleCalendarOption[]; selected_id?: string }>({ queryKey: ['v1', 'integrations', 'google-calendar', 'calendars'], queryFn: () => api.get('/v1/integrations/google-calendar/calendars').then((r) => r.data), enabled }) }
+export function useGoogleCalendarSelect() { const qc = useQueryClient(); return useMutation({ mutationFn: (calendar_id: string) => api.put('/v1/integrations/google-calendar/calendar', { calendar_id }).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'integrations', 'google-calendar'] }); qc.invalidateQueries({ queryKey: ['v1', 'integrations', 'google-calendar', 'calendars'] }) } }) }
+export function useGoogleCalendarSync() { const qc = useQueryClient(); return useMutation({ mutationFn: () => api.post('/v1/integrations/google-calendar/sync').then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'integrations', 'google-calendar'] }); qc.invalidateQueries({ queryKey: ['v1', 'calendar'] }) } }) }
+export function useGoogleCalendarDisconnect() { const qc = useQueryClient(); return useMutation({ mutationFn: () => api.delete('/v1/integrations/google-calendar/disconnect'), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'integrations', 'google-calendar'] }) }) }
 
 export interface ManagedAccount {
   id: number

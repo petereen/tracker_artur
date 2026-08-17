@@ -305,6 +305,7 @@ class Task(Base):
     priority = Column(Integer, nullable=False, server_default="2", default=2)  # 1=срочно, 2=обычно, 3=низкий
     workflow_status = Column(Text, nullable=False, server_default="to_do", default="to_do")
     start_at = Column(DateTime(timezone=True))
+    is_all_day = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     estimate_minutes = Column(Integer)
     work_location_type = Column(String(16))
     work_location = Column(Text)
@@ -1139,6 +1140,9 @@ class CalendarEntry(Base):
     description = Column(Text)
     starts_at = Column(DateTime(timezone=True), nullable=False)
     ends_at = Column(DateTime(timezone=True), nullable=False)
+    is_all_day = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    recurrence_rule = Column(Text)
+    recurrence_exceptions = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     remind_at = Column(DateTime(timezone=True))
     version = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -1939,6 +1943,9 @@ class CalendarConnection(Base):
     scopes = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     sync_cursor = Column(Text)
     calendar_id = Column(Text, nullable=False, server_default="primary", default="primary")
+    google_account_email = Column(Text)
+    calendar_name = Column(Text)
+    calendar_timezone = Column(Text)
     webhook_channel_id = Column(Text, unique=True)
     webhook_resource_id = Column(Text)
     encrypted_channel_token = Column(Text)
@@ -1955,13 +1962,37 @@ class CalendarConnection(Base):
 
 class CalendarEventLink(Base):
     __tablename__ = "calendar_event_links"
-    __table_args__ = (UniqueConstraint("connection_id", "task_id", name="uq_calendar_event_links_task"),)
+    __table_args__ = (
+        UniqueConstraint("connection_id", "task_id", name="uq_calendar_event_links_task"),
+        UniqueConstraint("connection_id", "calendar_entry_id", name="uq_calendar_event_links_entry"),
+        CheckConstraint("task_id IS NOT NULL OR calendar_entry_id IS NOT NULL", name="ck_calendar_event_links_entity"),
+    )
 
     id = Column(Integer, primary_key=True)
     connection_id = Column(Integer, ForeignKey("calendar_connections.id", ondelete="CASCADE"), nullable=False)
-    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"))
+    calendar_entry_id = Column(Integer, ForeignKey("calendar_entries.id", ondelete="CASCADE"))
     external_event_id = Column(Text, nullable=False)
+    external_recurring_event_id = Column(Text)
     external_etag = Column(Text)
+    external_updated_at = Column(DateTime(timezone=True))
+    source = Column(Text, nullable=False, server_default="platform", default="platform")
+    platform_version = Column(Integer)
+    platform_fingerprint = Column(String(64))
+    conflict_state = Column(Text, nullable=False, server_default="none", default="none")
     sync_state = Column(Text, nullable=False, server_default="synced", default="synced")
     last_error = Column(Text)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class GoogleCalendarOAuthState(Base):
+    __tablename__ = "google_calendar_oauth_states"
+    __table_args__ = (Index("ix_google_calendar_oauth_states_expiry", "expires_at"),)
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    nonce_hash = Column(String(64), nullable=False, unique=True)
+    encrypted_code_verifier = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

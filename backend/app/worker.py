@@ -19,7 +19,7 @@ from app.models.models import AssistantToolAudit, CalendarConnection, CompanyKno
 from app.observability.sentry import init_from_env
 from app.services.email_service import send_auth_email
 from app.services.secret_box import decrypt_secret
-from app.services.google_calendar import incremental_sync, register_watch, sync_task
+from app.services.google_calendar import incremental_sync, register_watch, sync_connection, sync_entity, sync_task
 from app.services.enterprise_tools import index_company_file, index_company_knowledge
 
 
@@ -74,6 +74,10 @@ async def execute_job(job_id: int) -> None:
                 )
             elif job.job_type == "calendar_sync":
                 await sync_task(db, int(job.payload["account_id"]), int(job.payload["task_id"]))
+            elif job.job_type == "calendar_outbound":
+                await sync_entity(db, int(job.payload["connection_id"]), job.payload["entity_type"], int(job.payload["entity_id"]), job.payload.get("operation", "upsert"), job.payload.get("external_event_id"))
+            elif job.job_type == "calendar_account_sync":
+                await sync_connection(db, int(job.payload["connection_id"]))
             elif job.job_type == "calendar_watch":
                 await register_watch(db, int(job.payload["connection_id"]))
             elif job.job_type == "calendar_inbound":

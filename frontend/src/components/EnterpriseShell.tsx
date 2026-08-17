@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
-  BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, Goal, KeyRound, Landmark,
+  BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark,
   FolderArchive, LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { useActor, useBrandingSettings, useEnterpriseLogout, useERPMetadata, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
@@ -21,6 +21,7 @@ const NAV = [
   { to: '/reports', label: 'nav.reports', icon: FileCheck2, roles: [] },
   { to: '/projects', label: 'nav.projects', icon: BriefcaseBusiness, roles: [] },
   { to: '/plans', label: 'nav.plans', icon: Goal, roles: [] },
+  { to: '/contracts', label: 'nav.contracts', icon: FileSignature, roles: [] },
   { to: '/analytics', label: 'nav.analytics', icon: BarChart3, roles: [] },
   { to: '/administration', label: 'nav.settings', icon: Settings2, roles: ['admin', 'manager', 'team_lead'] },
 ]
@@ -29,7 +30,7 @@ const NAV_GROUP_BREAKS = new Set(['/calendar', '/projects', '/analytics', '/admi
 
 const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
-  '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө',
+  '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө', '/contracts': 'Гэрээ',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
   '/erp': 'ERP үйл ажиллагаа',
   '/administration/workspace': 'Logo оруулах',
@@ -62,7 +63,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         const event = JSON.parse(message.data)
         cursor = event.id
         sessionStorage.setItem('oyuns-event-cursor', String(cursor))
-        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', okrs: 'objectives', notifications: 'notifications', company_files: 'company-files', erp: 'erp' }
+        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', contracts: 'contracts', okrs: 'objectives', notifications: 'notifications', company_files: 'company-files', erp: 'erp' }
         const key = topicMap[event.topic]
         if (key) queryClient.invalidateQueries({ queryKey: ['v1', key] })
       }
@@ -118,7 +119,7 @@ export function EnterpriseShell() {
   }, [actorQuery.data?.locale, i18n])
   const nav = useMemo(() => {
     const base = NAV.filter((item) => !item.roles.length || item.roles.some((role) => roles.includes(role)))
-    const canAccessERP = roles.includes('admin') || Boolean(erp.data && Object.values(erp.data.modules).some(Boolean))
+    const canAccessERP = roles.includes('admin') || Object.values(erp.data?.modules ?? {}).some(Boolean)
     return canAccessERP ? [...base.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, base[base.length - 1]] : base
   }, [erp.data, roles])
   const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
@@ -130,6 +131,7 @@ export function EnterpriseShell() {
   const commandChannels = useMemo(() => [...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }].map((item) => ({ id: item.to, type: 'channel' as const, title: 'settings' in item ? String(item.label) : t(item.label), subtitle: 'Workspace section', icon: item.icon, run: () => navigate(item.to) })), [nav, navigate, t])
   const commandFeatures = useMemo(() => [
     { id: 'create-task', type: 'feature' as const, title: 'Create task', subtitle: 'Open a new task form', icon: CheckSquare2, run: () => navigate('/tasks?create=1') },
+    { id: 'create-contract', type: 'feature' as const, title: 'Create contract', subtitle: 'Open a new contract draft', icon: FileSignature, run: () => navigate('/contracts?create=1') },
     { id: 'upload-file', type: 'feature' as const, title: 'Upload file', subtitle: 'Open the company file uploader', icon: Upload, run: () => navigate('/company-files?upload=1') },
     ...(roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role)) ? [
       { id: 'workspace-settings', type: 'feature' as const, title: 'Workspace settings', subtitle: 'Branding and identity', icon: Settings2, run: () => navigate('/administration/workspace') },

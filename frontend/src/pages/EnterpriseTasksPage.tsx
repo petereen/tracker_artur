@@ -899,36 +899,8 @@ export function EnterpriseTasksPage() {
   };
   return (
     <div className="task-workspace">
-      <div className="view-toolbar">
-        <div>
-          <h2>Миний даалгавар</h2>
-          <p>Таны хариуцаж буй ажил, төсөл болон дэд даалгавар.</p>
-        </div>
-        <div className="toolbar-cluster">
-          {canReview && (
-            <button
-              className="secondary-action compact"
-              onClick={() => setSection("deadlines")}
-            >
-              Хугацааны хяналт
-            </button>
-          )}
-          <button
-            className="primary-action compact"
-            onClick={() => openCreate()}
-          >
-            <Plus size={16} />
-            Даалгавар
-          </button>
-        </div>
-      </div>
-      {lastMove && (
-        <div className="undo-banner" role="status">
-          Даалгавар зөөгдлөө.<button onClick={undoMove}>Буцаах</button>
-        </div>
-      )}
-      <div className="task-filterbar">
-        <div className="task-viewmodes">
+      <div className="workspace-toolbar task-toolbar">
+        <div className="task-viewmodes toolbar-start">
           <div className="segmented-control">
             <button
               className={view === "board" ? "active" : ""}
@@ -959,6 +931,8 @@ export function EnterpriseTasksPage() {
               Календарь
             </button>
           </div>
+        </div>
+        <div className="toolbar-cluster">
           <div className="task-filter-control">
             <button
               className="secondary-action compact"
@@ -1075,8 +1049,28 @@ export function EnterpriseTasksPage() {
             </div>
           )}
           </div>
+          {canReview && (
+            <button
+              className="secondary-action compact"
+              onClick={() => setSection("deadlines")}
+            >
+              Хугацааны хяналт
+            </button>
+          )}
+          <button
+            className="primary-action compact"
+            onClick={() => openCreate()}
+          >
+            <Plus size={16} />
+            Даалгавар
+            </button>
         </div>
       </div>
+      {lastMove && (
+        <div className="undo-banner" role="status">
+          Даалгавар зөөгдлөө.<button onClick={undoMove}>Буцаах</button>
+        </div>
+      )}
       <QueryRegion
         pending={tasks.isLoading || tasks.isFetching}
         skeleton={
