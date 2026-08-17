@@ -28,6 +28,8 @@ from app.models.models import (
     JobQueue,
     Organization,
     Task,
+    TaskAssignee,
+    TaskReviewer,
     UserAccount,
 )
 from app.services.secret_box import decrypt_secret, encrypt_secret
@@ -307,6 +309,31 @@ async def queue_entity_sync(db: AsyncSession, account_id: int, entity_type: str,
         db.add(JobQueue(job_type="calendar_outbound", payload=payload, dedup_key=key))
 
 
+def task_participant_employee_ids(task: Task, contributor_ids: set[int] | list[int] = (), reviewer_ids: set[int] | list[int] = ()) -> set[int]:
+    return {value for value in (task.assignee_id, task.created_by_id, task.reviewer_id) if value} | set(contributor_ids) | set(reviewer_ids)
+
+
+async def queue_task_sync_for_members(db: AsyncSession, task_id: int, version: int | None, operation: str = "upsert", previous_employee_ids: set[int] | None = None) -> None:
+    """Queue only for users participating in the task, never the whole tenant."""
+    task = await db.get(Task, task_id)
+    if not task:
+        return
+    contributor_ids = (await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task_id))).scalars().all()
+    reviewer_ids = (await db.execute(select(TaskReviewer.employee_id).where(TaskReviewer.task_id == task_id))).scalars().all()
+    employee_ids = task_participant_employee_ids(task, contributor_ids, reviewer_ids)
+    if not employee_ids:
+        return
+    account_ids = (await db.execute(select(UserAccount.id).where(UserAccount.employee_id.in_(employee_ids), UserAccount.status == "active"))).scalars().all()
+    for account_id in account_ids:
+        await queue_entity_sync(db, account_id, "task", task_id, version, operation)
+    if operation == "upsert" and previous_employee_ids:
+        removed_ids = previous_employee_ids - employee_ids
+        if removed_ids:
+            removed_accounts = (await db.execute(select(UserAccount.id).where(UserAccount.employee_id.in_(removed_ids), UserAccount.status == "active"))).scalars().all()
+            for account_id in removed_accounts:
+                await queue_entity_sync(db, account_id, "task", task_id, version, "delete")
+
+
 async def queue_account_sync(db: AsyncSession, connection_id: int) -> None:
     connection = await db.get(CalendarConnection, connection_id)
     if not connection or connection.status != "active":
@@ -323,8 +350,13 @@ async def sync_connection(db: AsyncSession, connection_id: int) -> None:
     account = await db.get(UserAccount, connection.account_id)
     if not account:
         return
-    tasks = (await db.execute(select(Task).where(Task.organization_id == account.organization_id, Task.is_archived.is_(False), or_(Task.start_at.isnot(None), Task.deadline_at.isnot(None))))).scalars().all()
-    entries = (await db.execute(select(CalendarEntry).where(CalendarEntry.organization_id == account.organization_id, or_(CalendarEntry.account_id == account.id, CalendarEntry.visibility == "company")))).scalars().all()
+    if not account.employee_id:
+        tasks = []
+    else:
+        contributor_tasks = select(TaskAssignee.task_id).where(TaskAssignee.employee_id == account.employee_id)
+        reviewer_tasks = select(TaskReviewer.task_id).where(TaskReviewer.employee_id == account.employee_id)
+        tasks = (await db.execute(select(Task).where(Task.organization_id == account.organization_id, Task.is_archived.is_(False), or_(Task.assignee_id == account.employee_id, Task.created_by_id == account.employee_id, Task.reviewer_id == account.employee_id, Task.id.in_(contributor_tasks), Task.id.in_(reviewer_tasks)), or_(Task.start_at.isnot(None), Task.deadline_at.isnot(None))))).scalars().all()
+    entries = (await db.execute(select(CalendarEntry).where(CalendarEntry.organization_id == account.organization_id, CalendarEntry.account_id == account.id, CalendarEntry.visibility == "private"))).scalars().all()
     for task in tasks:
         await sync_entity(db, connection.id, "task", task.id)
     for entry in entries:

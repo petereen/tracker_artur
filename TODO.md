@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Extend compact page action-bar alignment to the Contracts/document workspace (`frontend/src/pages/ContractsWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Standardize compact page action bars across Calendar, Tasks, Reports, Projects, Plans, and Analytics (`frontend/src/pages`, `frontend/src/index.css`)
 - [x] Deliver the complete “Гэрээ” Document & Contract Lifecycle Management module: tenant-safe drafting, parallel unanimous approvals, immutable revisions with anchored comments, print/sign/stamp prompts, signed archival, notifications, API, UI, migrations, and regression coverage (`backend/app/models/contracts.py`, `backend/app/routers/contracts.py`, `frontend/src/pages/ContractsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/alembic/versions`, `backend/tests`, `frontend/src`)
 - [ ] Run dependency-backed backend pytest coverage and Alembic upgrade validation for the contract lifecycle (`backend/tests`, `backend/alembic`)
@@ -8,6 +9,7 @@
 - [x] Add Google Calendar connection metadata and event mappings for both tasks and standalone calendar entries, including migration/backfill-safe uniqueness and encrypted credential lifecycle (`backend/app/models/models.py`, `backend/alembic/versions`)
 - [x] Align Google Calendar OAuth, status, manual sync, disconnect, and callback routes with the public API contract, secure state/PKCE handling, calendar account metadata, token refresh, and watch-channel management (`backend/app/routers/enterprise.py`, `backend/app/services/google_calendar.py`)
 - [x] Enqueue deduplicated outbound sync work for task and calendar-entry create/update/delete mutations, with platform-origin tagging to prevent inbound echo loops (`backend/app/routers/enterprise.py`, `backend/app/services/google_calendar.py`, `backend/app/worker.py`)
+- [x] Restrict Google Calendar outbound sync to the connected user’s private entries and task participation, excluding company events and unrelated users’ tasks (`backend/app/services/google_calendar.py`, `backend/app/routers/enterprise.py`, `docs/google-calendar-sync.md`)
 - [x] Implement task/event Google payload conversion and inbound incremental reconciliation for timed, all-day, recurring, deleted, and timezone-aware items under platform-authoritative conflict rules (`backend/app/services/google_calendar.py`)
 - [x] Add Calendar header Google sync control with disconnected, syncing, connected/synced, refresh, and disconnect/manage states, popup OAuth completion, and localized/status-aware feedback (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`, `frontend/src/i18n.ts`)
 - [ ] Add backend and frontend regression coverage for OAuth security, API contracts, token refresh, mapping/deduplication, sync-token recovery, lifecycle triggers, conflict rules, date/timezone conversions, and all UI states (`backend/tests`, `frontend/src`)
@@ -201,6 +203,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Standardize the Contracts list and document detail action bars, remove the redundant module heading, and update the workspace regression assertion (`frontend/src/pages/ContractsWorkspacePage.tsx`, `frontend/src/pages/ContractsWorkspacePage.test.tsx`, `frontend/src/index.css`)
 - [x] Remove duplicate sub-page headings and standardize compact action-bar alignment across Calendar, Tasks, Reports, Projects, Plans, and Analytics (`frontend/src/pages`, `frontend/src/index.css`)
 - [x] Add tenant-safe contract lifecycle models, status constraints, reviewer rounds, immutable revisions, anchored comments, and supporting/final file metadata (`backend/app/models/contracts.py`, `backend/app/models/__init__.py`)
 - [x] Add contract Alembic migration with organization/status/reviewer/revision/file indexes and constraints (`backend/alembic/versions/h1i2j3k4l5m6_contract_lifecycle.py`)

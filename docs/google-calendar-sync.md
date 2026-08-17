@@ -22,8 +22,12 @@ changes are received through a watch channel and reconciled with an
 incremental `syncToken`; a 410 response resets the cursor and performs a
 bounded recovery pull.
 
-Platform tasks and Calendar entries carry private Google extended properties
+Platform tasks and private Calendar entries carry private Google extended properties
 with their platform identity and fingerprint. Platform changes enqueue worker
-jobs. Mapped Google changes are treated as conflicts and the platform version
-is written back, preventing update loops. New Google events are imported as
-private Calendar entries and then become platform-controlled.
+jobs only for the relevant user’s connection: private Calendar entries go to
+their owner, while tasks go only to connected users who are the creator, owner,
+contributor, or reviewer. Company events, unrelated users’ tasks, and
+unassigned tasks are not exported. Mapped Google changes are treated as
+conflicts and the platform version is written back, preventing update loops.
+New Google events are imported as private Calendar entries and then become
+platform-controlled for that connected user.

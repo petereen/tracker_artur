@@ -8056,6 +8056,24 @@ a {
 .calendar-toolbar {
   margin-bottom: 10px;
 }
+.contracts-workspace .workspace-toolbar,
+.contract-detail .workspace-toolbar {
+  margin-bottom: 0;
+}
+.contracts-toolbar .toolbar-start {
+  flex: 1 1 auto;
+}
+.contracts-toolbar .contract-tabs {
+  width: 100%;
+}
+.contracts-toolbar > .button-primary {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-height: 38px;
+}
+.contract-detail-toolbar > .contract-status {
+  margin-left: auto;
+}
 
 @media (max-width: 767px) {
   .workspace-toolbar {
@@ -8104,5 +8122,15 @@ a {
   }
   .projects-toolbar select {
     flex: 0 1 auto;
+  }
+  .contracts-toolbar {
+    align-items: center;
+  }
+  .contracts-toolbar .toolbar-start {
+    min-width: 0;
+    width: 100%;
+  }
+  .contracts-toolbar > .button-primary {
+    margin-left: auto;
   }
 }

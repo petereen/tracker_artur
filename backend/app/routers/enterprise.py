@@ -92,6 +92,7 @@ from app.services.google_calendar import (
     list_calendars as google_list_calendars,
     queue_account_sync as google_queue_account_sync,
     queue_entity_sync as google_queue_entity_sync,
+    queue_task_sync_for_members as google_queue_task_sync_for_members,
     stop_watch as google_stop_watch,
 )
 from app.services.secret_box import decrypt_secret, encrypt_secret
@@ -1304,7 +1305,7 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
     owner = await db.get(Employee, owner_id) if owner_id else None
     output = {**_task_out(task), "assignee_ids": sorted(assignees), "reviewer_ids": reviewer_ids, "primary_owner_name": owner.name if owner else None, "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after={**output, "task_id": task.id})
-    await google_queue_entity_sync(db, actor.account_id, "task", task.id, task.version)
+    await google_queue_task_sync_for_members(db, task.id, task.version)
     await create_notifications(
         db, organization_id=actor.organization_id, employee_ids=assignees,
         kind="task_assigned", title="Шинэ даалгавар",
@@ -1354,6 +1355,9 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
         if task.version != expected:
             raise HTTPException(status_code=409, detail={"message": "Task changed", "latest": _task_out(task)})
     patch = data.model_dump(exclude_unset=True)
+    previous_assignees = (await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all()
+    previous_reviewers = (await db.execute(select(TaskReviewer.employee_id).where(TaskReviewer.task_id == task.id))).scalars().all()
+    previous_participants = {value for value in (task.assignee_id, task.created_by_id, task.reviewer_id) if value} | set(previous_assignees) | set(previous_reviewers)
     next_workflow = patch.get("workflow_status")
     if not can_manage:
         current = set((await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all())
@@ -1406,7 +1410,7 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
         current_reviewers.append(task.reviewer_id)
     output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees)), "reviewer_ids": sorted(set(current_reviewers)), "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before={**before, "task_id": task.id}, after={**output, "task_id": task.id})
-    await google_queue_entity_sync(db, actor.account_id, "task", task.id, task.version)
+    await google_queue_task_sync_for_members(db, task.id, task.version, previous_employee_ids=previous_participants)
     if next_workflow == "review" and before["workflow_status"] != "review" and current_reviewers:
         assignee = await db.get(Employee, task.assignee_id) if task.assignee_id else None
         task_url = f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"
@@ -1442,7 +1446,7 @@ async def delete_task(task_id: int, db: AsyncSession = Depends(get_db), actor: A
     if not can_manage:
         raise HTTPException(status_code=403, detail="Only the task creator or management can delete this task")
     before = _task_out(task)
-    await google_queue_entity_sync(db, actor.account_id, "task", task.id, task.version, "delete")
+    await google_queue_task_sync_for_members(db, task.id, task.version, "delete")
     await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="deleted", version=task.version, before=before)
     await db.delete(task)
     await db.commit()
@@ -1622,7 +1626,8 @@ async def create_calendar_entry(data: CalendarEntryInput, db: AsyncSession = Dep
     db.add(entry)
     await db.flush()
     await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="created", after=_calendar_entry_out(entry))
-    await google_queue_entity_sync(db, actor.account_id, "calendar_entry", entry.id, entry.version)
+    if entry.visibility == "private" and entry.account_id:
+        await google_queue_entity_sync(db, entry.account_id, "calendar_entry", entry.id, entry.version)
     await db.commit()
     return _calendar_entry_out(entry)
 
@@ -1641,6 +1646,7 @@ async def update_calendar_entry(entry_id: int, data: CalendarEntryPatch, if_matc
             raise HTTPException(status_code=400, detail="If-Match must contain a version") from exc
         if entry.version != expected:
             raise HTTPException(status_code=409, detail="Calendar entry changed")
+    previous_sync_account_id = entry.account_id if entry.visibility == "private" else None
     patch = data.model_dump(exclude_unset=True)
     starts_at = patch.get("starts_at", entry.starts_at)
     ends_at = patch.get("ends_at", entry.ends_at)
@@ -1653,7 +1659,10 @@ async def update_calendar_entry(entry_id: int, data: CalendarEntryPatch, if_matc
     entry.version += 1
     await db.flush()
     await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="updated", version=entry.version, after=_calendar_entry_out(entry))
-    await google_queue_entity_sync(db, actor.account_id, "calendar_entry", entry.id, entry.version)
+    if entry.visibility == "private" and entry.account_id:
+        await google_queue_entity_sync(db, entry.account_id, "calendar_entry", entry.id, entry.version)
+    if previous_sync_account_id and (entry.visibility != "private" or entry.account_id != previous_sync_account_id):
+        await google_queue_entity_sync(db, previous_sync_account_id, "calendar_entry", entry.id, entry.version, "delete")
     await db.commit()
     return _calendar_entry_out(entry)
 
@@ -1665,7 +1674,8 @@ async def delete_calendar_entry(entry_id: int, db: AsyncSession = Depends(get_db
         raise HTTPException(status_code=404, detail="Calendar entry not found")
     if entry.visibility == "company" and not actor.has_any_role(*MANAGEMENT_ROLES):
         raise HTTPException(status_code=403, detail="Only supervisors can delete company events")
-    await google_queue_entity_sync(db, actor.account_id, "calendar_entry", entry.id, entry.version, "delete")
+    if entry.visibility == "private" and entry.account_id:
+        await google_queue_entity_sync(db, entry.account_id, "calendar_entry", entry.id, entry.version, "delete")
     await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="deleted", before=_calendar_entry_out(entry))
     await db.delete(entry)
     await db.commit()
@@ -3369,7 +3379,7 @@ async def google_calendar_sync(data: CalendarSyncInput | None = Body(default=Non
         raise HTTPException(status_code=409, detail="Connect Google Calendar first")
     if data and data.task_id:
         await _task_for_actor(db, data.task_id, actor)
-        await google_queue_entity_sync(db, actor.account_id, "task", data.task_id, None)
+        await google_queue_task_sync_for_members(db, data.task_id, None)
     else:
         await google_queue_account_sync(db, connection.id)
     await db.commit()

@@ -26,7 +26,8 @@ describe('ContractsWorkspacePage', () => {
 
   it('renders the lifecycle tabs and status-filtered list', () => {
     render(<MemoryRouter><ContractsWorkspacePage /></MemoryRouter>)
-    expect(screen.getByRole('heading', { name: 'Гэрээ' })).toBeInTheDocument()
+    expect(screen.getByRole('tablist')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Гэрээ' })).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /Ноорог/ })).toHaveTextContent('1')
     expect(screen.getByRole('button', { name: /Үйлчилгээний гэрээ/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: /Баталгаажсан/ }))

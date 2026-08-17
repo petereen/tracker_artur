@@ -81,6 +81,12 @@ def test_google_import_range_converts_all_day_dates_to_user_timezone():
     assert ends_at.isoformat() == "2026-08-11T00:00:00+08:00"
 
 
+def test_task_sync_participants_exclude_unrelated_users():
+    task = SimpleNamespace(assignee_id=11, created_by_id=12, reviewer_id=None)
+    assert google_calendar.task_participant_employee_ids(task, [13], [14]) == {11, 12, 13, 14}
+    assert 99 not in google_calendar.task_participant_employee_ids(task, [13], [14])
+
+
 def test_local_attachment_storage_never_uses_user_filenames(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "ATTACHMENT_STORAGE_BACKEND", "local")
     monkeypatch.setattr(settings, "ATTACHMENT_UPLOAD_DIR", str(tmp_path))
