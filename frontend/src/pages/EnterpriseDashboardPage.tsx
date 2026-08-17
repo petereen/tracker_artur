@@ -356,15 +356,18 @@ export function EnterpriseDashboardPage() {
     date_from: localDateKey(monthDays[0]),
     date_to: localDateKey(monthDays[monthDays.length - 1]),
   });
+  const miniCalendarVisibleTasks = useMemo(() => {
+    const tasks = new Map<number, EnterpriseTask>();
+    [...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
+    return [...tasks.values()];
+  }, [agenda.data?.tasks, miniCalendarTasks.data, todayTasks.data]);
   const miniCalendarRanges = useMemo(() => {
     const visibleStart = localDateKey(monthDays[0]);
     const visibleEnd = localDateKey(monthDays[monthDays.length - 1]);
     const dayIndex = new Map(monthDays.map((day, index) => [localDateKey(day), index]));
     const segments: MiniCalendarRange[] = [];
 
-    const tasks = new Map<number, EnterpriseTask>();
-    [...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
-    tasks.forEach((task) => {
+    miniCalendarVisibleTasks.forEach((task) => {
       if (!task.start_at || !task.deadline_at) return;
       let taskStart = dateKey(task.start_at)!;
       let taskEnd = dateKey(task.deadline_at)!;
@@ -399,7 +402,7 @@ export function EnterpriseDashboardPage() {
       weekSegments.forEach((segment) => { segment.laneCount = laneCount; });
     }
     return segments;
-  }, [agenda.data?.tasks, miniCalendarTasks.data, monthDays]);
+  }, [miniCalendarVisibleTasks, monthDays]);
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES);
   const isSupervisor = roles.some((role) =>
     ["admin", "manager", "team_lead"].includes(role),
@@ -969,10 +972,9 @@ export function EnterpriseDashboardPage() {
                 .toISOString()
                 .slice(0, 10);
               const count =
-                (agenda.data?.tasks ?? []).filter(
-                  (task: any) =>
-                    (!task.start_at || !task.deadline_at) &&
-                    (task.start_at || task.deadline_at)?.slice(0, 10) === local,
+                miniCalendarVisibleTasks.filter((task) =>
+                  (!task.start_at || !task.deadline_at) &&
+                  dateKey(task.start_at || task.deadline_at) === local,
                 ).length +
                 (agenda.data?.entries ?? []).filter(
                   (item: any) => item.starts_at?.slice(0, 10) === local,
