@@ -983,7 +983,7 @@ export function EnterpriseDashboardPage() {
             ))}
           </div>
           <div className="mini-month-grid">
-            {monthDays.map((day) => {
+            {monthDays.map((day, dayIndex) => {
               const local = new Date(
                 day.getTime() - day.getTimezoneOffset() * 60_000,
               )
@@ -995,12 +995,29 @@ export function EnterpriseDashboardPage() {
                 .toISOString()
                 .slice(0, 10);
               const markers = [...(miniCalendarMarkers.get(local) ?? [])];
+              const week = Math.floor(dayIndex / 7);
+              const column = dayIndex % 7;
+              const rangeFragments = miniCalendarRanges.filter(
+                (range) => range.week === week && range.start <= column && range.end >= column,
+              );
               return (
                 <span
                   key={local}
                   className={`${local === todayKey ? "today" : ""} ${day.getMonth() !== new Date().getMonth() ? "outside" : ""}`}
                 >
                   <i>{day.getDate()}</i>
+                  {rangeFragments.map((range) => {
+                    const isStart = range.isStart && column === range.start;
+                    const isEnd = range.isEnd && column === range.end;
+                    return (
+                      <u
+                        className={`mini-range-fragment${isStart ? " range-start" : ""}${isEnd ? " range-end" : ""}`}
+                        key={range.id}
+                        title={range.title}
+                        style={{ "--mini-lane": range.lane } as CSSProperties}
+                      />
+                    );
+                  })}
                   {markers.length > 0 && (
                     <em className="mini-day-markers" aria-label={`${markers.length} төрлийн календарийн зүйл`}>
                       {markers.map((marker) => <b className={`mini-day-marker ${marker}`} key={marker} />)}
@@ -1009,22 +1026,6 @@ export function EnterpriseDashboardPage() {
                 </span>
               );
             })}
-            <div className="mini-range-layer" aria-label="Олон өдрийн даалгаврууд">
-              {miniCalendarRanges.map((range) => (
-                <span
-                  className={`mini-range-bar${range.isStart ? " range-start" : ""}${range.isEnd ? " range-end" : ""}`}
-                  key={range.id}
-                  title={range.title}
-                  aria-label={range.title}
-                  style={{
-                    "--mini-lane": range.lane,
-                    "--mini-lane-count": range.laneCount,
-                    gridColumn: `${range.start + 1} / ${range.end + 2}`,
-                    gridRow: range.week + 1,
-                  } as CSSProperties}
-                />
-              ))}
-            </div>
           </div>
         </aside>
       </section>

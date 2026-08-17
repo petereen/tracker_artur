@@ -4268,7 +4268,7 @@ a {
   top: -5px;
 }
 .notification-popover {
-  background: color-mix(in srgb, var(--glass-heavy) 50%, var(--color-surface));
+  background: color-mix(in srgb, var(--glass-heavy) 75%, var(--color-surface));
   backdrop-filter: blur(24px);
   border: 1px solid var(--color-border);
   border-radius: 14px;
@@ -5134,43 +5134,32 @@ a {
   background: var(--color-green);
 }
 
-/* Task ranges sit beneath the day numbers and are split at each week boundary. */
+/* Per-day fragments bridge the grid gap into one continuous task stroke. */
 .today-mini-calendar .mini-month-grid {
   position: relative;
 }
-.today-mini-calendar .mini-range-layer {
-  bottom: 0;
-  display: grid;
-  gap: 2px;
-  grid-template-columns: repeat(7, 1fr);
-  grid-template-rows: repeat(6, minmax(0, 1fr));
-  left: 0;
-  pointer-events: none;
-  position: absolute;
-  right: 0;
-  top: 0;
-  z-index: 1;
-}
-.today-mini-calendar .mini-range-bar {
-  align-self: end;
-  aspect-ratio: auto;
+.today-mini-calendar .mini-range-fragment {
   background: var(--color-accent);
-  border-radius: 0;
+  bottom: calc(3px + var(--mini-lane) * 7px);
   display: block;
   height: 6px;
-  margin-bottom: calc(3px + var(--mini-lane) * 7px);
-  min-width: 3px;
-  opacity: 1;
-  position: relative;
-  width: 100%;
+  left: -1px;
+  pointer-events: none;
+  position: absolute;
+  border-radius: 0;
+  right: -1px;
+  text-decoration: none;
+  z-index: 1;
 }
-.today-mini-calendar .mini-range-bar.range-start {
+.today-mini-calendar .mini-range-fragment.range-start {
   border-bottom-left-radius: 9999px;
   border-top-left-radius: 9999px;
+  left: 4px;
 }
-.today-mini-calendar .mini-range-bar.range-end {
+.today-mini-calendar .mini-range-fragment.range-end {
   border-bottom-right-radius: 9999px;
   border-top-right-radius: 9999px;
+  right: 4px;
 }
 
 /* Today companion stays outside the dashboard flow, so interval details remain readable. */

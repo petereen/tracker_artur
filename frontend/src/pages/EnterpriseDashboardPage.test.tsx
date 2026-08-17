@@ -193,10 +193,13 @@ describe("Today work-hour timer", () => {
     };
 
     const { container } = renderDashboard();
-    const bars = [...container.querySelectorAll<HTMLElement>(".mini-range-bar")];
-    expect(bars).toHaveLength(2);
-    expect(bars.some((bar) => bar.classList.contains("range-start") && bar.classList.contains("range-end"))).toBe(true);
-    expect(bars.some((bar) => !bar.classList.contains("range-start") && bar.classList.contains("range-end"))).toBe(true);
+    const visibleRange = [...container.querySelectorAll<HTMLElement>('.mini-range-fragment[title="Visible range"]')];
+    const clippedRange = [...container.querySelectorAll<HTMLElement>('.mini-range-fragment[title="Clipped range"]')];
+    expect(visibleRange).toHaveLength(4);
+    expect(visibleRange.filter((bar) => bar.classList.contains("range-start"))).toHaveLength(1);
+    expect(visibleRange.filter((bar) => bar.classList.contains("range-end"))).toHaveLength(1);
+    expect(clippedRange.some((bar) => bar.classList.contains("range-start"))).toBe(false);
+    expect(clippedRange.filter((bar) => bar.classList.contains("range-end"))).toHaveLength(1);
     expect(container.querySelector(".mini-day-marker.task")).not.toBeInTheDocument();
   });
 
