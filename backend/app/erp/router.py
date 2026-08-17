@@ -17,11 +17,11 @@ from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor
 from app.models.models import (
     ERPAccessRole, ERPAccount, ERPAccountRole, ERPCapability, ERPCustomField, ERPDocument, ERPDocumentLine,
-    Employee, ERPFormDefinition, ERPMasterRequest, ERPGeneralLedgerEntry, ERPApprovalRule, ERPImportBatch, ERPPaymentAllocation, ERPPostingPeriod, ERPItem, ERPParty, ERPStockLedgerEntry, ERPTeamRole, ERPWarehouse, ERPWorkflowTransition, IdempotencyRecord, Organization, Project, Team, TeamMember, UserAccount,
+    Employee, ERPFormDefinition, ERPMasterRequest, ERPGeneralLedgerEntry, ERPApprovalRule, ERPImportBatch, ERPPaymentAllocation, ERPPostingPeriod, ERPItem, ERPParty, ERPStockLedgerEntry, ERPTeamRole, ERPWarehouse, ERPWorkflowTransition, ERPModuleConfig, ERPUnitOfMeasure, ERPPriceList, ERPPriceListEntry, ERPDiscountTier, ERPReorderRule, ERPCostCenter, ERPTaxTemplate, ERPTaxTemplateRate, ERPInventoryLevel, IdempotencyRecord, Organization, Project, Team, TeamMember, UserAccount,
 )
 from app.services.enterprise_events import record_change
 from app.erp.service import (
-    DOCUMENT_MODULES, DOCUMENT_TYPES, ERP_MODULES, MODULE_SETTINGS_KEY, VALID_ACTIONS, as_money, calculate_lines,
+    DOCUMENT_MODULES, DOCUMENT_TYPES, ERP_MODULES, MASTER_OPERATION_MODULES, MASTER_OPERATIONS, MODULE_SETTINGS_KEY, VALID_ACTIONS, as_money, calculate_lines,
     approval_required, bootstrap_organization, cancel_document, capability_scopes, default_workflow, document_out, ensure_definition, module_settings, next_number, operation_catalog, post_document, published_definition, record_workflow_transition, require_capability, scope_allows, validate_custom_fields, validate_definition_fields, validate_form_values, validate_workflow,
 )
 
@@ -142,6 +142,53 @@ class AccountInput(BaseModel):
     is_group: bool = False
 
 
+class UomRequestInput(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=120)
+    symbol: str | None = Field(default=None, max_length=16)
+    decimal_places: int = Field(default=2, ge=0, le=8)
+
+
+class ReorderRuleRequestInput(BaseModel):
+    item_id: int
+    warehouse_id: int
+    reorder_level: Decimal = Field(ge=0)
+    reorder_quantity: Decimal = Field(ge=0)
+    maximum_level: Decimal | None = Field(default=None, ge=0)
+
+
+class PriceListRequestInput(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=240)
+    party_id: int
+    item_id: int
+    rate: Decimal = Field(ge=0)
+    minimum_quantity: Decimal = Field(default=Decimal("1"), gt=0)
+    currency: str = Field(default="MNT", min_length=3, max_length=3)
+    valid_from: date | None = None
+    valid_to: date | None = None
+
+
+class DiscountTierRequestInput(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=240)
+    minimum_spend: Decimal = Field(default=Decimal("0"), ge=0)
+    discount_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+
+
+class CostCenterRequestInput(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=240)
+    parent_id: int | None = None
+
+
+class TaxTemplateRequestInput(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=240)
+    direction: Literal["sales", "purchase"] = "sales"
+    rates: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+
+
 class DocumentLineInput(BaseModel):
     item_id: int | None = None
     warehouse_id: int | None = None
@@ -149,6 +196,8 @@ class DocumentLineInput(BaseModel):
     description: str = Field(min_length=1, max_length=1000)
     quantity: Decimal = Decimal("1")
     rate: Decimal = Decimal("0")
+    discount_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0)
     tax_rate: Decimal = Decimal("0")
     data: dict[str, Any] = Field(default_factory=dict)
 
@@ -223,6 +272,37 @@ async def _document_lines(db: AsyncSession, document_id: int) -> list[ERPDocumen
     return (await db.execute(select(ERPDocumentLine).where(ERPDocumentLine.document_id == document_id).order_by(ERPDocumentLine.position))).scalars().all()
 
 
+MASTER_OPERATION_LITERAL = Literal[
+    "party", "item", "supplier", "purchase_item", "supplier_price_list", "customer", "sales_catalog_item",
+    "customer_discount_tier", "warehouse", "item_sku", "uom", "reorder_rule", "chart_account", "cost_center", "tax_template",
+]
+
+
+def _validate_master_payload(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    forced_party_type = {"supplier": "supplier", "customer": "customer"}.get(operation)
+    if operation in {"party", "supplier", "customer"}:
+        return PartyInput.model_validate({**payload, "party_type": forced_party_type or payload.get("party_type", "customer")}).model_dump(mode="json")
+    if operation in {"item", "purchase_item", "sales_catalog_item", "item_sku"}:
+        return ItemInput.model_validate({**payload, "item_type": payload.get("item_type", "product")}).model_dump(mode="json")
+    if operation == "warehouse":
+        return WarehouseInput.model_validate(payload).model_dump(mode="json")
+    if operation == "chart_account":
+        return AccountInput.model_validate(payload).model_dump(mode="json")
+    if operation == "uom":
+        return UomRequestInput.model_validate(payload).model_dump(mode="json")
+    if operation == "reorder_rule":
+        return ReorderRuleRequestInput.model_validate(payload).model_dump(mode="json")
+    if operation == "supplier_price_list":
+        return PriceListRequestInput.model_validate(payload).model_dump(mode="json")
+    if operation == "customer_discount_tier":
+        return DiscountTierRequestInput.model_validate(payload).model_dump(mode="json")
+    if operation == "cost_center":
+        return CostCenterRequestInput.model_validate(payload).model_dump(mode="json")
+    if operation == "tax_template":
+        return TaxTemplateRequestInput.model_validate(payload).model_dump(mode="json")
+    raise HTTPException(status_code=422, detail={"code": "erp_invalid_master_request_operation", "operation": operation})
+
+
 def _definition_out(definition: ERPFormDefinition) -> dict[str, Any]:
     return {"id": definition.id, "operation": definition.operation, "version": definition.version, "status": definition.status,
             "fields": definition.fields or [], "workflow": definition.workflow or {}, "published_at": definition.published_at,
@@ -288,10 +368,18 @@ async def _write_document_lines(db: AsyncSession, document: ERPDocument, raw_lin
     existing = await _document_lines(db, document.id)
     for line in existing:
         await db.delete(line)
-    lines, net, tax, total = calculate_lines([line.model_dump() for line in raw_lines])
+    try:
+        lines, net, tax, total = calculate_lines([line.model_dump() for line in raw_lines])
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={"code": "erp_invalid_document_line", "message": str(error)}) from error
     document.net_total, document.tax_total, document.grand_total = net, tax, total
     document.outstanding_amount = total if document.document_type in {"sales_invoice", "purchase_invoice"} else Decimal("0")
-    db.add_all([ERPDocumentLine(document_id=document.id, **line) for line in lines])
+    db.add_all([ERPDocumentLine(
+        document_id=document.id, item_id=line.get("item_id"), warehouse_id=line.get("warehouse_id"), account_id=line.get("account_id"),
+        description=line["description"], quantity=line["quantity"], rate=line["rate"], amount=line["amount"],
+        discount_percent=line["discount_percent"], discount_amount=line["discount_amount"], tax_rate=line["tax_rate"],
+        tax_amount=line["tax_amount"], position=line["position"], data=line.get("data") or {},
+    ) for line in lines])
 
 
 def _normalise_import_rows(entity: str, rows: list[dict[str, Any]], source_format: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -358,8 +446,13 @@ async def meta(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends
     organization = await _organization(db, actor)
     fields = (await db.execute(select(ERPCustomField).where(ERPCustomField.organization_id == actor.organization_id, ERPCustomField.is_active.is_(True)))).scalars().all()
     role_rows = (await db.execute(select(ERPAccessRole).where(ERPAccessRole.organization_id == actor.organization_id))).scalars().all()
+    config_rows = (await db.execute(select(ERPModuleConfig).where(ERPModuleConfig.organization_id == actor.organization_id))).scalars().all()
+    modules = module_settings(organization.settings)
+    if config_rows:
+        modules = {name: False for name in ERP_MODULES}
+        modules.update({row.module: bool(row.enabled) for row in config_rows})
     return {
-        "modules": module_settings(organization.settings), "module_labels": ERP_MODULES, "document_modules": DOCUMENT_MODULES,
+        "modules": modules, "module_labels": ERP_MODULES, "document_modules": DOCUMENT_MODULES,
         "actions": sorted(VALID_ACTIONS), "currency": organization.base_currency,
         "custom_fields": [{"resource": field.resource, "key": field.key, "label": field.label, "field_type": field.field_type,
             "options": field.options, "required": field.required, "posting_relevant": field.posting_relevant} for field in fields],
@@ -441,40 +534,84 @@ async def _materialize_master_request(db: AsyncSession, actor: ActorContext, req
         return request.materialized_entity_type or request.operation, request.materialized_entity_id
     payload = dict(request.payload or {})
     custom = payload.pop("custom", {})
-    if request.operation == "party":
-        data = PartyInput.model_validate({**payload, "custom": custom})
+    operation = request.operation
+    if operation in {"party", "supplier", "customer"}:
+        data = PartyInput.model_validate({**payload, "party_type": {"supplier": "supplier", "customer": "customer"}.get(operation, payload.get("party_type", "customer")), "custom": custom})
         exists = await db.scalar(select(ERPParty.id).where(ERPParty.organization_id == actor.organization_id, ERPParty.code == data.code))
         if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
-        item = ERPParty(organization_id=actor.organization_id, **data.model_dump())
-    elif request.operation == "item":
+        entity = ERPParty(organization_id=actor.organization_id, **data.model_dump())
+    elif operation in {"item", "purchase_item", "sales_catalog_item", "item_sku"}:
         data = ItemInput.model_validate({**payload, "custom": custom})
         exists = await db.scalar(select(ERPItem.id).where(ERPItem.organization_id == actor.organization_id, ERPItem.code == data.code))
         if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
-        item = ERPItem(organization_id=actor.organization_id, **data.model_dump())
+        entity = ERPItem(organization_id=actor.organization_id, **data.model_dump())
+    elif operation == "warehouse":
+        data = WarehouseInput.model_validate(payload)
+        exists = await db.scalar(select(ERPWarehouse.id).where(ERPWarehouse.organization_id == actor.organization_id, ERPWarehouse.code == data.code))
+        if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
+        entity = ERPWarehouse(organization_id=actor.organization_id, **data.model_dump())
+    elif operation == "chart_account":
+        data = AccountInput.model_validate(payload)
+        exists = await db.scalar(select(ERPAccount.id).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.code == data.code))
+        if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
+        entity = ERPAccount(organization_id=actor.organization_id, **data.model_dump())
+    elif operation == "uom":
+        data = UomRequestInput.model_validate(payload)
+        exists = await db.scalar(select(ERPUnitOfMeasure.id).where(ERPUnitOfMeasure.organization_id == actor.organization_id, ERPUnitOfMeasure.code == data.code))
+        if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
+        entity = ERPUnitOfMeasure(organization_id=actor.organization_id, **data.model_dump())
+    elif operation == "reorder_rule":
+        data = ReorderRuleRequestInput.model_validate(payload)
+        entity = ERPReorderRule(organization_id=actor.organization_id, **data.model_dump())
+    elif operation == "supplier_price_list":
+        data = PriceListRequestInput.model_validate(payload)
+        exists = await db.scalar(select(ERPPriceList.id).where(ERPPriceList.organization_id == actor.organization_id, ERPPriceList.code == data.code))
+        if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
+        entity = ERPPriceList(organization_id=actor.organization_id, code=data.code, name=data.name, party_id=data.party_id, currency=data.currency.upper(), valid_from=data.valid_from, valid_to=data.valid_to)
+    elif operation == "customer_discount_tier":
+        data = DiscountTierRequestInput.model_validate(payload)
+        exists = await db.scalar(select(ERPDiscountTier.id).where(ERPDiscountTier.organization_id == actor.organization_id, ERPDiscountTier.code == data.code))
+        if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
+        entity = ERPDiscountTier(organization_id=actor.organization_id, **data.model_dump())
+    elif operation == "cost_center":
+        data = CostCenterRequestInput.model_validate(payload)
+        exists = await db.scalar(select(ERPCostCenter.id).where(ERPCostCenter.organization_id == actor.organization_id, ERPCostCenter.code == data.code))
+        if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
+        entity = ERPCostCenter(organization_id=actor.organization_id, **data.model_dump())
+    elif operation == "tax_template":
+        data = TaxTemplateRequestInput.model_validate(payload)
+        exists = await db.scalar(select(ERPTaxTemplate.id).where(ERPTaxTemplate.organization_id == actor.organization_id, ERPTaxTemplate.code == data.code))
+        if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
+        entity = ERPTaxTemplate(organization_id=actor.organization_id, code=data.code, name=data.name, direction=data.direction)
     else:
         raise HTTPException(status_code=422, detail={"code": "erp_invalid_master_request_operation"})
-    db.add(item); await db.flush()
-    request.materialized_entity_type, request.materialized_entity_id = request.operation, item.id
-    return request.operation, item.id
+    db.add(entity); await db.flush()
+    if operation == "supplier_price_list":
+        data = PriceListRequestInput.model_validate(payload)
+        db.add(ERPPriceListEntry(price_list_id=entity.id, item_id=data.item_id, minimum_quantity=data.minimum_quantity, rate=data.rate))
+    if operation == "tax_template":
+        for rate in TaxTemplateRequestInput.model_validate(payload).rates:
+            db.add(ERPTaxTemplateRate(tax_template_id=entity.id, name=str(rate.get("name") or "VAT"), rate=Decimal(str(rate.get("rate", 0))), account_id=rate.get("account_id")))
+    request.materialized_entity_type, request.materialized_entity_id = operation, entity.id
+    return operation, entity.id
 
 
 @router.get("/master-requests/{operation}")
-async def list_master_requests(operation: Literal["party", "item"], db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def list_master_requests(operation: MASTER_OPERATION_LITERAL, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, operation, "view")
     rows = (await db.execute(select(ERPMasterRequest).where(ERPMasterRequest.organization_id == actor.organization_id, ERPMasterRequest.operation == operation).order_by(ERPMasterRequest.created_at.desc()))).scalars().all()
     scopes = await capability_scopes(db, actor, operation, "view")
     rows = [row for row in rows if all(all(scope_allows(scopes, {dimension: value}) for value in values) for dimension, values in (row.scope or {}).items())]
-    return [{"id": row.id, "operation": row.operation, "definition_version": row.definition_version, "workflow_state": row.workflow_state, "payload": row.payload, "scope": row.scope, "version": row.version, "materialized_entity_type": row.materialized_entity_type, "materialized_entity_id": row.materialized_entity_id, "created_at": row.created_at} for row in rows]
+    return [{"id": row.id, "operation": row.operation, "definition_version": row.definition_version, "workflow_state": row.workflow_state, "status": row.workflow_state, "payload": row.payload, "payload_json": row.payload, "scope": row.scope, "version": row.version, "requested_by": row.requested_by_account_id, "approved_by": row.approved_by_account_id, "approved_at": row.approved_at, "materialized_entity_type": row.materialized_entity_type, "materialized_entity_id": row.materialized_entity_id, "created_at": row.created_at} for row in rows]
 
 
 @router.post("/master-requests/{operation}", status_code=status.HTTP_201_CREATED)
-async def create_master_request(operation: Literal["party", "item"], data: MasterRequestInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def create_master_request(operation: MASTER_OPERATION_LITERAL, data: MasterRequestInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, operation, "create")
     definition = await ensure_definition(db, actor.organization_id, operation, actor.account_id)
     form_values = validate_form_values(definition.fields or [], data.custom, "master")
     # Validate shape on creation, but do not materialize the ERP master until approved.
-    payload = {**data.payload, "custom": form_values}
-    (PartyInput if operation == "party" else ItemInput).model_validate(payload)
+    payload = {**_validate_master_payload(operation, data.payload), "custom": form_values}
     request_scope = await _validated_scope(db, actor.organization_id, data.scope)
     scopes = await capability_scopes(db, actor, operation, "create")
     if any(not scope_allows(scopes, {dimension: value}) for dimension, values in request_scope.items() for value in values): raise HTTPException(status_code=403, detail={"code": "erp_scope_denied"})
@@ -484,7 +621,7 @@ async def create_master_request(operation: Literal["party", "item"], data: Maste
     db.add(request); await db.flush()
     await record_workflow_transition(db, actor, entity_type="master_request", entity_id=request.id, operation=operation, definition_version=definition.version, from_state=None, to_state=request.workflow_state)
     await db.commit()
-    return {"id": request.id, "operation": request.operation, "definition_version": request.definition_version, "workflow_state": request.workflow_state, "version": request.version}
+    return {"id": request.id, "operation": request.operation, "definition_version": request.definition_version, "workflow_state": request.workflow_state, "status": request.workflow_state, "payload": request.payload, "payload_json": request.payload, "requested_by": request.requested_by_account_id, "version": request.version}
 
 
 @router.post("/master-requests/by-id/{request_id}/transition")
@@ -500,10 +637,12 @@ async def transition_master_request(request_id: int, data: WorkflowTransitionInp
     await _workflow_transition_allowed(db, actor, definition.workflow or {}, request.workflow_state, data.to_state, request.requested_by_account_id)
     before = request.workflow_state
     request.workflow_state, request.version = data.to_state, request.version + 1
-    if data.to_state == "approved": await _materialize_master_request(db, actor, request)
+    if data.to_state == "approved":
+        await _materialize_master_request(db, actor, request)
+        request.approved_by_account_id, request.approved_at = actor.account_id, datetime.now(timezone.utc)
     await record_workflow_transition(db, actor, entity_type="master_request", entity_id=request.id, operation=request.operation, definition_version=request.definition_version, from_state=before, to_state=data.to_state, comment=data.comment)
     await db.commit()
-    return {"id": request.id, "workflow_state": request.workflow_state, "version": request.version, "materialized_entity_type": request.materialized_entity_type, "materialized_entity_id": request.materialized_entity_id}
+    return {"id": request.id, "workflow_state": request.workflow_state, "status": request.workflow_state, "version": request.version, "requested_by": request.requested_by_account_id, "approved_by": request.approved_by_account_id, "approved_at": request.approved_at, "payload_json": request.payload, "materialized_entity_type": request.materialized_entity_type, "materialized_entity_id": request.materialized_entity_id}
 
 
 @router.put("/admin/modules")
@@ -513,6 +652,13 @@ async def update_modules(data: ModulesInput, db: AsyncSession = Depends(get_db),
     if unknown:
         raise HTTPException(status_code=422, detail={"code": "erp_unknown_module", "modules": sorted(unknown)})
     organization = await _organization(db, actor)
+    for name in ERP_MODULES:
+        row = await db.scalar(select(ERPModuleConfig).where(ERPModuleConfig.organization_id == organization.id, ERPModuleConfig.module == name).with_for_update())
+        if row is None:
+            row = ERPModuleConfig(organization_id=organization.id, module=name)
+            db.add(row)
+        row.enabled = bool(data.modules.get(name, False))
+        row.updated_by_account_id = actor.account_id
     settings = {**(organization.settings or {}), MODULE_SETTINGS_KEY: {name: bool(data.modules.get(name, False)) for name in ERP_MODULES}}
     organization.settings = settings
     await bootstrap_organization(db, organization.id)
@@ -863,18 +1009,45 @@ async def create_account(data: AccountInput, db: AsyncSession = Depends(get_db),
 
 
 @router.get("/documents/{document_type}")
-async def list_documents(document_type: str, document_status: str | None = Query(default=None, alias="status"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def list_documents(
+    document_type: str,
+    document_status: str | None = Query(default=None, alias="status"),
+    view: Literal["all", "drafts", "pending_approval", "approved", "archived"] = "all",
+    search: str | None = None,
+    party_id: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor),
+):
     if document_type not in DOCUMENT_TYPES:
         raise HTTPException(status_code=404, detail="Unknown ERP document type")
     await require_capability(db, actor, document_type, "view")
     statement = select(ERPDocument).where(ERPDocument.organization_id == actor.organization_id, ERPDocument.document_type == document_type)
     if document_status:
         statement = statement.where(ERPDocument.status == document_status)
+    if party_id is not None:
+        statement = statement.where(ERPDocument.party_id == party_id)
+    if date_from is not None:
+        statement = statement.where(ERPDocument.posting_date >= date_from)
+    if date_to is not None:
+        statement = statement.where(ERPDocument.posting_date <= date_to)
+    if view == "archived":
+        statement = statement.where(ERPDocument.archived_at.is_not(None))
+    else:
+        statement = statement.where(ERPDocument.archived_at.is_(None))
     docs = (await db.execute(statement.order_by(ERPDocument.posting_date.desc(), ERPDocument.id.desc()))).scalars().all()
     scopes = await capability_scopes(db, actor, document_type, "view")
     visible = []
     for doc in docs:
         lines = await _document_lines(db, doc.id)
+        if search and search.casefold() not in f"{doc.number} {(doc.payload or {}).get('title', '')}".casefold():
+            continue
+        if view == "drafts" and doc.workflow_state != "draft":
+            continue
+        if view == "pending_approval" and (doc.workflow_state in {"draft", "approved", "rejected", "cancelled"} or doc.status in {"submitted", "cancelled"}):
+            continue
+        if view == "approved" and doc.workflow_state != "approved" and doc.status not in {"approved", "submitted"}:
+            continue
         if scope_allows(scopes, {"project_ids": doc.project_id, "branch_codes": (doc.payload or {}).get("branch_code")}) and all(scope_allows(scopes, {"warehouse_ids": line.warehouse_id}) for line in lines):
             visible.append(document_out(doc, lines))
     return visible
@@ -1010,6 +1183,34 @@ async def approve_document(document_id: int, db: AsyncSession = Depends(get_db),
     return document_out(document)
 
 
+@router.post("/documents/by-id/{document_id}/archive")
+async def archive_document(document_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    document = await _document(db, actor, document_id)
+    await require_capability(db, actor, document.document_type, "archive")
+    if document.archived_at:
+        return document_out(document)
+    document.archived_at = datetime.now(timezone.utc)
+    document.archived_by_account_id = actor.account_id
+    document.version += 1
+    await record_change(db, actor=actor, topic="erp", aggregate_type=f"erp_{document.document_type}", aggregate_id=document.id, operation="archived", version=document.version, after={"status": document.status})
+    await db.commit()
+    return document_out(document)
+
+
+@router.post("/documents/by-id/{document_id}/restore")
+async def restore_document(document_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    document = await _document(db, actor, document_id)
+    await require_capability(db, actor, document.document_type, "archive")
+    if not document.archived_at:
+        return document_out(document)
+    document.archived_at = None
+    document.archived_by_account_id = None
+    document.version += 1
+    await record_change(db, actor=actor, topic="erp", aggregate_type=f"erp_{document.document_type}", aggregate_id=document.id, operation="restored", version=document.version, after={"status": document.status})
+    await db.commit()
+    return document_out(document)
+
+
 @router.post("/documents/by-id/{document_id}/submit")
 async def submit_document(document_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     document = await _document(db, actor, document_id)
@@ -1055,7 +1256,7 @@ async def amend(document_id: int, db: AsyncSession = Depends(get_db), actor: Act
     await db.flush()
     source_lines = await _document_lines(db, source.id)
     db.add_all([ERPDocumentLine(document_id=amendment.id, item_id=line.item_id, warehouse_id=line.warehouse_id, account_id=line.account_id,
-        description=line.description, quantity=line.quantity, rate=line.rate, amount=line.amount, tax_rate=line.tax_rate, tax_amount=line.tax_amount,
+        description=line.description, quantity=line.quantity, rate=line.rate, amount=line.amount, discount_percent=line.discount_percent, discount_amount=line.discount_amount, tax_rate=line.tax_rate, tax_amount=line.tax_amount,
         position=line.position, data=line.data) for line in source_lines])
     await db.commit()
     return document_out(amendment, await _document_lines(db, amendment.id))
@@ -1080,7 +1281,7 @@ async def convert_document(document_id: int, target_type: str, db: AsyncSession 
     source_lines = await _document_lines(db, source.id)
     db.add_all([ERPDocumentLine(
         document_id=converted.id, item_id=line.item_id, warehouse_id=line.warehouse_id, account_id=line.account_id,
-        description=line.description, quantity=line.quantity, rate=line.rate, amount=line.amount, tax_rate=line.tax_rate,
+        description=line.description, quantity=line.quantity, rate=line.rate, amount=line.amount, discount_percent=line.discount_percent, discount_amount=line.discount_amount, tax_rate=line.tax_rate,
         tax_amount=line.tax_amount, position=line.position, data=line.data,
     ) for line in source_lines])
     converted.net_total, converted.tax_total, converted.grand_total = source.net_total, source.tax_total, source.grand_total
@@ -1114,14 +1315,37 @@ async def bom_costing(document_id: int, margin_percent: Decimal | None = Query(d
 @router.get("/reports/dashboard")
 async def dashboard(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "erp_dashboard", "view")
-    docs = (await db.execute(select(ERPDocument).where(ERPDocument.organization_id == actor.organization_id, ERPDocument.status == "submitted"))).scalars().all()
-    amounts = {kind: sum((as_money(doc.grand_total) for doc in docs if doc.document_type == kind), Decimal("0")) for kind in DOCUMENT_TYPES}
-    stock_value = await db.scalar(select(func.coalesce(func.sum(ERPStockLedgerEntry.value_delta), 0)).where(ERPStockLedgerEntry.organization_id == actor.organization_id))
-    open_queries = await db.scalar(select(func.count(ERPDocument.id)).where(ERPDocument.organization_id == actor.organization_id, ERPDocument.document_type == "support_ticket", ERPDocument.status.not_in(["cancelled", "submitted"])))
-    return {"currency": (await _organization(db, actor)).base_currency, "revenue": str(amounts["sales_invoice"]), "expenses": str(amounts["purchase_invoice"]),
-        "profit": str(amounts["sales_invoice"] - amounts["purchase_invoice"]), "cash_collected": str(amounts["payment_entry"]),
-        "inventory_value": str(stock_value), "open_customer_queries": open_queries, "payroll_total": str(amounts["payroll_run"]),
-        "production_cost": str(amounts["work_order"]), "upcoming_maintenance": sum(1 for doc in docs if doc.document_type == "maintenance_schedule")}
+    approved_statuses = ["approved", "submitted"]
+    async def total_for(document_type: str) -> Decimal:
+        value = await db.scalar(select(func.coalesce(func.sum(ERPDocument.grand_total), 0)).where(
+            ERPDocument.organization_id == actor.organization_id, ERPDocument.document_type == document_type,
+            ERPDocument.status.in_(approved_statuses), ERPDocument.archived_at.is_(None),
+        ))
+        return as_money(value or 0)
+    revenue = await total_for("sales_invoice")
+    purchase_expenses = await total_for("purchase_invoice")
+    payroll_total = await total_for("payroll_run")
+    cash_collected = await total_for("payment_entry")
+    inventory_value = await db.scalar(select(func.coalesce(func.sum(ERPInventoryLevel.inventory_value), 0)).where(ERPInventoryLevel.organization_id == actor.organization_id))
+    if inventory_value is None:
+        inventory_value = await db.scalar(select(func.coalesce(func.sum(ERPStockLedgerEntry.value_delta), 0)).where(ERPStockLedgerEntry.organization_id == actor.organization_id))
+    open_support = await db.scalar(select(func.count(ERPDocument.id)).where(
+        ERPDocument.organization_id == actor.organization_id, ERPDocument.document_type == "support_ticket",
+        ERPDocument.status.not_in(["cancelled", "submitted"]), ERPDocument.archived_at.is_(None),
+    )) or 0
+    pending_approvals = await db.scalar(select(func.count(ERPDocument.id)).where(
+        ERPDocument.organization_id == actor.organization_id, ERPDocument.document_type != "support_ticket",
+        ERPDocument.status.not_in(["cancelled", "submitted"]), ERPDocument.workflow_state.not_in(["draft", "approved", "rejected", "cancelled"]),
+        ERPDocument.archived_at.is_(None),
+    )) or 0
+    open_queries = int(open_support) + int(pending_approvals)
+    docs = (await db.execute(select(ERPDocument).where(ERPDocument.organization_id == actor.organization_id, ERPDocument.status.in_(approved_statuses), ERPDocument.archived_at.is_(None)))).scalars().all()
+    maintenance = sum(1 for doc in docs if doc.document_type == "maintenance_schedule")
+    return {"currency": (await _organization(db, actor)).base_currency, "revenue": str(revenue), "expenses": str(purchase_expenses + payroll_total),
+        "profit": str(revenue - purchase_expenses - payroll_total), "cash_collected": str(cash_collected),
+        "inventory_value": str(as_money(inventory_value or 0)), "open_customer_queries": open_queries, "open_queries": open_queries,
+        "open_queries_breakdown": {"support_tickets": int(open_support), "pending_approvals": int(pending_approvals)}, "payroll_total": str(payroll_total),
+        "production_cost": str(await total_for("work_order")), "upcoming_maintenance": maintenance}
 
 
 @router.get("/reports/stock-balance")

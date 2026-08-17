@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -27,6 +29,18 @@
   --shadow-sm: 0 1px 2px rgba(14, 20, 28, 0.05);
   --shadow-md: 0 14px 38px rgba(23, 31, 43, 0.12);
   --radius: 14px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --settings-card-padding: var(--space-6);
+  --settings-section-gap: var(--space-6);
+  --settings-control-gap: var(--space-4);
+  --font-brand: 'Montserrat', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   font:
@@ -36,6 +50,7 @@
     "Segoe UI",
     sans-serif;
   font-optical-sizing: auto;
+  font-family: var(--font-brand);
 }
 
 /* Planning, check-in, and analytics workspaces */
@@ -1276,6 +1291,21 @@ a {
   gap: 18px;
   grid-template-columns: minmax(210px, 0.85fr) minmax(220px, 1fr);
   margin-top: 9px;
+}
+.clock-summary-skeleton {
+  min-height: 116px;
+}
+.clock-time-skeleton {
+  border-radius: 10px;
+  display: block;
+  height: clamp(2.8rem, 7vw, 4.6rem);
+  width: min(290px, 75%);
+}
+.clock-copy-skeleton {
+  border-radius: 6px;
+  display: block;
+  height: 14px;
+  width: min(260px, 100%);
 }
 .clock-time {
   font-size: clamp(2.8rem, 7vw, 4.6rem);
@@ -2943,6 +2973,184 @@ a {
   justify-content: center;
   padding: 0;
   width: 32px;
+}
+
+/* Settings system: one spacing scale, one section treatment, one action rhythm. */
+.settings-page {
+  --settings-surface: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-soft));
+  --settings-control-height: 40px;
+}
+
+.settings-content {
+  display: grid;
+  gap: var(--settings-section-gap);
+}
+
+.settings-content > .panel,
+.settings-content > .settings-embedded {
+  margin: 0;
+}
+
+.settings-content > .panel,
+.settings-content > .settings-embedded,
+.settings-page .erp-builder-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.settings-content > .settings-embedded {
+  background: var(--settings-surface);
+  padding: var(--settings-card-padding);
+}
+
+.settings-content > .settings-embedded,
+.settings-content > .panel {
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-page .panel-heading,
+.settings-page .settings-embedded-heading {
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.settings-page .panel-heading {
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.settings-page .panel-heading h2,
+.settings-page .settings-embedded-heading h3 {
+  color: var(--color-text);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.settings-page .panel-heading h2 {
+  font-size: 1.05rem;
+  line-height: 1.3;
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+.settings-page .panel-heading p,
+.settings-page .settings-embedded-heading p {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  margin: 0;
+  max-width: 680px;
+}
+
+.settings-page .settings-embedded-heading {
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.settings-page .settings-embedded-heading h3 {
+  font-size: 0.98rem;
+  line-height: 1.35;
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+.settings-page .settings-embedded > div:not(.settings-embedded-heading) > .page-header,
+.settings-page .settings-embedded .page-header {
+  margin: 0 0 var(--space-6);
+}
+
+.settings-page .account-admin,
+.settings-page .branding-settings,
+.settings-page .erp-admin-panel {
+  padding: var(--settings-card-padding);
+}
+
+.settings-page .branding-grid,
+.settings-page .integration-grid,
+.settings-page .erp-module-grid,
+.settings-page .account-create-form {
+  gap: var(--settings-control-gap);
+}
+
+.settings-page .branding-grid,
+.settings-page .erp-module-grid {
+  margin-top: 0;
+}
+
+.settings-page .account-create-form {
+  margin: 0 0 var(--space-6);
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.settings-page .account-create-form label,
+.settings-page .settings-embedded label {
+  gap: var(--space-2);
+}
+
+.settings-page .account-create-form input,
+.settings-page .account-create-form select,
+.settings-page .settings-embedded input:not([type='checkbox']):not([type='file']),
+.settings-page .settings-embedded select,
+.settings-page .settings-embedded textarea {
+  min-height: var(--settings-control-height);
+}
+
+.settings-page .account-list {
+  margin-top: 0;
+}
+
+.settings-page .account-list article {
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+}
+
+.settings-page .role-editor {
+  gap: var(--space-2);
+}
+
+.settings-page .settings-embedded [class~='justify-end'],
+.settings-page .settings-embedded [class~='items-end'] > [class~='flex'] {
+  border-top: 1px solid var(--color-border-soft);
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+}
+
+.settings-page .settings-embedded [class~='justify-end'] {
+  justify-content: flex-end;
+}
+
+.settings-page .integration-panel {
+  min-height: 88px;
+  padding: var(--space-4) var(--space-5);
+}
+
+.settings-page .settings-embedded .bg-surface.border.rounded-xl {
+  box-shadow: none;
+}
+
+@media (max-width: 720px) {
+  .settings-content > .settings-embedded {
+    padding: var(--space-5);
+  }
+
+  .settings-page .account-create-form {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .settings-page .account-create-form button {
+    justify-self: start;
+  }
+
+  .settings-page .account-list article {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-page .account-list article > div:last-child {
+    align-self: stretch;
+  }
 }
 
 @media (max-width: 480px) {
@@ -4671,6 +4879,42 @@ a {
   height: 3px;
   position: absolute;
   width: 3px;
+}
+
+/* Task ranges sit beneath the day numbers and are split at each week boundary. */
+.today-mini-calendar .mini-month-grid {
+  position: relative;
+}
+.today-mini-calendar .mini-range-layer {
+  bottom: 0;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(6, minmax(0, 1fr));
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 1;
+}
+.today-mini-calendar .mini-range-bar {
+  align-self: end;
+  background: var(--color-accent);
+  border-radius: 0;
+  display: block;
+  height: 5px;
+  margin-bottom: calc(3px + var(--mini-lane) * 7px);
+  min-width: 3px;
+  opacity: 0.82;
+}
+.today-mini-calendar .mini-range-bar.range-start {
+  border-bottom-left-radius: 9999px;
+  border-top-left-radius: 9999px;
+}
+.today-mini-calendar .mini-range-bar.range-end {
+  border-bottom-right-radius: 9999px;
+  border-top-right-radius: 9999px;
 }
 
 /* Today companion stays outside the dashboard flow, so interval details remain readable. */
@@ -7495,6 +7739,14 @@ a {
 .erp-create-field.checkbox input { width: auto; }
 @media (max-width: 1100px) { .erp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 620px) { .erp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .erp-document-list > article { align-items: flex-start; } }
+.erp-workbench-filters { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.erp-workbench-filters input { min-width: 210px; flex: 1; max-width: 320px; }
+.erp-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; margin-top: 7px; }
+.erp-line-editor { display: grid; grid-template-columns: minmax(180px, 2fr) repeat(4, minmax(84px, 1fr)) auto auto; align-items: center; gap: 8px; margin: 8px 0; }
+.erp-line-editor input { min-width: 0; }
+.erp-form-total { display: flex; justify-content: flex-end; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid var(--color-border); margin-top: 12px; }
+@media (max-width: 900px) { .erp-line-editor { grid-template-columns: minmax(150px, 2fr) repeat(2, minmax(84px, 1fr)); } .erp-line-editor strong { justify-self: end; } }
+@media (max-width: 620px) { .erp-workbench-filters { align-items: stretch; } .erp-workbench-filters input { max-width: none; width: 100%; } .erp-line-editor { grid-template-columns: 1fr 1fr; } .erp-line-editor input:first-child { grid-column: 1 / -1; } .erp-row-actions { flex-wrap: wrap; } }
 
 /* ERP access role and operation builders */
 .erp-builder-panel { padding: 20px; }

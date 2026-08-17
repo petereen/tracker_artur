@@ -5,6 +5,7 @@ import { EnterpriseDashboardPage } from "./EnterpriseDashboardPage";
 const mocks = vi.hoisted(() => ({
   clock: { data: undefined as any, refetch: vi.fn() },
   action: { mutate: vi.fn(), isPending: false },
+  agenda: { data: { tasks: [] as any[], entries: [] as any[] } },
 }));
 
 vi.mock("../api/enterprise", () => ({
@@ -14,7 +15,7 @@ vi.mock("../api/enterprise", () => ({
   useTodayCheckin: () => ({ data: {} }),
   useStartCheckin: () => ({ mutateAsync: vi.fn() }),
   useSubmitCheckin: () => ({ mutateAsync: vi.fn() }),
-  useTodayAgenda: () => ({ data: { tasks: [], entries: [] } }),
+  useTodayAgenda: () => mocks.agenda,
   useEnterpriseTasks: () => ({ data: [] }),
   useWorkerDirectory: () => ({ data: [] }),
   useUpdateEnterpriseTask: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
@@ -80,6 +81,37 @@ describe("Today work-hour timer", () => {
     vi.useRealTimers();
   });
 
+  it("holds the timer and companion behind the clock loading gate", () => {
+    mocks.clock.data = undefined;
+    const { container, rerender } = renderDashboard();
+
+    expect(container.querySelector(".clock-time")).not.toBeInTheDocument();
+    expect(container.querySelector(".today-companion img")).not.toBeInTheDocument();
+    expect(container.querySelector(".clock-summary-skeleton")).toBeInTheDocument();
+
+    const active = {
+        id: 10,
+        employee_id: 1,
+        local_work_date: "2026-08-11",
+        project_id: null,
+        task_id: null,
+        entry_type: "work",
+        mode: "in_person",
+        started_at: new Date(Date.now() - 5_000).toISOString(),
+        ended_at: null,
+      };
+    mocks.clock.data = {
+      active,
+      today_entries: [active],
+      timezone: "Asia/Ulaanbaatar",
+      server_time: new Date(Date.now()).toISOString(),
+    };
+    rerender(<EnterpriseDashboardPage />);
+
+    expect(container.querySelector(".clock-time")).toHaveTextContent("00:00:05");
+    expect(container.querySelector(".today-companion img")).toHaveAttribute("src", "/oyuns-working.gif");
+  });
+
   it("increments from a stable server sync every second", () => {
     const { container } = renderDashboard();
     expect(container.querySelector(".clock-time")).toHaveTextContent("00:00:05");
@@ -143,5 +175,21 @@ describe("Today work-hour timer", () => {
     rerender(<EnterpriseDashboardPage />);
     fireEvent.click(document.querySelector("button.clock-button.office") as HTMLButtonElement);
     expect(mocks.action.mutate).toHaveBeenLastCalledWith({ action: "start", mode: "in_person" });
+  });
+
+  it("renders date-range tasks as split bars with rounded visible ends", () => {
+    mocks.agenda.data = {
+      tasks: [
+        { id: 101, title: "Visible range", start_at: "2026-08-03T09:00:00Z", deadline_at: "2026-08-06T17:00:00Z" },
+        { id: 102, title: "Clipped range", start_at: "2026-07-20T09:00:00Z", deadline_at: "2026-08-02T17:00:00Z" },
+      ],
+      entries: [],
+    };
+
+    const { container } = renderDashboard();
+    const bars = [...container.querySelectorAll<HTMLElement>(".mini-range-bar")];
+    expect(bars).toHaveLength(2);
+    expect(bars.some((bar) => bar.classList.contains("range-start") && bar.classList.contains("range-end"))).toBe(true);
+    expect(bars.some((bar) => !bar.classList.contains("range-start") && bar.classList.contains("range-end"))).toBe(true);
   });
 });

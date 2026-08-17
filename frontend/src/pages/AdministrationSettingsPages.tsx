@@ -35,7 +35,7 @@ function SettingsPage({ title, description, children }: { title: string; descrip
       <div>{SETTINGS.map(({ to, title: itemTitle, icon: Icon }) => <NavLink key={to} to={to}><Icon size={15} /><span>{itemTitle}</span></NavLink>)}</div>
     </nav>
     <div className="view-toolbar settings-page-heading"><div><h2>{title}</h2><p>{description}</p></div></div>
-    {children}
+    <div className="settings-content">{children}</div>
   </div>
 }
 

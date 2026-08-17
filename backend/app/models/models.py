@@ -1493,6 +1493,22 @@ class ERPFormDefinition(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class ERPModuleConfig(Base):
+    __tablename__ = "erp_module_configs"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "module", name="uq_erp_module_config_org_module"),
+        Index("ix_erp_module_configs_org_enabled", "organization_id", "enabled"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    module = Column(String(40), nullable=False)
+    enabled = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    updated_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class ERPMasterRequest(Base):
     __tablename__ = "erp_master_requests"
     __table_args__ = (Index("ix_erp_master_requests_org_operation_state", "organization_id", "operation", "workflow_state"),)
@@ -1505,6 +1521,8 @@ class ERPMasterRequest(Base):
     workflow_state = Column(String(64), nullable=False, server_default="draft", default="draft")
     scope = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     requested_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    approved_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    approved_at = Column(DateTime(timezone=True))
     materialized_entity_type = Column(String(40))
     materialized_entity_id = Column(Integer)
     version = Column(Integer, nullable=False, server_default="1", default=1)
@@ -1620,6 +1638,128 @@ class ERPWarehouse(Base):
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
 
 
+class ERPUnitOfMeasure(Base):
+    __tablename__ = "erp_units_of_measure"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_uom_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(32), nullable=False)
+    name = Column(Text, nullable=False)
+    symbol = Column(String(16))
+    decimal_places = Column(Integer, nullable=False, server_default="2", default=2)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPPriceList(Base):
+    __tablename__ = "erp_price_lists"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_price_list_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(64), nullable=False)
+    name = Column(Text, nullable=False)
+    party_id = Column(Integer, ForeignKey("erp_parties.id", ondelete="SET NULL"))
+    price_list_type = Column(String(24), nullable=False, server_default="supplier", default="supplier")
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    valid_from = Column(Date)
+    valid_to = Column(Date)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPPriceListEntry(Base):
+    __tablename__ = "erp_price_list_entries"
+    __table_args__ = (UniqueConstraint("price_list_id", "item_id", name="uq_erp_price_list_entry_item"),)
+
+    id = Column(Integer, primary_key=True)
+    price_list_id = Column(Integer, ForeignKey("erp_price_lists.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("erp_items.id", ondelete="CASCADE"), nullable=False)
+    uom_id = Column(Integer, ForeignKey("erp_units_of_measure.id", ondelete="SET NULL"))
+    minimum_quantity = Column(Numeric(18, 6), nullable=False, server_default="1", default=1)
+    rate = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+
+
+class ERPDiscountTier(Base):
+    __tablename__ = "erp_discount_tiers"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_discount_tier_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(64), nullable=False)
+    name = Column(Text, nullable=False)
+    minimum_spend = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    discount_percent = Column(Numeric(9, 4), nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPReorderRule(Base):
+    __tablename__ = "erp_reorder_rules"
+    __table_args__ = (UniqueConstraint("organization_id", "item_id", "warehouse_id", name="uq_erp_reorder_rule_item_warehouse"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("erp_items.id", ondelete="CASCADE"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("erp_warehouses.id", ondelete="CASCADE"), nullable=False)
+    reorder_level = Column(Numeric(18, 6), nullable=False, server_default="0", default=0)
+    reorder_quantity = Column(Numeric(18, 6), nullable=False, server_default="0", default=0)
+    maximum_level = Column(Numeric(18, 6))
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+
+
+class ERPCostCenter(Base):
+    __tablename__ = "erp_cost_centers"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_cost_center_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("erp_cost_centers.id", ondelete="SET NULL"))
+    code = Column(String(64), nullable=False)
+    name = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+
+
+class ERPTaxTemplate(Base):
+    __tablename__ = "erp_tax_templates"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_tax_template_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(64), nullable=False)
+    name = Column(Text, nullable=False)
+    direction = Column(String(16), nullable=False, server_default="sales", default="sales")
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+
+
+class ERPTaxTemplateRate(Base):
+    __tablename__ = "erp_tax_template_rates"
+
+    id = Column(Integer, primary_key=True)
+    tax_template_id = Column(Integer, ForeignKey("erp_tax_templates.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    rate = Column(Numeric(9, 4), nullable=False, server_default="0", default=0)
+    account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+
+
+class ERPInventoryLevel(Base):
+    __tablename__ = "erp_inventory_levels"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "item_id", "warehouse_id", name="uq_erp_inventory_level_item_warehouse"),
+        Index("ix_erp_inventory_levels_org_warehouse", "organization_id", "warehouse_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(Integer, ForeignKey("erp_items.id", ondelete="CASCADE"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("erp_warehouses.id", ondelete="CASCADE"), nullable=False)
+    quantity = Column(Numeric(18, 6), nullable=False, server_default="0", default=0)
+    valuation_rate = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    inventory_value = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class ERPAccount(Base):
     __tablename__ = "erp_accounts"
     __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_account_org_code"),)
@@ -1640,6 +1780,7 @@ class ERPDocument(Base):
         UniqueConstraint("organization_id", "document_type", "number", name="uq_erp_document_number"),
         Index("ix_erp_documents_org_type_status", "organization_id", "document_type", "status"),
         Index("ix_erp_documents_party", "organization_id", "party_id", "posting_date"),
+        Index("ix_erp_documents_org_archive", "organization_id", "archived_at"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -1665,6 +1806,8 @@ class ERPDocument(Base):
     submitted_at = Column(DateTime(timezone=True))
     submitted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     cancelled_at = Column(DateTime(timezone=True))
+    archived_at = Column(DateTime(timezone=True))
+    archived_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     version = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
@@ -1682,6 +1825,8 @@ class ERPDocumentLine(Base):
     description = Column(Text, nullable=False)
     quantity = Column(Numeric(18, 6), nullable=False, server_default="1", default=1)
     rate = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    discount_percent = Column(Numeric(9, 4), nullable=False, server_default="0", default=0)
+    discount_amount = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
     amount = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
     tax_rate = Column(Numeric(9, 4), nullable=False, server_default="0", default=0)
     tax_amount = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)

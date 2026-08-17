@@ -15,6 +15,8 @@ def test_erp_schema_registers_tenant_scoped_configurable_records():
         "erp_parties", "erp_items", "erp_warehouses", "erp_accounts", "erp_documents", "erp_document_lines",
         "erp_general_ledger_entries", "erp_stock_ledger_entries", "erp_posting_periods", "erp_approval_rules", "erp_payment_allocations", "erp_import_batches",
         "erp_team_roles", "erp_form_definitions", "erp_master_requests", "erp_workflow_transitions",
+        "erp_module_configs", "erp_units_of_measure", "erp_price_lists", "erp_price_list_entries", "erp_discount_tiers",
+        "erp_reorder_rules", "erp_cost_centers", "erp_tax_templates", "erp_tax_template_rates", "erp_inventory_levels",
     }
     assert required.issubset(Base.metadata.tables)
     assert Base.metadata.tables["erp_documents"].c.organization_id.nullable is False
@@ -39,6 +41,17 @@ def test_erp_document_line_totals_are_decimal_and_tax_exclusive():
     assert total == Decimal("32.8438")
 
 
+def test_erp_document_line_totals_apply_discount_before_vat():
+    lines, net, tax, total = calculate_lines([{
+        "description": "Discounted widget", "quantity": "2", "rate": "100", "discount_percent": "10", "tax_rate": "10",
+    }])
+    assert lines[0]["gross_amount"] == Decimal("200.0000")
+    assert lines[0]["discount_amount"] == Decimal("20.0000")
+    assert net == Decimal("180.0000")
+    assert tax == Decimal("18.0000")
+    assert total == Decimal("198.0000")
+
+
 def test_erp_routes_are_versioned_and_cover_meta_masters_documents_and_reports():
     paths = {route.path for route in app.routes}
     assert {
@@ -48,6 +61,7 @@ def test_erp_routes_are_versioned_and_cover_meta_masters_documents_and_reports()
         "/v1/erp/accounting/posting-periods", "/v1/erp/admin/approval-rules", "/v1/erp/stock/policy",
         "/v1/erp/imports/preview", "/v1/erp/imports/csv", "/v1/erp/imports/{batch_id}/commit", "/v1/erp/manufacturing/boms/{document_id}/costing",
         "/v1/erp/catalog", "/v1/erp/admin/forms/{operation}", "/v1/erp/admin/forms/{operation}/publish", "/v1/erp/master-requests/{operation}", "/v1/erp/documents/by-id/{document_id}/transition",
+        "/v1/erp/documents/by-id/{document_id}/archive", "/v1/erp/documents/by-id/{document_id}/restore",
     }.issubset(paths)
 
 
@@ -58,7 +72,7 @@ def test_every_broad_mvp_document_domain_has_an_explicit_module():
 
 def test_erp_builder_catalog_is_server_owned_and_covers_documents_and_master_requests():
     catalog = operation_catalog()
-    assert {"sales_order", "purchase_order", "stock_entry", "party", "item"}.issubset(catalog["operations"])
+    assert {"sales_order", "purchase_order", "stock_entry", "party", "item", "supplier", "customer", "uom", "tax_template"}.issubset(catalog["operations"])
     assert {"reference", "multi_select", "money"}.issubset(catalog["field_types"])
     assert {"warehouse_ids", "project_ids", "branch_codes"}.issubset(catalog["scope_dimensions"])
 

@@ -8,6 +8,7 @@ import { EnterpriseShell } from './EnterpriseShell'
 vi.mock('../api/enterprise', () => ({
   useActor: () => ({ data: { name: 'Manager', email: 'manager@example.com', roles: ['manager'], locale: 'mn', avatar_url: null } }),
   useBrandingSettings: () => ({ data: {} }),
+  useERPMetadata: () => ({ data: { modules: {}, module_labels: {}, document_modules: {}, actions: [], currency: 'MNT', custom_fields: [], roles: [], module_visibility_is_not_authorization: true }, isLoading: false }),
   useEnterpriseLogout: () => ({ mutate: vi.fn() }),
   useWorkerDirectory: () => ({ data: [] }),
   useWorkerPerformance: () => ({ data: {} }),

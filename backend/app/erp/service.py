@@ -27,6 +27,8 @@ from app.models.models import (
     ERPPostingPeriod,
     ERPSequence,
     ERPStockLedgerEntry,
+    ERPInventoryLevel,
+    ERPItem,
     Organization,
     TeamMember,
     UserAccount,
@@ -45,7 +47,7 @@ ERP_MODULES = {
     "assets_maintenance": "Assets & maintenance",
 }
 MODULE_SETTINGS_KEY = "erp_modules"
-VALID_ACTIONS = frozenset({"view", "create", "edit", "approve", "submit", "cancel", "export", "administer"})
+VALID_ACTIONS = frozenset({"view", "create", "edit", "approve", "submit", "cancel", "archive", "export", "administer"})
 DOCUMENT_MODULES = {
     "journal_entry": "accounting", "payment_entry": "accounting", "budget": "accounting", "fiscal_period": "accounting",
     "quotation": "selling", "sales_order": "selling", "delivery": "selling", "sales_invoice": "selling",
@@ -58,7 +60,16 @@ DOCUMENT_MODULES = {
     "asset": "assets_maintenance", "maintenance_schedule": "assets_maintenance", "maintenance_visit": "assets_maintenance",
 }
 DOCUMENT_TYPES = frozenset(DOCUMENT_MODULES)
-MASTER_OPERATIONS = frozenset({"party", "item"})
+MASTER_OPERATIONS = frozenset({
+    "party", "item", "supplier", "purchase_item", "supplier_price_list", "customer", "sales_catalog_item",
+    "customer_discount_tier", "warehouse", "item_sku", "uom", "reorder_rule", "chart_account", "cost_center", "tax_template",
+})
+MASTER_OPERATION_MODULES = {
+    "party": None, "item": None, "supplier": "buying", "purchase_item": "buying", "supplier_price_list": "buying",
+    "customer": "selling", "sales_catalog_item": "selling", "customer_discount_tier": "selling", "warehouse": "stock",
+    "item_sku": "stock", "uom": "stock", "reorder_rule": "stock", "chart_account": "accounting", "cost_center": "accounting",
+    "tax_template": "accounting",
+}
 OPERATION_TYPES = DOCUMENT_TYPES | MASTER_OPERATIONS
 FORM_FIELD_TYPES = frozenset({"text", "long_text", "number", "money", "date", "datetime", "boolean", "select", "multi_select", "reference"})
 FORM_SECTIONS = frozenset({"header", "line", "master"})
@@ -74,10 +85,10 @@ DEFAULT_ACCOUNTS = (
 )
 ROLE_TEMPLATES = {
     "erp_administrator": ("ERP administrator", [("*", "*")]),
-    "erp_accountant": ("Accountant", [("accounts", "*"), ("journal_entry", "*"), ("payment_entry", "*"), ("budget", "*"), ("sales_invoice", "view"), ("purchase_invoice", "view")]),
-    "erp_sales": ("Sales", [("parties", "*"), ("items", "view"), ("quotation", "*"), ("sales_order", "*"), ("delivery", "*"), ("sales_invoice", "create"), ("sales_invoice", "view"), ("lead", "*"), ("opportunity", "*")]),
-    "erp_purchasing": ("Purchasing", [("parties", "*"), ("items", "view"), ("supplier_quotation", "*"), ("purchase_order", "*"), ("purchase_receipt", "*"), ("purchase_invoice", "create"), ("purchase_invoice", "view")]),
-    "erp_stock": ("Stock controller", [("items", "*"), ("warehouses", "*"), ("stock", "view"), ("stock_entry", "*"), ("stock_reconciliation", "*")]),
+    "erp_accountant": ("Accountant", [("accounts", "*"), ("chart_account", "*"), ("cost_center", "*"), ("tax_template", "*"), ("journal_entry", "*"), ("payment_entry", "*"), ("budget", "*"), ("sales_invoice", "view"), ("purchase_invoice", "view")]),
+    "erp_sales": ("Sales", [("parties", "*"), ("customer", "*"), ("customer_discount_tier", "*"), ("items", "view"), ("sales_catalog_item", "*"), ("quotation", "*"), ("sales_order", "*"), ("delivery", "*"), ("sales_invoice", "create"), ("sales_invoice", "view"), ("lead", "*"), ("opportunity", "*")]),
+    "erp_purchasing": ("Purchasing", [("parties", "*"), ("supplier", "*"), ("supplier_price_list", "*"), ("purchase_item", "*"), ("items", "view"), ("supplier_quotation", "*"), ("purchase_order", "*"), ("purchase_receipt", "*"), ("purchase_invoice", "create"), ("purchase_invoice", "view")]),
+    "erp_stock": ("Stock controller", [("items", "*"), ("item_sku", "*"), ("warehouses", "*"), ("warehouse", "*"), ("uom", "*"), ("reorder_rule", "*"), ("stock", "view"), ("stock_entry", "*"), ("stock_reconciliation", "*")]),
     "erp_hr_payroll": ("Payroll administrator", [("salary_structure", "*"), ("payroll_run", "*"), ("salary_slip", "*"), ("payroll", "*")]),
     "erp_support": ("Support", [("support_ticket", "*"), ("service_level_agreement", "*")]),
     "erp_manufacturing": ("Manufacturing", [("bill_of_materials", "*"), ("work_order", "*"), ("job_card", "*")]),
@@ -108,10 +119,16 @@ def operation_catalog() -> dict[str, Any]:
     operations: dict[str, Any] = {}
     for key, module in DOCUMENT_MODULES.items():
         operations[key] = {"key": key, "kind": "document", "module": module, "label": key.replace("_", " ").title(), "sections": ["header", "line"], "posting_capable": key in {"journal_entry", "payment_entry", "sales_invoice", "purchase_invoice", "delivery", "purchase_receipt", "stock_entry", "stock_reconciliation", "payroll_run", "salary_slip", "asset"}}
-    operations.update({
-        "party": {"key": "party", "kind": "master_request", "module": None, "label": "Party request", "sections": ["master"], "posting_capable": False},
-        "item": {"key": "item", "kind": "master_request", "module": None, "label": "Item request", "sections": ["master"], "posting_capable": False},
-    })
+    labels = {
+        "party": (None, "Party request"), "item": (None, "Item request"), "supplier": ("buying", "Create supplier / vendor"),
+        "purchase_item": ("buying", "Create purchase item"), "supplier_price_list": ("buying", "Create supplier price list"),
+        "customer": ("selling", "Create customer"), "sales_catalog_item": ("selling", "Create sales catalog item"),
+        "customer_discount_tier": ("selling", "Create customer discount tier"), "warehouse": ("stock", "Create warehouse"),
+        "item_sku": ("stock", "Create item / SKU"), "uom": ("stock", "Create unit of measure"), "reorder_rule": ("stock", "Create reorder rule"),
+        "chart_account": ("accounting", "Create chart of accounts entry"), "cost_center": ("accounting", "Create cost center"),
+        "tax_template": ("accounting", "Create tax template"),
+    }
+    operations.update({key: {"key": key, "kind": "master_request", "module": module, "label": label, "sections": ["master"], "posting_capable": False} for key, (module, label) in labels.items()})
     return {"operations": operations, "actions": sorted(VALID_ACTIONS), "field_types": sorted(FORM_FIELD_TYPES), "sections": sorted(FORM_SECTIONS), "reference_targets": sorted(REFERENCE_TARGETS), "scope_dimensions": sorted(SCOPE_DIMENSIONS)}
 
 
@@ -399,9 +416,19 @@ def calculate_lines(lines: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
         quantity = Decimal(str(source.get("quantity", 1)))
         rate = as_money(source.get("rate", 0))
         tax_rate = Decimal(str(source.get("tax_rate", 0)))
-        amount = as_money(quantity * rate)
+        discount_percent = Decimal(str(source.get("discount_percent", 0)))
+        discount_amount_input = as_money(source.get("discount_amount", 0))
+        if quantity < 0 or rate < 0 or tax_rate < 0 or tax_rate > 100 or discount_percent < 0 or discount_percent > 100 or discount_amount_input < 0:
+            raise ValueError("line values must be non-negative and rates must not exceed 100")
+        if discount_percent and discount_amount_input:
+            raise ValueError("use either discount_percent or discount_amount")
+        gross_amount = as_money(quantity * rate)
+        discount_amount = discount_amount_input if discount_amount_input else as_money(gross_amount * discount_percent / Decimal("100"))
+        if discount_amount > gross_amount:
+            raise ValueError("discount cannot exceed gross amount")
+        amount = as_money(gross_amount - discount_amount)
         tax_amount = as_money(amount * tax_rate / Decimal("100"))
-        result.append({**source, "quantity": quantity, "rate": rate, "amount": amount, "tax_rate": tax_rate, "tax_amount": tax_amount, "position": position})
+        result.append({**source, "quantity": quantity, "rate": rate, "gross_amount": gross_amount, "discount_percent": discount_percent, "discount_amount": discount_amount, "amount": amount, "tax_rate": tax_rate, "tax_amount": tax_amount, "position": position})
         net += amount
         tax += tax_amount
     return result, as_money(net), as_money(tax), as_money(net + tax)
@@ -545,10 +572,22 @@ async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorCon
             movement = str((document.payload or {}).get("movement_type", "receipt"))
             direction = -1 if document.document_type == "delivery" or (document.document_type == "stock_entry" and movement == "issue") else 1
             quantity = line.quantity * direction
+            item = await db.get(ERPItem, line.item_id)
+            valuation_rate = as_money(item.standard_cost if item else line.rate)
             db.add(ERPStockLedgerEntry(
                 organization_id=document.organization_id, document_id=document.id, item_id=line.item_id, warehouse_id=line.warehouse_id,
-                posting_date=document.posting_date, quantity_delta=quantity, value_delta=as_money(line.amount * direction), valuation_rate=line.rate,
+                posting_date=document.posting_date, quantity_delta=quantity, value_delta=as_money(line.amount * direction), valuation_rate=valuation_rate,
             ))
+            level = await db.scalar(select(ERPInventoryLevel).where(
+                ERPInventoryLevel.organization_id == document.organization_id, ERPInventoryLevel.item_id == line.item_id,
+                ERPInventoryLevel.warehouse_id == line.warehouse_id,
+            ).with_for_update())
+            if level is None:
+                level = ERPInventoryLevel(organization_id=document.organization_id, item_id=line.item_id, warehouse_id=line.warehouse_id)
+                db.add(level)
+            level.quantity = level.quantity + quantity
+            level.valuation_rate = valuation_rate
+            level.inventory_value = as_money(level.quantity * valuation_rate)
     if document.document_type == "payment_entry":
         await apply_payment_allocations(db, document)
     document.status = "submitted"
@@ -568,6 +607,14 @@ async def cancel_document(db: AsyncSession, document: ERPDocument) -> None:
         organization_id=row.organization_id, document_id=document.id, item_id=row.item_id, warehouse_id=row.warehouse_id,
         posting_date=document.posting_date, quantity_delta=-row.quantity_delta, value_delta=-row.value_delta, valuation_rate=row.valuation_rate,
     ) for row in stock_entries])
+    for row in stock_entries:
+        level = await db.scalar(select(ERPInventoryLevel).where(
+            ERPInventoryLevel.organization_id == row.organization_id, ERPInventoryLevel.item_id == row.item_id,
+            ERPInventoryLevel.warehouse_id == row.warehouse_id,
+        ).with_for_update())
+        if level:
+            level.quantity = level.quantity - row.quantity_delta
+            level.inventory_value = as_money(level.quantity * level.valuation_rate)
     allocations = (await db.execute(select(ERPPaymentAllocation).where(ERPPaymentAllocation.payment_document_id == document.id))).scalars().all()
     for allocation in allocations:
         invoice = await db.scalar(select(ERPDocument).where(ERPDocument.id == allocation.invoice_document_id).with_for_update())
@@ -587,9 +634,11 @@ def document_out(document: ERPDocument, lines: list[ERPDocumentLine] | None = No
         "net_total": str(document.net_total), "tax_total": str(document.tax_total), "grand_total": str(document.grand_total),
         "outstanding_amount": str(document.outstanding_amount), "payload": document.payload, "custom": document.custom,
         "definition_version": document.definition_version, "workflow_state": document.workflow_state, "version": document.version,
+        "archived_at": document.archived_at.isoformat() if document.archived_at else None,
     }
     if lines is not None:
         result["lines"] = [{"id": line.id, "item_id": line.item_id, "warehouse_id": line.warehouse_id, "account_id": line.account_id,
             "description": line.description, "quantity": str(line.quantity), "rate": str(line.rate), "amount": str(line.amount),
+            "discount_percent": str(line.discount_percent), "discount_amount": str(line.discount_amount),
             "tax_rate": str(line.tax_rate), "tax_amount": str(line.tax_amount), "data": line.data} for line in lines]
     return result

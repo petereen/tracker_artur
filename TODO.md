@@ -1,6 +1,15 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Standardize settings module spacing, section cards, headers, controls, and action alignment (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/index.css`)
+- [x] Render continuous multi-day task ranges with clipped rounded ends and collision-free lanes in the Today mini calendar (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
+- [x] Add OYUNS ERP core-operations migration and normalized operational entities (`backend/app/models/models.py`, `backend/alembic/versions`)
+- [x] Add contextual buying/selling/stock/accounting master-data request schemas, permissions, materializers, and audit responses (`backend/app/erp`)
+- [x] Add discount-aware buying/selling document workflows, branch conversions, archive/restore, and inventory synchronization (`backend/app/erp`)
+- [x] Make ERP module configuration and KPI dashboard state-aware (`backend/app/erp`, `frontend/src/api/enterprise.ts`)
+- [x] Build contextual master-data and document workbench UI with responsive OYUNS styling (`frontend/src/pages/ERPWorkspacePage.tsx`, `frontend/src/components`)
+- [x] Localize ERP operations and validation copy in Mongolian, English, and Russian (`frontend/src/i18n.ts`)
+- [x] Add ERP core-operations backend, frontend, accessibility, migration, and end-to-end coverage (`backend/tests`, `frontend/src`, `frontend/e2e`)
 - [x] Fix checklist item creation 500 caused by millisecond timestamps exceeding the database position precision (`frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseTasksPage.test.ts`)
 - [x] Add explicit light/dark borders, pill containers, action-button spacing, and focus-within feedback to Collaboration inputs (`frontend/src/index.css`)
 - [x] Modernize task-detail Collaboration inputs and icon-only actions (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
@@ -179,6 +188,8 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Render continuous multi-day task ranges with clipped rounded ends and collision-free lanes in the Today mini calendar (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
+- [x] Prevent the Today clock companion and elapsed timer from flashing before clock state hydration (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`)
 - [x] Fix checklist item creation 500 caused by millisecond timestamps exceeding the database position precision (`frontend/src/api/enterprise.ts`, `frontend/src/pages/EnterpriseTasksPage.test.ts`)
 - [x] Add explicit light/dark borders, pill containers, action-button spacing, and focus-within feedback to Collaboration inputs (`frontend/src/index.css`)
 - [x] Modernize task-detail Collaboration inputs and icon-only actions (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
@@ -408,6 +419,9 @@ Collaboration
 - [x] Build enterprise dashboard, project workspace, task views, clock, capacity, reports, and OKRs UI
 - [x] Add OYUNS web drafts, browser voice transcription, and Google Calendar connection contracts
 - [x] Add focused backend enterprise/RBAC/compatibility tests and frontend semantics/accessibility tests
+
+## Completed Tasks
+- [x] Deliver OYUNS ERP Core Operations MVP: normalized masters, contextual requests, buying/selling workbench, approval-aware KPIs, archive/restore, MN/EN/RU copy, and regression coverage (`backend/app/erp`, `backend/app/models/models.py`, `frontend/src`)
 - [x] Run available focused validation and document environment-dependent checks
 - [ ] Add database-backed migration/replay/concurrency tests and full browser acceptance coverage
 - [ ] Rehearse migration, load, backup/restore, and failure recovery against production-shaped infrastructure

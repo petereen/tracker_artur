@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { motion } from "motion/react";
 import {
   Archive,
@@ -69,6 +69,26 @@ function formatLocalTime(value: string, timezone: string) {
 
 const toInputDateTime = (value: string | null) =>
   value ? new Date(value).toISOString().slice(0, 16) : "";
+
+type MiniCalendarRange = {
+  id: string;
+  title: string;
+  week: number;
+  start: number;
+  end: number;
+  lane: number;
+  laneCount: number;
+  isStart: boolean;
+  isEnd: boolean;
+};
+
+function dateKey(value: string | null | undefined) {
+  return value?.slice(0, 10) || null;
+}
+
+function localDateKey(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
 
 function DelegatedTaskSheet({
   task,
@@ -332,11 +352,60 @@ export function EnterpriseDashboardPage() {
       return day;
     });
   }, []);
+  const miniCalendarTasks = useEnterpriseTasks(undefined, {
+    date_from: localDateKey(monthDays[0]),
+    date_to: localDateKey(monthDays[monthDays.length - 1]),
+  });
+  const miniCalendarRanges = useMemo(() => {
+    const visibleStart = localDateKey(monthDays[0]);
+    const visibleEnd = localDateKey(monthDays[monthDays.length - 1]);
+    const dayIndex = new Map(monthDays.map((day, index) => [localDateKey(day), index]));
+    const segments: MiniCalendarRange[] = [];
+
+    const tasks = new Map<number, EnterpriseTask>();
+    [...(miniCalendarTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
+    tasks.forEach((task) => {
+      if (!task.start_at || !task.deadline_at) return;
+      let taskStart = dateKey(task.start_at)!;
+      let taskEnd = dateKey(task.deadline_at)!;
+      if (taskEnd < taskStart) [taskStart, taskEnd] = [taskEnd, taskStart];
+      if (taskEnd < visibleStart || taskStart > visibleEnd) return;
+      const start = Math.max(0, dayIndex.get(taskStart) ?? (taskStart < visibleStart ? 0 : -1));
+      const end = Math.min(monthDays.length - 1, dayIndex.get(taskEnd) ?? (taskEnd > visibleEnd ? monthDays.length - 1 : -1));
+      if (start < 0 || end < start) return;
+      for (let week = Math.floor(start / 7); week <= Math.floor(end / 7); week += 1) {
+        const segmentStart = Math.max(start, week * 7);
+        const segmentEnd = Math.min(end, week * 7 + 6);
+        const overlapping = segments.filter((segment) => segment.week === week && segment.start <= segmentEnd && segment.end >= segmentStart);
+        let lane = 0;
+        while (overlapping.some((segment) => segment.lane === lane)) lane += 1;
+        segments.push({
+          id: `${task.id}-${week}`,
+          title: task.title,
+          week,
+          start: segmentStart % 7,
+          end: segmentEnd % 7,
+          lane,
+          laneCount: 0,
+          isStart: segmentStart === start && taskStart >= visibleStart,
+          isEnd: segmentEnd === end && taskEnd <= visibleEnd,
+        });
+      }
+    });
+
+    for (let week = 0; week < 6; week += 1) {
+      const weekSegments = segments.filter((segment) => segment.week === week);
+      const laneCount = Math.max(1, ...weekSegments.map((segment) => segment.lane + 1));
+      weekSegments.forEach((segment) => { segment.laneCount = laneCount; });
+    }
+    return segments;
+  }, [agenda.data?.tasks, miniCalendarTasks.data, monthDays]);
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES);
   const isSupervisor = roles.some((role) =>
     ["admin", "manager", "team_lead"].includes(role),
   );
   const active = clock.data?.active;
+  const clockReady = Boolean(clock.data);
   const [clientNow, setClientNow] = useState(() => Date.now());
   const serverClockRef = useRef<{ serverTimeMs: number; clientTimeMs: number } | null>(null);
   const clockRefetchRef = useRef(clock.refetch);
@@ -349,6 +418,15 @@ export function EnterpriseDashboardPage() {
       serverClockRef.current = { serverTimeMs, clientTimeMs: Date.now() };
     }
   }, [serverTime]);
+  useEffect(() => {
+    if (!clockReady) return;
+    // Prime both states so a later clock action can switch companions without
+    // introducing a network request during the visible state transition.
+    ["/oyuns-working.gif", "/oyuns-sleeping.gif"].forEach((src) => {
+      const image = new Image();
+      image.src = src;
+    });
+  }, [clockReady]);
   const activeTimerKey = active
     ? `${active.id}:${active.entry_type}:${active.started_at}`
     : null;
@@ -389,13 +467,20 @@ export function EnterpriseDashboardPage() {
     };
   }, [activeTimerKey]);
   const serverClock = serverClockRef.current;
+  const initialServerTime = serverTime ? new Date(serverTime).getTime() : NaN;
   const clockNow = serverClock
     ? serverClock.serverTimeMs + (clientNow - serverClock.clientTimeMs)
-    : clientNow;
+    : Number.isFinite(initialServerTime)
+      ? initialServerTime
+      : clientNow;
   const recoveredClock = Boolean(active && (active.local_work_date !== today || clockNow - new Date(active.started_at).getTime() > 16 * 60 * 60 * 1000));
   const working = active?.entry_type === "work";
   const onBreak = active?.entry_type === "break";
-  const companionSrc = working ? "/oyuns-working.gif" : "/oyuns-sleeping.gif";
+  const companionSrc = clockReady
+    ? working
+      ? "/oyuns-working.gif"
+      : "/oyuns-sleeping.gif"
+    : null;
   const todayEntries = clock.data?.today_entries ?? [];
   const todayWorkSeconds = todayEntries.reduce((total, entry) => {
     if (entry.entry_type !== "work") return total;
@@ -517,55 +602,62 @@ export function EnterpriseDashboardPage() {
             {active ? "LIVE" : "OFF"}
           </span>
         </div>
-        <div className="clock-summary">
-          <div className="clock-time" aria-live="polite">
-            {formatDuration(todayWorkSeconds)}
+        {clockReady ? (
+          <div className="clock-summary">
+            <div className="clock-time" aria-live="polite">
+              {formatDuration(todayWorkSeconds)}
+            </div>
+            <p>
+              {working
+                ? `${active?.mode === "remote" ? "Remote" : "Оффис"} горимоор ажиллаж байна.`
+                : onBreak
+                  ? "Завсарлагын хугацаа ажилласан цагт орохгүй."
+                  : "Telegram болон вэбийн цагийн төлөв үргэлж ижил байна."}
+            </p>
+            <div
+              className="clock-details"
+              aria-label="Өнөөдрийн цагийн дэлгэрэнгүй"
+            >
+              {todayEntries.map((entry) => {
+                const seconds = Math.max(
+                  0,
+                  ((entry.ended_at
+                    ? new Date(entry.ended_at).getTime()
+                    : clockNow) -
+                    new Date(entry.started_at).getTime()) /
+                    1000,
+                );
+                return (
+                  <div key={entry.id}>
+                    {entry.entry_type === "break"
+                      ? "Завсарлага"
+                      : entry.mode === "remote"
+                        ? "Remote"
+                        : "Оффис"}
+                    :{" "}
+                    {formatLocalTime(
+                      entry.started_at,
+                      clock.data?.timezone ?? "Asia/Ulaanbaatar",
+                    )}
+                    –
+                    {entry.ended_at
+                      ? formatLocalTime(
+                          entry.ended_at,
+                          clock.data?.timezone ?? "Asia/Ulaanbaatar",
+                        )
+                      : "одоо"}{" "}
+                    ({formatDuration(seconds)})
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <p>
-            {working
-              ? `${active?.mode === "remote" ? "Remote" : "Оффис"} горимоор ажиллаж байна.`
-              : onBreak
-                ? "Завсарлагын хугацаа ажилласан цагт орохгүй."
-                : "Telegram болон вэбийн цагийн төлөв үргэлж ижил байна."}
-          </p>
-          <div
-            className="clock-details"
-            aria-label="Өнөөдрийн цагийн дэлгэрэнгүй"
-          >
-            {todayEntries.map((entry) => {
-              const seconds = Math.max(
-                0,
-                ((entry.ended_at
-                  ? new Date(entry.ended_at).getTime()
-                  : clockNow) -
-                  new Date(entry.started_at).getTime()) /
-                  1000,
-              );
-              return (
-                <div key={entry.id}>
-                  {entry.entry_type === "break"
-                    ? "Завсарлага"
-                    : entry.mode === "remote"
-                      ? "Remote"
-                      : "Оффис"}
-                  :{" "}
-                  {formatLocalTime(
-                    entry.started_at,
-                    clock.data?.timezone ?? "Asia/Ulaanbaatar",
-                  )}
-                  –
-                  {entry.ended_at
-                    ? formatLocalTime(
-                        entry.ended_at,
-                        clock.data?.timezone ?? "Asia/Ulaanbaatar",
-                      )
-                    : "одоо"}{" "}
-                  ({formatDuration(seconds)})
-                </div>
-              );
-            })}
+        ) : (
+          <div className="clock-summary clock-summary-skeleton" aria-label="Цагийн төлөв ачаалж байна">
+            <span className="skeleton clock-time-skeleton" />
+            <span className="skeleton clock-copy-skeleton" />
           </div>
-        </div>
+        )}
         {recoveredClock && <div className="clock-recovery" role="alert"><strong>Өмнөх сесс сэргээгдлээ.</strong><span>Энэ цагийн бүртгэл удаан нээлттэй эсвэл өөр өдрөөс үргэлжилж байна. Одоогийн төлөвөө шалгаад үргэлжлүүлэх эсвэл дуусгана уу.</span></div>}
         <div className="clock-actions">
           {!active && (
@@ -627,12 +719,14 @@ export function EnterpriseDashboardPage() {
             </>
           )}
         </div>
-        <div
-          className={`today-companion ${working ? "working" : "sleeping"}`}
-          aria-hidden="true"
-        >
-          <img src={companionSrc} alt="" />
-        </div>
+        {companionSrc && (
+          <div
+            className={`today-companion ${working ? "working" : "sleeping"}`}
+            aria-hidden="true"
+          >
+            <img src={companionSrc} alt="" />
+          </div>
+        )}
       </section>
       <section className="daily-focus panel">
         <span className="eyebrow">Өнөөдрийн төвлөрөл</span>
@@ -877,6 +971,7 @@ export function EnterpriseDashboardPage() {
               const count =
                 (agenda.data?.tasks ?? []).filter(
                   (task: any) =>
+                    (!task.start_at || !task.deadline_at) &&
                     (task.start_at || task.deadline_at)?.slice(0, 10) === local,
                 ).length +
                 (agenda.data?.entries ?? []).filter(
@@ -892,6 +987,22 @@ export function EnterpriseDashboardPage() {
                 </span>
               );
             })}
+            <div className="mini-range-layer" aria-label="Олон өдрийн даалгаврууд">
+              {miniCalendarRanges.map((range) => (
+                <span
+                  className={`mini-range-bar${range.isStart ? " range-start" : ""}${range.isEnd ? " range-end" : ""}`}
+                  key={range.id}
+                  title={range.title}
+                  aria-label={range.title}
+                  style={{
+                    "--mini-lane": range.lane,
+                    "--mini-lane-count": range.laneCount,
+                    gridColumn: `${range.start + 1} / ${range.end + 2}`,
+                    gridRow: range.week + 1,
+                  } as CSSProperties}
+                />
+              ))}
+            </div>
           </div>
         </aside>
       </section>
