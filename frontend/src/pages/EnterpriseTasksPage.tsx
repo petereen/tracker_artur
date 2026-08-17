@@ -100,6 +100,26 @@ const taskPlace = (task: EnterpriseTask) =>
       ? "Remote"
       : "Байршилгүй");
 
+const taskCreatorName = (task: EnterpriseTask) => task.creator_name || "Тодорхойгүй";
+
+const formatTaskCreatedAt = (createdAt: string) =>
+  new Date(createdAt).toLocaleString("mn-MN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+function TaskCreatorAvatar({ task, large = false }: { task: EnterpriseTask; large?: boolean }) {
+  const name = taskCreatorName(task);
+  return (
+    <span className={`task-creator-avatar ${large ? "large" : ""}`} aria-hidden="true">
+      {task.creator_avatar_url ? <img src={task.creator_avatar_url} alt="" /> : name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
 const statusLabel = (status: WorkflowStatus) =>
   COLUMNS.find((column) => column.key === status)?.label || status;
 
@@ -154,6 +174,10 @@ function TaskCard({
             {taskPlace(task)}
           </span>
           <span>{task.project_name || "Төсөл сонгоогүй"}</span>
+          <span className="task-creator-fact" title={`Үүсгэсэн: ${taskCreatorName(task)}`}>
+            <TaskCreatorAvatar task={task} />
+            Үүсгэсэн: {taskCreatorName(task)}
+          </span>
         </div>
       </button>
       {subtasks.length > 0 && (
@@ -1234,6 +1258,18 @@ export function EnterpriseTasksPage() {
                   <X />
                 </button>
               </div>
+              {selected && (
+                <section className="task-creator-meta" aria-label="Даалгавар үүсгэсэн мэдээлэл">
+                  <TaskCreatorAvatar task={selected} large />
+                  <div>
+                    <span className="eyebrow">Даалгаврын зохиогч</span>
+                    <strong>
+                      Үүсгэсэн: {taskCreatorName(selected)} <span aria-hidden="true">•</span>{" "}
+                      <time dateTime={selected.created_at}>{formatTaskCreatedAt(selected.created_at)}</time>
+                    </strong>
+                  </div>
+                </section>
+              )}
               <form className="sheet-form" onSubmit={selected ? save : submit}>
                 {selected?.parent_task_id ? simplifiedFormFields : formFields}
                 <UserTagPicker label="Хянагч" value={form.reviewer_ids} users={workers.data || []} onChange={(reviewer_ids) => setForm({ ...form, reviewer_ids })} />

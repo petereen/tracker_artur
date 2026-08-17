@@ -44,8 +44,10 @@ export interface EnterpriseTask {
   version: number
   is_archived: boolean
   is_overdue: boolean
+  created_at: string
   created_by_id: number | null
   creator_name?: string | null
+  creator_avatar_url?: string | null
   can_manage_collaboration?: boolean
 }
 

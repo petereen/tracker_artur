@@ -301,6 +301,10 @@ def _task_out(item: Task) -> dict:
     }
 
 
+def _employee_avatar_url(employee: Employee | None) -> str | None:
+    return (employee.metadata_json or {}).get("avatar_url") if employee else None
+
+
 def _can_manage_task_collaboration(task: Task, actor: ActorContext) -> bool:
     return actor.has_any_role(*MANAGEMENT_ROLES) or (
         actor.employee_id is not None and task.created_by_id == actor.employee_id
@@ -1220,10 +1224,12 @@ async def list_tasks(
     for reviewer in reviewer_rows:
         reviewers.setdefault(reviewer.task_id, []).append(reviewer.employee_id)
     employee_ids = {row.assignee_id for row in rows if row.assignee_id} | {row.reviewer_id for row in rows if row.reviewer_id} | {row.created_by_id for row in rows if row.created_by_id} | {item.employee_id for item in assignment_rows} | {item.employee_id for item in reviewer_rows}
-    people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all()} if employee_ids else {}
+    people_rows = (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all() if employee_ids else []
+    people = {row.id: row.name for row in people_rows}
+    avatars = {row.id: _employee_avatar_url(row) for row in people_rows}
     project_ids = {row.project_id for row in rows if row.project_id}
     projects = {row.id: row.name for row in (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()} if project_ids else {}
-    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "reviewer_name": people.get(row.reviewer_id), "reviewer_ids": reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])), "reviewer_names": [people[employee_id] for employee_id in reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])) if employee_id in people], "creator_name": people.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id), "can_manage_collaboration": _can_manage_task_collaboration(row, actor)} for row in rows]
+    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "reviewer_name": people.get(row.reviewer_id), "reviewer_ids": reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])), "reviewer_names": [people[employee_id] for employee_id in reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])) if employee_id in people], "creator_name": people.get(row.created_by_id), "creator_avatar_url": avatars.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id), "can_manage_collaboration": _can_manage_task_collaboration(row, actor)} for row in rows]
 
 
 @router.get("/tasks/{task_id}")
@@ -1231,9 +1237,11 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db), actor: Acto
     task = await _task_for_actor(db, task_id, actor)
     assignee_ids = list((await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all())
     reviewer_ids = list((await db.execute(select(TaskReviewer.employee_id).where(TaskReviewer.task_id == task.id))).scalars().all())
-    people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_({*assignee_ids, *reviewer_ids, task.assignee_id, task.reviewer_id, task.created_by_id} - {None})))).scalars().all()} if assignee_ids or reviewer_ids or task.assignee_id or task.reviewer_id or task.created_by_id else {}
+    people_rows = (await db.execute(select(Employee).where(Employee.id.in_({*assignee_ids, *reviewer_ids, task.assignee_id, task.reviewer_id, task.created_by_id} - {None})))).scalars().all() if assignee_ids or reviewer_ids or task.assignee_id or task.reviewer_id or task.created_by_id else []
+    people = {row.id: row.name for row in people_rows}
+    avatars = {row.id: _employee_avatar_url(row) for row in people_rows}
     project = await db.get(Project, task.project_id) if task.project_id else None
-    return {**_task_out(task), "primary_owner_name": people.get(task.assignee_id), "reviewer_name": people.get(task.reviewer_id), "reviewer_ids": reviewer_ids or ([task.reviewer_id] if task.reviewer_id else []), "reviewer_names": [people[item] for item in reviewer_ids if item in people], "creator_name": people.get(task.created_by_id), "assignee_ids": assignee_ids, "assignee_names": [people[item] for item in assignee_ids if item in people], "project_name": project.name if project and project.organization_id == actor.organization_id else None, "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
+    return {**_task_out(task), "primary_owner_name": people.get(task.assignee_id), "reviewer_name": people.get(task.reviewer_id), "reviewer_ids": reviewer_ids or ([task.reviewer_id] if task.reviewer_id else []), "reviewer_names": [people[item] for item in reviewer_ids if item in people], "creator_name": people.get(task.created_by_id), "creator_avatar_url": avatars.get(task.created_by_id), "assignee_ids": assignee_ids, "assignee_names": [people[item] for item in assignee_ids if item in people], "project_name": project.name if project and project.organization_id == actor.organization_id else None, "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
 
 
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)
@@ -1303,19 +1311,20 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
     for employee_id in reviewer_ids:
         db.add(TaskReviewer(task_id=task.id, employee_id=employee_id))
     owner = await db.get(Employee, owner_id) if owner_id else None
-    output = {**_task_out(task), "assignee_ids": sorted(assignees), "reviewer_ids": reviewer_ids, "primary_owner_name": owner.name if owner else None, "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
+    creator = await db.get(Employee, actor.employee_id) if actor.employee_id else None
+    output = {**_task_out(task), "assignee_ids": sorted(assignees), "reviewer_ids": reviewer_ids, "primary_owner_name": owner.name if owner else None, "creator_name": creator.name if creator else None, "creator_avatar_url": _employee_avatar_url(creator), "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after={**output, "task_id": task.id})
     await google_queue_task_sync_for_members(db, task.id, task.version)
+    task_url = f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"
     await create_notifications(
         db, organization_id=actor.organization_id, employee_ids=assignees,
         kind="task_assigned", title="Шинэ даалгавар",
         body=f"Танд “{task.title}” даалгавар оноолоо.", target_url=f"/tasks?task={task.id}",
-        payload={"task_id": task.id, "title": task.title, "deadline_iso": task.deadline_at.isoformat() if task.deadline_at else None},
+        payload={"task_id": task.id, "title": task.title, "deadline_iso": task.deadline_at.isoformat() if task.deadline_at else None, "creator_name": creator.name if creator else None, "task_url": task_url},
         source_event_id=source_event.id, task_id=task.id, dedup_key=f"task-created:{task.id}",
     )
     if task.workflow_status == "review" and reviewer_ids:
         assignee = await db.get(Employee, task.assignee_id) if task.assignee_id else None
-        task_url = f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"
         await create_notifications(
             db, organization_id=actor.organization_id, employee_ids=reviewer_ids,
             kind="task_review_requested", title="Хянах шаардлагатай",
@@ -1408,9 +1417,20 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     current_reviewers = (await db.execute(select(TaskReviewer.employee_id).where(TaskReviewer.task_id == task.id))).scalars().all()
     if task.reviewer_id and task.reviewer_id not in current_reviewers:
         current_reviewers.append(task.reviewer_id)
-    output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees)), "reviewer_ids": sorted(set(current_reviewers)), "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
+    creator = await db.get(Employee, task.created_by_id) if task.created_by_id else None
+    output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees)), "reviewer_ids": sorted(set(current_reviewers)), "creator_name": creator.name if creator else None, "creator_avatar_url": _employee_avatar_url(creator), "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before={**before, "task_id": task.id}, after={**output, "task_id": task.id})
     await google_queue_task_sync_for_members(db, task.id, task.version, previous_employee_ids=previous_participants)
+    newly_assigned = (set(current_assignees) | ({task.assignee_id} if task.assignee_id else set())) - (set(previous_assignees) | ({before["primary_owner_id"]} if before.get("primary_owner_id") else set()))
+    if newly_assigned:
+        task_url = f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"
+        await create_notifications(
+            db, organization_id=actor.organization_id, employee_ids=newly_assigned,
+            kind="task_assigned", title="Шинэ даалгавар",
+            body=f"Танд “{task.title}” даалгавар оноолоо.", target_url=f"/tasks?task={task.id}",
+            payload={"task_id": task.id, "title": task.title, "deadline_iso": task.deadline_at.isoformat() if task.deadline_at else None, "creator_name": creator.name if creator else None, "task_url": task_url},
+            source_event_id=source_event.id, task_id=task.id, dedup_key=f"task-assigned:{task.id}:v{task.version}",
+        )
     if next_workflow == "review" and before["workflow_status"] != "review" and current_reviewers:
         assignee = await db.get(Employee, task.assignee_id) if task.assignee_id else None
         task_url = f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"

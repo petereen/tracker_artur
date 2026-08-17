@@ -840,6 +840,7 @@ async def _confirm_task_creation(db: AsyncSession, actor: ActorContext, action: 
     people = {employee.id: employee.name for employee in (await db.execute(select(Employee).where(Employee.id.in_(people_ids)))).scalars().all()} if people_ids else {}
     output["assignee_names"] = [people[employee_id] for employee_id in assignee_ids if employee_id in people]
     output["reviewer_names"] = [people[employee_id] for employee_id in reviewer_ids if employee_id in people]
+    creator = await db.get(Employee, task.created_by_id) if task.created_by_id else None
     source_event = await record_change(
         db,
         actor=actor,
@@ -859,7 +860,7 @@ async def _confirm_task_creation(db: AsyncSession, actor: ActorContext, action: 
         title="Шинэ даалгавар",
         body=f"Танд “{task.title}” даалгавар оноолоо.",
         target_url=f"/tasks?task={task.id}",
-        payload={"task_id": task.id, "title": task.title, "deadline_iso": deadline_at.isoformat() if deadline_at else None},
+        payload={"task_id": task.id, "title": task.title, "deadline_iso": deadline_at.isoformat() if deadline_at else None, "creator_name": creator.name if creator else None, "task_url": f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"},
         source_event_id=source_event.id,
         task_id=task.id,
         dedup_key=f"assistant-task-created:{task.id}",

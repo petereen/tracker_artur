@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Show task creator metadata in web task cards/details and Telegram assignment alerts (`frontend/src/pages/EnterpriseTasksPage.tsx`, `backend/app/routers/enterprise.py`, `backend/app/services/reminder_service.py`)
+- [x] Add contract composer attachments and OYUNS icon-only action buttons (`frontend/src/pages/ContractsWorkspacePage.tsx`, `frontend/src/index.css`, `frontend/src/pages/ContractsWorkspacePage.test.tsx`)
 - [x] Extend compact page action-bar alignment to the Contracts/document workspace (`frontend/src/pages/ContractsWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Standardize compact page action bars across Calendar, Tasks, Reports, Projects, Plans, and Analytics (`frontend/src/pages`, `frontend/src/index.css`)
 - [x] Deliver the complete “Гэрээ” Document & Contract Lifecycle Management module: tenant-safe drafting, parallel unanimous approvals, immutable revisions with anchored comments, print/sign/stamp prompts, signed archival, notifications, API, UI, migrations, and regression coverage (`backend/app/models/contracts.py`, `backend/app/routers/contracts.py`, `frontend/src/pages/ContractsWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/alembic/versions`, `backend/tests`, `frontend/src`)
@@ -203,6 +205,8 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Show task creator metadata in web task cards/details and Telegram assignment alerts (`frontend/src/pages/EnterpriseTasksPage.tsx`, `backend/app/routers/enterprise.py`, `backend/app/services/reminder_service.py`)
+- [x] Add contract composer attachments and OYUNS icon-only action buttons (`frontend/src/pages/ContractsWorkspacePage.tsx`, `frontend/src/index.css`, `frontend/src/pages/ContractsWorkspacePage.test.tsx`)
 - [x] Standardize the Contracts list and document detail action bars, remove the redundant module heading, and update the workspace regression assertion (`frontend/src/pages/ContractsWorkspacePage.tsx`, `frontend/src/pages/ContractsWorkspacePage.test.tsx`, `frontend/src/index.css`)
 - [x] Remove duplicate sub-page headings and standardize compact action-bar alignment across Calendar, Tasks, Reports, Projects, Plans, and Analytics (`frontend/src/pages`, `frontend/src/index.css`)
 - [x] Add tenant-safe contract lifecycle models, status constraints, reviewer rounds, immutable revisions, anchored comments, and supporting/final file metadata (`backend/app/models/contracts.py`, `backend/app/models/__init__.py`)

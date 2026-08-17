@@ -56,3 +56,22 @@ def test_review_outbox_contains_assignee_link_and_action_button():
     assert "https://erp.example.test/tasks?task=12" in text
     assert keyboard is not None
     assert any(button.url == "https://erp.example.test/tasks?task=12" for row in keyboard.inline_keyboard for button in row)
+
+
+def test_assignment_outbox_shows_creator_and_task_link():
+    text, keyboard = _render_outbox({
+        "kind": "task_assigned",
+        "task_id": 12,
+        "task_title": "Prepare handoff",
+        "task_description": None,
+        "task_deadline_at": None,
+        "payload": {
+            "title": "Prepare handoff",
+            "creator_name": "Тэмүүлэн",
+            "task_url": "https://erp.example.test/tasks?task=12",
+        },
+    })
+    assert "Үүсгэсэн: Тэмүүлэн" in text
+    assert "🔗 Даалгавар харах: https://erp.example.test/tasks?task=12" in text
+    assert keyboard is not None
+    assert any(button.url == "https://erp.example.test/tasks?task=12" for row in keyboard.inline_keyboard for button in row)

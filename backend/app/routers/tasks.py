@@ -103,11 +103,14 @@ async def _enqueue_assignment(db: AsyncSession, task: Task, actor_tg: Optional[s
     ms = (await db.execute(select(ManagerSettings))).scalars().first()
     policy = load_policy(ms)
     nb = next_allowed(datetime.now(timezone.utc), assignee.timezone or "Asia/Ulaanbaatar", policy)
+    creator = await db.get(Employee, task.created_by_id) if task.created_by_id else None
     payload = {
         "title": task.title,
         "description": task.description,
         "timezone_name": assignee.timezone or "Asia/Ulaanbaatar",
         "deadline_iso": task.deadline_at.astimezone(timezone.utc).isoformat() if task.deadline_at else None,
+        "creator_name": creator.name if creator else None,
+        "task_url": f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}",
     }
     stmt = (
         pg_insert(NotificationOutbox)

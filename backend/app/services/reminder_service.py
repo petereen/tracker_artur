@@ -214,11 +214,15 @@ def _render_outbox(item: dict):
     timezone_name = p.get("timezone_name") or "Asia/Ulaanbaatar"
     dl_h = _fmt_deadline(deadline_dt) if deadline_dt else "Хугацаагүй"
     if item["kind"] == "task_assigned":
-        text = (f"📌 Танд #{tid} даалгавар оноолоо:\n«{title}»\nХугацаа: {dl_h}")
+        task_url = p.get("task_url") or f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={tid}"
+        creator_name = p.get("creator_name") or "Тодорхойгүй"
+        text = (f"📌 Танд #{tid} даалгавар оноолоо:\n«{title}»\n"
+                f"Үүсгэсэн: {creator_name}\nХугацаа: {dl_h}\n"
+                f"🔗 Даалгавар харах: {task_url}")
         return text, (
             task_actions_kb(
                 tid, title=title, deadline=deadline_dt, description=description,
-                timezone_name=timezone_name,
+                timezone_name=timezone_name, task_url=task_url,
             )
             if tid else None
         )

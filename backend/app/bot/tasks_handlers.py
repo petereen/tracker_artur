@@ -11,6 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from app.core.config import settings
 from app.bot.db import get_all_active_employees, get_manager_settings
 from app.bot.keyboards import task_actions_kb
 from app.services import reminder_service, task_ai, task_service
@@ -170,6 +171,8 @@ def _enqueue_assignment_bot(task: dict, actor_tg: str | None) -> None:
             "description": task.get("description"),
             "timezone_name": task.get("assignee_tz") or "Asia/Ulaanbaatar",
             "deadline_iso": _iso(task["deadline_at"]),
+            "creator_name": task.get("creator_name"),
+            "task_url": f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task['id']}",
         },
         not_before=nb, dedup_key=f"task_assigned:{task['id']}",
     )
