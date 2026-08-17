@@ -6363,10 +6363,25 @@ a {
 .collaboration-pill-composer,
 .comment-input-wrap {
   position: relative;
+  border: 1px solid #d1d5db;
+  border-radius: 9999px;
+  padding-right: 3rem;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.collaboration-pill-composer:focus-within,
+.comment-input-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .collaboration-pill-composer {
   display: flex;
   align-items: center;
+}
+.collaboration-pill-composer input,
+.comment-composer textarea {
+  border: 0;
+  border-radius: inherit;
+  padding-right: 0.85rem;
 }
 .collaboration-composer input,
 .relationship-composer select {
@@ -6375,17 +6390,13 @@ a {
 .collaboration-pill-composer input {
   width: 100%;
   min-height: 52px;
-  padding: 0.65rem 3.35rem 0.65rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 9999px;
+  padding: 0.65rem 0.85rem 0.65rem 1rem;
   background: var(--surface-secondary);
   color: var(--text);
-  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  transition: background 160ms ease;
 }
 .collaboration-pill-composer input:focus {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
   background: var(--surface);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
   outline: none;
 }
 .composer-submit {
@@ -6422,22 +6433,23 @@ a {
 .comment-composer textarea {
   width: 100%;
   min-height: 56px;
-  padding: 0.8rem 3.35rem 0.8rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 9999px;
+  padding: 0.8rem 0.85rem 0.8rem 1rem;
   background: var(--surface-secondary);
   color: var(--text);
   resize: vertical;
-  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  transition: background 160ms ease;
 }
 .comment-composer textarea:focus {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
   background: var(--surface);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
   outline: none;
 }
 .comment-input-wrap .composer-submit {
   top: 9px;
+}
+
+:root[data-theme="dark"] .collaboration-pill-composer,
+:root[data-theme="dark"] .comment-input-wrap {
+  border-color: #4b5563;
 }
 
 .mention-suggestions {
