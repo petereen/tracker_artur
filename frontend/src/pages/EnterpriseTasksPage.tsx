@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -102,14 +102,23 @@ const taskPlace = (task: EnterpriseTask) =>
       ? "Remote"
       : "Байршилгүй");
 
+const statusLabel = (status: WorkflowStatus) =>
+  COLUMNS.find((column) => column.key === status)?.label || status;
+
 function TaskCard({
   task,
   onOpen,
   draggable = false,
+  subtasks = [],
+  onToggleSubtask,
+  subtaskUpdating = false,
 }: {
   task: EnterpriseTask;
-  onOpen: () => void;
+  onOpen: (task?: EnterpriseTask) => void;
   draggable?: boolean;
+  subtasks?: EnterpriseTask[];
+  onToggleSubtask?: (subtask: EnterpriseTask) => void;
+  subtaskUpdating?: boolean;
 }) {
   const sortable = useSortable({
     id: task.id,
@@ -125,7 +134,7 @@ function TaskCard({
       }}
       className={`kanban-card task-card-clear ${task.parent_task_id ? "subtask-card" : ""} ${sortable.isDragging ? "dragging" : ""}`}
     >
-      <button className="task-card-body" onClick={onOpen}>
+      <button className="task-card-body" onClick={() => onOpen()}>
         <div className="task-priority" data-priority={task.priority} />
         {task.parent_task_id && (
           <span className="subtask-tag">Дэд даалгавар</span>
@@ -149,6 +158,35 @@ function TaskCard({
           <span>{task.project_name || "Төсөл сонгоогүй"}</span>
         </div>
       </button>
+      {subtasks.length > 0 && (
+        <div className="nested-subtasks" aria-label={`${task.title} дэд даалгавар`}>
+          <div className="nested-subtasks-heading">
+            <span>Дэд даалгавар</span>
+            <b>{subtasks.length}</b>
+          </div>
+          {subtasks.map((subtask) => (
+            <article className="nested-subtask" key={subtask.id}>
+              <input
+                type="checkbox"
+                checked={subtask.workflow_status === "done"}
+                disabled={!onToggleSubtask || subtaskUpdating}
+                aria-label={`${subtask.title} ${subtask.workflow_status === "done" ? "буцаах" : "дуусгах"}`}
+                onChange={() => onToggleSubtask?.(subtask)}
+              />
+              <button type="button" className="nested-subtask-title" onClick={() => onOpen(subtask)}>
+                <strong>{subtask.title}</strong>
+                <small>
+                  {subtask.primary_owner_name || "Хариуцагчгүй"}
+                  {subtask.deadline_at && ` · ${new Date(subtask.deadline_at).toLocaleDateString("mn-MN")}`}
+                </small>
+              </button>
+              <span className={`nested-subtask-status ${subtask.workflow_status}`}>
+                {statusLabel(subtask.workflow_status)}
+              </span>
+            </article>
+          ))}
+        </div>
+      )}
       {draggable && (
         <button
           className="drag-handle"
@@ -198,6 +236,12 @@ export function taskActivitySummary(item: { entity_type: string; action: string;
   return detail ? `${subject}: “${detail}” ${verb}` : `${subject} ${verb}`;
 }
 
+export function commentMentionQuery(value: string, caret: number): string | null {
+  const beforeCaret = value.slice(0, caret);
+  const match = beforeCaret.match(/(?:^|\s)@([^\s@]*)$/u);
+  return match ? match[1] : null;
+}
+
 function TaskCollaboration({
   task,
   tasks,
@@ -220,6 +264,8 @@ function TaskCollaboration({
   const [progress, setProgress] = useState(0);
   const [relationshipType, setRelationshipType] = useState<"blocks" | "related">("blocks");
   const [commentMentionIds, setCommentMentionIds] = useState<number[]>([]);
+  const commentInput = useRef<HTMLTextAreaElement>(null);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const checks = useTaskCheckItems(task.id);
   const addCheck = useAddTaskCheckItem();
   const updateCheck = useUpdateTaskCheckItem();
@@ -361,8 +407,27 @@ function TaskCollaboration({
               </article>)}
             </div> : <div className="collaboration-empty"><MessageSquare size={20} /><p>Сэтгэгдэл алга байна.</p></div>}
             <div className="comment-composer">
-              <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="Сэтгэгдэл бичих…" />
-              <UserTagPicker label="Дурдах хэрэглэгч" value={commentMentionIds} users={workers} onChange={setCommentMentionIds} />
+              <div className="comment-input-wrap">
+                <textarea ref={commentInput} rows={3} value={text} onChange={(e) => { setText(e.target.value); setMentionQuery(commentMentionQuery(e.target.value, e.target.selectionStart)); }} onClick={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} onKeyUp={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} placeholder="Сэтгэгдэл бичих…" />
+                {mentionQuery !== null && workers.filter((worker) => worker.name.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())).slice(0, 6).length > 0 && (
+                  <div className="mention-suggestions" role="listbox" aria-label="Дурдах ажилтан">
+                    {workers.filter((worker) => worker.name.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())).slice(0, 6).map((worker) => (
+                      <button type="button" role="option" key={worker.id} onMouseDown={(event) => event.preventDefault()} onClick={() => {
+                        const input = commentInput.current;
+                        if (!input) return;
+                        const start = input.selectionStart;
+                        const before = text.slice(0, start).replace(/@[^\s@]*$/u, `@${worker.name} `);
+                        const next = before + text.slice(start);
+                        setText(next);
+                        setCommentMentionIds((ids) => ids.includes(worker.id) ? ids : [...ids, worker.id]);
+                        setMentionQuery(null);
+                        requestAnimationFrame(() => { input.focus(); const position = before.length; input.setSelectionRange(position, position); });
+                      }}><span className="worker-avatar">{worker.name[0]}</span><span>{worker.name}</span></button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <UserTagPicker label="Дурдсан хүмүүс" value={commentMentionIds} users={workers} onChange={setCommentMentionIds} />
               <div><span>Дурдсан хүмүүс web мэдэгдэл авна.</span><button type="button" className="primary-action compact" onClick={submitText} disabled={!text.trim() || addComment.isPending}><MessageSquare size={15} />Илгээх</button></div>
             </div>
           </>
@@ -449,7 +514,7 @@ export function EnterpriseTasksPage() {
         COLUMNS.map((column) => [
           column.key,
           (tasks.data ?? []).filter(
-            (task) => task.workflow_status === column.key,
+            (task) => !task.parent_task_id && task.workflow_status === column.key,
           ),
         ]),
       ) as Record<WorkflowStatus, EnterpriseTask[]>,
@@ -615,6 +680,13 @@ export function EnterpriseTasksPage() {
         );
       })
       .catch(() => undefined);
+  };
+  const toggleSubtask = (subtask: EnterpriseTask) => {
+    updateTask.mutate({
+      id: subtask.id,
+      version: subtask.version,
+      workflow_status: subtask.workflow_status === "done" ? "to_do" : "done",
+    });
   };
   const undoMove = () => {
     if (!lastMove) return;
@@ -1052,6 +1124,9 @@ export function EnterpriseTasksPage() {
                         <TaskCard
                           key={task.id}
                           task={task}
+                          subtasks={(tasks.data ?? []).filter((item) => item.parent_task_id === task.id)}
+                          onToggleSubtask={toggleSubtask}
+                          subtaskUpdating={updateTask.isPending}
                           draggable
                           onOpen={() => openTask(task)}
                         />
@@ -1068,6 +1143,9 @@ export function EnterpriseTasksPage() {
                             <TaskCard
                               key={task.id}
                               task={task}
+                              subtasks={(tasks.data ?? []).filter((item) => item.parent_task_id === task.id)}
+                              onToggleSubtask={toggleSubtask}
+                              subtaskUpdating={updateTask.isPending}
                               draggable
                               onOpen={() => openTask(task)}
                             />

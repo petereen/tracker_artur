@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Skip Telegram worker daily digests on each worker's non-working days (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
+- [x] Nest Kanban subtasks inside parent task cards with compact status controls (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
+- [x] Repair task collaboration 500s and add inline @mention suggestions (`backend/app/routers/enterprise.py`, `frontend/src/pages/EnterpriseTasksPage.tsx`)
 - [x] Revamp the compact Mongolian task collaboration workspace and its responsive interaction states (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/index.css`)
 - [x] Repair task collaboration persistence, activity history, and web-only participant notifications (`backend/app/routers/enterprise.py`, `frontend/src/pages/EnterpriseTasksPage.tsx`)
 - [x] Add task collaboration API and UI regression coverage (`backend/tests`, `frontend/src`)

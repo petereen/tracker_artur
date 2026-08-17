@@ -4319,6 +4319,86 @@ a {
   margin-bottom: 6px;
   padding: 3px 6px;
 }
+.nested-subtasks {
+  border-top: 1px solid var(--color-border-soft);
+  display: grid;
+  gap: 2px;
+  margin: 0 10px 10px 20px;
+  padding-top: 8px;
+}
+.nested-subtasks-heading {
+  align-items: center;
+  color: var(--color-muted-2);
+  display: flex;
+  font-size: 0.58rem;
+  font-weight: 750;
+  gap: 5px;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+}
+.nested-subtasks-heading b {
+  background: var(--color-surface-3);
+  border-radius: 999px;
+  font-size: 0.55rem;
+  padding: 1px 5px;
+}
+.nested-subtask {
+  align-items: center;
+  border-radius: 7px;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  min-height: 35px;
+  padding: 4px 5px 4px 2px;
+}
+.nested-subtask:hover {
+  background: var(--color-surface-2);
+}
+.nested-subtask > input {
+  accent-color: var(--color-accent);
+  height: 14px;
+  margin: 0;
+  width: 14px;
+}
+.nested-subtask-title {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+.nested-subtask-title strong {
+  font-size: 0.67rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nested-subtask-title small {
+  color: var(--color-muted-2);
+  font-size: 0.57rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nested-subtask-status {
+  color: var(--color-muted-2);
+  font-size: 0.54rem;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nested-subtask-status.done {
+  color: var(--color-green);
+}
+.nested-subtask-status.in_progress {
+  color: var(--color-accent);
+}
 .task-calendar button.subtask-event {
   border-left-color: var(--color-purple);
 }
@@ -6206,6 +6286,46 @@ a {
   width: 100%;
   min-height: 76px;
   resize: vertical;
+}
+
+.comment-input-wrap {
+  position: relative;
+  display: block;
+}
+
+.mention-suggestions {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--line, #d9e0ea);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  box-shadow: 0 12px 30px rgb(25 44 72 / 14%);
+}
+
+.mention-suggestions button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mention-suggestions button:hover,
+.mention-suggestions button:focus-visible {
+  background: rgb(42 111 219 / 10%);
+  outline: none;
 }
 .comment-composer > div:last-child {
   justify-content: space-between;

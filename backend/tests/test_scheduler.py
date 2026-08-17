@@ -17,6 +17,15 @@ def test_schedule_weekdays_preserves_employee_configuration():
     assert _schedule_weekdays(schedule) == (1, 3, 6)
 
 
+def test_worker_digest_weekdays_use_employee_schedule():
+    schedule = SimpleNamespace(weekdays=[2, 4, 7])
+
+    weekdays = _schedule_weekdays(schedule)
+    digest_dow = ",".join(str(day - 1) for day in weekdays)
+
+    assert digest_dow == "1,3,6"
+
+
 def test_missed_checkin_jobs_group_employees_with_the_same_deadline():
     timezone = pytz.timezone("Asia/Ulaanbaatar")
     deadline = time(23, 0)

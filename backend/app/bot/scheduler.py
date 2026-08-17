@@ -70,15 +70,18 @@ def _rebuild_jobs_unlocked():
         except Exception:
             tz = DEFAULT_TIMEZONE
 
-        # Дайджесты по задачам — для ВСЕХ активных сотрудников (не зависят от опросов).
+        sch = get_schedule(emp.id)
+        employee_weekdays = _schedule_weekdays(sch)
+        employee_dow = ",".join(str(d - 1) for d in employee_weekdays)
+
+        # Worker task digests follow each employee's configured workweek.
         scheduler.add_job(send_employee_morning_digest, "cron",
-            hour=md.hour, minute=md.minute, day_of_week=digest_dow, timezone=tz,
+            hour=md.hour, minute=md.minute, day_of_week=employee_dow, timezone=tz,
             id=f"task_morning_{emp.id}", replace_existing=True, args=[emp.id])
         scheduler.add_job(send_employee_evening_digest, "cron",
-            hour=ed.hour, minute=ed.minute, day_of_week=digest_dow, timezone=tz,
+            hour=ed.hour, minute=ed.minute, day_of_week=employee_dow, timezone=tz,
             id=f"task_evening_{emp.id}", replace_existing=True, args=[emp.id])
 
-        sch = get_schedule(emp.id)
         # Monthly reports apply to every active employee. Employees without a
         # legacy Schedule row use the same default start-of-day time.
         morning: time = sch.morning_time if sch and sch.morning_time else time(9, 15)
@@ -86,8 +89,8 @@ def _rebuild_jobs_unlocked():
             hour=morning.hour, minute=morning.minute, timezone=tz,
             id=f"monthly_report_{emp.id}", replace_existing=True, args=[emp.id])
 
-        weekdays = _schedule_weekdays(sch)
-        dow = ",".join(str(d - 1) for d in weekdays)
+        weekdays = employee_weekdays
+        dow = employee_dow
 
         # Work-time reminders are fixed local-time guardrails and apply even
         # when an employee has no legacy Schedule row.

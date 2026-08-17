@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Resp
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -316,21 +316,31 @@ async def _notify_task_collaboration(
 ) -> None:
     recipients = await _task_participant_ids(db, task)
     recipients.update(mention_ids or set())
-    await create_notifications(
-        db,
-        organization_id=actor.organization_id,
-        employee_ids=recipients,
-        exclude_employee_id=actor.employee_id,
-        kind="task_collaboration_updated",
-        title="Даалгавар шинэчлэгдлээ",
-        body=f"“{task.title}”: {summary}",
-        target_url=f"/tasks?task={task.id}",
-        payload={"task_id": task.id, "action": action, "summary": summary, "actor_employee_id": actor.employee_id},
-        source_event_id=source_event_id,
-        task_id=task.id,
-        dedup_key=f"task-collaboration:{task.id}:{action}:{source_event_id}",
-        deliver_telegram=False,
-    )
+    # Collaboration writes must not be lost because an optional in-app
+    # notification is unavailable (for example during a rolling migration).
+    # A savepoint keeps the task/checklist/comment transaction usable while
+    # still rolling back any partial notification rows.
+    try:
+        async with db.begin_nested():
+            await create_notifications(
+                db,
+                organization_id=actor.organization_id,
+                employee_ids=recipients,
+                exclude_employee_id=actor.employee_id,
+                kind="task_collaboration_updated",
+                title="Даалгавар шинэчлэгдлээ",
+                body=f"“{task.title}”: {summary}",
+                target_url=f"/tasks?task={task.id}",
+                payload={"task_id": task.id, "action": action, "summary": summary, "actor_employee_id": actor.employee_id},
+                source_event_id=source_event_id,
+                task_id=task.id,
+                dedup_key=f"task-collaboration:{task.id}:{action}:{source_event_id}",
+                deliver_telegram=False,
+            )
+    except SQLAlchemyError:
+        # Notifications are a side effect; the collaboration mutation is the
+        # user-visible operation and should remain durable.
+        return
 
 
 def _entry_out(item: WorkTimeEntry) -> dict:
@@ -1826,12 +1836,12 @@ async def task_activity(task_id: int, limit: int = Query(default=100, ge=1, le=2
         AuditLog.entity_type.in_(("task", "task_assignees", "task_dependency", "task_check_item", "task_comment", "attachment")),
         or_(
             and_(AuditLog.entity_type == "task", AuditLog.entity_id == task_id),
-            AuditLog.before_data["task_id"].as_integer() == task_id,
-            AuditLog.after_data["task_id"].as_integer() == task_id,
-            AuditLog.before_data["parent_task_id"].as_integer() == task_id,
-            AuditLog.after_data["parent_task_id"].as_integer() == task_id,
-            and_(AuditLog.before_data["object_type"].as_string() == "task", AuditLog.before_data["object_id"].as_integer() == task_id),
-            and_(AuditLog.after_data["object_type"].as_string() == "task", AuditLog.after_data["object_id"].as_integer() == task_id),
+            AuditLog.before_data.op("->>")("task_id") == str(task_id),
+            AuditLog.after_data.op("->>")("task_id") == str(task_id),
+            AuditLog.before_data.op("->>")("parent_task_id") == str(task_id),
+            AuditLog.after_data.op("->>")("parent_task_id") == str(task_id),
+            and_(AuditLog.before_data.op("->>")("object_type") == "task", AuditLog.before_data.op("->>")("object_id") == str(task_id)),
+            and_(AuditLog.after_data.op("->>")("object_type") == "task", AuditLog.after_data.op("->>")("object_id") == str(task_id)),
         ),
     ).order_by(AuditLog.created_at.desc()).limit(limit))).scalars().all()
     return [{"id": event.id, "action": event.action, "entity_type": event.entity_type, "entity_id": event.entity_id, "actor_account_id": event.actor_account_id, "actor_employee_id": event.actor_employee_id, "before": event.before_data or {}, "after": event.after_data or {}, "created_at": event.created_at} for event in rows]
@@ -1846,8 +1856,16 @@ async def list_task_comments(task_id: int, db: AsyncSession = Depends(get_db), a
 
 @router.post("/tasks/{task_id}/comments", status_code=status.HTTP_201_CREATED)
 async def create_task_comment(task_id: int, data: TaskCommentInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    await _task_for_actor(db, task_id, actor, write=True)
-    comment = TaskComment(task_id=task_id, author_id=actor.employee_id, author_account_id=actor.account_id, text=data.text, mentions=sorted(set(data.mentions)))
+    task = await _task_for_actor(db, task_id, actor, write=True)
+    mention_ids = sorted(set(data.mentions))
+    if mention_ids:
+        valid_mentions = set((await db.execute(select(Employee.id).where(
+            Employee.organization_id == actor.organization_id,
+            Employee.is_active.is_(True),
+            Employee.id.in_(mention_ids),
+        ))).scalars().all())
+        mention_ids = [employee_id for employee_id in mention_ids if employee_id in valid_mentions]
+    comment = TaskComment(task_id=task_id, author_id=actor.employee_id, author_account_id=actor.account_id, text=data.text, mentions=mention_ids)
     db.add(comment)
     await db.flush()
     source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task_comment", aggregate_id=comment.id, operation="created", after={"task_id": task_id, "text": comment.text, "mentions": comment.mentions})
