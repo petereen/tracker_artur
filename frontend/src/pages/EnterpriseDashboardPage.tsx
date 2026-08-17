@@ -20,6 +20,7 @@ import {
   EnterpriseTask,
   useClock,
   useClockAction,
+  useCalendarEvents,
   useDeleteEnterpriseTask,
   useEnterpriseSummary,
   useEnterpriseTasks,
@@ -82,12 +83,15 @@ type MiniCalendarRange = {
   isEnd: boolean;
 };
 
-function dateKey(value: string | null | undefined) {
-  return value?.slice(0, 10) || null;
-}
-
 function localDateKey(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function calendarDayKey(value: string | null | undefined) {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : localDateKey(parsed);
 }
 
 function DelegatedTaskSheet({
@@ -356,11 +360,24 @@ export function EnterpriseDashboardPage() {
     date_from: localDateKey(monthDays[0]),
     date_to: localDateKey(monthDays[monthDays.length - 1]),
   });
+  const miniCalendarEvents = useCalendarEvents("private", monthDays[20]);
   const miniCalendarVisibleTasks = useMemo(() => {
     const tasks = new Map<number, EnterpriseTask>();
-    [...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
+    [...(miniCalendarEvents.data?.tasks ?? []), ...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
     return [...tasks.values()];
-  }, [agenda.data?.tasks, miniCalendarTasks.data, todayTasks.data]);
+  }, [agenda.data?.tasks, miniCalendarEvents.data?.tasks, miniCalendarTasks.data, todayTasks.data]);
+  const miniCalendarMarkerDates = useMemo(() => {
+    const dates = new Set<string>();
+    const add = (value: string | null | undefined) => {
+      const key = calendarDayKey(value);
+      if (key) dates.add(key);
+    };
+    miniCalendarVisibleTasks.forEach((task) => {
+      if (!task.start_at || !task.deadline_at) add(task.start_at || task.deadline_at);
+    });
+    [...(miniCalendarEvents.data?.entries ?? []), ...(miniCalendarEvents.data?.time_blocks ?? []), ...(agenda.data?.entries ?? [])].forEach((item: any) => add(item.remind_at || item.starts_at || item.start_at));
+    return dates;
+  }, [agenda.data?.entries, miniCalendarEvents.data?.entries, miniCalendarEvents.data?.time_blocks, miniCalendarVisibleTasks]);
   const miniCalendarRanges = useMemo(() => {
     const visibleStart = localDateKey(monthDays[0]);
     const visibleEnd = localDateKey(monthDays[monthDays.length - 1]);
@@ -369,8 +386,8 @@ export function EnterpriseDashboardPage() {
 
     miniCalendarVisibleTasks.forEach((task) => {
       if (!task.start_at || !task.deadline_at) return;
-      let taskStart = dateKey(task.start_at)!;
-      let taskEnd = dateKey(task.deadline_at)!;
+      let taskStart = calendarDayKey(task.start_at)!;
+      let taskEnd = calendarDayKey(task.deadline_at)!;
       if (taskEnd < taskStart) [taskStart, taskEnd] = [taskEnd, taskStart];
       if (taskEnd < visibleStart || taskStart > visibleEnd) return;
       const start = Math.max(0, dayIndex.get(taskStart) ?? (taskStart < visibleStart ? 0 : -1));
@@ -602,7 +619,7 @@ export function EnterpriseDashboardPage() {
             <h2>Өнөөдрийн ажлын цаг</h2>
           </div>
           <span className={`live-indicator ${active ? "online" : ""}`}>
-            {active ? "LIVE" : "OFF"}
+            {active ? "АЖИЛЛАЖ БАЙНА" : "АМАРЧ БАЙНА"}
           </span>
         </div>
         {clockReady ? (
@@ -972,13 +989,7 @@ export function EnterpriseDashboardPage() {
                 .toISOString()
                 .slice(0, 10);
               const count =
-                miniCalendarVisibleTasks.filter((task) =>
-                  (!task.start_at || !task.deadline_at) &&
-                  dateKey(task.start_at || task.deadline_at) === local,
-                ).length +
-                (agenda.data?.entries ?? []).filter(
-                  (item: any) => item.starts_at?.slice(0, 10) === local,
-                ).length;
+                miniCalendarMarkerDates.has(local) ? 1 : 0;
               return (
                 <span
                   key={local}

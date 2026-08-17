@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../api/enterprise", () => ({
   useClock: () => mocks.clock,
   useClockAction: () => mocks.action,
+  useCalendarEvents: () => ({ data: { tasks: [], entries: [], time_blocks: [] } }),
   useEnterpriseSummary: () => ({ data: { active_projects: 1, completed_tasks: 2, completion_rate: 80, worked_minutes: 60 } }),
   useTodayCheckin: () => ({ data: {} }),
   useStartCheckin: () => ({ mutateAsync: vi.fn() }),
@@ -180,8 +181,8 @@ describe("Today work-hour timer", () => {
   it("renders date-range tasks as split bars with rounded visible ends", () => {
     mocks.agenda.data = {
       tasks: [
-        { id: 101, title: "Visible range", start_at: "2026-08-03T09:00:00Z", deadline_at: "2026-08-06T17:00:00Z" },
-        { id: 102, title: "Clipped range", start_at: "2026-07-20T09:00:00Z", deadline_at: "2026-08-02T17:00:00Z" },
+        { id: 101, title: "Visible range", start_at: "2026-08-03", deadline_at: "2026-08-06" },
+        { id: 102, title: "Clipped range", start_at: "2026-07-20", deadline_at: "2026-08-02" },
       ],
       entries: [],
     };
