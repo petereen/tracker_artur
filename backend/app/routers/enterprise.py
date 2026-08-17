@@ -288,6 +288,51 @@ def _task_out(item: Task) -> dict:
     }
 
 
+def _can_manage_task_collaboration(task: Task, actor: ActorContext) -> bool:
+    return actor.has_any_role(*MANAGEMENT_ROLES) or (
+        actor.employee_id is not None and task.created_by_id == actor.employee_id
+    )
+
+
+async def _task_participant_ids(db: AsyncSession, task: Task) -> set[int]:
+    assignees = set((await db.execute(
+        select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id)
+    )).scalars().all())
+    reviewers = set((await db.execute(
+        select(TaskReviewer.employee_id).where(TaskReviewer.task_id == task.id)
+    )).scalars().all())
+    return assignees | reviewers | {value for value in (task.assignee_id, task.reviewer_id) if value}
+
+
+async def _notify_task_collaboration(
+    db: AsyncSession,
+    *,
+    task: Task,
+    actor: ActorContext,
+    source_event_id: int,
+    action: str,
+    summary: str,
+    mention_ids: set[int] | None = None,
+) -> None:
+    recipients = await _task_participant_ids(db, task)
+    recipients.update(mention_ids or set())
+    await create_notifications(
+        db,
+        organization_id=actor.organization_id,
+        employee_ids=recipients,
+        exclude_employee_id=actor.employee_id,
+        kind="task_collaboration_updated",
+        title="Даалгавар шинэчлэгдлээ",
+        body=f"“{task.title}”: {summary}",
+        target_url=f"/tasks?task={task.id}",
+        payload={"task_id": task.id, "action": action, "summary": summary, "actor_employee_id": actor.employee_id},
+        source_event_id=source_event_id,
+        task_id=task.id,
+        dedup_key=f"task-collaboration:{task.id}:{action}:{source_event_id}",
+        deliver_telegram=False,
+    )
+
+
 def _entry_out(item: WorkTimeEntry) -> dict:
     return {
         "id": item.id, "employee_id": item.employee_id, "project_id": item.project_id,
@@ -406,7 +451,7 @@ class AssigneesInput(BaseModel):
 
 class DependencyInput(BaseModel):
     predecessor_task_id: int
-    dependency_type: str = "blocks"
+    dependency_type: Literal["blocks", "related"] = "blocks"
 
 
 class CheckItemInput(BaseModel):
@@ -1130,7 +1175,7 @@ async def list_tasks(
     people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_(employee_ids)))).scalars().all()} if employee_ids else {}
     project_ids = {row.project_id for row in rows if row.project_id}
     projects = {row.id: row.name for row in (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()} if project_ids else {}
-    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "reviewer_name": people.get(row.reviewer_id), "reviewer_ids": reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])), "reviewer_names": [people[employee_id] for employee_id in reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])) if employee_id in people], "creator_name": people.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id)} for row in rows]
+    return [{**_task_out(row), "primary_owner_name": people.get(row.assignee_id), "reviewer_name": people.get(row.reviewer_id), "reviewer_ids": reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])), "reviewer_names": [people[employee_id] for employee_id in reviewers.get(row.id, ([row.reviewer_id] if row.reviewer_id else [])) if employee_id in people], "creator_name": people.get(row.created_by_id), "assignee_ids": assignees.get(row.id, []), "assignee_names": [people[employee_id] for employee_id in assignees.get(row.id, []) if employee_id in people], "project_name": projects.get(row.project_id), "can_manage_collaboration": _can_manage_task_collaboration(row, actor)} for row in rows]
 
 
 @router.get("/tasks/{task_id}")
@@ -1140,7 +1185,7 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db), actor: Acto
     reviewer_ids = list((await db.execute(select(TaskReviewer.employee_id).where(TaskReviewer.task_id == task.id))).scalars().all())
     people = {row.id: row.name for row in (await db.execute(select(Employee).where(Employee.id.in_({*assignee_ids, *reviewer_ids, task.assignee_id, task.reviewer_id, task.created_by_id} - {None})))).scalars().all()} if assignee_ids or reviewer_ids or task.assignee_id or task.reviewer_id or task.created_by_id else {}
     project = await db.get(Project, task.project_id) if task.project_id else None
-    return {**_task_out(task), "primary_owner_name": people.get(task.assignee_id), "reviewer_name": people.get(task.reviewer_id), "reviewer_ids": reviewer_ids or ([task.reviewer_id] if task.reviewer_id else []), "reviewer_names": [people[item] for item in reviewer_ids if item in people], "creator_name": people.get(task.created_by_id), "assignee_ids": assignee_ids, "assignee_names": [people[item] for item in assignee_ids if item in people], "project_name": project.name if project and project.organization_id == actor.organization_id else None}
+    return {**_task_out(task), "primary_owner_name": people.get(task.assignee_id), "reviewer_name": people.get(task.reviewer_id), "reviewer_ids": reviewer_ids or ([task.reviewer_id] if task.reviewer_id else []), "reviewer_names": [people[item] for item in reviewer_ids if item in people], "creator_name": people.get(task.created_by_id), "assignee_ids": assignee_ids, "assignee_names": [people[item] for item in assignee_ids if item in people], "project_name": project.name if project and project.organization_id == actor.organization_id else None, "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
 
 
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)
@@ -1210,8 +1255,8 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
     for employee_id in reviewer_ids:
         db.add(TaskReviewer(task_id=task.id, employee_id=employee_id))
     owner = await db.get(Employee, owner_id) if owner_id else None
-    output = {**_task_out(task), "assignee_ids": sorted(assignees), "reviewer_ids": reviewer_ids, "primary_owner_name": owner.name if owner else None}
-    source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after=output)
+    output = {**_task_out(task), "assignee_ids": sorted(assignees), "reviewer_ids": reviewer_ids, "primary_owner_name": owner.name if owner else None, "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
+    source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="created", version=task.version, after={**output, "task_id": task.id})
     await create_notifications(
         db, organization_id=actor.organization_id, employee_ids=assignees,
         kind="task_assigned", title="Шинэ даалгавар",
@@ -1229,6 +1274,13 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
             payload={"task_id": task.id, "title": task.title, "assignee_name": assignee.name if assignee else None, "task_url": task_url}, source_event_id=source_event.id,
             task_id=task.id, dedup_key=f"task-review-requested:{task.id}:v{task.version}", immediate=True,
         )
+    if task.parent_task_id:
+        parent = await db.get(Task, task.parent_task_id)
+        if parent:
+            await _notify_task_collaboration(
+                db, task=parent, actor=actor, source_event_id=source_event.id,
+                action="subtask_created", summary=f"“{task.title}” дэд даалгавар нэмэгдлээ.",
+            )
     if idempotency_key:
         db.add(IdempotencyRecord(account_id=actor.account_id, operation="create_task", key=idempotency_key, request_hash=request_hash, response_status=201, response_body=json.loads(json.dumps(output, default=str)), expires_at=datetime.now(timezone.utc) + timedelta(days=1)))
     await db.commit()
@@ -1304,8 +1356,8 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     current_reviewers = (await db.execute(select(TaskReviewer.employee_id).where(TaskReviewer.task_id == task.id))).scalars().all()
     if task.reviewer_id and task.reviewer_id not in current_reviewers:
         current_reviewers.append(task.reviewer_id)
-    output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees)), "reviewer_ids": sorted(set(current_reviewers))}
-    source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before=before, after=output)
+    output = {**_task_out(task), "assignee_ids": sorted(set(current_assignees)), "reviewer_ids": sorted(set(current_reviewers)), "can_manage_collaboration": _can_manage_task_collaboration(task, actor)}
+    source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task", aggregate_id=task.id, operation="updated", version=task.version, before={**before, "task_id": task.id}, after={**output, "task_id": task.id})
     if next_workflow == "review" and before["workflow_status"] != "review" and current_reviewers:
         assignee = await db.get(Employee, task.assignee_id) if task.assignee_id else None
         task_url = f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={task.id}"
@@ -1651,49 +1703,70 @@ async def delete_time_block(block_id: int, db: AsyncSession = Depends(get_db), a
 
 
 @router.post("/tasks/{task_id}/dependencies", status_code=status.HTTP_201_CREATED)
-async def add_dependency(task_id: int, data: DependencyInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
+async def add_dependency(task_id: int, data: DependencyInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if task_id == data.predecessor_task_id:
-        raise HTTPException(status_code=400, detail="A task cannot depend on itself")
-    graph_rows = (await db.execute(select(TaskDependency.predecessor_task_id, TaskDependency.successor_task_id))).all()
-    graph: dict[int, set[int]] = {}
-    for predecessor, successor in graph_rows:
-        graph.setdefault(predecessor, set()).add(successor)
-    stack = [task_id]
-    seen: set[int] = set()
-    while stack:
-        current = stack.pop()
-        if current == data.predecessor_task_id:
-            raise HTTPException(status_code=409, detail="Dependency would create a cycle")
-        if current not in seen:
-            seen.add(current)
-            stack.extend(graph.get(current, ()))
-    dependency = TaskDependency(predecessor_task_id=data.predecessor_task_id, successor_task_id=task_id, dependency_type=data.dependency_type)
+        raise HTTPException(status_code=400, detail="A task cannot relate to itself")
+    task = await _task_for_actor(db, task_id, actor, write=True)
+    if not _can_manage_task_collaboration(task, actor):
+        raise HTTPException(status_code=403, detail="Only task creators and managers can change task relationships")
+    other = await _task_for_actor(db, data.predecessor_task_id, actor)
+    predecessor_id, successor_id = data.predecessor_task_id, task_id
+    if data.dependency_type == "related":
+        predecessor_id, successor_id = sorted((task_id, data.predecessor_task_id))
+    duplicate = await db.scalar(select(TaskDependency.id).where(
+        or_(
+            and_(TaskDependency.predecessor_task_id == predecessor_id, TaskDependency.successor_task_id == successor_id),
+            and_(TaskDependency.predecessor_task_id == successor_id, TaskDependency.successor_task_id == predecessor_id),
+        )
+    ))
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Tasks already have a relationship")
+    if data.dependency_type == "blocks":
+        graph_rows = (await db.execute(
+            select(TaskDependency.predecessor_task_id, TaskDependency.successor_task_id)
+            .join(Task, Task.id == TaskDependency.successor_task_id)
+            .where(Task.organization_id == actor.organization_id, TaskDependency.dependency_type == "blocks")
+        )).all()
+        graph: dict[int, set[int]] = {}
+        for predecessor, successor in graph_rows:
+            graph.setdefault(predecessor, set()).add(successor)
+        stack, seen = [task_id], set()
+        while stack:
+            current = stack.pop()
+            if current == data.predecessor_task_id:
+                raise HTTPException(status_code=409, detail="Dependency would create a cycle")
+            if current not in seen:
+                seen.add(current)
+                stack.extend(graph.get(current, ()))
+    dependency = TaskDependency(predecessor_task_id=predecessor_id, successor_task_id=successor_id, dependency_type=data.dependency_type)
     db.add(dependency)
     await db.flush()
-    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_dependency", aggregate_id=dependency.id, operation="created", after={"predecessor_task_id": data.predecessor_task_id, "successor_task_id": task_id})
+    source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task_dependency", aggregate_id=dependency.id, operation="created", after={"task_id": task_id, "predecessor_task_id": predecessor_id, "successor_task_id": successor_id, "dependency_type": data.dependency_type})
+    await _notify_task_collaboration(db, task=task, actor=actor, source_event_id=source_event.id, action="relationship_created", summary=f"“{other.title}” даалгавартай холбоос нэмэгдлээ.")
     await db.commit()
-    return {"id": dependency.id, "predecessor_task_id": data.predecessor_task_id, "successor_task_id": task_id}
+    return {"id": dependency.id, "predecessor_task_id": predecessor_id, "predecessor_title": other.title if data.dependency_type == "blocks" else None, "successor_task_id": successor_id, "dependency_type": data.dependency_type, "relation_type": data.dependency_type, "direction": "related" if data.dependency_type == "related" else "blocked_by", "related_task_id": other.id, "related_task_title": other.title}
 
 
 @router.get("/tasks/{task_id}/dependencies")
 async def list_dependencies(task_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await _task_for_actor(db, task_id, actor)
-    rows = (await db.execute(
-        select(TaskDependency, Task.title).join(Task, Task.id == TaskDependency.predecessor_task_id).where(
-            TaskDependency.successor_task_id == task_id,
-            Task.organization_id == actor.organization_id,
-        ).order_by(TaskDependency.id)
-    )).all()
-    return [{"id": row.id, "predecessor_task_id": row.predecessor_task_id, "predecessor_title": title, "successor_task_id": row.successor_task_id, "dependency_type": row.dependency_type} for row, title in rows]
+    rows = (await db.execute(select(TaskDependency).where(
+        or_(TaskDependency.successor_task_id == task_id, and_(TaskDependency.dependency_type == "related", TaskDependency.predecessor_task_id == task_id))
+    ).order_by(TaskDependency.id))).scalars().all()
+    related_ids = {row.predecessor_task_id if row.successor_task_id == task_id else row.successor_task_id for row in rows}
+    titles = {row.id: row.title for row in (await db.execute(select(Task).where(Task.id.in_(related_ids), Task.organization_id == actor.organization_id))).scalars().all()} if related_ids else {}
+    return [{"id": row.id, "predecessor_task_id": row.predecessor_task_id, "predecessor_title": titles.get(row.predecessor_task_id), "successor_task_id": row.successor_task_id, "dependency_type": row.dependency_type, "relation_type": row.dependency_type, "direction": "related" if row.dependency_type == "related" else "blocked_by", "related_task_id": row.predecessor_task_id if row.successor_task_id == task_id else row.successor_task_id, "related_task_title": titles.get(row.predecessor_task_id if row.successor_task_id == task_id else row.successor_task_id)} for row in rows]
 
 
 @router.delete("/tasks/{task_id}/dependencies/{dependency_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_dependency(task_id: int, dependency_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES))):
-    await _task_for_actor(db, task_id, actor, write=True)
+async def remove_dependency(task_id: int, dependency_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    task = await _task_for_actor(db, task_id, actor, write=True)
+    if not _can_manage_task_collaboration(task, actor):
+        raise HTTPException(status_code=403, detail="Only task creators and managers can change task relationships")
     dependency = await db.get(TaskDependency, dependency_id)
-    if not dependency or dependency.successor_task_id != task_id:
+    if not dependency or (dependency.successor_task_id != task_id and not (dependency.dependency_type == "related" and dependency.predecessor_task_id == task_id)):
         raise HTTPException(status_code=404, detail="Dependency not found")
-    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_dependency", aggregate_id=dependency.id, operation="deleted", before={"predecessor_task_id": dependency.predecessor_task_id, "successor_task_id": task_id})
+    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_dependency", aggregate_id=dependency.id, operation="deleted", before={"task_id": task_id, "predecessor_task_id": dependency.predecessor_task_id, "successor_task_id": dependency.successor_task_id, "dependency_type": dependency.dependency_type})
     await db.delete(dependency)
     await db.commit()
 
@@ -1704,7 +1777,8 @@ async def add_check_item(task_id: int, data: CheckItemInput, db: AsyncSession = 
     item = TaskCheckItem(task_id=task_id, **data.model_dump())
     db.add(item)
     await db.flush()
-    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_check_item", aggregate_id=item.id, operation="created", after={"task_id": task_id, "text": item.text})
+    source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task_check_item", aggregate_id=item.id, operation="created", after={"task_id": task_id, "text": item.text})
+    await _notify_task_collaboration(db, task=task, actor=actor, source_event_id=source_event.id, action="checklist_created", summary=f"Checklist-д “{item.text}” нэмлээ.")
     await db.commit()
     return {"id": item.id, "task_id": task_id, **data.model_dump()}
 
@@ -1728,7 +1802,7 @@ async def update_check_item(task_id: int, item_id: int, data: CheckItemPatch, db
         setattr(item, field, value)
     if "is_completed" in patch:
         item.completed_at = datetime.now(timezone.utc) if item.is_completed else None
-    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_check_item", aggregate_id=item.id, operation="updated", before=before, after={"task_id": task_id, **patch})
+    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_check_item", aggregate_id=item.id, operation="updated", before={"task_id": task_id, **before}, after={"task_id": task_id, **patch})
     await db.commit()
     return {"id": item.id, "task_id": task_id, "text": item.text, "is_completed": item.is_completed, "assignee_id": item.assignee_id, "position": _decimal(item.position), "completed_at": item.completed_at}
 
@@ -1747,23 +1821,20 @@ async def remove_check_item(task_id: int, item_id: int, db: AsyncSession = Depen
 @router.get("/tasks/{task_id}/activity")
 async def task_activity(task_id: int, limit: int = Query(default=100, ge=1, le=200), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await _task_for_actor(db, task_id, actor)
-    candidates = (await db.execute(select(AuditLog).where(
+    rows = (await db.execute(select(AuditLog).where(
         AuditLog.organization_id == actor.organization_id,
         AuditLog.entity_type.in_(("task", "task_assignees", "task_dependency", "task_check_item", "task_comment", "attachment")),
-    ).order_by(AuditLog.created_at.desc()).limit(limit * 4))).scalars().all()
-    rows = []
-    for event in candidates:
-        before = event.before_data or {}
-        after = event.after_data or {}
-        belongs = event.entity_type == "task" and event.entity_id == task_id
-        belongs = belongs or before.get("task_id") == task_id or after.get("task_id") == task_id
-        belongs = belongs or after.get("object_type") == "task" and after.get("object_id") == task_id
-        belongs = belongs or before.get("object_type") == "task" and before.get("object_id") == task_id
-        if belongs:
-            rows.append({"id": event.id, "action": event.action, "entity_type": event.entity_type, "entity_id": event.entity_id, "actor_account_id": event.actor_account_id, "actor_employee_id": event.actor_employee_id, "before": before, "after": after, "created_at": event.created_at})
-        if len(rows) >= limit:
-            break
-    return rows
+        or_(
+            and_(AuditLog.entity_type == "task", AuditLog.entity_id == task_id),
+            AuditLog.before_data["task_id"].as_integer() == task_id,
+            AuditLog.after_data["task_id"].as_integer() == task_id,
+            AuditLog.before_data["parent_task_id"].as_integer() == task_id,
+            AuditLog.after_data["parent_task_id"].as_integer() == task_id,
+            and_(AuditLog.before_data["object_type"].as_string() == "task", AuditLog.before_data["object_id"].as_integer() == task_id),
+            and_(AuditLog.after_data["object_type"].as_string() == "task", AuditLog.after_data["object_id"].as_integer() == task_id),
+        ),
+    ).order_by(AuditLog.created_at.desc()).limit(limit))).scalars().all()
+    return [{"id": event.id, "action": event.action, "entity_type": event.entity_type, "entity_id": event.entity_id, "actor_account_id": event.actor_account_id, "actor_employee_id": event.actor_employee_id, "before": event.before_data or {}, "after": event.after_data or {}, "created_at": event.created_at} for event in rows]
 
 
 @router.get("/tasks/{task_id}/comments")
@@ -1779,7 +1850,8 @@ async def create_task_comment(task_id: int, data: TaskCommentInput, db: AsyncSes
     comment = TaskComment(task_id=task_id, author_id=actor.employee_id, author_account_id=actor.account_id, text=data.text, mentions=sorted(set(data.mentions)))
     db.add(comment)
     await db.flush()
-    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_comment", aggregate_id=comment.id, operation="created", after={"task_id": task_id, "text": comment.text, "mentions": comment.mentions})
+    source_event = await record_change(db, actor=actor, topic="tasks", aggregate_type="task_comment", aggregate_id=comment.id, operation="created", after={"task_id": task_id, "text": comment.text, "mentions": comment.mentions})
+    await _notify_task_collaboration(db, task=task, actor=actor, source_event_id=source_event.id, action="comment_created", summary="Шинэ сэтгэгдэл нэмлээ.", mention_ids=set(comment.mentions))
     await db.commit()
     return {"id": comment.id, "task_id": task_id, "text": comment.text, "mentions": comment.mentions, "is_resolved": False, "created_at": comment.created_at}
 
@@ -1797,7 +1869,7 @@ async def update_task_comment(task_id: int, comment_id: int, data: TaskCommentPa
         comment.edited_at = datetime.now(timezone.utc)
     if data.is_resolved is not None:
         comment.is_resolved = data.is_resolved
-    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_comment", aggregate_id=comment.id, operation="updated", after={"text": comment.text, "is_resolved": comment.is_resolved})
+    await record_change(db, actor=actor, topic="tasks", aggregate_type="task_comment", aggregate_id=comment.id, operation="updated", after={"task_id": task_id, "text": comment.text, "is_resolved": comment.is_resolved})
     await db.commit()
     return {"id": comment.id, "text": comment.text, "is_resolved": comment.is_resolved, "edited_at": comment.edited_at}
 
@@ -1846,7 +1918,11 @@ async def upload_attachment(object_type: Literal["task", "report"], object_id: i
     db.add(attachment)
     try:
         await db.flush()
-        await record_change(db, actor=actor, topic="tasks" if object_type == "task" else "reports", aggregate_type="attachment", aggregate_id=attachment.id, operation="created", after={"object_type": object_type, "object_id": object_id, "filename": filename, "size": len(content), "checksum": checksum})
+        source_event = await record_change(db, actor=actor, topic="tasks" if object_type == "task" else "reports", aggregate_type="attachment", aggregate_id=attachment.id, operation="created", after={"task_id": object_id if object_type == "task" else None, "object_type": object_type, "object_id": object_id, "filename": filename, "size": len(content), "checksum": checksum})
+        if object_type == "task":
+            task = await db.get(Task, object_id)
+            if task:
+                await _notify_task_collaboration(db, task=task, actor=actor, source_event_id=source_event.id, action="file_created", summary=f"“{filename}” файл нэмлээ.")
         await db.commit()
     except Exception:
         await delete_attachment(storage_key)
@@ -1872,7 +1948,7 @@ async def remove_attachment(attachment_id: int, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=404, detail="Attachment not found")
     await _authorize_attachment_object(db, attachment.object_type, attachment.object_id, actor, write=True)
     storage_key = attachment.storage_key
-    await record_change(db, actor=actor, topic="tasks" if attachment.object_type == "task" else "reports", aggregate_type="attachment", aggregate_id=attachment.id, operation="deleted", before={"filename": attachment.filename, "object_type": attachment.object_type, "object_id": attachment.object_id})
+    await record_change(db, actor=actor, topic="tasks" if attachment.object_type == "task" else "reports", aggregate_type="attachment", aggregate_id=attachment.id, operation="deleted", before={"task_id": attachment.object_id if attachment.object_type == "task" else None, "filename": attachment.filename, "object_type": attachment.object_type, "object_id": attachment.object_id})
     await db.delete(attachment)
     await db.commit()
     await delete_attachment(storage_key)

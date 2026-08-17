@@ -33,6 +33,7 @@ async def create_notifications(
     source_event_id: int | None = None,
     task_id: int | None = None,
     immediate: bool = False,
+    deliver_telegram: bool = True,
 ) -> list[UserNotification]:
     employee_set = {int(value) for value in employee_ids if value is not None}
     if exclude_employee_id is not None:
@@ -57,7 +58,7 @@ async def create_notifications(
         existing = await db.scalar(select(UserNotification.id).where(UserNotification.dedup_key == scoped_key))
         if existing:
             continue
-        telegram_available = bool(employee and employee.telegram_id)
+        telegram_available = bool(deliver_telegram and employee and employee.telegram_id)
         notification = UserNotification(
             organization_id=organization_id,
             recipient_account_id=account.id,
@@ -101,7 +102,7 @@ async def create_notifications(
     # Telegram users may be registered employees before they have opened the
     # web app and therefore have no UserAccount yet. They cannot receive an
     # in-app notification, but must still receive the Telegram delivery.
-    unlinked_employee_ids = employee_set - covered_employee_ids
+    unlinked_employee_ids = employee_set - covered_employee_ids if deliver_telegram else set()
     if unlinked_employee_ids:
         unlinked = (await db.execute(select(Employee).where(Employee.id.in_(unlinked_employee_ids), Employee.is_active.is_(True)))).scalars().all()
         for employee in unlinked:

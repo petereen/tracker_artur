@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Repair task collaboration persistence, activity history, and web-only participant notifications (`backend/app/routers/enterprise.py`, `frontend/src/pages/EnterpriseTasksPage.tsx`)
+- [x] Add task collaboration API and UI regression coverage (`backend/tests`, `frontend/src`)
 - [x] Deliver the ERP access-role, versioned form, and workflow builders with scoped assignments and master-data requests (`backend/app/erp`, `backend/app/models/models.py`, `frontend/src`)
 - [x] Add ERP builder schema migration and backfill legacy custom fields into initial published definitions (`backend/alembic/versions`)
 - [x] Add ERP builder backend regression coverage for schemas, workflows, scopes, and requests (`backend/tests`)

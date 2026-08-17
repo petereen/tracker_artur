@@ -180,12 +180,16 @@ function TaskCollaboration({
   canManage,
   conflict,
   resolveConflict,
+  onCreateSubtask,
+  workers,
 }: {
   task: EnterpriseTask;
   tasks: EnterpriseTask[];
   canManage: boolean;
   conflict: EnterpriseTask | null;
   resolveConflict: (reapply: boolean) => void;
+  onCreateSubtask: () => void;
+  workers: { id: number; name: string }[];
 }) {
   const [tab, setTab] = useState<
     | "subtasks"
@@ -197,6 +201,8 @@ function TaskCollaboration({
   >("subtasks");
   const [text, setText] = useState("");
   const [progress, setProgress] = useState(0);
+  const [relationshipType, setRelationshipType] = useState<"blocks" | "related">("blocks");
+  const [commentMentionIds, setCommentMentionIds] = useState<number[]>([]);
   const checks = useTaskCheckItems(task.id);
   const addCheck = useAddTaskCheckItem();
   const updateCheck = useUpdateTaskCheckItem();
@@ -212,13 +218,18 @@ function TaskCollaboration({
   const deleteFile = useDeleteAttachment();
   const activity = useTaskActivity(task.id);
   const subtasks = tasks.filter((item) => item.parent_task_id === task.id);
-  const submitText = () => {
+  const submitText = async () => {
     if (!text.trim()) return;
-    if (tab === "checklist")
-      addCheck.mutate({ taskId: task.id, text: text.trim() });
-    if (tab === "comments")
-      addComment.mutate({ taskId: task.id, text: text.trim() });
-    setText("");
+    try {
+      if (tab === "checklist")
+        await addCheck.mutateAsync({ taskId: task.id, text: text.trim() });
+      if (tab === "comments")
+        await addComment.mutateAsync({ taskId: task.id, text: text.trim(), mentions: commentMentionIds });
+      setText("");
+      setCommentMentionIds([]);
+    } catch {
+      // The mutation keeps the user's draft and shows the server error.
+    }
   };
   return (
     <section className="task-collaboration">
@@ -264,18 +275,21 @@ function TaskCollaboration({
         ))}
       </nav>
       {tab === "subtasks" && (
-        <div className="collaboration-list">
-          {subtasks.length ? (
-            subtasks.map((item) => (
-              <article key={item.id}>
-                <strong>{item.title}</strong>
-                <span>{item.workflow_status}</span>
-              </article>
-            ))
-          ) : (
-            <p>Дэд даалгавар байхгүй байна.</p>
-          )}
-        </div>
+        <>
+          <div className="collaboration-list">
+            {subtasks.length ? (
+              subtasks.map((item) => (
+                <article key={item.id}>
+                  <strong>{item.title}</strong>
+                  <span>{item.workflow_status}</span>
+                </article>
+              ))
+            ) : (
+              <p>Дэд даалгавар байхгүй байна.</p>
+            )}
+          </div>
+          {canManage && <button type="button" className="secondary-action compact" onClick={onCreateSubtask}>Дэд даалгавар нэмэх</button>}
+        </>
       )}
       {tab === "checklist" && (
         <>
@@ -314,7 +328,7 @@ function TaskCollaboration({
               onChange={(e) => setText(e.target.value)}
               placeholder="Checklist нэмэх"
             />
-            <button type="button" onClick={submitText}>
+            <button type="button" onClick={submitText} disabled={addCheck.isPending}>
               Нэмэх
             </button>
           </div>
@@ -325,7 +339,8 @@ function TaskCollaboration({
           <div className="collaboration-list">
             {dependencies.data?.map((item) => (
               <article key={item.id}>
-                <strong>{item.predecessor_title}</strong>
+                <strong>{item.related_task_title || item.predecessor_title}</strong>
+                <span>{item.relation_type === "related" ? "Холбоотой" : "Хамааралтай"}</span>
                 {canManage && (
                   <button
                     type="button"
@@ -341,26 +356,22 @@ function TaskCollaboration({
             ))}
           </div>
           {canManage && (
-            <select
-              defaultValue=""
-              onChange={(e) => {
-                if (e.target.value)
-                  addDependency.mutate({
-                    taskId: task.id,
-                    predecessor_task_id: Number(e.target.value),
-                  });
-                e.target.value = "";
-              }}
-            >
-              <option value="">Өмнөх даалгавар нэмэх</option>
-              {tasks
-                .filter((item) => item.id !== task.id)
-                .map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title}
-                  </option>
-                ))}
-            </select>
+            <div className="inline-compose">
+              <select value={relationshipType} onChange={(e) => setRelationshipType(e.target.value as "blocks" | "related")}>
+                <option value="blocks">Өмнөх ажил блоклоно</option>
+                <option value="related">Энгийн холбоотой</option>
+              </select>
+              <select defaultValue="" disabled={addDependency.isPending} onChange={async (e) => {
+                if (!e.target.value) return;
+                try {
+                  await addDependency.mutateAsync({ taskId: task.id, predecessor_task_id: Number(e.target.value), dependency_type: relationshipType });
+                  e.target.value = "";
+                } catch { /* hook reports */ }
+              }}>
+                <option value="">Даалгавар холбох</option>
+                {tasks.filter((item) => item.id !== task.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+              </select>
+            </div>
           )}
         </>
       )}
@@ -397,10 +408,11 @@ function TaskCollaboration({
               onChange={(e) => setText(e.target.value)}
               placeholder="@mention бүхий сэтгэгдэл"
             />
-            <button type="button" onClick={submitText}>
+            <button type="button" onClick={submitText} disabled={addComment.isPending}>
               Илгээх
             </button>
           </div>
+          <UserTagPicker label="Дурдах хэрэглэгч" value={commentMentionIds} users={workers} onChange={setCommentMentionIds} />
         </>
       )}
       {tab === "files" && (
@@ -410,15 +422,19 @@ function TaskCollaboration({
             Файл нэмэх
             <input
               type="file"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0];
-                if (file)
-                  upload.mutate({
+                if (!file) return;
+                try {
+                  await upload.mutateAsync({
                     objectType: "task",
                     objectId: task.id,
                     file,
                     onProgress: setProgress,
                   });
+                  e.currentTarget.value = "";
+                  setProgress(0);
+                } catch { /* hook reports */ }
               }}
             />
           </label>
@@ -488,6 +504,7 @@ export function EnterpriseTasksPage() {
   );
   const [selected, setSelected] = useState<EnterpriseTask | null>(null);
   const [creating, setCreating] = useState(false);
+  const [returnToTask, setReturnToTask] = useState<EnterpriseTask | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [form, setForm] = useState({
     ...EMPTY,
@@ -579,13 +596,27 @@ export function EnterpriseTasksPage() {
       project_id: projectId ? String(projectId) : "",
       workflow_status,
     });
+    setReturnToTask(null);
+    setCreating(true);
+  };
+  const openSubtaskCreate = (parent: EnterpriseTask) => {
+    setForm({
+      ...EMPTY,
+      project_id: parent.project_id ? String(parent.project_id) : "",
+      parent_task_id: String(parent.id),
+      workflow_status: "to_do",
+    });
+    setReturnToTask(parent);
+    setSelected(null);
     setCreating(true);
   };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
-      await createTask.mutateAsync(payload());
+      const created = await createTask.mutateAsync(payload()) as EnterpriseTask;
       setCreating(false);
+      setSelected(returnToTask || created);
+      setReturnToTask(null);
       setForm({ ...EMPTY, project_id: projectId ? String(projectId) : "" });
     } catch {
       /* hook reports */
@@ -1207,6 +1238,7 @@ export function EnterpriseTasksPage() {
             onMouseDown={() => {
               setSelected(null);
               setCreating(false);
+              setReturnToTask(null);
             }}
           >
             <motion.aside
@@ -1228,6 +1260,7 @@ export function EnterpriseTasksPage() {
                   onClick={() => {
                     setSelected(null);
                     setCreating(false);
+                    setReturnToTask(null);
                   }}
                 >
                   <X />
@@ -1269,9 +1302,11 @@ export function EnterpriseTasksPage() {
                 <TaskCollaboration
                   task={selected}
                   tasks={tasks.data ?? []}
-                  canManage={canReview}
+                  canManage={Boolean(selected.can_manage_collaboration)}
                   conflict={conflict}
                   resolveConflict={resolveConflict}
+                  onCreateSubtask={() => openSubtaskCreate(selected)}
+                  workers={workers.data ?? []}
                 />
               )}
             </motion.aside>
