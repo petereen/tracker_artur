@@ -361,23 +361,29 @@ export function EnterpriseDashboardPage() {
     date_to: localDateKey(monthDays[monthDays.length - 1]),
   });
   const miniCalendarEvents = useCalendarEvents("private", monthDays[20]);
+  const miniCalendarCompanyEvents = useCalendarEvents("corporate", monthDays[20]);
   const miniCalendarVisibleTasks = useMemo(() => {
     const tasks = new Map<number, EnterpriseTask>();
-    [...(miniCalendarEvents.data?.tasks ?? []), ...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
+    [...(miniCalendarEvents.data?.tasks ?? []), ...(miniCalendarCompanyEvents.data?.tasks ?? []), ...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(delegatedTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
     return [...tasks.values()];
-  }, [agenda.data?.tasks, miniCalendarEvents.data?.tasks, miniCalendarTasks.data, todayTasks.data]);
-  const miniCalendarMarkerDates = useMemo(() => {
-    const dates = new Set<string>();
-    const add = (value: string | null | undefined) => {
+  }, [agenda.data?.tasks, delegatedTasks.data, miniCalendarCompanyEvents.data?.tasks, miniCalendarEvents.data?.tasks, miniCalendarTasks.data, todayTasks.data]);
+  const miniCalendarMarkers = useMemo(() => {
+    type MarkerKind = "task" | "event" | "reminder" | "time-block";
+    const dates = new Map<string, Set<MarkerKind>>();
+    const add = (value: string | null | undefined, kind: MarkerKind) => {
       const key = calendarDayKey(value);
-      if (key) dates.add(key);
+      if (!key) return;
+      if (!dates.has(key)) dates.set(key, new Set());
+      dates.get(key)!.add(kind);
     };
     miniCalendarVisibleTasks.forEach((task) => {
-      if (!task.start_at || !task.deadline_at) add(task.start_at || task.deadline_at);
+      add(task.start_at || task.deadline_at, "task");
+      if (task.deadline_at) add(task.deadline_at, "task");
     });
-    [...(miniCalendarEvents.data?.entries ?? []), ...(miniCalendarEvents.data?.time_blocks ?? []), ...(agenda.data?.entries ?? [])].forEach((item: any) => add(item.remind_at || item.starts_at || item.start_at));
+    [...(miniCalendarEvents.data?.entries ?? []), ...(miniCalendarCompanyEvents.data?.entries ?? []), ...(agenda.data?.entries ?? [])].forEach((item: any) => add(item.remind_at || item.starts_at || item.start_at, item.kind === "reminder" ? "reminder" : "event"));
+    [...(miniCalendarEvents.data?.time_blocks ?? []), ...(miniCalendarCompanyEvents.data?.time_blocks ?? [])].forEach((item: any) => add(item.starts_at || item.start_at, "time-block"));
     return dates;
-  }, [agenda.data?.entries, miniCalendarEvents.data?.entries, miniCalendarEvents.data?.time_blocks, miniCalendarVisibleTasks]);
+  }, [agenda.data?.entries, miniCalendarCompanyEvents.data?.entries, miniCalendarCompanyEvents.data?.time_blocks, miniCalendarEvents.data?.entries, miniCalendarEvents.data?.time_blocks, miniCalendarVisibleTasks]);
   const miniCalendarRanges = useMemo(() => {
     const visibleStart = localDateKey(monthDays[0]);
     const visibleEnd = localDateKey(monthDays[monthDays.length - 1]);
@@ -988,15 +994,18 @@ export function EnterpriseDashboardPage() {
               )
                 .toISOString()
                 .slice(0, 10);
-              const count =
-                miniCalendarMarkerDates.has(local) ? 1 : 0;
+              const markers = [...(miniCalendarMarkers.get(local) ?? [])];
               return (
                 <span
                   key={local}
                   className={`${local === todayKey ? "today" : ""} ${day.getMonth() !== new Date().getMonth() ? "outside" : ""}`}
                 >
                   <i>{day.getDate()}</i>
-                  {count > 0 && <em />}
+                  {markers.length > 0 && (
+                    <em className="mini-day-markers" aria-label={`${markers.length} төрлийн календарийн зүйл`}>
+                      {markers.map((marker) => <b className={`mini-day-marker ${marker}`} key={marker} />)}
+                    </em>
+                  )}
                 </span>
               );
             })}

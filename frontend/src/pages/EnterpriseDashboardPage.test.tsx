@@ -6,12 +6,14 @@ const mocks = vi.hoisted(() => ({
   clock: { data: undefined as any, refetch: vi.fn() },
   action: { mutate: vi.fn(), isPending: false },
   agenda: { data: { tasks: [] as any[], entries: [] as any[] } },
+  privateCalendar: { tasks: [] as any[], entries: [] as any[], time_blocks: [] as any[] },
+  companyCalendar: { tasks: [] as any[], entries: [] as any[], time_blocks: [] as any[] },
 }));
 
 vi.mock("../api/enterprise", () => ({
   useClock: () => mocks.clock,
   useClockAction: () => mocks.action,
-  useCalendarEvents: () => ({ data: { tasks: [], entries: [], time_blocks: [] } }),
+  useCalendarEvents: (scope: string) => ({ data: scope === "private" ? mocks.privateCalendar : mocks.companyCalendar }),
   useEnterpriseSummary: () => ({ data: { active_projects: 1, completed_tasks: 2, completion_rate: 80, worked_minutes: 60 } }),
   useTodayCheckin: () => ({ data: {} }),
   useStartCheckin: () => ({ mutateAsync: vi.fn() }),
@@ -47,6 +49,9 @@ describe("Today work-hour timer", () => {
     setVisibilityState("visible");
     mocks.clock.refetch.mockReset();
     mocks.action.mutate.mockReset();
+    mocks.agenda.data = { tasks: [], entries: [] };
+    mocks.privateCalendar = { tasks: [], entries: [], time_blocks: [] };
+    mocks.companyCalendar = { tasks: [], entries: [], time_blocks: [] };
     const startedAt = new Date(Date.now() - 5_000).toISOString();
     mocks.clock.data = {
       active: {
@@ -192,5 +197,23 @@ describe("Today work-hour timer", () => {
     expect(bars).toHaveLength(2);
     expect(bars.some((bar) => bar.classList.contains("range-start") && bar.classList.contains("range-end"))).toBe(true);
     expect(bars.some((bar) => !bar.classList.contains("range-start") && bar.classList.contains("range-end"))).toBe(true);
+  });
+
+  it("renders visible markers for monthly tasks, events, and reminders", () => {
+    mocks.privateCalendar = {
+      tasks: [{ id: 201, title: "Monthly task", start_at: "2026-08-12", deadline_at: null }],
+      entries: [{ id: 202, kind: "event", starts_at: "2026-08-13" }],
+      time_blocks: [],
+    };
+    mocks.companyCalendar = {
+      tasks: [],
+      entries: [{ id: 203, kind: "reminder", starts_at: "2026-08-14", remind_at: "2026-08-14" }],
+      time_blocks: [],
+    };
+
+    const { container } = renderDashboard();
+    expect(container.querySelector(".mini-day-marker.task")).toBeInTheDocument();
+    expect(container.querySelector(".mini-day-marker.event")).toBeInTheDocument();
+    expect(container.querySelector(".mini-day-marker.reminder")).toBeInTheDocument();
   });
 });
