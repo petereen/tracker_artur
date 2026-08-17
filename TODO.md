@@ -28,6 +28,7 @@
 - [x] Merge private, company, assigned, and delegated Today mini-calendar sources and render explicit typed markers (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Render start-and-due tasks exclusively as solid continuous mini-calendar strokes with rounded true endpoints (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Replace the non-painting mini-calendar range overlay with gap-bridging per-day stroke fragments (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
+- [x] Align mini-calendar range caps to the horizontal centers of their start and due date numbers (`frontend/src/index.css`)
 - [x] Add OYUNS ERP core-operations migration and normalized operational entities (`backend/app/models/models.py`, `backend/alembic/versions`)
 - [x] Add contextual buying/selling/stock/accounting master-data request schemas, permissions, materializers, and audit responses (`backend/app/erp`)
 - [x] Add discount-aware buying/selling document workflows, branch conversions, archive/restore, and inventory synchronization (`backend/app/erp`)
@@ -213,6 +214,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Align mini-calendar range caps to the horizontal centers of their start and due date numbers (`frontend/src/index.css`)
 - [x] Replace the non-painting mini-calendar range overlay with gap-bridging per-day stroke fragments (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Render start-and-due tasks exclusively as solid continuous mini-calendar strokes with rounded true endpoints (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Merge private, company, assigned, and delegated Today mini-calendar sources and render explicit typed markers (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
