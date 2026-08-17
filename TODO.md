@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Merge ERP core-operation and ERP builder Alembic heads so `alembic upgrade head` has one target (`backend/alembic/versions/f7g8h9i0j1k2_merge_erp_core_heads.py`)
 - [x] Standardize settings module spacing, section cards, headers, controls, and action alignment (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/index.css`)
 - [x] Render continuous multi-day task ranges with clipped rounded ends and collision-free lanes in the Today mini calendar (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
 - [x] Add OYUNS ERP core-operations migration and normalized operational entities (`backend/app/models/models.py`, `backend/alembic/versions`)
