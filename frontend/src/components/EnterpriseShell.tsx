@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
-  BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark,
+  BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine,
   FolderArchive, LayoutDashboard, LogOut, Menu, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { useActor, useBrandingSettings, useEnterpriseLogout, useERPMetadata, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
@@ -16,6 +16,7 @@ import { GlobalCommandBar } from './GlobalCommandBar'
 
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
+  { to: '/worktime', label: 'nav.worktime', icon: ScanLine, roles: [] },
   { to: '/calendar', label: 'nav.calendar', icon: CalendarDays, roles: [] },
   { to: '/tasks', label: 'nav.tasks', icon: CheckSquare2, roles: [] },
   { to: '/reports', label: 'nav.reports', icon: FileCheck2, roles: [] },
@@ -29,7 +30,7 @@ const NAV = [
 const NAV_GROUP_BREAKS = new Set(['/calendar', '/projects', '/analytics', '/administration'])
 
 const TITLES: Record<string, string> = {
-  '/': 'Өнөөдрийн ажлын орон зай', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
+  '/': 'Өнөөдрийн ажлын орон зай', '/worktime': 'Ажлын цагийн бүртгэл', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
   '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө', '/contracts': 'Гэрээ',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
   '/erp': 'ERP үйл ажиллагаа',

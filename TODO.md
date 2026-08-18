@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add dynamic QR worktime kiosk models, signing, pairing, replay protection, and clock API (`backend/app/models/models.py`, `backend/app/routers/worktime_qr.py`, `backend/alembic/versions`)
+- [x] Preserve and harden one-open-work-interval invariants across QR, web, and Telegram clocks (`backend/app/models/models.py`, `backend/app/services/work_report_service.py`)
+- [x] Add authenticated Worktime scanner and public kiosk display with OYUNS responsive/PiP styling (`frontend/src/pages/WorktimePage.tsx`, `frontend/src/pages/WorktimeQrPage.tsx`, `frontend/src/index.css`)
+- [x] Add kiosk management settings, API hooks, navigation, localization, and security headers (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`)
+- [x] Add QR backend/frontend regression coverage and deployment configuration documentation (`backend/tests`, `frontend/src`, `docs`, `.env.example`)
 - [x] Add admin task row menus and batch actions to the organizational deadline control (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise.py`, `frontend/src/index.css`)
 - [x] Increase notification popover background opacity (`frontend/src/index.css`)
 - [x] Fix visual overflow and boundary clipping for multi-day task range bars in the Calendar Month/Grid view (`frontend/src/index.css`)

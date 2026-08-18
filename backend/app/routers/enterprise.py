@@ -366,6 +366,7 @@ def _entry_out(item: WorkTimeEntry) -> dict:
         "task_id": item.task_id, "local_work_date": item.local_work_date,
         "entry_type": item.entry_type, "mode": item.mode, "started_at": item.started_at,
         "ended_at": item.ended_at, "source_channel": item.source_channel,
+        "source_kiosk_id": item.source_kiosk_id, "work_location_id": item.work_location_id,
         "is_billable": item.is_billable, "approval_status": item.approval_status,
         "version": item.version,
     }

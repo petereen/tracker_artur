@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # AI gateway: Redis accelerates exact/circuit cache operations while
     # PostgreSQL/pgvector persists safe semantic cache entries.
     AI_REDIS_URL: str = "redis://redis:6379/0"
+    WORKTIME_QR_SIGNING_SECRET: str = ""
+    WORKTIME_QR_ROTATION_SECONDS: int = 30
+    WORKTIME_QR_GRACE_SECONDS: int = 15
+    WORKTIME_QR_KIOSK_COOKIE_DAYS: int = 180
+    WORKTIME_QR_REDIS_URL: str = "redis://redis:6379/0"
     AI_MODEL_REGISTRY_JSON: str = ""
     AI_OPENAI_TIMEOUT_SECONDS: float = 35.0
     AI_EXACT_CACHE_TTL_SECONDS: int = 86_400

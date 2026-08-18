@@ -14,6 +14,7 @@ from app.models.models import (  # noqa: F401
     WorkReport,
     WorkReportRevision,
     WorkReportPrompt,
+    WorktimeQrKiosk,
     AssistantContextExample,
     UnknownAssistantRequest,
 )

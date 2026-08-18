@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, BookOpen, Boxes, CalendarClock, CalendarDays, ClipboardList, Code2, KeyRound, Landmark, Settings2, ShieldCheck, UserPlus, UserRoundCog, Users2 } from 'lucide-react'
+import { ArrowLeft, Bot, BookOpen, Boxes, CalendarClock, CalendarDays, ClipboardList, Code2, KeyRound, Landmark, MonitorUp, Settings2, ShieldCheck, UserPlus, UserRoundCog, Users2 } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useManagedAccounts, usePermissionSettings, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUploadBrandingLogo } from '../api/enterprise'
+import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUploadBrandingLogo, useWorktimeQrKiosks } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { EmployeesPage } from './EmployeesPage'
 import { QuestionsPage } from './QuestionsPage'
@@ -107,7 +107,25 @@ export function CollaborationSettingsPage() {
     {canManagePermissions && <section className="account-admin panel"><div className="panel-heading"><div><span className="eyebrow">Collaboration access</span><h2>Даалгавар оноох эрх</h2><p>Сонгосон role-той, ажилтантай холбогдсон хэрэглэгч бусад ажилтанд даалгавар өгч болно.</p></div><UserRoundCog /></div><fieldset className="role-editor"><legend>Даалгавар оноож болох role</legend>{ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={permissions.data?.task_assignment_roles.includes(value) ?? true} onChange={() => { const current = permissions.data?.task_assignment_roles ?? ROLES.map(([name]) => name); updatePermissions.mutate(current.includes(value) ? current.filter((item) => item !== value) : [...current, value]) }} disabled={updatePermissions.isPending} /><span>{label}</span></label>)}</fieldset></section>}
     <section className="settings-embedded"><div className="settings-embedded-heading"><ClipboardList /><div><h3>Check-in асуултууд</h3><p>Өдрийн асуултын банк болон хариулах хүрээ.</p></div></div><QuestionsPage /></section>
     <section className="settings-embedded"><div className="settings-embedded-heading"><CalendarDays /><div><h3>Ажилтны хуваарь</h3><p>Check-in, сануулга болон ажлын өдрүүд.</p></div></div><SchedulePage /></section>
+    <WorktimeQrKioskPanel />
   </SettingsPage>
+}
+
+function WorktimeQrKioskPanel() {
+  const kiosks = useWorktimeQrKiosks()
+  const create = useCreateWorktimeQrKiosk()
+  const renew = useRenewWorktimeQrPairingCode()
+  const revoke = useRevokeWorktimeQrKiosk()
+  const [label, setLabel] = useState('Main office display')
+  const [locationId, setLocationId] = useState('main_office')
+  const [displayName, setDisplayName] = useState('Main office')
+  const [pairingCode, setPairingCode] = useState<string | null>(null)
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const result = await create.mutateAsync({ label, location_id: locationId, display_name: displayName })
+    setPairingCode(result.pairing_code || null)
+  }
+  return <section className="settings-embedded worktime-kiosk-admin"><div className="settings-embedded-heading"><MonitorUp /><div><h3>Worktime QR дэлгэц</h3><p>TV дэлгэцийг pairing кодоор нэг удаа холбож, оффисын динамик QR үүсгэнэ.</p></div></div><form className="kiosk-create-form" onSubmit={submit}><label>Дэлгэцийн нэр<input value={label} onChange={(event) => setLabel(event.target.value)} required /></label><label>Location ID<input value={locationId} onChange={(event) => setLocationId(event.target.value)} pattern="[A-Za-z0-9_-]+" required /></label><label>Харагдах нэр<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><button className="primary-action" disabled={create.isPending}>Pairing код үүсгэх</button></form>{pairingCode && <div className="kiosk-pairing-code" role="status"><strong>{pairingCode}</strong><span>Энэ кодыг TV дээрх <a href="/worktimeqr" target="_blank" rel="noreferrer">/worktimeqr</a> дэлгэцэд 10 минутын дотор оруулна уу.</span><button className="secondary-action compact" onClick={() => navigator.clipboard?.writeText(pairingCode)}>Хуулах</button></div>}<div className="kiosk-list">{kiosks.isLoading ? <p>Дэлгэцүүдийг ачаалж байна…</p> : (kiosks.data ?? []).map((kiosk) => <article key={kiosk.id} className={`kiosk-row ${kiosk.status}`}><div><strong>{kiosk.display_name}</strong><span>{kiosk.label} · {kiosk.location_id} · {kiosk.status === 'active' ? 'Идэвхтэй' : 'Цуцлагдсан'}</span></div>{kiosk.status === 'active' && <div className="kiosk-row-actions"><button className="secondary-action compact" onClick={async () => setPairingCode((await renew.mutateAsync(kiosk.id)).pairing_code || null)} disabled={renew.isPending}>Дахин pair хийх</button><button className="danger-action compact" onClick={() => revoke.mutate(kiosk.id)} disabled={revoke.isPending}>Цуцлах</button></div>}</article>)}</div></section>
 }
 
 function UnlinkedAccountsPanel() {

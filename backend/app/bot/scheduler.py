@@ -310,7 +310,7 @@ async def send_reminder(employee_id: int, num: int):
         if not report_complete:
             missing.append("өдрийн тайлан")
         if missing:
-            reminder_text = f"⚠️ Сануулга #{num}: " + " болон ".join(missing) + "-аа бөглөхөө бүү мартаарай!"
+            reminder_text = f"⚠️ Сануулга #{num}: " + " болон ".join(missing) + "-аа бөглөхөө мартав аа!"
             await bot.send_message(telegram_id, reminder_text)
             from app.services.user_notifications import mirror_existing_telegram_notification
             mirror_existing_telegram_notification(

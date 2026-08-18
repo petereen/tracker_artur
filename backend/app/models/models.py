@@ -480,6 +480,34 @@ class WorkReportPrompt(Base):
     report = relationship("WorkReport", back_populates="prompts")
 
 
+class WorktimeQrKiosk(Base):
+    """A provisioned office display that may mint short-lived QR tokens."""
+
+    __tablename__ = "worktime_qr_kiosks"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "label", name="uq_worktime_qr_kiosk_org_label"),
+        Index("ix_worktime_qr_kiosks_org_status", "organization_id", "status"),
+        CheckConstraint("status IN ('active','revoked')", name="ck_worktime_qr_kiosk_status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(UUID(as_uuid=True), nullable=False, unique=True, default=uuid.uuid4, server_default=sa_text("gen_random_uuid()"))
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    label = Column(Text, nullable=False)
+    location_id = Column(Text, nullable=False, server_default="main_office", default="main_office")
+    display_name = Column(Text, nullable=False, server_default="Main office", default="Main office")
+    credential_hash = Column(String(64), nullable=False, unique=True)
+    pairing_code_hash = Column(String(64), unique=True)
+    pairing_expires_at = Column(DateTime(timezone=True))
+    status = Column(Text, nullable=False, server_default="active", default="active")
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    paired_at = Column(DateTime(timezone=True))
+    last_seen_at = Column(DateTime(timezone=True))
+    revoked_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class WorkTimeEntry(Base):
     """One non-overlapping in-person or remote work interval for a day."""
 
@@ -509,6 +537,8 @@ class WorkTimeEntry(Base):
     hourly_rate_snapshot = Column(Numeric(18, 4))
     rate_currency = Column(String(3))
     exchange_rate_snapshot_id = Column(Integer, ForeignKey("exchange_rate_snapshots.id", ondelete="SET NULL"))
+    source_kiosk_id = Column(Integer, ForeignKey("worktime_qr_kiosks.id", ondelete="SET NULL"), index=True)
+    work_location_id = Column(Text)
     version = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

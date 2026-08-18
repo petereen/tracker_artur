@@ -97,6 +97,77 @@ export interface ClockEntry {
   mode: 'in_person' | 'remote' | null
   started_at: string
   ended_at: string | null
+  source_channel?: string
+  source_kiosk_id?: number | null
+  work_location_id?: string | null
+}
+
+export interface WorktimeQrKiosk {
+  id: number
+  public_id: string
+  label: string
+  location_id: string
+  display_name: string
+  status: 'active' | 'revoked'
+  paired_at: string | null
+  last_seen_at: string | null
+  revoked_at: string | null
+  pairing_code?: string
+  pairing_expires_at?: string
+}
+
+export interface WorktimeQrDisplayToken {
+  token: string
+  issued_at: string
+  expires_at: string
+  server_time: string
+  location_id: string
+  display_name: string
+}
+
+export interface WorktimeQrClockResult {
+  action: 'clock_in' | 'switched_to_office' | 'clock_out'
+  replayed: boolean
+  location_id: string
+  server_time: string
+  timezone: string
+  affected_entries: ClockEntry[]
+  shift_summary: { active: ClockEntry | null; today_entries: ClockEntry[] }
+}
+
+const worktimeQrKeys = ['v1', 'worktime-qr'] as const
+
+export function useWorktimeQrKiosks(enabled = true) {
+  return useQuery<WorktimeQrKiosk[]>({ queryKey: [...worktimeQrKeys, 'kiosks'], queryFn: () => api.get('/v1/worktime-qr/kiosks').then((response) => response.data), enabled })
+}
+
+export function useCreateWorktimeQrKiosk() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (input: { label: string; location_id: string; display_name: string }) => api.post('/v1/worktime-qr/kiosks', input).then((response) => response.data as WorktimeQrKiosk), onSuccess: () => queryClient.invalidateQueries({ queryKey: worktimeQrKeys }) })
+}
+
+export function useRenewWorktimeQrPairingCode() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (id: number) => api.post(`/v1/worktime-qr/kiosks/${id}/pairing-code`).then((response) => response.data as WorktimeQrKiosk), onSuccess: () => queryClient.invalidateQueries({ queryKey: worktimeQrKeys }) })
+}
+
+export function useRevokeWorktimeQrKiosk() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (id: number) => api.post(`/v1/worktime-qr/kiosks/${id}/revoke`).then((response) => response.data as WorktimeQrKiosk), onSuccess: () => queryClient.invalidateQueries({ queryKey: worktimeQrKeys }) })
+}
+
+export function usePairWorktimeQrKiosk() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (code: string) => api.post('/v1/worktime-qr/pair', { code }).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: [...worktimeQrKeys, 'display-token'] }) })
+}
+
+export function useWorktimeQrDisplayToken(enabled = true) {
+  return useQuery<WorktimeQrDisplayToken>({ queryKey: [...worktimeQrKeys, 'display-token'], queryFn: () => api.get('/v1/worktime-qr/display-token', { headers: { 'Cache-Control': 'no-cache' } }).then((response) => response.data), enabled, refetchInterval: (query) => query.state.error ? 10_000 : query.state.data ? Math.max(250, new Date(query.state.data.expires_at).getTime() - Date.now()) : 30_000, refetchOnWindowFocus: true, retry: false })
+}
+
+export function useWorktimeQrClock() {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (input: { token: string; client_timestamp: string }) => api.post('/v1/worktime-qr/clock', input).then((response) => response.data as WorktimeQrClockResult), onSuccess: (result) => { queryClient.setQueryData(clockQueryKey, { active: result.shift_summary.active, today_entries: result.shift_summary.today_entries, timezone: result.timezone, server_time: result.server_time }); queryClient.invalidateQueries({ queryKey: clockQueryKey }) } })
 }
 
 export interface TaskDependency { id: number; predecessor_task_id: number; predecessor_title: string | null; successor_task_id: number; dependency_type: 'blocks' | 'related'; relation_type: 'blocks' | 'related'; direction: 'blocked_by' | 'related'; related_task_id: number; related_task_title: string | null }

@@ -8,6 +8,8 @@ import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordResetPage
 import { InitialWorkspaceSkeleton } from './components/Loading'
 
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
+const WorktimePage = lazy(() => import('./pages/WorktimePage').then((module) => ({ default: module.WorktimePage })))
+const WorktimeQrPage = lazy(() => import('./pages/WorktimeQrPage').then((module) => ({ default: module.WorktimeQrPage })))
 const ProjectsWorkspacePage = lazy(() => import('./pages/ProjectsWorkspacePage').then((module) => ({ default: module.ProjectsWorkspacePage })))
 const EnterpriseTasksPage = lazy(() => import('./pages/EnterpriseTasksPage').then((module) => ({ default: module.EnterpriseTasksPage })))
 const CalendarWorkspacePage = lazy(() => import('./pages/CalendarWorkspacePage').then((module) => ({ default: module.CalendarWorkspacePage })))
@@ -47,6 +49,7 @@ function AuthenticatedApp() {
     <Routes>
       <Route element={<EnterpriseShell />}>
         <Route index element={<EnterpriseDashboardPage />} />
+        <Route path="worktime" element={<WorktimePage />} />
         <Route path="projects" element={<ProjectsWorkspacePage />} />
         <Route path="tasks" element={<EnterpriseTasksPage />} />
         <Route path="calendar" element={<CalendarWorkspacePage />} />
@@ -88,6 +91,7 @@ export default function App() {
       <Suspense fallback={<InitialWorkspaceSkeleton />}>
         <Routes>
           <Route path="/tg" element={<TgMiniAppPage />} />
+          <Route path="/worktimeqr" element={<WorktimeQrPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
