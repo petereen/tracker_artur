@@ -2660,7 +2660,8 @@ a {
   border: 1px solid var(--color-border);
   border-radius: 14px 0 0 14px;
   box-shadow: var(--shadow-md);
-  transform: translate3d(0, 0, 0);
+  height: fit-content;
+  max-height: calc(100dvh - 110px);
   width: 310px;
 }
 .workers-drawer:not(.open) {
@@ -2699,10 +2700,11 @@ a {
   width: 16px;
 }
 .workers-content {
-  height: 100%;
   display: flex;
   flex-direction: column;
-  padding: max(18px, min(35vh, calc(var(--workers-toggle-y, 132px) - var(--workers-panel-top) + 18px))) 14px 18px;
+  max-height: inherit;
+  overflow-y: auto;
+  padding: 18px 14px;
   transform: translate3d(100%, 0, 0);
   transition: transform 320ms cubic-bezier(.22, 1, .36, 1);
   will-change: transform;

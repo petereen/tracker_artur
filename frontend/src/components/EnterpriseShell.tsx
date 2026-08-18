@@ -92,7 +92,7 @@ export function EnterpriseShell() {
   const [commandOpen, setCommandOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [workersOpen, setWorkersOpen] = useState(false)
-  const [workersToggleY, setWorkersToggleY] = useState(() => Math.max(108, Math.round(window.innerHeight * 0.38)))
+  const [workersToggleY, setWorkersToggleY] = useState(110)
   const [workersDragging, setWorkersDragging] = useState(false)
   const workersToggleRef = useRef<HTMLButtonElement>(null)
   const workersDragRef = useRef({ pointerId: -1, startY: 0, startToggleY: 0, moved: false })
