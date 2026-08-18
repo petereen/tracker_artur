@@ -122,10 +122,23 @@ function WorktimeQrKioskPanel() {
   const [pairingCode, setPairingCode] = useState<string | null>(null)
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
-    const result = await create.mutateAsync({ label, location_id: locationId, display_name: displayName })
-    setPairingCode(result.pairing_code || null)
+    try {
+      const result = await create.mutateAsync({ label, location_id: locationId, display_name: displayName })
+      setPairingCode(result.pairing_code || null)
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail
+      toast.error(typeof detail === 'object' ? detail.message || 'QR дэлгэц үүсгэсэнгүй' : detail || 'QR дэлгэц үүсгэсэнгүй')
+    }
   }
-  return <section className="settings-embedded worktime-kiosk-admin"><div className="settings-embedded-heading"><MonitorUp /><div><h3>Worktime QR дэлгэц</h3><p>TV дэлгэцийг pairing кодоор нэг удаа холбож, оффисын динамик QR үүсгэнэ.</p></div></div><form className="kiosk-create-form" onSubmit={submit}><label>Дэлгэцийн нэр<input value={label} onChange={(event) => setLabel(event.target.value)} required /></label><label>Location ID<input value={locationId} onChange={(event) => setLocationId(event.target.value)} pattern="[A-Za-z0-9_-]+" required /></label><label>Харагдах нэр<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><button className="primary-action" disabled={create.isPending}>Pairing код үүсгэх</button></form>{pairingCode && <div className="kiosk-pairing-code" role="status"><strong>{pairingCode}</strong><span>Энэ кодыг TV дээрх <a href="/worktimeqr" target="_blank" rel="noreferrer">/worktimeqr</a> дэлгэцэд 10 минутын дотор оруулна уу.</span><button className="secondary-action compact" onClick={() => navigator.clipboard?.writeText(pairingCode)}>Хуулах</button></div>}<div className="kiosk-list">{kiosks.isLoading ? <p>Дэлгэцүүдийг ачаалж байна…</p> : (kiosks.data ?? []).map((kiosk) => <article key={kiosk.id} className={`kiosk-row ${kiosk.status}`}><div><strong>{kiosk.display_name}</strong><span>{kiosk.label} · {kiosk.location_id} · {kiosk.status === 'active' ? 'Идэвхтэй' : 'Цуцлагдсан'}</span></div>{kiosk.status === 'active' && <div className="kiosk-row-actions"><button className="secondary-action compact" onClick={async () => setPairingCode((await renew.mutateAsync(kiosk.id)).pairing_code || null)} disabled={renew.isPending}>Дахин pair хийх</button><button className="danger-action compact" onClick={() => revoke.mutate(kiosk.id)} disabled={revoke.isPending}>Цуцлах</button></div>}</article>)}</div></section>
+  const renewPairing = async (id: number) => {
+    try {
+      setPairingCode((await renew.mutateAsync(id)).pairing_code || null)
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail
+      toast.error(typeof detail === 'object' ? detail.message || 'Pairing код шинэчилсэнгүй' : detail || 'Pairing код шинэчилсэнгүй')
+    }
+  }
+  return <section className="settings-embedded worktime-kiosk-admin"><div className="settings-embedded-heading"><MonitorUp /><div><h3>Worktime QR дэлгэц</h3><p>TV дэлгэцийг pairing кодоор нэг удаа холбож, оффисын динамик QR үүсгэнэ.</p></div></div><form className="kiosk-create-form" onSubmit={submit}><label>Дэлгэцийн нэр<input value={label} onChange={(event) => setLabel(event.target.value)} required /></label><label>Location ID<input value={locationId} onChange={(event) => setLocationId(event.target.value)} pattern="[A-Za-z0-9_-]+" required /></label><label>Харагдах нэр<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><button className="primary-action" disabled={create.isPending}>Pairing код үүсгэх</button></form>{pairingCode && <div className="kiosk-pairing-code" role="status"><strong>{pairingCode}</strong><span>Энэ кодыг TV дээрх <a href="/worktimeqr" target="_blank" rel="noreferrer">/worktimeqr</a> дэлгэцэд 10 минутын дотор оруулна уу.</span><button className="secondary-action compact" onClick={() => navigator.clipboard?.writeText(pairingCode)}>Хуулах</button></div>}{kiosks.isError && <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />QR дэлгэцийн өгөгдлийн хүснэгт бэлэн биш байна. Backend migration-ийг ажиллуулаад дахин оролдоно уу.</div>}<div className="kiosk-list">{kiosks.isLoading ? <p>Дэлгэцүүдийг ачаалж байна…</p> : (kiosks.data ?? []).map((kiosk) => <article key={kiosk.id} className={`kiosk-row ${kiosk.status}`}><div><strong>{kiosk.display_name}</strong><span>{kiosk.label} · {kiosk.location_id} · {kiosk.status === 'active' ? 'Идэвхтэй' : 'Цуцлагдсан'}</span></div>{kiosk.status === 'active' && <div className="kiosk-row-actions"><button className="secondary-action compact" onClick={() => renewPairing(kiosk.id)} disabled={renew.isPending}>Дахин pair хийх</button><button className="danger-action compact" onClick={() => revoke.mutate(kiosk.id)} disabled={revoke.isPending}>Цуцлах</button></div>}</article>)}</div></section>
 }
 
 function UnlinkedAccountsPanel() {

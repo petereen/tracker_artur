@@ -18,6 +18,8 @@ export function WorktimePage() {
   const [scanning, setScanning] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<{ action: string; replayed: boolean } | null>(null)
+  const scanRef = useRef(scan)
+  scanRef.current = scan
 
   useEffect(() => () => { controlsRef.current?.stop(); controlsRef.current = null }, [])
 
@@ -30,43 +32,62 @@ export function WorktimePage() {
     setScanning(false)
   }
 
-  const startScanner = async () => {
+  const startScanner = () => {
     setCameraError(null)
     setLastResult(null)
     handledRef.current = false
     setScanning(true)
-    try {
-      const reader = new BrowserQRCodeReader()
-      const controls = await reader.decodeFromConstraints({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } }, videoRef.current!, async (result) => {
-        if (!result || handledRef.current) return
-        handledRef.current = true
-        stopScanner()
-        try {
-          const value = await scan.mutateAsync({ token: result.getText(), client_timestamp: new Date().toISOString() })
-          setLastResult({ action: value.action, replayed: value.replayed })
-          toast.success(value.action === 'clock_out' ? 'Оффисын цаг дууслаа' : value.action === 'switched_to_office' ? 'Оффисын цаг эхэллээ' : 'Оффисын цаг бүртгэгдлээ')
-          if (navigator.vibrate) navigator.vibrate(80)
-          try {
-            const audio = new AudioContext()
-            const oscillator = audio.createOscillator()
-            const gain = audio.createGain()
-            oscillator.frequency.value = 880
-            gain.gain.value = 0.05
-            oscillator.connect(gain).connect(audio.destination)
-            oscillator.start()
-            oscillator.stop(audio.currentTime + 0.12)
-          } catch { /* audio feedback is optional */ }
-        } catch (error: any) {
-          const detail = error?.response?.data?.detail
-          setCameraError(typeof detail === 'object' ? detail.message : detail || 'QR код бүртгэгдсэнгүй')
-        }
-      })
-      controlsRef.current = controls
-    } catch (error: any) {
-      setScanning(false)
-      setCameraError(error?.name === 'NotAllowedError' ? 'Камер ашиглах зөвшөөрөл олгогдоогүй байна.' : 'Камер нээж чадсангүй. HTTPS холболт болон камерын тохиргоог шалгана уу.')
-    }
   }
+
+  useEffect(() => {
+    if (!scanning || !videoRef.current) return
+    let cancelled = false
+    const reader = new BrowserQRCodeReader()
+    const video = videoRef.current
+    const start = async () => {
+      try {
+        const controls = await reader.decodeFromConstraints({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } }, video, async (result) => {
+          if (!result || handledRef.current) return
+          handledRef.current = true
+          stopScanner()
+          try {
+            const value = await scanRef.current.mutateAsync({ token: result.getText(), client_timestamp: new Date().toISOString() })
+            setLastResult({ action: value.action, replayed: value.replayed })
+            toast.success(value.action === 'clock_out' ? 'Оффисын цаг дууслаа' : value.action === 'switched_to_office' ? 'Оффисын цаг эхэллээ' : 'Оффисын цаг бүртгэгдлээ')
+            if (navigator.vibrate) navigator.vibrate(80)
+            try {
+              const audio = new AudioContext()
+              const oscillator = audio.createOscillator()
+              const gain = audio.createGain()
+              oscillator.frequency.value = 880
+              gain.gain.value = 0.05
+              oscillator.connect(gain).connect(audio.destination)
+              oscillator.start()
+              oscillator.stop(audio.currentTime + 0.12)
+            } catch { /* audio feedback is optional */ }
+          } catch (error: any) {
+            const detail = error?.response?.data?.detail
+            setCameraError(typeof detail === 'object' ? detail.message : detail || 'QR код бүртгэгдсэнгүй')
+          }
+        })
+        if (cancelled) controls.stop()
+        else controlsRef.current = controls
+      } catch (error: any) {
+        if (cancelled) return
+        setScanning(false)
+        setCameraError(error?.name === 'NotAllowedError' ? 'Камер ашиглах зөвшөөрөл олгогдоогүй байна.' : 'Камер нээж чадсангүй. HTTPS холболт болон камерын тохиргоог шалгана уу.')
+      }
+    }
+    void start()
+    return () => {
+      cancelled = true
+      controlsRef.current?.stop()
+      controlsRef.current = null
+      const stream = video.srcObject as MediaStream | null
+      stream?.getTracks().forEach((track) => track.stop())
+      video.srcObject = null
+    }
+  }, [scanning])
 
   const active = clock.data?.active
   const timezone = clock.data?.timezone
@@ -79,7 +100,7 @@ export function WorktimePage() {
       <section className="worktime-scanner panel">
         <div className="panel-heading"><div><span className="eyebrow">QR SCANNER</span><h2>Оффисын QR уншуулах</h2></div><ScanLine size={22} /></div>
         <div className={`scanner-viewport ${scanning ? 'scanning' : ''}`}>
-          {scanning ? <><video ref={videoRef} autoPlay muted playsInline aria-label="Оффисын QR камер" /><div className="scanner-frame" aria-hidden="true" /></> : <div className="scanner-placeholder"><Camera size={32} /><span>Камер нээж, дэлгэц дээрх QR код руу чиглүүлнэ үү.</span></div>}
+          {scanning ? <><video ref={videoRef} autoPlay muted playsInline onLoadedMetadata={(event) => { void event.currentTarget.play().catch(() => undefined) }} aria-label="Оффисын QR камер" /><div className="scanner-frame" aria-hidden="true" /></> : <div className="scanner-placeholder"><Camera size={32} /><span>Камер нээж, дэлгэц дээрх QR код руу чиглүүлнэ үү.</span></div>}
         </div>
         {cameraError && <div className="worktime-alert error" role="alert"><ShieldAlert size={17} />{cameraError}</div>}
         {lastResult && <div className="worktime-alert success" role="status"><CheckCircle2 size={17} /><span>{lastResult.replayed ? 'Давхар хүсэлт баталгаажлаа.' : lastResult.action === 'clock_out' ? 'Оффисын цаг дууслаа.' : lastResult.action === 'switched_to_office' ? 'Remote цаг хаагдаж, оффисын цаг эхэллээ.' : 'Оффисын цаг эхэллээ.'} Дахин бүртгэхийн тулд товчийг дахин дарна уу.</span></div>}

@@ -7,8 +7,11 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 
-revision: str = "b7c8d9e0f1a2"
-down_revision: Union[str, Sequence[str], None] = ("a5b6c7d8e9f0", "c1d2e3f4g5h6")
+revision: str = "c5d6e7f8g9h0"
+# Merge the repository's two actual Alembic heads so deployment can upgrade
+# the QR schema in one pass. Both heads already include the older task/search
+# branches that originally forked from z4a5b6c7d8e9.
+down_revision: Union[str, Sequence[str], None] = ("f5g6h7i8j9k0", "h1i2j3k4l5m6")
 branch_labels = None
 depends_on = None
 
