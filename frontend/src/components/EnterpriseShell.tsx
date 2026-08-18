@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
@@ -92,6 +92,11 @@ export function EnterpriseShell() {
   const [commandOpen, setCommandOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [workersOpen, setWorkersOpen] = useState(false)
+  const [workersToggleY, setWorkersToggleY] = useState(() => Math.max(108, Math.round(window.innerHeight * 0.38)))
+  const [workersDragging, setWorkersDragging] = useState(false)
+  const workersToggleRef = useRef<HTMLButtonElement>(null)
+  const workersDragRef = useRef({ pointerId: -1, startY: 0, startToggleY: 0, moved: false })
+  const suppressWorkersClickRef = useRef(false)
   const [workerSearch, setWorkerSearch] = useState('')
   const [selectedWorker, setSelectedWorker] = useState<number>()
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('oyuns-theme') as 'light' | 'dark') || 'light')
@@ -100,6 +105,16 @@ export function EnterpriseShell() {
   const erp = useERPMetadata(Boolean(token))
 
   useEffect(() => setMobileOpen(false), [location.pathname])
+  useEffect(() => {
+    const clampToggle = () => {
+      const buttonHeight = workersToggleRef.current?.offsetHeight ?? 48
+      const margin = 14
+      setWorkersToggleY((current) => Math.min(Math.max(current, margin), Math.max(margin, window.innerHeight - buttonHeight - margin)))
+    }
+    clampToggle()
+    window.addEventListener('resize', clampToggle)
+    return () => window.removeEventListener('resize', clampToggle)
+  }, [])
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('oyuns-theme', theme) }, [theme])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -141,6 +156,41 @@ export function EnterpriseShell() {
     ] : []),
     { id: 'profile', type: 'feature' as const, title: 'Open profile', subtitle: 'Manage your account', icon: UserCircle2, run: () => navigate('/profile') },
   ], [navigate, roles])
+
+  const handleWorkersPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0 && event.pointerType !== 'touch') return
+    const button = event.currentTarget
+    button.setPointerCapture(event.pointerId)
+    workersDragRef.current = { pointerId: event.pointerId, startY: event.clientY, startToggleY: workersToggleY, moved: false }
+    suppressWorkersClickRef.current = false
+    setWorkersDragging(true)
+  }
+  const handleWorkersPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = workersDragRef.current
+    if (drag.pointerId !== event.pointerId) return
+    const delta = event.clientY - drag.startY
+    if (!drag.moved && Math.abs(delta) < 8) return
+    drag.moved = true
+    suppressWorkersClickRef.current = true
+    const buttonHeight = workersToggleRef.current?.offsetHeight ?? 48
+    const margin = 14
+    const maxY = Math.max(margin, window.innerHeight - buttonHeight - margin)
+    setWorkersToggleY(Math.min(Math.max(drag.startToggleY + delta, margin), maxY))
+  }
+  const finishWorkersPointer = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = workersDragRef.current
+    if (drag.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    workersDragRef.current.pointerId = -1
+    setWorkersDragging(false)
+  }
+  const handleWorkersClick = () => {
+    if (suppressWorkersClickRef.current) {
+      suppressWorkersClickRef.current = false
+      return
+    }
+    setWorkersOpen((value) => !value)
+  }
 
   return (
     <RealtimeProvider>
@@ -191,7 +241,7 @@ export function EnterpriseShell() {
             <span>Бусад</span>
           </button>
         </nav>
-        <aside className={`workers-drawer ${workersOpen ? 'open' : ''}`} aria-label="Ажилтны төлөв"><button className="workers-toggle" onClick={() => setWorkersOpen((value) => !value)} aria-label={workersOpen ? 'Ажилтны жагсаалт хаах' : 'Ажилтны жагсаалт нээх'}>{workersOpen ? <ChevronRight /> : <><ChevronLeft /><Users2 /></>}</button>{workersOpen && <div className="workers-content"><header><div><span className="eyebrow">Live presence</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)}><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={worker.avatar_url} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Ажлын алба оруулаагүй'}</p>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer"><Send size={14} />Telegram-аар чатлах</a>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div>}</aside>
+        <aside className={`workers-drawer ${workersOpen ? 'open' : ''} ${workersDragging ? 'is-dragging' : ''}`} style={{ '--workers-toggle-y': `${workersToggleY}px` } as React.CSSProperties} aria-label="Ажилтны төлөв"><button ref={workersToggleRef} className="workers-toggle" onPointerDown={handleWorkersPointerDown} onPointerMove={handleWorkersPointerMove} onPointerUp={finishWorkersPointer} onPointerCancel={finishWorkersPointer} onClick={handleWorkersClick} aria-label={workersOpen ? 'Ажилтны жагсаалт хаах' : 'Ажилтны жагсаалт нээх'}>{workersOpen ? <ChevronRight /> : <><ChevronLeft /><Users2 /></>}</button><div className="workers-content"><header><div><span className="eyebrow">OYUNS</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)}><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={worker.avatar_url} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Ажлын алба оруулаагүй'}</p>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer"><Send size={14} />Telegram-аар чатлах</a>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div></aside>
         <OyunsAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
         <GlobalCommandBar open={commandOpen} onClose={() => setCommandOpen(false)} accountId={actorQuery.data?.id} channels={commandChannels} features={commandFeatures} onWorker={(id) => { setSelectedWorker(id); setWorkersOpen(true) }} />
       </div>

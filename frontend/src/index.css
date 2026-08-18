@@ -2648,6 +2648,7 @@ a {
 
 .workers-drawer {
   bottom: 18px;
+  --workers-panel-top: 92px;
   position: fixed;
   right: 0;
   top: 92px;
@@ -2659,7 +2660,11 @@ a {
   border: 1px solid var(--color-border);
   border-radius: 14px 0 0 14px;
   box-shadow: var(--shadow-md);
+  transform: translate3d(0, 0, 0);
   width: 310px;
+}
+.workers-drawer:not(.open) {
+  pointer-events: none;
 }
 .workers-toggle {
   align-items: center;
@@ -2671,9 +2676,20 @@ a {
   gap: 1px;
   min-height: 42px;
   padding: 0 7px;
-  position: absolute;
+  cursor: grab;
+  position: fixed;
   right: 0;
-  top: 12px;
+  top: var(--workers-toggle-y, 132px);
+  touch-action: none;
+  transform: translate3d(0, 0, 0);
+  transition: right 320ms cubic-bezier(.22, 1, .36, 1), background-color 160ms ease, color 160ms ease;
+  z-index: 2;
+  pointer-events: auto;
+}
+.workers-drawer.is-dragging .workers-toggle {
+  cursor: grabbing;
+  transition: none;
+  will-change: transform;
 }
 .workers-drawer.open .workers-toggle {
   right: 309px;
@@ -2683,10 +2699,16 @@ a {
   width: 16px;
 }
 .workers-content {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  padding: 18px 14px;
+  padding: max(18px, min(35vh, calc(var(--workers-toggle-y, 132px) - var(--workers-panel-top) + 18px))) 14px 18px;
+  transform: translate3d(100%, 0, 0);
+  transition: transform 320ms cubic-bezier(.22, 1, .36, 1);
+  will-change: transform;
+}
+.workers-drawer.open .workers-content {
+  transform: translate3d(0, 0, 0);
 }
 .workers-content > header,
 .worker-performance > header {
@@ -4110,6 +4132,23 @@ a {
   .workspace-sidebar,
   .detail-sheet {
     transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workers-content,
+  .workers-toggle {
+    transition-duration: 1ms;
+  }
+}
+@media (max-width: 800px) {
+  .workers-drawer {
+    --workers-panel-top: auto;
+  }
+  .workers-drawer:not(.open) {
+    display: block;
+  }
+  .workers-content {
+    padding-top: 18px;
   }
 }
 @media (prefers-reduced-transparency: reduce) {
@@ -6005,10 +6044,10 @@ a {
   width: 36px;
 }
 .workers-drawer {
-  top: 132px;
+  top: var(--workers-panel-top, 92px);
 }
 .workers-toggle {
-  top: 18px;
+  top: var(--workers-toggle-y, 132px);
 }
 .metrics-grid {
   gap: 16px;
@@ -6209,9 +6248,6 @@ a {
   .workers-drawer.open {
     border-radius: 14px 0 0 14px;
     height: min(74vh, 560px);
-  }
-  .workers-toggle {
-    top: 12px;
   }
   .productivity-panel {
     grid-template-columns: 1fr minmax(180px, 220px);
@@ -6491,7 +6527,7 @@ a {
   width: 100%;
 }
 .workers-drawer {
-  display: none;
+  display: block;
 }
 
 @media (min-width: 480px) {

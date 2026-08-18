@@ -162,7 +162,12 @@ export function usePairWorktimeQrKiosk() {
 }
 
 export function useWorktimeQrDisplayToken(enabled = true) {
-  return useQuery<WorktimeQrDisplayToken>({ queryKey: [...worktimeQrKeys, 'display-token'], queryFn: () => publicApi.get('/v1/worktime-qr/display-token', { headers: { 'Cache-Control': 'no-cache' } }).then((response) => response.data), enabled, refetchInterval: (query) => query.state.error ? false : query.state.data ? Math.max(250, new Date(query.state.data.expires_at).getTime() - Date.now()) : 30_000, refetchOnWindowFocus: false, refetchOnReconnect: false, retry: false })
+  return useQuery<WorktimeQrDisplayToken>({ queryKey: [...worktimeQrKeys, 'display-token'], queryFn: () => publicApi.get('/v1/worktime-qr/display-token', { headers: { 'Cache-Control': 'no-cache' } }).then((response) => response.data), enabled, refetchInterval: (query) => {
+    const expiresAt = query.state.data?.expires_at
+    if (query.state.error) return expiresAt ? 5_000 : false
+    if (expiresAt) return Math.max(1_000, new Date(expiresAt).getTime() - Date.now() - 4_000)
+    return 30_000
+  }, refetchOnWindowFocus: false, refetchOnReconnect: false, refetchIntervalInBackground: true, retry: false })
 }
 
 export function useWorktimeQrClock() {

@@ -1087,7 +1087,7 @@ export function EnterpriseTasksPage() {
               className="secondary-action compact"
               onClick={() => setSection("deadlines")}
             >
-              Хугацааны хяналт
+              Нийт даалгаврууд
             </button>
           )}
           <button
@@ -1473,7 +1473,7 @@ function Deadlines({ onBack, onEditTask }: { onBack: () => void; onEditTask: (id
           <button className="text-action" onClick={onBack}>
             ← Миний даалгавар
           </button>
-          <h2>Байгууллагын хугацааны хяналт</h2>
+          <h2>Байгууллагын нийт даалгаврууд</h2>
         </div>
         <div className="deadline-filters">
           {visibleTasks.length > 0 && <label className="deadline-select-all"><input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedIds(allVisibleSelected ? [] : visibleTasks.map((item) => item.entity_id))} />Бүгдийг сонгох</label>}
