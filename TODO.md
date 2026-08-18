@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add shared mobile workspace shell, bottom navigation, spacing, and overflow rules (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
+- [x] Add mobile bottom-sheet date-range filter while preserving desktop filter behavior (`frontend/src/components/TimePeriodFilter.tsx`, `frontend/src/index.css`)
+- [x] Revamp Home, Stats, Profile, and Calendar mobile layouts (`frontend/src/pages`, `frontend/src/index.css`)
+- [x] Standardize mobile controls and stacked cards across authenticated workspace pages (`frontend/src/index.css`)
+- [x] Add responsive component/browser coverage and validate frontend build (`frontend/src`, `frontend/e2e`)
 - [x] Add dynamic QR worktime kiosk models, signing, pairing, replay protection, and clock API (`backend/app/models/models.py`, `backend/app/routers/worktime_qr.py`, `backend/alembic/versions`)
 - [x] Fix kiosk countdown synchronization so elapsed time is not cancelled by per-render server-offset recalculation (`frontend/src/pages/WorktimeQrPage.tsx`)
 - [x] Keep the unpaired kiosk pairing screen stable by bypassing employee session refresh and error polling (`frontend/src/api/client.ts`, `frontend/src/api/enterprise.ts`)

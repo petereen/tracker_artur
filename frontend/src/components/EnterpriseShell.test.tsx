@@ -29,4 +29,15 @@ describe('enterprise sidebar', () => {
     expect(link.compareDocumentPosition(profile as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(link.parentElement).toHaveClass('sidebar-footer')
   })
+
+  it('keeps five thumb-reachable mobile destinations and a More control', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
+    const tabbar = container.querySelector('.mobile-tabbar')
+    expect(tabbar).not.toBeNull()
+    expect(tabbar?.querySelectorAll('a')).toHaveLength(4)
+    expect(tabbar?.querySelector('button')).toHaveAccessibleName('Бусад цэс нээх')
+    expect(tabbar?.textContent).toContain('Өнөөдөр')
+    expect(tabbar?.textContent).toContain('Календарь')
+  })
 })
