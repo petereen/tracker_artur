@@ -1,7 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import toast from 'react-hot-toast'
-import { acceptSession, api, refreshAccessToken } from './client'
+import { acceptSession, api, publicApi, refreshAccessToken } from './client'
 import { useAuthStore, Actor } from '../store/auth'
 
 export type WorkflowStatus = 'backlog' | 'to_do' | 'in_progress' | 'review' | 'done' | 'cancelled'
@@ -158,11 +158,11 @@ export function useRevokeWorktimeQrKiosk() {
 
 export function usePairWorktimeQrKiosk() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: (code: string) => api.post('/v1/worktime-qr/pair', { code }).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: [...worktimeQrKeys, 'display-token'] }) })
+  return useMutation({ mutationFn: (code: string) => publicApi.post('/v1/worktime-qr/pair', { code }).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: [...worktimeQrKeys, 'display-token'] }) })
 }
 
 export function useWorktimeQrDisplayToken(enabled = true) {
-  return useQuery<WorktimeQrDisplayToken>({ queryKey: [...worktimeQrKeys, 'display-token'], queryFn: () => api.get('/v1/worktime-qr/display-token', { headers: { 'Cache-Control': 'no-cache' } }).then((response) => response.data), enabled, refetchInterval: (query) => query.state.error ? 10_000 : query.state.data ? Math.max(250, new Date(query.state.data.expires_at).getTime() - Date.now()) : 30_000, refetchOnWindowFocus: true, retry: false })
+  return useQuery<WorktimeQrDisplayToken>({ queryKey: [...worktimeQrKeys, 'display-token'], queryFn: () => publicApi.get('/v1/worktime-qr/display-token', { headers: { 'Cache-Control': 'no-cache' } }).then((response) => response.data), enabled, refetchInterval: (query) => query.state.error ? false : query.state.data ? Math.max(250, new Date(query.state.data.expires_at).getTime() - Date.now()) : 30_000, refetchOnWindowFocus: false, refetchOnReconnect: false, retry: false })
 }
 
 export function useWorktimeQrClock() {

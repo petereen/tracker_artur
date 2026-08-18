@@ -3,6 +3,7 @@
 ## Current Milestone
 - [x] Add dynamic QR worktime kiosk models, signing, pairing, replay protection, and clock API (`backend/app/models/models.py`, `backend/app/routers/worktime_qr.py`, `backend/alembic/versions`)
 - [x] Fix kiosk countdown synchronization so elapsed time is not cancelled by per-render server-offset recalculation (`frontend/src/pages/WorktimeQrPage.tsx`)
+- [x] Keep the unpaired kiosk pairing screen stable by bypassing employee session refresh and error polling (`frontend/src/api/client.ts`, `frontend/src/api/enterprise.ts`)
 - [x] Preserve and harden one-open-work-interval invariants across QR, web, and Telegram clocks (`backend/app/models/models.py`, `backend/app/services/work_report_service.py`)
 - [x] Add authenticated Worktime scanner and public kiosk display with OYUNS responsive/PiP styling (`frontend/src/pages/WorktimePage.tsx`, `frontend/src/pages/WorktimeQrPage.tsx`, `frontend/src/index.css`)
 - [x] Add kiosk management settings, API hooks, navigation, localization, and security headers (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`)

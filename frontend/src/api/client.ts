@@ -2,6 +2,9 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '../store/auth'
 
 export const api = axios.create({ baseURL: '/api', withCredentials: true })
+// Public kiosk endpoints must not trigger the employee session refresh flow.
+// A TV at /worktimeqr has no employee bearer token before pairing.
+export const publicApi = axios.create({ baseURL: '/api', withCredentials: true })
 const refreshClient = axios.create({ baseURL: '/api', withCredentials: true })
 let refreshPromise: Promise<string> | null = null
 let proactiveTimer: number | undefined
