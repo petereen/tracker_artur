@@ -1020,7 +1020,7 @@ export function EnterpriseDashboardPage() {
                     );
                   })}
                   {markers.length > 0 && (
-                    <em className="mini-day-markers" aria-label={`${markers.length} төрлийн календарийн зүйл`}>
+                    <em className="mini-day-markers" aria-label={`${markers.length} төрлийн календарийн item`}>
                       {markers.map((marker) => <b className={`mini-day-marker ${marker}`} key={marker} />)}
                     </em>
                   )}

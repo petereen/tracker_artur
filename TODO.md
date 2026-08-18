@@ -11,6 +11,7 @@
 - [x] Keep the unpaired kiosk pairing screen stable by bypassing employee session refresh and error polling (`frontend/src/api/client.ts`, `frontend/src/api/enterprise.ts`)
 - [x] Route the dashboard “Оффис эхлэх” CTA to the authenticated QR scanner while leaving Telegram daystart unchanged (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/pages/WorktimePage.tsx`)
 - [x] Add inner spacing and responsive overflow protection to Worktime cards, scanner alerts, and interval text (`frontend/src/index.css`)
+- [x] Replace the Worktime instructional header with a separate compact status panel (`frontend/src/pages/WorktimePage.tsx`, `frontend/src/index.css`)
 - [x] Preserve and harden one-open-work-interval invariants across QR, web, and Telegram clocks (`backend/app/models/models.py`, `backend/app/services/work_report_service.py`)
 - [x] Add authenticated Worktime scanner and public kiosk display with OYUNS responsive/PiP styling (`frontend/src/pages/WorktimePage.tsx`, `frontend/src/pages/WorktimeQrPage.tsx`, `frontend/src/index.css`)
 - [x] Add kiosk management settings, API hooks, navigation, localization, and security headers (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`)

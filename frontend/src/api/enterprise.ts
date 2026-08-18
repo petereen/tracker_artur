@@ -710,7 +710,7 @@ export function useSetHolidayCountry() {
 
 export function useCreateCalendarEntry() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/entries', input).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success('Календарийн зүйл хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Календарийн зүйл хадгалагдсангүй') })
+  return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/entries', input).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success('Календарийн item хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Календарийн item хадгалагдсангүй') })
 }
 
 export function useTodayAgenda() {

@@ -2784,9 +2784,10 @@ a {
 
 /* Dynamic QR worktime surfaces */
 .worktime-page { display: grid; gap: 18px; min-width: 0; }
-.worktime-hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-width: 0; padding: clamp(16px, 2vw, 24px); }
-.worktime-hero h2, .worktime-scanner h2, .worktime-today h2 { margin: 4px 0 0; }
-.worktime-hero p { margin: 7px 0 0; color: var(--muted, #667085); }
+.worktime-status { display: flex; align-items: center; min-width: 0; padding: 14px clamp(16px, 2vw, 24px); }
+.worktime-status .worktime-state { min-width: 0; }
+.worktime-status .worktime-state span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worktime-scanner h2, .worktime-today h2 { margin: 4px 0 0; }
 .worktime-state, .kiosk-connectivity { display: inline-flex; align-items: center; gap: 8px; color: var(--muted, #667085); font-size: 12px; font-weight: 700; }
 .worktime-state.active { color: #00C885; }
 .worktime-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); gap: 18px; min-width: 0; }
@@ -2845,7 +2846,6 @@ a {
 .danger-action { border: 1px solid rgb(255 59 87 / 30%); border-radius: 8px; color: #a31932; background: transparent; cursor: pointer; }
 .danger-action.compact, .secondary-action.compact { padding: 8px 10px; font-size: 11px; }
 @media (max-width: 800px) {
-  .worktime-hero { align-items: flex-start; flex-direction: column; }
   .worktime-grid { grid-template-columns: 1fr; }
   .kiosk-create-form { grid-template-columns: 1fr 1fr; }
   .kiosk-create-form .primary-action { grid-column: 1 / -1; }

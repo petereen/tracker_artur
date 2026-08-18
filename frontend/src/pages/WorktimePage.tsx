@@ -92,23 +92,22 @@ export function WorktimePage() {
   const active = clock.data?.active
   const timezone = clock.data?.timezone
   return <div className="worktime-page">
-    <section className="worktime-hero panel">
-      <div><span className="eyebrow">WORKTIME / ATTENDANCE</span><h2>Ажлын цагийн бүртгэл</h2><p>Оффисын дэлгэц дээрх одоогийн QR кодыг уншуулж цаг бүртгэнэ.</p></div>
-      <div className={`worktime-state ${active ? 'active' : ''}`}><Clock3 size={17} /><span>{active ? active.mode === 'remote' ? 'Remote ажиллаж байна' : active.entry_type === 'break' ? 'Завсарлага' : 'Оффист ажиллаж байна' : 'Идэвхтэй цаг алга'}</span></div>
+    <section className="worktime-status panel" aria-live="polite">
+      <div className={`worktime-state ${active ? 'active' : ''}`}><Clock3 size={17} /><span>{active ? active.mode === 'remote' ? 'Remote ажиллаж байна' : active.entry_type === 'break' ? 'Завсарлага' : 'Ажиллаж байна' : 'Идэвхгүй'}</span></div>
     </section>
     <div className="worktime-grid">
       <section className="worktime-scanner panel">
         <div className="panel-heading"><div><span className="eyebrow">QR SCANNER</span><h2>Оффисын QR уншуулах</h2></div><ScanLine size={22} /></div>
         <div className={`scanner-viewport ${scanning ? 'scanning' : ''}`}>
-          {scanning ? <><video ref={videoRef} autoPlay muted playsInline onLoadedMetadata={(event) => { void event.currentTarget.play().catch(() => undefined) }} aria-label="Оффисын QR камер" /><div className="scanner-frame" aria-hidden="true" /></> : <div className="scanner-placeholder"><Camera size={32} /><span>Камер нээж, дэлгэц дээрх QR код руу чиглүүлнэ үү.</span></div>}
+          {scanning ? <><video ref={videoRef} autoPlay muted playsInline onLoadedMetadata={(event) => { void event.currentTarget.play().catch(() => undefined) }} aria-label="Оффисын QR камер" /><div className="scanner-frame" aria-hidden="true" /></> : <div className="scanner-placeholder"><Camera size={32} /><span>Камер нээж, дэлгэц дээрх QR кодыг уншуулна уу.</span></div>}
         </div>
         {cameraError && <div className="worktime-alert error" role="alert"><ShieldAlert size={17} />{cameraError}</div>}
         {lastResult && <div className="worktime-alert success" role="status"><CheckCircle2 size={17} /><span>{lastResult.replayed ? 'Давхар хүсэлт баталгаажлаа.' : lastResult.action === 'clock_out' ? 'Оффисын цаг дууслаа.' : lastResult.action === 'switched_to_office' ? 'Remote цаг хаагдаж, оффисын цаг эхэллээ.' : 'Оффисын цаг эхэллээ.'} Дахин бүртгэхийн тулд товчийг дахин дарна уу.</span></div>}
         <div className="scanner-actions">{scanning ? <button type="button" className="secondary-action" onClick={stopScanner}><RefreshCw size={16} />Болих</button> : <button type="button" className="primary-action" onClick={startScanner} disabled={scan.isPending}><ScanLine size={16} />QR уншуулах</button>}</div>
       </section>
       <section className="worktime-today panel">
-        <div className="panel-heading"><div><span className="eyebrow">TODAY</span><h2>Өнөөдрийн интервал</h2></div><Coffee size={21} /></div>
-        <div className="worktime-intervals">{clock.isLoading ? <p className="text-muted">Ачаалж байна…</p> : (clock.data?.today_entries ?? []).map((entry) => <div className="worktime-interval" key={entry.id}><span className={`interval-icon ${entry.entry_type}`}><>{entry.entry_type === 'break' ? <Coffee size={15} /> : entry.mode === 'remote' ? <Laptop2 size={15} /> : <MapPin size={15} />}</></span><div><strong>{entry.entry_type === 'break' ? 'Завсарлага' : entry.mode === 'remote' ? 'Remote' : 'Оффис'}</strong><small>{formatTime(entry.started_at, timezone)} – {entry.ended_at ? formatTime(entry.ended_at, timezone) : 'одоо'}</small></div></div>)}{!clock.isLoading && !clock.data?.today_entries.length && <p className="text-muted">Өнөөдөр бүртгэл алга байна.</p>}</div>
+        <div className="panel-heading"><div><span className="eyebrow">ӨНӨӨДӨР</span><h2>Өнөөдрийн ажлын цаг</h2></div><Coffee size={21} /></div>
+        <div className="worktime-intervals">{clock.isLoading ? <p className="text-muted">Ачаалж байна…</p> : (clock.data?.today_entries ?? []).map((entry) => <div className="worktime-interval" key={entry.id}><span className={`interval-icon ${entry.entry_type}`}><>{entry.entry_type === 'break' ? <Coffee size={15} /> : entry.mode === 'remote' ? <Laptop2 size={15} /> : <MapPin size={15} />}</></span><div><strong>{entry.entry_type === 'break' ? 'Завсарлага' : entry.mode === 'remote' ? 'Remote' : 'Оффис'}</strong><small>{formatTime(entry.started_at, timezone)} – {entry.ended_at ? formatTime(entry.ended_at, timezone) : 'одоо'}</small></div></div>)}{!clock.isLoading && !clock.data?.today_entries.length && <p className="text-muted">Өнөөдөр та бүртгэл хийгээгүй байна.</p>}</div>
       </section>
     </div>
   </div>
