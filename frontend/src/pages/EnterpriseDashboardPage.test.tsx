@@ -5,6 +5,7 @@ import { EnterpriseDashboardPage } from "./EnterpriseDashboardPage";
 const mocks = vi.hoisted(() => ({
   clock: { data: undefined as any, refetch: vi.fn() },
   action: { mutate: vi.fn(), isPending: false },
+  navigate: vi.fn(),
   agenda: { data: { tasks: [] as any[], entries: [] as any[] } },
   privateCalendar: { tasks: [] as any[], entries: [] as any[], time_blocks: [] as any[] },
   companyCalendar: { tasks: [] as any[], entries: [] as any[], time_blocks: [] as any[] },
@@ -31,6 +32,10 @@ vi.mock("../store/auth", () => ({
     selector({ actor: { employee_id: 1, roles: [] } }),
 }));
 
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => mocks.navigate,
+}));
+
 function setVisibilityState(value: "hidden" | "visible") {
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -49,6 +54,7 @@ describe("Today work-hour timer", () => {
     setVisibilityState("visible");
     mocks.clock.refetch.mockReset();
     mocks.action.mutate.mockReset();
+    mocks.navigate.mockReset();
     mocks.agenda.data = { tasks: [], entries: [] };
     mocks.privateCalendar = { tasks: [], entries: [], time_blocks: [] };
     mocks.companyCalendar = { tasks: [], entries: [], time_blocks: [] };
@@ -180,7 +186,7 @@ describe("Today work-hour timer", () => {
     mocks.clock.data = { ...mocks.clock.data, active: null };
     rerender(<EnterpriseDashboardPage />);
     fireEvent.click(document.querySelector("button.clock-button.office") as HTMLButtonElement);
-    expect(mocks.action.mutate).toHaveBeenLastCalledWith({ action: "start", mode: "in_person" });
+    expect(mocks.navigate).toHaveBeenLastCalledWith("/worktime");
   });
 
   it("renders date-range tasks as split bars with rounded visible ends", () => {

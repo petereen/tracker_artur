@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { motion } from "motion/react";
+import { useNavigate } from "react-router-dom";
 import {
   Archive,
   ArrowUpRight,
@@ -316,6 +317,7 @@ function DelegatedTaskSheet({
 }
 
 export function EnterpriseDashboardPage() {
+  const navigate = useNavigate();
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset | "custom">(
     "week",
   );
@@ -689,10 +691,9 @@ export function EnterpriseDashboardPage() {
           {!active && (
             <>
               <button
+                type="button"
                 className="clock-button office"
-                onClick={() =>
-                  action.mutate({ action: "start", mode: "in_person" })
-                }
+                onClick={() => navigate("/worktime")}
               >
                 <House />
                 Оффис эхлэх

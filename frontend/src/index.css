@@ -2783,25 +2783,27 @@ a {
 }
 
 /* Dynamic QR worktime surfaces */
-.worktime-page { display: grid; gap: 18px; }
-.worktime-hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.worktime-page { display: grid; gap: 18px; min-width: 0; }
+.worktime-hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-width: 0; padding: clamp(16px, 2vw, 24px); }
 .worktime-hero h2, .worktime-scanner h2, .worktime-today h2 { margin: 4px 0 0; }
 .worktime-hero p { margin: 7px 0 0; color: var(--muted, #667085); }
 .worktime-state, .kiosk-connectivity { display: inline-flex; align-items: center; gap: 8px; color: var(--muted, #667085); font-size: 12px; font-weight: 700; }
 .worktime-state.active { color: #00C885; }
-.worktime-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); gap: 18px; }
-.worktime-scanner, .worktime-today { min-width: 0; }
+.worktime-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); gap: 18px; min-width: 0; }
+.worktime-scanner, .worktime-today { min-width: 0; overflow: hidden; padding: clamp(16px, 2vw, 24px); }
+.worktime-hero > *, .worktime-scanner > *, .worktime-today > * { min-width: 0; max-width: 100%; }
 .scanner-viewport { position: relative; min-height: 330px; margin: 18px 0; border: 1px solid color-mix(in srgb, #2D62EC 18%, transparent); border-radius: 20px; background: #0B172A; display: grid; place-items: center; overflow: hidden; }
 .scanner-viewport video { display: block; width: 100%; height: min(62vh, 520px); min-height: 330px; object-fit: cover; background: #0B172A; }
 .scanner-placeholder { display: grid; place-items: center; gap: 10px; padding: 40px; color: #fff; text-align: center; }
 .scanner-frame { position: absolute; width: min(62vw, 250px); aspect-ratio: 1; border: 3px solid #00C885; border-radius: 20px; box-shadow: 0 0 0 999px rgb(11 23 42 / 28%); pointer-events: none; }
 .scanner-actions { display: flex; justify-content: flex-end; }
-.worktime-alert { display: flex; align-items: flex-start; gap: 9px; padding: 12px 14px; border-radius: 12px; font-size: 13px; }
+.worktime-alert { display: flex; align-items: flex-start; gap: 9px; max-width: 100%; padding: 12px 14px; border-radius: 12px; font-size: 13px; overflow-wrap: anywhere; }
 .worktime-alert.error { color: #a31932; background: rgb(255 59 87 / 10%); }
 .worktime-alert.success { color: #007a52; background: rgb(0 200 133 / 11%); }
 .worktime-intervals { display: grid; gap: 10px; margin-top: 12px; }
 .worktime-interval { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 13px; background: color-mix(in srgb, var(--surface, #fff) 88%, #2D62EC 12%); }
-.worktime-interval > div { display: grid; gap: 3px; }
+.worktime-interval > div { display: grid; gap: 3px; min-width: 0; overflow: hidden; }
+.worktime-interval strong, .worktime-interval small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .worktime-interval small { color: var(--muted, #667085); }
 .interval-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; color: #2D62EC; background: rgb(45 98 236 / 11%); }
 .interval-icon.break { color: #FF833B; background: rgb(255 131 59 / 12%); }
@@ -4339,7 +4341,7 @@ a {
   top: -5px;
 }
 .notification-popover {
-  background: color-mix(in srgb, var(--glass-heavy) 75%, var(--color-surface));
+  background: color-mix(in srgb, var(--glass-heavy) 90%, var(--color-surface));
   backdrop-filter: blur(24px);
   border: 1px solid var(--color-border);
   border-radius: 14px;

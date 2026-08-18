@@ -104,7 +104,7 @@ export function WorktimePage() {
         </div>
         {cameraError && <div className="worktime-alert error" role="alert"><ShieldAlert size={17} />{cameraError}</div>}
         {lastResult && <div className="worktime-alert success" role="status"><CheckCircle2 size={17} /><span>{lastResult.replayed ? 'Давхар хүсэлт баталгаажлаа.' : lastResult.action === 'clock_out' ? 'Оффисын цаг дууслаа.' : lastResult.action === 'switched_to_office' ? 'Remote цаг хаагдаж, оффисын цаг эхэллээ.' : 'Оффисын цаг эхэллээ.'} Дахин бүртгэхийн тулд товчийг дахин дарна уу.</span></div>}
-        <div className="scanner-actions">{scanning ? <button className="secondary-action" onClick={stopScanner}><RefreshCw size={16} />Болих</button> : <button className="primary-action" onClick={startScanner} disabled={scan.isPending}><ScanLine size={16} />QR уншуулах</button>}</div>
+        <div className="scanner-actions">{scanning ? <button type="button" className="secondary-action" onClick={stopScanner}><RefreshCw size={16} />Болих</button> : <button type="button" className="primary-action" onClick={startScanner} disabled={scan.isPending}><ScanLine size={16} />QR уншуулах</button>}</div>
       </section>
       <section className="worktime-today panel">
         <div className="panel-heading"><div><span className="eyebrow">TODAY</span><h2>Өнөөдрийн интервал</h2></div><Coffee size={21} /></div>

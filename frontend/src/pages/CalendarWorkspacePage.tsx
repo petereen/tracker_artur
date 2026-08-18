@@ -163,10 +163,13 @@ export function CalendarWorkspacePage() {
   const mobileSelectedItems = mobileItemsByDate.get(selectedMobileDate) ?? []
   useEffect(() => {
     const today = new Date()
+    const selectedDate = new Date(`${selectedMobileDate}T12:00:00`)
+    const selectedIsInAnchorMonth = selectedDate.getFullYear() === anchor.getFullYear() && selectedDate.getMonth() === anchor.getMonth()
+    if (selectedIsInAnchorMonth) return
     const todayInMonth = today.getFullYear() === anchor.getFullYear() && today.getMonth() === anchor.getMonth()
     const firstPopulated = mobileMonthDays.map(localDate).find((date) => mobileItemsByDate.has(date))
     setSelectedMobileDate(todayInMonth ? localDate(today) : firstPopulated ?? localDate(mobileMonthDays[0] ?? anchor))
-  }, [anchor, mobileMonthDays, mobileItemsByDate])
+  }, [anchor, mobileMonthDays, mobileItemsByDate, selectedMobileDate])
   const holidayKeys = new Set((events.data?.holidays ?? []).filter((item: any) => item.kind === 'holiday').flatMap(itemDates))
   const todayKey = localDate(new Date())
   return <div className="calendar-workspace"><div className="workspace-toolbar calendar-toolbar"><div className="toolbar-start"><GoogleCalendarSyncControl /><div className="segmented-control"><button className={scope === 'private' ? 'active' : ''} onClick={() => startTransition(() => setScope('private'))}>Хувийн</button><button className={scope === 'corporate' ? 'active' : ''} onClick={() => startTransition(() => setScope('corporate'))}>Компаний</button></div></div><button className="primary-action compact" onClick={() => { setForm({ ...form, visibility: scope === 'corporate' && canPublish ? 'company' : 'private' }); setCreating(true) }}><Plus size={16} />Үүсгэх</button></div>
