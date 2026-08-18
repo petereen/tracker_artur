@@ -20,3 +20,11 @@ window. It proves possession of the current office display code, not physical
 presence against live video relaying; GPS and biometric checks are deliberately
 outside this milestone. Existing Telegram commands and web clock controls
 continue to operate on the same work-time entries.
+
+When `TELEGRAM_BOT_USERNAME` is configured and the bot's Main Mini App points
+to `/tg`, the displayed QR is also a Telegram Mini App deep link. Scanning it
+with a phone camera opens Telegram, authenticates the employee with Telegram's
+signed `initData`, and submits the short-lived QR token to the same idempotent
+clock endpoint automatically. If the Telegram username is not configured, the
+QR remains a normal OYUNS scanner token. Telegram may still show its standard
+Mini App open confirmation.

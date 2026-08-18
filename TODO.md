@@ -14,6 +14,7 @@
 - [x] Add inner spacing and responsive overflow protection to Worktime cards, scanner alerts, and interval text (`frontend/src/index.css`)
 - [x] Replace the Worktime instructional header with a separate compact status panel (`frontend/src/pages/WorktimePage.tsx`, `frontend/src/index.css`)
 - [x] Prefetch the next kiosk token before expiry to eliminate QR rotation gaps (`frontend/src/api/enterprise.ts`)
+- [x] Open kiosk QR links in Telegram Mini App and auto-clock through the existing idempotent QR endpoint (`backend/app/routers/worktime_qr.py`, `frontend/src/pages/WorktimeQrPage.tsx`, `frontend/src/pages/WorktimePage.tsx`, `frontend/src/pages/TgMiniAppPage.tsx`, `docs/worktime-qr.md`)
 - [x] Preserve and harden one-open-work-interval invariants across QR, web, and Telegram clocks (`backend/app/models/models.py`, `backend/app/services/work_report_service.py`)
 - [x] Add authenticated Worktime scanner and public kiosk display with OYUNS responsive/PiP styling (`frontend/src/pages/WorktimePage.tsx`, `frontend/src/pages/WorktimeQrPage.tsx`, `frontend/src/index.css`)
 - [x] Add kiosk management settings, API hooks, navigation, localization, and security headers (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`)

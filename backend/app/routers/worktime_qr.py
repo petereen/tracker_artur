@@ -9,6 +9,7 @@ import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
@@ -73,6 +74,13 @@ def _sign(payload: dict) -> str:
     encoded = _b64(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
     signature = _b64(hmac.new(_secret(), encoded.encode(), hashlib.sha256).digest())
     return f"oyuns-worktime:v1:{encoded}.{signature}"
+
+
+def _telegram_link(token: str) -> str | None:
+    username = settings.TELEGRAM_BOT_USERNAME.strip().lstrip("@")
+    if not username:
+        return None
+    return f"https://t.me/{username}?startapp={quote(token, safe='')}"
 
 
 def _decode(token: str) -> dict:
@@ -243,7 +251,8 @@ async def display_token(response: Response, kiosk_cookie: str | None = Cookie(de
     await db.commit()
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
-    return {"token": _sign(payload), "issued_at": now, "expires_at": now + timedelta(seconds=ttl), "server_time": now, "location_id": kiosk.location_id, "display_name": kiosk.display_name}
+    token = _sign(payload)
+    return {"token": token, "telegram_link": _telegram_link(token), "issued_at": now, "expires_at": now + timedelta(seconds=ttl), "server_time": now, "location_id": kiosk.location_id, "display_name": kiosk.display_name}
 
 
 def _entry_out(entry: WorkTimeEntry | None) -> dict | None:

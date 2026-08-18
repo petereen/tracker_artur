@@ -25,11 +25,15 @@ export function TgMiniAppPage() {
     telegram.setHeaderColor?.('bg_color')
     telegram.setBackgroundColor?.('bg_color')
     document.documentElement.classList.add('telegram-mini-app')
+    const startParam = telegram.initDataUnsafe?.start_param || new URLSearchParams(window.location.search).get('tgWebAppStartParam')
 
     api.post('/v1/auth/telegram', undefined, { headers: { 'X-Telegram-Init-Data': initData } })
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         acceptSession(data)
         setInitialized(true)
+        if (typeof startParam === 'string' && startParam.startsWith('oyuns-worktime:')) {
+          await api.post('/v1/worktime-qr/clock', { token: startParam, client_timestamp: new Date().toISOString() })
+        }
         setState('ready')
       })
       .catch(() => setState('error'))

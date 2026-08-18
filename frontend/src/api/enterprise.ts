@@ -118,6 +118,7 @@ export interface WorktimeQrKiosk {
 
 export interface WorktimeQrDisplayToken {
   token: string
+  telegram_link: string | null
   issued_at: string
   expires_at: string
   server_time: string
