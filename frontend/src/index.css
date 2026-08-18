@@ -2693,7 +2693,7 @@ a {
   will-change: transform;
 }
 .workers-drawer.open .workers-toggle {
-  right: 309px;
+  display: none;
 }
 .workers-toggle svg {
   height: 16px;

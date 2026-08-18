@@ -233,6 +233,7 @@ Collaboration
 
 ## Completed Tasks
 - [x] Add a vertically draggable, pointer-aware workers drawer toggle with bounded positioning, click-vs-drag handling, and GPU-accelerated drawer transitions (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
+- [x] Close the workers drawer from its X button or outside pointer interaction and hide the draggable toggle while open (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
 - [x] Preserve selected mobile calendar dates when event data refreshes (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`)
 - [x] Align mini-calendar range caps to the horizontal centers of their start and due date numbers (`frontend/src/index.css`)
 - [x] Replace the non-painting mini-calendar range overlay with gap-bridging per-day stroke fragments (`frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`, `frontend/src/pages/EnterpriseDashboardPage.test.tsx`)
