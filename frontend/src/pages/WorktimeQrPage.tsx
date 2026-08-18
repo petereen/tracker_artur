@@ -8,9 +8,11 @@ export function WorktimeQrPage() {
   const pair = usePairWorktimeQrKiosk()
   const [code, setCode] = useState('')
   const [now, setNow] = useState(Date.now())
+  const [serverOffset, setServerOffset] = useState(0)
   const [pipAvailable, setPipAvailable] = useState(false)
   const qrRef = useRef<HTMLCanvasElement>(null)
   const pipVideoRef = useRef<HTMLVideoElement>(null)
+  const data = display.data
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250)
@@ -18,9 +20,11 @@ export function WorktimeQrPage() {
     return () => window.clearInterval(timer)
   }, [])
 
-  const data = display.data
-  const offset = data ? new Date(data.server_time).getTime() - Date.now() : 0
-  const remaining = data ? Math.max(0, new Date(data.expires_at).getTime() - (now + offset)) : 0
+  useEffect(() => {
+    if (data?.token) setServerOffset(new Date(data.server_time).getTime() - Date.now())
+  }, [data?.token, data?.server_time])
+
+  const remaining = data ? Math.max(0, new Date(data.expires_at).getTime() - (now + serverOffset)) : 0
   const total = data ? Math.max(1, new Date(data.expires_at).getTime() - new Date(data.issued_at).getTime()) : 30_000
   const progress = Math.min(100, Math.max(0, remaining / total * 100))
   const hasUsableToken = Boolean(data && remaining > 0)
