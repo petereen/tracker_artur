@@ -28,9 +28,6 @@ def test_worktime_qr_router_exposes_pair_display_and_clock_contract():
 def test_qr_security_and_state_contract_is_present():
     assert "hmac.new" in SOURCE
     assert "IdempotencyRecord" in SOURCE
-    assert "TELEGRAM_BOT_USERNAME" in SOURCE
-    assert "startapp" in SOURCE
-    assert '"telegram_link"' in SOURCE
     assert 'source_channel="web_qr"' in SOURCE
     assert '"active_break"' in SOURCE
     assert '"switched_to_office"' in SOURCE

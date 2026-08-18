@@ -9,17 +9,6 @@ function formatTime(value: string | null, timezone = 'Asia/Ulaanbaatar') {
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(value))
 }
 
-function tokenFromScan(value: string) {
-  try {
-    const url = new URL(value)
-    const startParam = url.searchParams.get('startapp')
-    if (startParam?.startsWith('oyuns-worktime:')) return startParam
-  } catch {
-    // The scanner also accepts the raw signed QR token.
-  }
-  return value
-}
-
 export function WorktimePage() {
   const clock = useClock()
   const scan = useWorktimeQrClock()
@@ -62,7 +51,7 @@ export function WorktimePage() {
           handledRef.current = true
           stopScanner()
           try {
-            const value = await scanRef.current.mutateAsync({ token: tokenFromScan(result.getText()), client_timestamp: new Date().toISOString() })
+            const value = await scanRef.current.mutateAsync({ token: result.getText(), client_timestamp: new Date().toISOString() })
             setLastResult({ action: value.action, replayed: value.replayed })
             toast.success(value.action === 'clock_out' ? 'Оффисын цаг дууслаа' : value.action === 'switched_to_office' ? 'Оффисын цаг эхэллээ' : 'Оффисын цаг бүртгэгдлээ')
             if (navigator.vibrate) navigator.vibrate(80)
