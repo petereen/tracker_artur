@@ -141,18 +141,22 @@ function relativeDayLabel(delta: number) {
 }
 
 function DigitalClock({ timezone, hourFormat, now, localTimezone }: { timezone: string; hourFormat: "12" | "24"; now: Date; localTimezone: string }) {
-  const time = new Intl.DateTimeFormat(undefined, {
+  const parts = new Intl.DateTimeFormat(undefined, {
     timeZone: timezone,
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
     hour12: hourFormat === "12",
-  }).format(now);
+  }).formatToParts(now);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || "";
+  const hour = part("hour");
+  const minute = part("minute").padStart(2, "0");
+  const dayPeriod = part("dayPeriod");
   const offset = timezoneOffsetMinutes(timezone, now) - timezoneOffsetMinutes(localTimezone, now);
   const day = relativeDayLabel(dayDifference(localTimezone, timezone, now));
   return (
-    <div className="world-clock-digital-time" aria-label={`${timezoneLabel(timezone)} ${time}, ${day}, ${formatOffset(offset)}`}>
-      <strong>{time}</strong>
-      <span>{day} · {formatOffset(offset)}</span>
+    <div className="world-clock-digital-time" aria-label={`${timezoneLabel(timezone)} ${hour}:${minute}${dayPeriod ? ` ${dayPeriod}` : ""}, ${day}, ${formatOffset(offset)}`}>
+      <div className="world-clock-digital-number"><strong>{hour}:{minute}</strong>{dayPeriod && <span className="world-clock-period">{dayPeriod}</span>}</div>
+      <div className="world-clock-tile-meta"><strong>{formatOffset(offset)}</strong><span>{day}</span></div>
     </div>
   );
 }
@@ -290,8 +294,8 @@ export function WorldClockWidget() {
   return (
     <section className={`world-clock-panel panel ${open ? "settings-open" : ""}`} aria-label="World clock">
       <div className="panel-heading"><div><span className="eyebrow">WORLD CLOCK</span><h2>Дэлхийн цаг</h2></div><button ref={triggerRef} type="button" className="world-clock-settings-trigger" onClick={openEditor} aria-expanded={open} aria-label="Цагийн тохиргоо"><Settings2 size={17} /></button></div>
-      {saved.clocks.length ? <div className={`world-clock-list ${saved.display_mode}`}>
-        {saved.clocks.map((timezone) => saved.display_mode === "analog" ? <AnalogClock key={timezone} timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /> : <article className="world-clock-row" key={timezone}><div className="world-clock-city"><Clock3 size={15} /><strong>{timezoneLabel(timezone)}</strong><small>{timezone}</small></div><DigitalClock timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /></article>)}
+      {saved.clocks.length ? <div className={`world-clock-list ${saved.display_mode} count-${saved.clocks.length}`}>
+        {saved.clocks.map((timezone) => saved.display_mode === "analog" ? <AnalogClock key={timezone} timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /> : <article className="world-clock-tile" key={timezone}><div className="world-clock-tile-city"><Clock3 size={14} /><span><strong>{timezoneLabel(timezone)}</strong><small>{timezone}</small></span></div><DigitalClock timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /></article>)}
       </div> : <div className="world-clock-empty"><Clock3 size={25} /><strong>Цаг нэмээгүй байна</strong><span>Ажлынхаа хотуудын цагийг нэг дор хараарай.</span><button type="button" className="secondary-action compact" onClick={openEditor}><Plus size={14} />Цаг нэмэх</button></div>}
       {open && <div className="world-clock-settings-layer" onMouseDown={() => setOpen(false)}><WorldClockEditor draft={draft || clonePreferences(saved)} onChange={setDraft} onClose={() => setOpen(false)} onSave={save} saving={update.isPending} /></div>}
     </section>

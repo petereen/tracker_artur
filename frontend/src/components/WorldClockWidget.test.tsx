@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorldClockWidget } from "./WorldClockWidget";
 
 const mocks = vi.hoisted(() => ({
@@ -13,12 +13,17 @@ vi.mock("../api/enterprise", () => ({
 }));
 
 describe("WorldClockWidget", () => {
+  beforeEach(() => {
+    mocks.preferences.data = { clocks: ["Asia/Ulaanbaatar"], display_mode: "digital", hour_format: "24" };
+  });
   afterEach(() => vi.clearAllMocks());
 
   it("renders the default Ulaanbaatar digital clock and opens settings", () => {
     render(<WorldClockWidget />);
     expect(screen.getByText("Ulaanbaatar")).toBeInTheDocument();
     expect(screen.getByText(/HRS/)).toBeInTheDocument();
+    expect(document.querySelector(".world-clock-list.digital.count-1")).toBeInTheDocument();
+    expect(document.querySelector(".world-clock-tile")).toHaveClass("world-clock-tile");
 
     fireEvent.click(screen.getByRole("button", { name: "Цагийн тохиргоо" }));
     expect(screen.getByRole("dialog", { name: "Цагийн тохиргоо" })).toBeInTheDocument();
@@ -40,5 +45,17 @@ describe("WorldClockWidget", () => {
     render(<WorldClockWidget />);
     expect(screen.getByText("Цаг нэмээгүй байна")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Цаг нэмэх/ })).toBeInTheDocument();
+  });
+
+  it("uses a two-column square-tile grid for six clocks", () => {
+    mocks.preferences.data = {
+      clocks: ["Asia/Ulaanbaatar", "Asia/Tokyo", "Europe/London", "America/New_York", "Australia/Sydney", "Asia/Dubai"],
+      display_mode: "digital",
+      hour_format: "12",
+    };
+    render(<WorldClockWidget />);
+    expect(document.querySelector(".world-clock-list.digital.count-6")).toBeInTheDocument();
+    expect(document.querySelectorAll(".world-clock-tile")).toHaveLength(6);
+    expect(document.querySelectorAll(".world-clock-period").length).toBeGreaterThan(0);
   });
 });
