@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Merge the three remaining Alembic heads so server deployment can run `alembic upgrade head` (`backend/alembic/versions/e7f8g9h0i1j2_merge_all_heads.py`, `backend/tests/test_alembic_graph.py`)
 - [x] Repair the Alembic dependency cycle that prevented `user_accounts.preferences` from being migrated and made backend startup unhealthy (`backend/alembic/versions/c4d5e6f7g8h9_configurable_erp_foundation.py`, `backend/tests/test_alembic_graph.py`)
 - [x] Add account-synced world-clock preferences API, model field, migration, and validation (`backend/app/models/models.py`, `backend/app/routers/enterprise_auth.py`, `backend/alembic/versions`)
 - [x] Build the responsive Apple-style world-clock widget and dashboard three-column layout (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`)
