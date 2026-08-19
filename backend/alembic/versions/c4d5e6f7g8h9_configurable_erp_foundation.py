@@ -1,7 +1,7 @@
 """add configurable ERP foundation
 
 Revision ID: c4d5e6f7g8h9
-Revises: b7c8d9e0f1a2
+Revises: z4a5b6c7d8e9
 """
 
 from typing import Sequence, Union
@@ -12,7 +12,10 @@ from sqlalchemy.dialects import postgresql
 
 
 revision: str = "c4d5e6f7g8h9"
-down_revision: Union[str, Sequence[str], None] = "b7c8d9e0f1a2"
+# Keep the ERP branch independent from the later QR/contract branch. Using
+# c5d6e7f8g9h0 here creates a cycle because the QR merge already includes the
+# contract migration, which eventually depends on the ERP branch.
+down_revision: Union[str, Sequence[str], None] = "z4a5b6c7d8e9"
 branch_labels = None
 depends_on = None
 
