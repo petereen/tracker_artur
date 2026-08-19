@@ -137,45 +137,6 @@ services:
     # index scan from querying knowledge_documents before its migration exists.
     command: sh -c "alembic upgrade head && exec python -m app.worker"
 
-  # Configure a dedicated HTTPS MCP domain (for example mcp.oyuns.mn) for
-  # this service in Dokploy. The executor remains on the private network.
-  mcp-edge:
-    build:
-      context: ./backend
-    restart: unless-stopped
-    depends_on:
-      backend:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
-      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
-      SECRET_KEY: ${SECRET_KEY}
-      AI_REDIS_URL: ${AI_REDIS_URL:-redis://redis:6379/0}
-      MCP_EDGE_PORT: ${MCP_EDGE_PORT:-8011}
-      MCP_EXECUTOR_URL: ${MCP_EXECUTOR_URL:-http://backend:8000/v1/mcp-executor}
-      MCP_INTERNAL_SHARED_SECRET: ${MCP_INTERNAL_SHARED_SECRET:-}
-      MCP_INTERNAL_REQUIRE_MTLS: ${MCP_INTERNAL_REQUIRE_MTLS:-false}
-      MCP_INTERNAL_CA_FILE: ${MCP_INTERNAL_CA_FILE:-}
-      MCP_INTERNAL_CERT_FILE: ${MCP_INTERNAL_CERT_FILE:-}
-      MCP_INTERNAL_KEY_FILE: ${MCP_INTERNAL_KEY_FILE:-}
-      MCP_CATALOG_VERSION: ${MCP_CATALOG_VERSION:-2026-08-01.1}
-      MCP_TOKEN_ISSUER: ${MCP_TOKEN_ISSUER:-oyuns}
-      MCP_TOKEN_TTL_SECONDS: ${MCP_TOKEN_TTL_SECONDS:-120}
-      MCP_READS_PER_ACTOR_MINUTE: ${MCP_READS_PER_ACTOR_MINUTE:-60}
-      MCP_PREVIEWS_PER_ACTOR_MINUTE: ${MCP_PREVIEWS_PER_ACTOR_MINUTE:-10}
-      MCP_READS_PER_ORGANIZATION_MINUTE: ${MCP_READS_PER_ORGANIZATION_MINUTE:-600}
-      MCP_MAX_ORGANIZATION_CONCURRENT_READS: ${MCP_MAX_ORGANIZATION_CONCURRENT_READS:-50}
-    command: python -m app.mcp_server
-    expose:
-      - "8011"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health')"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
   frontend:
     build:
       context: ./frontend

@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Temporarily remove the MCP edge service from local and Dokploy Compose deployments (`docker-compose.yml`, `docker-compose.dokploy.yml`)
 - [x] Enlarge world-clock tiles, remove decorative/icon/region-code clutter, and localize relative-day labels (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/index.css`)
 - [x] Stabilize the six-clock grid and guard over-capacity preferences with a visible six-city warning (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/index.css`)
 - [x] Refine the world-clock widget into a fixed-height, padded square digital-tile grid following the supplied reference (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/index.css`)
