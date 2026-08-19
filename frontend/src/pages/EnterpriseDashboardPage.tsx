@@ -40,6 +40,7 @@ import {
 } from "../components/TimePeriodFilter";
 import { EMPTY_ROLES, useAuthStore } from "../store/auth";
 import { UserTagPicker } from "../components/UserTagPicker";
+import { WorldClockWidget } from "../components/WorldClockWidget";
 
 function formatDuration(seconds: number) {
   seconds = Math.max(0, Math.floor(seconds));
@@ -755,100 +756,7 @@ export function EnterpriseDashboardPage() {
           </div>
         )}
       </section>
-      <section className="daily-focus panel">
-        <span className="eyebrow">Өнөөдрийн төвлөрөл</span>
-        <h2>Хамгийн чухал ажлаа тодорхой болго.</h2>
-        {todayCheckin.data?.template?.questions
-          ?.slice(0, 2)
-          .map((question: any, index: number) => (
-            <div className="focus-question" key={question.id}>
-              <span>{index + 1}</span>
-              <div>
-                <strong>{question.prompt?.mn || question.prompt?.en}</strong>
-                <p>{question.is_required ? "Заавал хариулна" : "Сонголттой"}</p>
-              </div>
-            </div>
-          ))}
-        {!todayCheckin.data?.template && (
-          <p>Check-in асуулт тохируулаагүй байна.</p>
-        )}
-        <button
-          className="secondary-action"
-          onClick={openCheckin}
-          disabled={
-            !todayCheckin.data?.template ||
-            todayCheckin.data?.checkin?.status === "submitted"
-          }
-        >
-          {todayCheckin.data?.checkin?.status === "submitted"
-            ? "Өнөөдрийн check-in бөглөгдсөн"
-            : "Өдрийн check-in бөглөх"}
-        </button>
-        {checkinOpen && (
-          <form className="checkin-form" onSubmit={saveCheckin}>
-            {todayCheckin.data.template.questions.map((question: any) => (
-              <label key={question.id}>
-                <strong>{question.prompt?.mn || question.prompt?.en}</strong>
-                {question.choices?.length ? (
-                  <select
-                    required={question.is_required}
-                    value={answers[question.id] || ""}
-                    onChange={(event) =>
-                      setAnswers({
-                        ...answers,
-                        [question.id]: event.target.value,
-                      })
-                    }
-                  >
-                    <option value="">Сонгох</option>
-                    {question.choices.map((choice: any) => (
-                      <option key={String(choice)}>{String(choice)}</option>
-                    ))}
-                  </select>
-                ) : ["integer", "decimal", "number"].includes(question.answer_type) ? (
-                  <input
-                    type="number"
-                    step={question.answer_type === "integer" ? "1" : "any"}
-                    required={question.is_required}
-                    value={answers[question.id] || ""}
-                    onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
-                  />
-                ) : question.answer_type === "boolean" ? (
-                  <select required={question.is_required} value={answers[question.id] || ""} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}>
-                    <option value="">Сонгох</option><option value="true">Тийм</option><option value="false">Үгүй</option>
-                  </select>
-                ) : (
-                  <textarea
-                    required={question.is_required}
-                    value={answers[question.id] || ""}
-                    onChange={(event) =>
-                      setAnswers({
-                        ...answers,
-                        [question.id]: event.target.value,
-                      })
-                    }
-                  />
-                )}
-              </label>
-            ))}
-            <div>
-              <button
-                type="button"
-                className="secondary-action compact"
-                onClick={() => setCheckinOpen(false)}
-              >
-                Цуцлах
-              </button>
-              <button
-                className="primary-action compact"
-                disabled={submitCheckin.isPending}
-              >
-                Хадгалах
-              </button>
-            </div>
-          </form>
-        )}
-      </section>
+      <WorldClockWidget />
       <section className="metrics-grid" aria-label="Гүйцэтгэлийн үзүүлэлт">
         {cards.map(({ label, value, icon: Icon, tone }, index) => (
           <motion.article
@@ -870,10 +778,12 @@ export function EnterpriseDashboardPage() {
         ))}
       </section>
       <section className="panel productivity-panel">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">Өнөөдрийн ажил</span>
-            <h2>Хийх даалгаврууд</h2>
+        <div className="today-task-column">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">Өнөөдрийн ажил</span>
+              <h2>Хийх даалгаврууд</h2>
+            </div>
           </div>
           <div
             className="today-task-tabs"
@@ -897,8 +807,7 @@ export function EnterpriseDashboardPage() {
               Миний өгсөн даалгаврууд
             </button>
           </div>
-        </div>
-        <div className="today-task-list">
+          <div className="today-task-list">
           {taskTab === "today" ? (
             activeTasks.length ? (
               activeTasks.map((task) => (
@@ -970,7 +879,102 @@ export function EnterpriseDashboardPage() {
           ) : (
             <p>Таны өгсөн идэвхтэй даалгавар алга.</p>
           )}
+          </div>
         </div>
+        <section className="daily-focus panel">
+          <span className="eyebrow">Өнөөдрийн төлөвлөгөө</span>
+          <h2>Хамгийн чухал ажлаа тодорхой болго.</h2>
+          {todayCheckin.data?.template?.questions
+            ?.slice(0, 2)
+            .map((question: any, index: number) => (
+              <div className="focus-question" key={question.id}>
+                <span>{index + 1}</span>
+                <div>
+                  <strong>{question.prompt?.mn || question.prompt?.en}</strong>
+                  <p>{question.is_required ? "Заавал хариулна" : "Сонголттой"}</p>
+                </div>
+              </div>
+            ))}
+          {!todayCheckin.data?.template && (
+            <p>Check-in асуулт тохируулаагүй байна.</p>
+          )}
+          <button
+            className="secondary-action"
+            onClick={openCheckin}
+            disabled={
+              !todayCheckin.data?.template ||
+              todayCheckin.data?.checkin?.status === "submitted"
+            }
+          >
+            {todayCheckin.data?.checkin?.status === "submitted"
+              ? "Өнөөдрийн check-in бөглөгдсөн"
+              : "Өдрийн check-in бөглөх"}
+          </button>
+          {checkinOpen && (
+            <form className="checkin-form" onSubmit={saveCheckin}>
+              {todayCheckin.data.template.questions.map((question: any) => (
+                <label key={question.id}>
+                  <strong>{question.prompt?.mn || question.prompt?.en}</strong>
+                  {question.choices?.length ? (
+                    <select
+                      required={question.is_required}
+                      value={answers[question.id] || ""}
+                      onChange={(event) =>
+                        setAnswers({
+                          ...answers,
+                          [question.id]: event.target.value,
+                        })
+                      }
+                    >
+                      <option value="">Сонгох</option>
+                      {question.choices.map((choice: any) => (
+                        <option key={String(choice)}>{String(choice)}</option>
+                      ))}
+                    </select>
+                  ) : ["integer", "decimal", "number"].includes(question.answer_type) ? (
+                    <input
+                      type="number"
+                      step={question.answer_type === "integer" ? "1" : "any"}
+                      required={question.is_required}
+                      value={answers[question.id] || ""}
+                      onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
+                    />
+                  ) : question.answer_type === "boolean" ? (
+                    <select required={question.is_required} value={answers[question.id] || ""} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}>
+                      <option value="">Сонгох</option><option value="true">Тийм</option><option value="false">Үгүй</option>
+                    </select>
+                  ) : (
+                    <textarea
+                      required={question.is_required}
+                      value={answers[question.id] || ""}
+                      onChange={(event) =>
+                        setAnswers({
+                          ...answers,
+                          [question.id]: event.target.value,
+                        })
+                      }
+                    />
+                  )}
+                </label>
+              ))}
+              <div>
+                <button
+                  type="button"
+                  className="secondary-action compact"
+                  onClick={() => setCheckinOpen(false)}
+                >
+                  Цуцлах
+                </button>
+                <button
+                  className="primary-action compact"
+                  disabled={submitCheckin.isPending}
+                >
+                  Хадгалах
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
         <aside className="today-mini-calendar">
           <strong>
             {new Date().toLocaleDateString("mn-MN", {

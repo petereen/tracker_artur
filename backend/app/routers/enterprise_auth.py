@@ -3,6 +3,7 @@ import secrets
 import hmac
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Response, UploadFile, status
 from typing import Literal
@@ -144,6 +145,35 @@ class ProfilePatch(BaseModel):
         if value and not allowed:
             raise ValueError("Choose a supplied memoji or upload a custom avatar")
         return value
+
+
+DEFAULT_WORLD_CLOCKS = ["Asia/Ulaanbaatar"]
+WORLD_CLOCK_MAX = 6
+
+
+class WorldClockPreferences(BaseModel):
+    clocks: list[str] = Field(default_factory=lambda: list(DEFAULT_WORLD_CLOCKS))
+    display_mode: Literal["digital", "analog"] = "digital"
+    hour_format: Literal["12", "24"] = "24"
+
+    @field_validator("clocks")
+    @classmethod
+    def validate_clocks(cls, value: list[str]) -> list[str]:
+        if len(value) > WORLD_CLOCK_MAX:
+            raise ValueError(f"At most {WORLD_CLOCK_MAX} world clocks are supported")
+        normalized: list[str] = []
+        for timezone_name in value:
+            timezone_name = timezone_name.strip()
+            if not timezone_name:
+                raise ValueError("Timezone cannot be empty")
+            try:
+                ZoneInfo(timezone_name)
+            except ZoneInfoNotFoundError as exc:
+                raise ValueError("Unknown timezone") from exc
+            normalized.append(timezone_name)
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("World clocks must use unique timezones")
+        return normalized
 
 
 class PasswordResetRequest(BaseModel):
@@ -442,6 +472,35 @@ async def profile(db: AsyncSession = Depends(get_db), actor: ActorContext = Depe
         "requires_password_setup": password_setup_required,
         "roles": sorted(actor.roles),
     }
+
+
+@router.get("/preferences/world-clock", response_model=WorldClockPreferences)
+async def world_clock_preferences(
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    account = await db.get(UserAccount, actor.account_id)
+    saved = (account.preferences or {}).get("world_clock") if account else None
+    if not saved:
+        return WorldClockPreferences()
+    return WorldClockPreferences.model_validate(saved)
+
+
+@router.put("/preferences/world-clock", response_model=WorldClockPreferences)
+async def update_world_clock_preferences(
+    data: WorldClockPreferences,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    account = await db.get(UserAccount, actor.account_id, with_for_update=True)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    account.preferences = {
+        **(account.preferences or {}),
+        "world_clock": data.model_dump(),
+    }
+    await db.commit()
+    return data
 
 
 @router.get("/avatars/{token}.png")

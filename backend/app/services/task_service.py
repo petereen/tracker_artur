@@ -395,6 +395,7 @@ def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, 
                     recipient_employee_id=employee.id, kind=kind, title=title, body=body,
                     target_url=f"/tasks?task={task_id}" if task_id else "/tasks", payload=payload,
                     telegram_status="queued", dedup_key=web_key,
+                    is_priority=kind in {"task_assigned", "task_review_requested", "task_deadline", "task_overdue"},
                 )
                 s.add(notification)
                 s.flush()

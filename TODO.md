@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add account-synced world-clock preferences API, model field, migration, and validation (`backend/app/models/models.py`, `backend/app/routers/enterprise_auth.py`, `backend/alembic/versions`)
+- [x] Build the responsive Apple-style world-clock widget and dashboard three-column layout (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/pages/EnterpriseDashboardPage.tsx`, `frontend/src/index.css`)
+- [x] Add world-clock, dashboard relocation, responsive, and accessibility regression coverage; run frontend/backend validation (`frontend/src`, `backend/tests`, `frontend/e2e`) — focused frontend tests/build and Python validation pass; backend pytest unavailable because `pytest` is not installed
 - [ ] Run dependency-backed backend pytest coverage and Alembic upgrade validation for the contract lifecycle (`backend/tests`, `backend/alembic`)
 - [x] Add shared mobile workspace shell, bottom navigation, spacing, and overflow rules (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
 - [x] Add mobile bottom-sheet date-range filter while preserving desktop filter behavior (`frontend/src/components/TimePeriodFilter.tsx`, `frontend/src/index.css`)
@@ -232,6 +235,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Add solid notification surface styling and Gmail-style priority toggles with persisted filtering (`frontend/src/components/NotificationCenter.tsx`, `frontend/src/index.css`, `backend/app/routers/enterprise.py`, `backend/app/models/models.py`, `backend/alembic/versions`)
 - [x] Add a vertically draggable, pointer-aware workers drawer toggle with bounded positioning, click-vs-drag handling, and GPU-accelerated drawer transitions (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
 - [x] Close the workers drawer from its X button or outside pointer interaction and hide the draggable toggle while open (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
 - [x] Preserve selected mobile calendar dates when event data refreshes (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`)

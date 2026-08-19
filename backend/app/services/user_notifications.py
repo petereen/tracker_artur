@@ -13,6 +13,7 @@ from app.models.models import (
     NotificationOutbox,
     UserAccount,
     UserNotification,
+    DEFAULT_PRIORITY_NOTIFICATION_KINDS,
 )
 from app.services.notification_policy import load_policy, next_allowed
 
@@ -71,6 +72,7 @@ async def create_notifications(
             payload=payload or {},
             telegram_status="queued" if telegram_available else "unavailable",
             dedup_key=scoped_key,
+            is_priority=kind in DEFAULT_PRIORITY_NOTIFICATION_KINDS,
         )
         db.add(notification)
         await db.flush()
@@ -157,6 +159,7 @@ def mirror_existing_telegram_notification(
             payload=payload or {},
             telegram_status=telegram_status,
             dedup_key=scoped_key,
+            is_priority=kind in DEFAULT_PRIORITY_NOTIFICATION_KINDS,
         )
         db.add(notification)
         db.flush()

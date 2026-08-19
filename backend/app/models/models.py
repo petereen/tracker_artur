@@ -365,6 +365,14 @@ class NotificationOutbox(Base):
     sent_at = Column(DateTime(timezone=True))
 
 
+DEFAULT_PRIORITY_NOTIFICATION_KINDS = {
+    "task_assigned", "task_review_requested", "task_collaboration_updated",
+    "task_deadline", "task_overdue", "monthly_report", "report_submitted",
+    "project_member_added", "project_request_reviewed", "project_deadline",
+    "company_plan_created", "calendar_reminder", "event",
+}
+
+
 class UserNotification(Base):
     __tablename__ = "user_notifications"
     __table_args__ = (
@@ -384,6 +392,7 @@ class UserNotification(Base):
     payload = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     telegram_status = Column(Text, nullable=False, server_default="unavailable", default="unavailable")
     dedup_key = Column(Text, nullable=False)
+    is_priority = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     read_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -638,6 +647,7 @@ class UserAccount(Base):
     password_hash = Column(Text, nullable=False)
     status = Column(Text, nullable=False, server_default="active", default="active")
     locale = Column(String(8), nullable=False, server_default="mn", default="mn")
+    preferences = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     must_change_password = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     failed_login_count = Column(Integer, nullable=False, server_default="0", default=0)
     locked_until = Column(DateTime(timezone=True))

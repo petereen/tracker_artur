@@ -881,6 +881,31 @@ export function useProfile() {
   return useQuery<UserProfile>({ queryKey: ['v1', 'profile'], queryFn: () => api.get('/v1/auth/profile').then((response) => response.data) })
 }
 
+export interface WorldClockPreferences {
+  clocks: string[]
+  display_mode: 'digital' | 'analog'
+  hour_format: '12' | '24'
+}
+
+export function useWorldClockPreferences() {
+  return useQuery<WorldClockPreferences>({
+    queryKey: ['v1', 'auth', 'preferences', 'world-clock'],
+    queryFn: () => api.get('/v1/auth/preferences/world-clock').then((response) => response.data),
+  })
+}
+
+export function useUpdateWorldClockPreferences() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: WorldClockPreferences) => api.put('/v1/auth/preferences/world-clock', input).then((response) => response.data as WorldClockPreferences),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['v1', 'auth', 'preferences', 'world-clock'], data)
+      toast.success('Цагийн тохиргоо хадгалагдлаа')
+    },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Цагийн тохиргоо хадгалагдсангүй'),
+  })
+}
+
 export function useUpdateProfile() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -914,6 +939,7 @@ export interface UserNotification {
   created_at: string
   read_at: string | null
   telegram_status: 'queued' | 'sent' | 'failed' | 'unavailable'
+  is_priority: boolean
 }
 
 export interface NotificationPage {
@@ -949,6 +975,21 @@ export function useReadAllNotifications() {
       await queryClient.cancelQueries({ queryKey: ['v1', 'notifications'] })
       const previous = queryClient.getQueryData<NotificationPage>(['v1', 'notifications'])
       queryClient.setQueryData<NotificationPage>(['v1', 'notifications'], (page) => !page ? page : { ...page, unread_count: 0, items: page.items.map((item) => ({ ...item, read_at: item.read_at ?? new Date().toISOString() })) })
+      return { previous }
+    },
+    onError: (_error, _variables, context) => queryClient.setQueryData(['v1', 'notifications'], context?.previous),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['v1', 'notifications'] }),
+  })
+}
+
+export function useToggleNotificationPriority() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, is_priority }: { id: number; is_priority: boolean }) => api.post(`/v1/notifications/${id}/priority`, { is_priority }).then((response) => response.data),
+    onMutate: async ({ id, is_priority }) => {
+      await queryClient.cancelQueries({ queryKey: ['v1', 'notifications'] })
+      const previous = queryClient.getQueryData<NotificationPage>(['v1', 'notifications'])
+      queryClient.setQueryData<NotificationPage>(['v1', 'notifications'], (page) => !page ? page : { ...page, items: page.items.map((item) => item.id === id ? { ...item, is_priority } : item) })
       return { previous }
     },
     onError: (_error, _variables, context) => queryClient.setQueryData(['v1', 'notifications'], context?.previous),

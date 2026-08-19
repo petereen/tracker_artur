@@ -177,6 +177,7 @@ async def list_notifications(
             "id": item.id, "kind": item.kind, "title": item.title, "body": item.body,
             "target_url": item.target_url, "payload": item.payload, "created_at": item.created_at,
             "read_at": item.read_at, "telegram_status": item.telegram_status,
+            "is_priority": item.is_priority,
         } for item in page],
         "unread_count": unread_count or 0,
         "next_cursor": page[-1].id if len(rows) > limit and page else None,
@@ -201,6 +202,21 @@ async def read_all_notifications(db: AsyncSession = Depends(get_db), actor: Acto
         item.read_at = now
     await db.commit()
     return {"updated": len(rows), "read_at": now}
+
+
+@router.post("/notifications/{notification_id:int}/priority")
+async def toggle_notification_priority(
+    notification_id: int,
+    is_priority: bool = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    item = await db.get(UserNotification, notification_id, with_for_update=True)
+    if not item or item.recipient_account_id != actor.account_id:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    item.is_priority = is_priority
+    await db.commit()
+    return {"id": item.id, "is_priority": item.is_priority}
 
 
 @router.get("/settings/permissions")

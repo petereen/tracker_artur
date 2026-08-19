@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   agenda: { data: { tasks: [] as any[], entries: [] as any[] } },
   privateCalendar: { tasks: [] as any[], entries: [] as any[], time_blocks: [] as any[] },
   companyCalendar: { tasks: [] as any[], entries: [] as any[], time_blocks: [] as any[] },
+  worldClock: { data: { clocks: ["Asia/Ulaanbaatar"], display_mode: "digital", hour_format: "24" }, isLoading: false, isError: false, refetch: vi.fn() },
+  worldClockUpdate: { mutateAsync: vi.fn(), isPending: false },
 }));
 
 vi.mock("../api/enterprise", () => ({
@@ -24,6 +26,8 @@ vi.mock("../api/enterprise", () => ({
   useWorkerDirectory: () => ({ data: [] }),
   useUpdateEnterpriseTask: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
   useDeleteEnterpriseTask: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
+  useWorldClockPreferences: () => mocks.worldClock,
+  useUpdateWorldClockPreferences: () => mocks.worldClockUpdate,
 }));
 
 vi.mock("../store/auth", () => ({
@@ -225,5 +229,17 @@ describe("Today work-hour timer", () => {
     expect(container.querySelector(".mini-day-marker.task")).toBeInTheDocument();
     expect(container.querySelector(".mini-day-marker.event")).toBeInTheDocument();
     expect(container.querySelector(".mini-day-marker.reminder")).toBeInTheDocument();
+  });
+
+  it("places task tabs below the heading beside the relocated check-in and calendar", () => {
+    const { container } = renderDashboard();
+    const productivity = container.querySelector(".productivity-panel") as HTMLElement;
+    expect(productivity.querySelector(".today-task-column .today-task-tabs")).toBeInTheDocument();
+    expect(productivity.querySelector(".daily-focus")).toBeInTheDocument();
+    expect(productivity.querySelector(".today-mini-calendar")).toBeInTheDocument();
+    expect(productivity.children[0]).toHaveClass("today-task-column");
+    expect(productivity.children[1]).toHaveClass("daily-focus");
+    expect(productivity.children[2]).toHaveClass("today-mini-calendar");
+    expect(container.querySelector(".world-clock-panel")).toBeInTheDocument();
   });
 });

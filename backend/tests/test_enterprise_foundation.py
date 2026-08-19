@@ -18,7 +18,7 @@ from app.main import app
 from app.models.models import Base, Task
 from app.routers import enterprise
 from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _calendar_task_visible_to_employee, _holiday_provider_rows, _task_out
-from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE
+from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE, WorldClockPreferences
 from app.services.enterprise_events import _json_safe, _redact
 from app.services.work_report_service import summarize_work_time
 
@@ -136,7 +136,27 @@ def test_assistant_pending_actions_support_creation_and_update_contracts():
 
 def test_versioned_routes_include_auth_clock_tasks_reports_and_realtime():
     paths = {route.path for route in app.routes}
-    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/auth/profile", "/v1/auth/profile/password", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime", "/v1/checkins/today", "/v1/calendar/events", "/v1/analytics/daily", "/v1/analytics/work-hours"}.issubset(paths)
+    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/auth/profile", "/v1/auth/profile/password", "/v1/auth/preferences/world-clock", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime", "/v1/checkins/today", "/v1/calendar/events", "/v1/analytics/daily", "/v1/analytics/work-hours"}.issubset(paths)
+
+
+def test_world_clock_preferences_default_and_boundary_validation():
+    default = WorldClockPreferences()
+    assert default.clocks == ["Asia/Ulaanbaatar"]
+    assert default.display_mode == "digital"
+    assert default.hour_format == "24"
+    assert WorldClockPreferences(clocks=[]).clocks == []
+    assert len(WorldClockPreferences(clocks=["UTC", "Asia/Tokyo", "Europe/London", "America/New_York", "Australia/Sydney", "Africa/Cairo"]).clocks) == 6
+
+
+def test_world_clock_preferences_reject_duplicate_invalid_and_over_capacity_timezones():
+    import pytest
+
+    with pytest.raises(ValueError):
+        WorldClockPreferences(clocks=["UTC", "UTC"])
+    with pytest.raises(ValueError):
+        WorldClockPreferences(clocks=["Mars/Phobos"])
+    with pytest.raises(ValueError):
+        WorldClockPreferences(clocks=["UTC"] * 7)
 
 
 def test_work_hour_analytics_aggregates_modes_and_returns_total():
