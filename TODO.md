@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Enlarge world-clock tiles, remove decorative/icon/region-code clutter, and localize relative-day labels (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/index.css`)
+- [x] Stabilize the six-clock grid and guard over-capacity preferences with a visible six-city warning (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/index.css`)
 - [x] Refine the world-clock widget into a fixed-height, padded square digital-tile grid following the supplied reference (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/index.css`)
 - [x] Make the previously partially-applied MCP context migration resumable when its column already exists (`backend/alembic/versions/a5b6c7d8e9f0_add_assistant_mcp_context.py`)
 - [x] Merge the three remaining Alembic heads so server deployment can run `alembic upgrade head` (`backend/alembic/versions/e7f8g9h0i1j2_merge_all_heads.py`, `backend/tests/test_alembic_graph.py`)

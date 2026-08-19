@@ -16,7 +16,7 @@ describe("WorldClockWidget", () => {
   beforeEach(() => {
     mocks.preferences.data = { clocks: ["Asia/Ulaanbaatar"], display_mode: "digital", hour_format: "24" };
   });
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => { vi.clearAllMocks(); vi.useRealTimers(); });
 
   it("renders the default Ulaanbaatar digital clock and opens settings", () => {
     render(<WorldClockWidget />);
@@ -24,6 +24,8 @@ describe("WorldClockWidget", () => {
     expect(screen.getByText(/HRS/)).toBeInTheDocument();
     expect(document.querySelector(".world-clock-list.digital.count-1")).toBeInTheDocument();
     expect(document.querySelector(".world-clock-tile")).toHaveClass("world-clock-tile");
+    expect(document.querySelector(".world-clock-tile-city svg")).not.toBeInTheDocument();
+    expect(document.querySelector(".world-clock-tile-city small")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Цагийн тохиргоо" }));
     expect(screen.getByRole("dialog", { name: "Цагийн тохиргоо" })).toBeInTheDocument();
@@ -57,5 +59,24 @@ describe("WorldClockWidget", () => {
     expect(document.querySelector(".world-clock-list.digital.count-6")).toBeInTheDocument();
     expect(document.querySelectorAll(".world-clock-tile")).toHaveLength(6);
     expect(document.querySelectorAll(".world-clock-period").length).toBeGreaterThan(0);
+  });
+
+  it("caps an over-capacity preference without blanking the widget", () => {
+    mocks.preferences.data = {
+      clocks: ["Asia/Ulaanbaatar", "Asia/Tokyo", "Europe/London", "America/New_York", "Australia/Sydney", "Asia/Dubai", "Europe/Paris"],
+      display_mode: "digital",
+      hour_format: "24",
+    };
+    render(<WorldClockWidget />);
+    expect(screen.getByRole("alert")).toHaveTextContent("6");
+    expect(document.querySelectorAll(".world-clock-tile")).toHaveLength(6);
+  });
+
+  it("uses Mongolian relative-day labels", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:00:00.000Z"));
+    render(<WorldClockWidget />);
+    expect(screen.getByText("өнөөдөр")).toBeInTheDocument();
+    vi.useRealTimers();
   });
 });

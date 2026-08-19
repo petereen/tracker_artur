@@ -9410,7 +9410,7 @@ a {
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
-  height: auto;
+  height: 100%;
   justify-self: center;
   max-height: none;
   max-width: 100%;
@@ -9418,59 +9418,48 @@ a {
   overflow: hidden;
   padding: clamp(12px, 1.5vw, 18px);
   position: relative;
-  width: 100%;
+  width: auto;
 }
-.world-clock-tile::after {
-  background: var(--color-accent);
-  border-radius: 999px;
-  content: "";
-  height: 4px;
-  left: 18px;
-  opacity: 0.7;
-  position: absolute;
-  top: 16px;
-  width: 24px;
-}
+.world-clock-tile::after { display: none; }
 .world-clock-tile-city {
   align-items: flex-start;
-  display: flex;
-  gap: 7px;
+  display: grid;
+  justify-items: center;
   min-width: 0;
-  padding-top: 10px;
+  padding-top: 0;
+  text-align: center;
 }
-.world-clock-tile-city > svg { color: var(--color-accent); flex: 0 0 auto; margin-top: 2px; }
-.world-clock-tile-city > span { display: grid; gap: 3px; min-width: 0; }
-.world-clock-tile-city strong,
-.world-clock-tile-city small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.world-clock-tile-city strong { font-size: clamp(0.68rem, 1vw, 0.78rem); font-weight: 700; }
-.world-clock-tile-city small { color: var(--color-muted); font-size: 0.54rem; }
-.world-clock-tile .world-clock-digital-time { align-content: center; display: grid; flex: 1; gap: 8px; justify-items: center; min-height: 0; text-align: center; }
+.world-clock-tile-city strong { font-size: clamp(0.82rem, 1.2vw, 1rem); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
+.world-clock-tile .world-clock-digital-time { align-content: center; display: grid; flex: 1; gap: 16px; justify-items: center; min-height: 0; text-align: center; }
 .world-clock-digital-number { align-items: baseline; display: flex; gap: 5px; justify-content: center; max-width: 100%; }
-.world-clock-digital-number > strong { font-size: clamp(1.35rem, 2.6vw, 2.15rem); font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: -0.065em; line-height: 0.95; white-space: nowrap; }
+.world-clock-digital-number > strong { font-size: clamp(1.75rem, 3.6vw, 3rem); font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: -0.065em; line-height: 0.95; white-space: nowrap; }
 .world-clock-period { color: var(--color-accent); font-size: clamp(0.55rem, 0.8vw, 0.68rem); font-weight: 800; letter-spacing: 0.04em; }
 .world-clock-tile-meta { align-items: center; display: grid; gap: 3px; justify-items: center; }
-.world-clock-tile-meta strong { color: var(--color-text); font-size: clamp(0.58rem, 0.9vw, 0.68rem); font-variant-numeric: tabular-nums; letter-spacing: 0.03em; }
-.world-clock-tile-meta span { color: var(--color-muted); font-size: 0.58rem; }
+.world-clock-tile-meta strong { color: var(--color-text); font-size: clamp(0.68rem, 1vw, 0.82rem); font-variant-numeric: tabular-nums; letter-spacing: 0.03em; }
+.world-clock-tile-meta span { color: var(--color-muted); font-size: clamp(0.68rem, 0.9vw, 0.78rem); }
 .world-clock-list.analog { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); }
-.world-clock-list.analog .world-clock-analog-wrap { align-self: center; height: 100%; justify-self: center; max-height: 100%; max-width: 100%; width: auto; }
-.world-clock-list.analog .world-clock-face { height: min(100%, 112px); max-height: 100%; max-width: 100%; width: auto; }
+.world-clock-list.analog .world-clock-analog-wrap { align-self: center; gap: 8px; height: 100%; justify-self: center; max-height: 100%; max-width: 100%; width: 100%; }
+.world-clock-list.analog .world-clock-face { height: min(calc(100% - 34px), 168px); max-height: 100%; max-width: 100%; width: auto; }
 .world-clock-list.analog .world-clock-analog-wrap > strong { font-size: 0.62rem; }
 .world-clock-list.analog .world-clock-analog-wrap > small { font-size: 0.54rem; }
-@supports (width: 1cqw) {
-  .world-clock-list.digital.count-1 .world-clock-tile,
-  .world-clock-list.digital.count-2 .world-clock-tile { width: min(100cqw, 100cqh); }
-  .world-clock-list.digital.count-2 .world-clock-tile { width: min(calc((100cqw - var(--clock-gap)) / 2), 100cqh); }
-  .world-clock-list.digital.count-3 .world-clock-tile,
-  .world-clock-list.digital.count-4 .world-clock-tile { width: min(calc((100cqw - var(--clock-gap)) / 2), calc((100cqh - var(--clock-gap)) / 2)); }
-  .world-clock-list.digital.count-5 .world-clock-tile,
-  .world-clock-list.digital.count-6 .world-clock-tile { width: min(calc((100cqw - var(--clock-gap)) / 2), calc((100cqh - var(--clock-gap) - var(--clock-gap)) / 3)); }
-}
+.world-clock-face .tick-12 { display: none; }
+.world-clock-list.digital.count-1 .world-clock-tile,
+.world-clock-list.digital.count-2 .world-clock-tile { height: 100%; }
+.world-clock-list.digital.count-3 .world-clock-tile,
+.world-clock-list.digital.count-4 .world-clock-tile { height: 100%; }
+.world-clock-list.digital.count-5 .world-clock-tile,
+.world-clock-list.digital.count-6 .world-clock-tile { height: 100%; }
+.world-clock-list.digital.count-5 .world-clock-digital-number > strong,
+.world-clock-list.digital.count-6 .world-clock-digital-number > strong { font-size: clamp(0.95rem, 1.8vw, 1.35rem); }
+.world-clock-limit-banner { background: var(--color-accent-soft); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); border-radius: 9px; color: var(--color-text); font-size: 0.68rem; margin: 14px 0 0; padding: 8px 10px; text-align: center; }
 @media (max-width: 540px) {
   .world-clock-panel { min-height: 420px; padding: 16px; }
   .world-clock-list.digital,
   .world-clock-list.analog { height: 348px; }
   .world-clock-tile { border-radius: 14px; padding: 11px; }
-  .world-clock-tile::after { left: 13px; top: 13px; }
-  .world-clock-tile-city { padding-top: 8px; }
-  .world-clock-digital-number > strong { font-size: clamp(1.18rem, 7vw, 1.75rem); }
+  .world-clock-tile-city { padding-top: 0; }
+  .world-clock-tile .world-clock-digital-time { gap: 12px; }
+  .world-clock-digital-number > strong { font-size: clamp(1.25rem, 7vw, 2.1rem); }
+  .world-clock-list.digital.count-5 .world-clock-digital-number > strong,
+  .world-clock-list.digital.count-6 .world-clock-digital-number > strong { font-size: clamp(0.95rem, 6vw, 1.35rem); }
 }

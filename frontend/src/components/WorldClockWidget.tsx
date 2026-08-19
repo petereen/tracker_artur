@@ -38,6 +38,7 @@ const DEFAULT_PREFERENCES: WorldClockPreferences = {
   display_mode: "digital",
   hour_format: "24",
 };
+const MAX_CLOCKS = 6;
 
 const FALLBACK_TIMEZONES = [
   "Pacific/Honolulu",
@@ -134,10 +135,10 @@ function dayDifference(fromTimezone: string, toTimezone: string, date: Date) {
 }
 
 function relativeDayLabel(delta: number) {
-  if (delta === 0) return "Today";
-  if (delta === 1) return "Tomorrow";
-  if (delta === -1) return "Yesterday";
-  return delta > 0 ? `In ${delta} days` : `${Math.abs(delta)} days ago`;
+  if (delta === 0) return "өнөөдөр";
+  if (delta === 1) return "+1 өдөр";
+  if (delta === -1) return "-1 өдөр";
+  return delta > 0 ? `+${delta} өдөр` : `${delta} өдөр`;
 }
 
 function DigitalClock({ timezone, hourFormat, now, localTimezone }: { timezone: string; hourFormat: "12" | "24"; now: Date; localTimezone: string }) {
@@ -212,6 +213,7 @@ function WorldClockEditor({ draft, onChange, onClose, onSave, saving }: { draft:
   const [query, setQuery] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [limitMessage, setLimitMessage] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
   const timezones = useMemo(() => supportedTimezones(), []);
   const filtered = useMemo(() => {
@@ -224,10 +226,15 @@ function WorldClockEditor({ draft, onChange, onClose, onSave, saving }: { draft:
   }, [draft.clocks, editingIndex, query, timezones]);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const chooseTimezone = (timezone: string) => {
+    if (editingIndex === null && draft.clocks.length >= MAX_CLOCKS) {
+      setLimitMessage(true);
+      return;
+    }
     const clocks = [...draft.clocks];
     if (editingIndex === null) clocks.push(timezone);
     else clocks[editingIndex] = timezone;
     onChange({ ...draft, clocks: [...new Set(clocks)] });
+    setLimitMessage(false);
     setEditingIndex(null);
     setQuery("");
     setSearchOpen(false);
@@ -253,9 +260,10 @@ function WorldClockEditor({ draft, onChange, onClose, onSave, saving }: { draft:
       <div className="world-clock-setting-search"><Search size={15} /><input value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder={editingIndex === null ? "Search time zones" : "Replace time zone"} aria-label="Цагийн бүс хайх" />{query && <button type="button" onClick={() => setQuery("")} aria-label="Хайлтыг цэвэрлэх"><X size={14} /></button>}</div>
       {searchOpen && <div className="world-clock-zone-results" role="listbox">{filtered.map((timezone) => <button type="button" key={timezone} onClick={() => chooseTimezone(timezone)} role="option"><strong>{timezoneLabel(timezone)}</strong><small>{timezone}</small></button>)}{filtered.length === 0 && <p>Цагийн бүс олдсонгүй.</p>}</div>}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}><SortableContext items={draft.clocks} strategy={verticalListSortingStrategy}><ul className="world-clock-setting-list">{draft.clocks.map((timezone, index) => <SortableClockRow key={timezone} timezone={timezone} index={index} total={draft.clocks.length} onMove={move} onEdit={() => { setEditingIndex(index); setQuery(""); setSearchOpen(true); }} onRemove={() => onChange({ ...draft, clocks: draft.clocks.filter((item) => item !== timezone) })} />)}</ul></SortableContext></DndContext>
-      {draft.clocks.length < 6 && <button type="button" className="world-clock-add" onClick={() => { setEditingIndex(null); setQuery(""); setSearchOpen(true); panelRef.current?.querySelector<HTMLInputElement>("input")?.focus(); }}><Plus size={15} />Цаг нэмэх</button>}
-      {draft.clocks.length === 6 && <p className="world-clock-limit">Хамгийн ихдээ 6 цаг нэмэх боломжтой.</p>}
-      <footer><button type="button" className="secondary-action compact" onClick={onClose}>Цуцлах</button><button type="button" className="primary-action compact" onClick={onSave} disabled={saving}>{saving ? "Хадгалж байна…" : "Хадгалах"}</button></footer>
+      {draft.clocks.length < MAX_CLOCKS && <button type="button" className="world-clock-add" onClick={() => { setEditingIndex(null); setQuery(""); setSearchOpen(true); setLimitMessage(false); panelRef.current?.querySelector<HTMLInputElement>("input")?.focus(); }}><Plus size={15} />Цаг нэмэх</button>}
+      {draft.clocks.length >= MAX_CLOCKS && <p className="world-clock-limit" role="alert">Хамгийн ихдээ 6 хот нэмэх боломжтой.</p>}
+      {limitMessage && <p className="world-clock-limit" role="alert">6-аас илүү хот нэмэх боломжгүй. Илүүдэл хотыг устгаад дахин оролдоно уу.</p>}
+      <footer><button type="button" className="secondary-action compact" onClick={onClose}>Цуцлах</button><button type="button" className="primary-action compact" onClick={onSave} disabled={saving || draft.clocks.length > MAX_CLOCKS}>{saving ? "Хадгалж байна…" : "Хадгалах"}</button></footer>
     </section>
   );
 }
@@ -269,6 +277,8 @@ export function WorldClockWidget() {
   const [now, setNow] = useState(() => new Date());
   const localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const saved = preferences.data || DEFAULT_PREFERENCES;
+  const visibleClocks = saved.clocks.slice(0, MAX_CLOCKS);
+  const hasTooManyClocks = saved.clocks.length > MAX_CLOCKS;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
@@ -294,8 +304,9 @@ export function WorldClockWidget() {
   return (
     <section className={`world-clock-panel panel ${open ? "settings-open" : ""}`} aria-label="World clock">
       <div className="panel-heading"><div><span className="eyebrow">WORLD CLOCK</span><h2>Дэлхийн цаг</h2></div><button ref={triggerRef} type="button" className="world-clock-settings-trigger" onClick={openEditor} aria-expanded={open} aria-label="Цагийн тохиргоо"><Settings2 size={17} /></button></div>
-      {saved.clocks.length ? <div className={`world-clock-list ${saved.display_mode} count-${saved.clocks.length}`}>
-        {saved.clocks.map((timezone) => saved.display_mode === "analog" ? <AnalogClock key={timezone} timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /> : <article className="world-clock-tile" key={timezone}><div className="world-clock-tile-city"><Clock3 size={14} /><span><strong>{timezoneLabel(timezone)}</strong><small>{timezone}</small></span></div><DigitalClock timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /></article>)}
+      {hasTooManyClocks && <p className="world-clock-limit-banner" role="alert">Хамгийн ихдээ 6 хот нэмэх боломжтой. Илүүдэл хотыг тохиргооноос устгана уу.</p>}
+      {visibleClocks.length ? <div className={`world-clock-list ${saved.display_mode} count-${visibleClocks.length}`}>
+        {visibleClocks.map((timezone) => saved.display_mode === "analog" ? <AnalogClock key={timezone} timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /> : <article className="world-clock-tile" key={timezone}><div className="world-clock-tile-city"><strong>{timezoneLabel(timezone)}</strong></div><DigitalClock timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /></article>)}
       </div> : <div className="world-clock-empty"><Clock3 size={25} /><strong>Цаг нэмээгүй байна</strong><span>Ажлынхаа хотуудын цагийг нэг дор хараарай.</span><button type="button" className="secondary-action compact" onClick={openEditor}><Plus size={14} />Цаг нэмэх</button></div>}
       {open && <div className="world-clock-settings-layer" onMouseDown={() => setOpen(false)}><WorldClockEditor draft={draft || clonePreferences(saved)} onChange={setDraft} onClose={() => setOpen(false)} onSave={save} saving={update.isPending} /></div>}
     </section>
