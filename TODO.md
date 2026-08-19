@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Make the previously partially-applied MCP context migration resumable when its column already exists (`backend/alembic/versions/a5b6c7d8e9f0_add_assistant_mcp_context.py`)
 - [x] Merge the three remaining Alembic heads so server deployment can run `alembic upgrade head` (`backend/alembic/versions/e7f8g9h0i1j2_merge_all_heads.py`, `backend/tests/test_alembic_graph.py`)
 - [x] Repair the Alembic dependency cycle that prevented `user_accounts.preferences` from being migrated and made backend startup unhealthy (`backend/alembic/versions/c4d5e6f7g8h9_configurable_erp_foundation.py`, `backend/tests/test_alembic_graph.py`)
 - [x] Add account-synced world-clock preferences API, model field, migration, and validation (`backend/app/models/models.py`, `backend/app/routers/enterprise_auth.py`, `backend/alembic/versions`)
