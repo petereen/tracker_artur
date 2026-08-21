@@ -235,12 +235,12 @@ def _web_telegram_error(code: str) -> RedirectResponse:
     # PUBLIC_APP_URL redirect could strand the host-only refresh cookie.
     target = f"/?{urlencode({'telegram_auth_error': code})}"
     response = RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
-    response.delete_cookie(TELEGRAM_WEB_STATE_COOKIE, path="/api/v1/auth/telegram")
+    response.delete_cookie(TELEGRAM_WEB_STATE_COOKIE, path="/")
     return response
 
 
 def _clear_web_telegram_state(response: Response) -> None:
-    response.delete_cookie(TELEGRAM_WEB_STATE_COOKIE, path="/api/v1/auth/telegram")
+    response.delete_cookie(TELEGRAM_WEB_STATE_COOKIE, path="/")
 
 
 def _native_origins() -> set[str]:
@@ -558,7 +558,9 @@ async def telegram_web_start(db: AsyncSession = Depends(get_db)):
         httponly=True,
         secure=settings.AUTH_COOKIE_SECURE,
         samesite="lax",
-        path="/api/v1/auth/telegram",
+        # Root scope also supports the temporary legacy callback alias while
+        # deployments migrate TELEGRAM_OIDC_REDIRECT_URI.
+        path="/",
     )
     return response
 

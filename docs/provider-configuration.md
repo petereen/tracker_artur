@@ -106,6 +106,12 @@ TELEGRAM_OIDC_ISSUER=https://oauth.telegram.org
 secret only in the backend/deployment secret manager; it is never sent to the
 browser or included in the frontend bundle.
 
+If an existing deployment still has
+`TELEGRAM_OIDC_REDIRECT_URI=https://erp.oyuns.mn/mobile-auth/telegram/callback`,
+replace it with the browser callback above and restart the backend/frontend.
+The frontend retains a temporary compatibility proxy for that old path, but
+BotFather should use the browser callback going forward.
+
 In BotFather → the bot's Login Widget settings, register both:
 
 - Website origin: `https://erp.oyuns.mn`
