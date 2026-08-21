@@ -7,7 +7,7 @@
 | Слой | Технологии |
 |------|-----------|
 | Backend | FastAPI, SQLAlchemy 2.0 async, Alembic, PostgreSQL 16 |
-| Auth | JWT (python-jose) + bcrypt; Telegram `initData` (HMAC) для Mini App |
+| Auth | JWT (python-jose) + bcrypt; Telegram OIDC/PKCE for browser/native login; signed `initData` (HMAC) for the Mini App |
 | Telegram-бот | aiogram 3.x, FSM (опросы + черновики задач), ролевое меню |
 | Планировщик | APScheduler 3.x + SQLAlchemyJobStore (напоминания, дайджесты, эскалация) |
 | AI | Chimege/OpenAI STT + native function tools для routing + строгие structured outputs для планов и ответов, `dateparser` |

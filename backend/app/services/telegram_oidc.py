@@ -66,11 +66,11 @@ async def discovery() -> dict[str, Any]:
     return payload
 
 
-async def authorization_url(state: str, nonce: str, verifier: str) -> str:
+async def authorization_url(state: str, nonce: str, verifier: str, *, redirect_uri: str | None = None) -> str:
     metadata = await discovery()
     values = {
         "client_id": settings.TELEGRAM_OIDC_CLIENT_ID,
-        "redirect_uri": settings.TELEGRAM_OIDC_REDIRECT_URI,
+        "redirect_uri": redirect_uri or settings.TELEGRAM_OIDC_REDIRECT_URI,
         "response_type": "code",
         "scope": "openid profile",
         "state": state,
@@ -81,20 +81,24 @@ async def authorization_url(state: str, nonce: str, verifier: str) -> str:
     return str(metadata["authorization_endpoint"]) + "?" + urlencode(values)
 
 
-async def exchange_code(code: str, verifier: str) -> dict[str, Any]:
+async def exchange_code(code: str, verifier: str, *, redirect_uri: str | None = None) -> dict[str, Any]:
     metadata = await discovery()
     data = {
         "grant_type": "authorization_code",
         "code": code,
         "client_id": settings.TELEGRAM_OIDC_CLIENT_ID,
-        "client_secret": settings.TELEGRAM_OIDC_CLIENT_SECRET,
-        "redirect_uri": settings.TELEGRAM_OIDC_REDIRECT_URI,
+        "redirect_uri": redirect_uri or settings.TELEGRAM_OIDC_REDIRECT_URI,
         "code_verifier": verifier,
     }
     try:
         timeout = aiohttp.ClientTimeout(total=20)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(str(metadata["token_endpoint"]), data=data, headers={"Accept": "application/json"}) as response:
+            async with session.post(
+                str(metadata["token_endpoint"]),
+                data=data,
+                auth=aiohttp.BasicAuth(settings.TELEGRAM_OIDC_CLIENT_ID, settings.TELEGRAM_OIDC_CLIENT_SECRET),
+                headers={"Accept": "application/json"},
+            ) as response:
                 payload = await response.json(content_type=None)
                 if response.status != 200 or not isinstance(payload, dict) or not payload.get("id_token"):
                     raise TelegramOIDCError("Telegram authorization could not be completed")
@@ -103,7 +107,7 @@ async def exchange_code(code: str, verifier: str) -> dict[str, Any]:
         raise TelegramOIDCError("Telegram authorization could not be completed") from exc
 
 
-async def validate_id_token(id_token: str, nonce: str) -> dict[str, Any]:
+async def validate_id_token(id_token: str, nonce: str | None = None) -> dict[str, Any]:
     global _jwks_cache
     metadata = await discovery()
     now = datetime.now(timezone.utc)
@@ -132,14 +136,19 @@ async def validate_id_token(id_token: str, nonce: str) -> dict[str, Any]:
             )
         except (JWTError, TelegramOIDCError) as retry_exc:
             raise TelegramOIDCError("Telegram ID token is invalid") from retry_exc
-    if claims.get("nonce") != nonce or not claims.get("sub"):
+    if not claims.get("sub") or (nonce is not None and claims.get("nonce") != nonce):
         raise TelegramOIDCError("Telegram ID token is invalid")
     try:
         expires_at = int(claims.get("exp", 0))
+        issued_at = int(claims.get("iat", 0))
     except (TypeError, ValueError) as exc:
         raise TelegramOIDCError("Telegram ID token is invalid") from exc
-    if expires_at <= int(time.time()):
+    now_seconds = int(time.time())
+    if expires_at <= now_seconds or issued_at > now_seconds + 60 or issued_at <= 0:
         raise TelegramOIDCError("Telegram ID token is expired")
+    audience = claims.get("aud")
+    if audience != settings.TELEGRAM_OIDC_CLIENT_ID and audience != [settings.TELEGRAM_OIDC_CLIENT_ID]:
+        raise TelegramOIDCError("Telegram ID token is invalid")
     return claims
 
 
@@ -163,4 +172,12 @@ def encrypt_nonce(nonce: str) -> str:
 
 
 def decrypt_nonce(value: str) -> str:
+    return decrypt_secret(value)
+
+
+def encrypt_state(state: str) -> str:
+    return encrypt_secret(state)
+
+
+def decrypt_state(value: str) -> str:
     return decrypt_secret(value)

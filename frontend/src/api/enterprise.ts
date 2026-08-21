@@ -242,13 +242,6 @@ export function useAuthCapabilities(enabled = true) {
   })
 }
 
-export function useTelegramWidgetLogin() {
-  return useMutation({
-    mutationFn: (payload: Record<string, string | number>) => api.post('/v1/auth/telegram-widget', payload).then((response) => response.data),
-    onSuccess: acceptSession,
-  })
-}
-
 export function usePasswordResetRequest() {
   return useMutation({
     mutationFn: (email: string) => api.post('/v1/auth/password-reset/request', { email }).then((response) => response.data),

@@ -5,11 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LoginPage } from './LoginPage'
 
 const mutateAsync = vi.fn()
-const mutate = vi.fn()
 
 vi.mock('../api/enterprise', () => ({
   useEnterpriseLogin: () => ({ mutateAsync, isPending: false }),
-  useTelegramWidgetLogin: () => ({ mutate, isPending: false }),
   useAuthCapabilities: () => ({ data: { telegram_native: false }, isLoading: false }),
 }))
 
@@ -20,6 +18,11 @@ function renderLogin() {
 
 describe('enterprise login', () => {
   beforeEach(() => mutateAsync.mockReset())
+
+  it('shows the browser Telegram login button', () => {
+    renderLogin()
+    expect(screen.getByRole('button', { name: /Telegram-аар нэвтрэх/ })).toBeEnabled()
+  })
 
   it('has explicit labels and a clear submit action', () => {
     renderLogin()

@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Implement Telegram browser OIDC Authorization Code + PKCE login while preserving Mini App and native authentication (`backend/app/routers/enterprise_auth.py`, `frontend/src/pages/LoginPage.tsx`)
 - [x] Repair duplicate Alembic revision IDs and converge the mobile migrations (`backend/alembic/versions`, `backend/tests/test_alembic_graph.py`)
 - [x] Replace Capgo Cloud delivery with the self-hosted OYUNS OTA updater API, bundle storage, release tooling, and native endpoint configuration (`backend/app/routers/mobile_updates.py`, `frontend/src/platform/updater.tsx`, `frontend/capacitor.config.ts`)
 - [x] Register the `mn.oyuns.workspace` Android app in Firebase project `oyuns-finance`, download its Google Services configuration, and verify the Android build (`frontend/android/app/google-services.json`)

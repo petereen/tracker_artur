@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     SYNC_DATABASE_URL: str
     SECRET_KEY: str
     BOT_TOKEN: str = ""
+    # Retained only so old deployments can start; browser login no longer
+    # reads this legacy widget setting.
     TELEGRAM_BOT_USERNAME: str = ""
     MANAGER_TG_ID: str = "306983322"
     # Public HTTPS address opened by Telegram. It must point to the Mini App
@@ -21,7 +23,10 @@ class Settings(BaseSettings):
     TELEGRAM_REFRESH_TOKEN_DAYS: int = 365
     TELEGRAM_OIDC_CLIENT_ID: str = ""
     TELEGRAM_OIDC_CLIENT_SECRET: str = ""
-    TELEGRAM_OIDC_REDIRECT_URI: str = "https://erp.oyuns.mn/mobile-auth/telegram/callback"
+    # Browser OIDC callback. Register this exact URL in BotFather.
+    TELEGRAM_OIDC_REDIRECT_URI: str = "https://erp.oyuns.mn/api/v1/auth/telegram/callback"
+    # Native login retains its existing universal/app-link callback.
+    TELEGRAM_OIDC_NATIVE_REDIRECT_URI: str = "https://erp.oyuns.mn/mobile-auth/telegram/callback"
     TELEGRAM_OIDC_ISSUER: str = "https://oauth.telegram.org"
     AUTH_COOKIE_SECURE: bool = True
     PUBLIC_APP_URL: str = "https://erp.oyuns.mn"

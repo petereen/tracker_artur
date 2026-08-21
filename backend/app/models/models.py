@@ -644,6 +644,7 @@ class UserAccount(Base):
     employee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"), unique=True)
     legacy_admin_id = Column(Integer, ForeignKey("admin_users.id", ondelete="SET NULL"), unique=True)
     email = Column(Text, nullable=False, unique=True)
+    telegram_oidc_subject = Column(Text, unique=True)
     password_hash = Column(Text, nullable=False)
     status = Column(Text, nullable=False, server_default="active", default="active")
     locale = Column(String(8), nullable=False, server_default="mn", default="mn")

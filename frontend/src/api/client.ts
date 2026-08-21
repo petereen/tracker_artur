@@ -61,7 +61,7 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const config = error.config as (InternalAxiosRequestConfig & { _sessionRetried?: boolean }) | undefined
-    const sessionEndpoint = ['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/logout', '/v1/auth/telegram', '/v1/auth/telegram-widget'].some((path) => config?.url?.includes(path))
+    const sessionEndpoint = ['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/logout', '/v1/auth/telegram'].some((path) => config?.url?.includes(path))
     if (error.response?.status !== 401 || !config || sessionEndpoint || config._sessionRetried) throw error
     config._sessionRetried = true
     try {

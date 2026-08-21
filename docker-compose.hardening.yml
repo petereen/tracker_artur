@@ -24,7 +24,8 @@ services:
       OTA_UPLOAD_TOKEN: ${OTA_UPLOAD_TOKEN:-}
       TELEGRAM_OIDC_CLIENT_ID: ${TELEGRAM_OIDC_CLIENT_ID:-}
       TELEGRAM_OIDC_CLIENT_SECRET: ${TELEGRAM_OIDC_CLIENT_SECRET:-}
-      TELEGRAM_OIDC_REDIRECT_URI: ${TELEGRAM_OIDC_REDIRECT_URI:-https://erp.oyuns.mn/mobile-auth/telegram/callback}
+      TELEGRAM_OIDC_REDIRECT_URI: ${TELEGRAM_OIDC_REDIRECT_URI:-https://erp.oyuns.mn/api/v1/auth/telegram/callback}
+      TELEGRAM_OIDC_NATIVE_REDIRECT_URI: ${TELEGRAM_OIDC_NATIVE_REDIRECT_URI:-https://erp.oyuns.mn/mobile-auth/telegram/callback}
       TELEGRAM_OIDC_ISSUER: ${TELEGRAM_OIDC_ISSUER:-https://oauth.telegram.org}
       ATTACHMENT_STORAGE_BACKEND: local
       CLAMAV_ENABLED: ${CLAMAV_ENABLED:-true}

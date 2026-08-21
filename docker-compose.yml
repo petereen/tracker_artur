@@ -50,10 +50,10 @@ services:
       SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
       SECRET_KEY: ${SECRET_KEY}
       BOT_TOKEN: ${BOT_TOKEN:-}
-      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
       TELEGRAM_OIDC_CLIENT_ID: ${TELEGRAM_OIDC_CLIENT_ID:-}
       TELEGRAM_OIDC_CLIENT_SECRET: ${TELEGRAM_OIDC_CLIENT_SECRET:-}
-      TELEGRAM_OIDC_REDIRECT_URI: ${TELEGRAM_OIDC_REDIRECT_URI:-https://erp.oyuns.mn/mobile-auth/telegram/callback}
+      TELEGRAM_OIDC_REDIRECT_URI: ${TELEGRAM_OIDC_REDIRECT_URI:-https://erp.oyuns.mn/api/v1/auth/telegram/callback}
+      TELEGRAM_OIDC_NATIVE_REDIRECT_URI: ${TELEGRAM_OIDC_NATIVE_REDIRECT_URI:-https://erp.oyuns.mn/mobile-auth/telegram/callback}
       TELEGRAM_OIDC_ISSUER: ${TELEGRAM_OIDC_ISSUER:-https://oauth.telegram.org}
       MANAGER_TG_ID: ${MANAGER_TG_ID:-306983322}
       MINI_APP_URL: ${MINI_APP_URL:-https://erp.oyuns.mn/tg}
@@ -205,8 +205,6 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        VITE_TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
     restart: unless-stopped
     environment:
       APPLE_TEAM_ID: ${APPLE_TEAM_ID:-}

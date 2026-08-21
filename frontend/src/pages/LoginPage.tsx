@@ -1,22 +1,18 @@
 import { useEffect, useState } from 'react'
 import { ArrowRight, LockKeyhole, Mail } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { useAuthCapabilities, useEnterpriseLogin, useTelegramWidgetLogin } from '../api/enterprise'
+import { useAuthCapabilities, useEnterpriseLogin } from '../api/enterprise'
 import { isNativePlatform } from '../platform/runtime'
 import { startNativeTelegramLogin, subscribeToNativeTelegramAuth, type NativeTelegramAuthState } from '../platform/telegram-auth'
-
-declare global {
-  interface Window { onTelegramAuth?: (user: Record<string, string | number>) => void }
-}
 
 export function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const login = useEnterpriseLogin()
-  const { mutate: loginWithTelegram } = useTelegramWidgetLogin()
   const native = isNativePlatform()
   const capabilities = useAuthCapabilities(native)
   const [telegramState, setTelegramState] = useState<NativeTelegramAuthState>({ status: 'idle' })
+  const [webTelegramError, setWebTelegramError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!native) return
@@ -24,26 +20,24 @@ export function LoginPage() {
   }, [native])
 
   useEffect(() => {
-    if (isNativePlatform()) return
-    const username = import.meta.env.VITE_TELEGRAM_BOT_USERNAME
-    if (!username) return
-    window.onTelegramAuth = (user) => {
-      loginWithTelegram(user)
+    if (native) return
+    const code = new URLSearchParams(window.location.search).get('telegram_auth_error')
+    if (!code) return
+    const messages: Record<string, string> = {
+      cancelled: 'Telegram нэвтрэлтийг цуцалсан. Дахин оролдоно уу.',
+      invalid_state: 'Telegram нэвтрэлтийн төлөв хүчингүй байна. Дахин оролдоно уу.',
+      invalid_callback: 'Telegram-ээс буцсан холбоос хүчингүй байна.',
+      token_exchange_failed: 'Telegram нэвтрэлтийг баталгаажуулж чадсангүй.',
+      invalid_id_token: 'Telegram баталгаажуулалтын токен хүчингүй байна.',
+      not_configured: 'Telegram нэвтрэлт одоогоор тохируулагдаагүй байна.',
+      provider_unavailable: 'Telegram нэвтрэлт түр боломжгүй байна.',
+      provider_error: 'Telegram нэвтрэлт амжилтгүй боллоо.',
+      account_unavailable: 'Таны Telegram бүртгэл идэвхтэй ажилтантай холбогдоогүй байна.',
+      login_failed: 'Telegram-аар нэвтрэх үед алдаа гарлаа.',
     }
-    const script = document.createElement('script')
-    script.src = 'https://telegram.org/js/telegram-widget.js?22'
-    script.async = true
-    script.setAttribute('data-telegram-login', username)
-    script.setAttribute('data-size', 'large')
-    script.setAttribute('data-userpic', 'false')
-    script.setAttribute('data-request-access', 'write')
-    script.setAttribute('data-onauth', 'onTelegramAuth(user)')
-    document.getElementById('telegram-login-widget')?.appendChild(script)
-    return () => {
-      delete window.onTelegramAuth
-      script.remove()
-    }
-  }, [loginWithTelegram])
+    setWebTelegramError(messages[code] || messages.login_failed)
+    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`)
+  }, [native])
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -82,7 +76,13 @@ export function LoginPage() {
             {login.isPending ? 'Нэвтэрч байна…' : 'Нэвтрэх'} <ArrowRight size={16} aria-hidden />
           </button>
         </form>
-        {!native && import.meta.env.VITE_TELEGRAM_BOT_USERNAME && <div className="telegram-login"><span>эсвэл Telegram-аар</span><div id="telegram-login-widget" /></div>}
+        {!native && <div className="telegram-login">
+          <span>эсвэл Telegram-аар</span>
+          <button className="primary-action native-telegram-action" type="button" onClick={() => { window.location.assign('/api/v1/auth/telegram') }}>
+            Telegram-аар нэвтрэх <ArrowRight size={16} aria-hidden />
+          </button>
+          {webTelegramError && <p className="login-inline-error" role="alert">{webTelegramError}</p>}
+        </div>}
         <footer><a href="/privacy">Нууцлал</a><a href="/terms">Үйлчилгээний нөхцөл</a></footer>
       </section>
     </main>

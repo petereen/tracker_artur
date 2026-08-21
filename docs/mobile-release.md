@@ -85,7 +85,8 @@ Native sign-in uses Telegram's OIDC Authorization Code flow with PKCE. The app o
 ```env
 TELEGRAM_OIDC_CLIENT_ID=...
 TELEGRAM_OIDC_CLIENT_SECRET=...
-TELEGRAM_OIDC_REDIRECT_URI=https://erp.oyuns.mn/mobile-auth/telegram/callback
+TELEGRAM_OIDC_REDIRECT_URI=https://erp.oyuns.mn/api/v1/auth/telegram/callback
+TELEGRAM_OIDC_NATIVE_REDIRECT_URI=https://erp.oyuns.mn/mobile-auth/telegram/callback
 TELEGRAM_OIDC_ISSUER=https://oauth.telegram.org
 ```
 
@@ -93,7 +94,7 @@ TELEGRAM_OIDC_ISSUER=https://oauth.telegram.org
 4. Set `ANDROID_SIGNING_CERT_SHA256` to a comma-separated list of the debug, internal, and production signing fingerprints. The frontend entrypoint generates `/.well-known/assetlinks.json` for `mn.oyuns.workspace`.
 5. Deploy the backend and association files before installing the native binary. Verify both URLs return HTTPS `200`, JSON content, no redirect, and the exact callback path.
 
-The native login screen shows Telegram first when the backend capability is configured and retains username/password as a fallback. Web Login Widget and `/tg` Mini App authentication remain browser/Telegram-only. A change to the App Link intent filter, Associated Domains entitlement, or signing fingerprints requires a new store binary; it cannot be delivered through OTA.
+The native login screen shows Telegram first when the backend capability is configured and retains username/password as a fallback. The browser uses the separate `/api/v1/auth/telegram/callback` OIDC callback, while `/tg` Mini App authentication remains unchanged. A change to the App Link intent filter, Associated Domains entitlement, or signing fingerprints requires a new store binary; it cannot be delivered through OTA.
 
 For local Android verification, include the debug keystore fingerprint from `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`. Release and Play signing fingerprints must also be present in `ANDROID_SIGNING_CERT_SHA256`. The backend never places the OIDC client secret, provider tokens, PKCE verifier, or ID token in the native bundle.
 

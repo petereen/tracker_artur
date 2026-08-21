@@ -72,7 +72,6 @@ stored. Back up the Docker volume with PostgreSQL.
 
 ```env
 BOT_TOKEN=Telegram bot token
-TELEGRAM_BOT_USERNAME=Telegram bot username without @ (enables browser Login Widget)
 MINI_APP_URL=https://erp.oyuns.mn/tg
 TELEGRAM_REFRESH_TOKEN_DAYS=365
 OPENAI_API_KEY=OpenAI project key
@@ -90,14 +89,36 @@ Telegram ID in Administration before they use this sign-in.
 Manual tasks, reports, and the Calendar URL fallback remain available when AI,
 voice, rates, or Calendar providers are unavailable.
 
-For browser Telegram login, set `TELEGRAM_BOT_USERNAME` and use BotFather's
-`/setdomain` command with `erp.oyuns.mn`, then rebuild the frontend so the Login
-Widget is included. The Mini App itself does not require the Login Widget.
+### Telegram Login for the normal website
+
+The normal browser uses Telegram's current OpenID Connect Authorization Code
+flow with PKCE. Configure these backend-only values:
+
+```env
+TELEGRAM_OIDC_CLIENT_ID=the Client ID shown by BotFather
+TELEGRAM_OIDC_CLIENT_SECRET=the Client Secret shown by BotFather
+TELEGRAM_OIDC_REDIRECT_URI=https://erp.oyuns.mn/api/v1/auth/telegram/callback
+TELEGRAM_OIDC_NATIVE_REDIRECT_URI=https://erp.oyuns.mn/mobile-auth/telegram/callback
+TELEGRAM_OIDC_ISSUER=https://oauth.telegram.org
+```
+
+`TELEGRAM_OIDC_CLIENT_SECRET` is different from `BOT_TOKEN`. Keep the client
+secret only in the backend/deployment secret manager; it is never sent to the
+browser or included in the frontend bundle.
+
+In BotFather → the bot's Login Widget settings, register both:
+
+- Website origin: `https://erp.oyuns.mn`
+- Exact browser callback URL: `https://erp.oyuns.mn/api/v1/auth/telegram/callback`
+
+The native callback remains registered separately for the existing iOS/Android
+flow. The Mini App continues to authenticate with signed `initData`; neither
+flow is replaced by browser OIDC.
 
 ## 5. Deployment order
 
 1. Back up PostgreSQL.
-2. Deploy the new image and run `alembic upgrade head` once (current head: `x2y3z4a5b6c7`).
+2. Deploy the new image and run `alembic upgrade head` once (current head: `k3l4m5n6o7p8`).
 3. Start `clamav`, then `backend`, `worker`, `bot`, and `frontend`; verify `/api/health` and one clean test upload.
 4. Test admin login, create a second account from Administration, change its
    password/status, private attachment access, Google connection, and one task

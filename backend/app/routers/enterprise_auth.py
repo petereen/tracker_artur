@@ -2,10 +2,11 @@ import hashlib
 import secrets
 import hmac
 from datetime import date, datetime, timedelta, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import RedirectResponse
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -33,6 +34,7 @@ from app.services import telegram_oidc
 
 router = APIRouter()
 REFRESH_COOKIE = "oyuns_refresh"
+TELEGRAM_WEB_STATE_COOKIE = "oyuns_telegram_oidc_state"
 TELEGRAM_DEFAULT_ROLE = "member"
 
 
@@ -45,16 +47,6 @@ class LoginInput(BaseModel):
     @classmethod
     def normalize_email(cls, value: str) -> str:
         return value.strip().lower()
-
-
-class TelegramWidgetLogin(BaseModel):
-    id: int
-    first_name: str = ""
-    last_name: str | None = None
-    username: str | None = None
-    photo_url: str | None = None
-    auth_date: int
-    hash: str
 
 
 class NativeTelegramStart(BaseModel):
@@ -237,6 +229,17 @@ def _set_refresh_cookie(response: Response, token: str, expires_at: datetime) ->
     )
 
 
+def _web_telegram_error(code: str) -> RedirectResponse:
+    target = f"{settings.PUBLIC_APP_URL.rstrip('/')}/?{urlencode({'telegram_auth_error': code})}"
+    response = RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+    response.delete_cookie(TELEGRAM_WEB_STATE_COOKIE, path="/api/v1/auth/telegram")
+    return response
+
+
+def _clear_web_telegram_state(response: Response) -> None:
+    response.delete_cookie(TELEGRAM_WEB_STATE_COOKIE, path="/api/v1/auth/telegram")
+
+
 def _native_origins() -> set[str]:
     return {origin.strip() for origin in settings.NATIVE_APP_ORIGINS.split(",") if origin.strip()}
 
@@ -337,13 +340,29 @@ async def login(
     return _complete_session(response, account, refresh_token, refresh_expires_at, origin)
 
 
-async def _telegram_session(response: Response, db: AsyncSession, telegram_id: str, username: str | None, device_label: str, origin: str | None):
+async def _telegram_session(
+    response: Response,
+    db: AsyncSession,
+    telegram_id: str,
+    username: str | None,
+    device_label: str,
+    origin: str | None,
+    oidc_subject: str | None = None,
+):
     """Link a registered Telegram identity and issue the one-year session."""
     telegram_user = {"id": telegram_id, "username": username} if username else {"id": telegram_id}
     if not telegram_user or not telegram_id.isdigit():
         raise HTTPException(status_code=401, detail="Invalid Telegram login")
 
-    employee = await db.scalar(select(Employee).where(Employee.telegram_id == telegram_id))
+    account = None
+    employee = None
+    if oidc_subject:
+        account = await db.scalar(select(UserAccount).where(UserAccount.telegram_oidc_subject == oidc_subject))
+        if account and account.employee_id:
+            employee = await db.scalar(select(Employee).where(Employee.id == account.employee_id))
+
+    if employee is None:
+        employee = await db.scalar(select(Employee).where(Employee.telegram_id == telegram_id))
     if employee is None and telegram_user.get("username"):
         username = str(telegram_user["username"]).lstrip("@")
         employee = await db.scalar(select(Employee).where(Employee.telegram_username.ilike(username)))
@@ -352,7 +371,8 @@ async def _telegram_session(response: Response, db: AsyncSession, telegram_id: s
     if not employee or not employee.is_active:
         raise HTTPException(status_code=403, detail="Telegram user is not registered as an active employee")
 
-    account = await db.scalar(select(UserAccount).where(UserAccount.employee_id == employee.id))
+    if account is None:
+        account = await db.scalar(select(UserAccount).where(UserAccount.employee_id == employee.id))
     if account is None and employee.email:
         account = await db.scalar(select(UserAccount).where(func.lower(UserAccount.email) == employee.email.lower()))
         if account and account.employee_id is None:
@@ -367,6 +387,7 @@ async def _telegram_session(response: Response, db: AsyncSession, telegram_id: s
             organization_id=organization.id,
             employee_id=employee.id,
             email=f"telegram-{telegram_id}",
+            telegram_oidc_subject=oidc_subject,
             password_hash=hash_account_password(secrets.token_urlsafe(48)),
             status="active",
             locale=employee.primary_language or "mn",
@@ -374,6 +395,10 @@ async def _telegram_session(response: Response, db: AsyncSession, telegram_id: s
         )
         db.add(account)
         await db.flush()
+    elif oidc_subject:
+        if account.telegram_oidc_subject and account.telegram_oidc_subject != oidc_subject:
+            raise HTTPException(status_code=409, detail="This account is linked to another Telegram identity")
+        account.telegram_oidc_subject = oidc_subject
 
     if account.status == "disabled":
         raise HTTPException(status_code=403, detail="Account is disabled")
@@ -419,7 +444,12 @@ async def native_telegram_start(
 
     state, nonce, verifier, state_hash, nonce_hash = telegram_oidc.new_state_values()
     try:
-        authorization = await telegram_oidc.authorization_url(state, nonce, verifier)
+        authorization = await telegram_oidc.authorization_url(
+            state,
+            nonce,
+            verifier,
+            redirect_uri=settings.TELEGRAM_OIDC_NATIVE_REDIRECT_URI,
+        )
     except telegram_oidc.TelegramOIDCError as exc:
         raise HTTPException(status_code=503, detail="Telegram authentication is temporarily unavailable") from exc
 
@@ -476,14 +506,134 @@ async def native_telegram_exchange(
     await db.commit()
 
     try:
-        token_payload = await telegram_oidc.exchange_code(data.code, verifier)
+        token_payload = await telegram_oidc.exchange_code(
+            data.code,
+            verifier,
+            redirect_uri=settings.TELEGRAM_OIDC_NATIVE_REDIRECT_URI,
+        )
         claims = await telegram_oidc.validate_id_token(str(token_payload["id_token"]), nonce)
     except telegram_oidc.TelegramOIDCError as exc:
         raise HTTPException(status_code=401, detail="Telegram authorization failed") from exc
 
-    telegram_id = str(claims.get("sub") or "")
+    telegram_id = str(claims.get("id") or claims.get("sub") or "")
+    oidc_subject = str(claims.get("sub") or "")
     username = claims.get("preferred_username") or claims.get("username")
-    return await _telegram_session(response, db, telegram_id, str(username) if username else None, f"telegram-oidc-{platform}", origin)
+    return await _telegram_session(response, db, telegram_id, str(username) if username else None, f"telegram-oidc-{platform}", origin, oidc_subject)
+
+
+@router.get("/telegram")
+async def telegram_web_start(db: AsyncSession = Depends(get_db)):
+    """Start Telegram OIDC in the user's normal browser."""
+    if not telegram_oidc.is_configured():
+        return _web_telegram_error("not_configured")
+
+    state, nonce, verifier, state_hash, nonce_hash = telegram_oidc.new_state_values()
+    try:
+        authorization = await telegram_oidc.authorization_url(
+            state,
+            nonce,
+            verifier,
+            redirect_uri=settings.TELEGRAM_OIDC_REDIRECT_URI,
+        )
+    except telegram_oidc.TelegramOIDCError:
+        return _web_telegram_error("provider_unavailable")
+
+    db.add(TelegramOAuthState(
+        state_hash=state_hash,
+        nonce_hash=nonce_hash,
+        encrypted_nonce=telegram_oidc.encrypt_nonce(nonce),
+        encrypted_code_verifier=telegram_oidc.encrypt_verifier(verifier),
+        platform="web",
+        expires_at=datetime.now(timezone.utc) + telegram_oidc.STATE_TTL,
+    ))
+    await db.commit()
+    response = RedirectResponse(authorization, status_code=status.HTTP_303_SEE_OTHER)
+    response.set_cookie(
+        TELEGRAM_WEB_STATE_COOKIE,
+        telegram_oidc.encrypt_state(state),
+        max_age=int(telegram_oidc.STATE_TTL.total_seconds()),
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite="lax",
+        path="/api/v1/auth/telegram",
+    )
+    return response
+
+
+@router.get("/telegram/callback")
+async def telegram_web_callback(
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    provider_error: str | None = Query(default=None, alias="error"),
+    state_cookie: str | None = Cookie(default=None, alias=TELEGRAM_WEB_STATE_COOKIE),
+    db: AsyncSession = Depends(get_db),
+):
+    """Validate the browser transaction, redeem the code, and set the app session."""
+    if not telegram_oidc.is_configured():
+        return _web_telegram_error("not_configured")
+    if not state or not state_cookie:
+        return _web_telegram_error("invalid_state")
+    try:
+        cookie_state = telegram_oidc.decrypt_state(state_cookie)
+    except ValueError:
+        return _web_telegram_error("invalid_state")
+    if not hmac.compare_digest(cookie_state, state):
+        return _web_telegram_error("invalid_state")
+
+    now = datetime.now(timezone.utc)
+    state_hash = hashlib.sha256(state.encode()).hexdigest()
+    record = (
+        await db.execute(
+            select(TelegramOAuthState)
+            .where(
+                TelegramOAuthState.state_hash == state_hash,
+                TelegramOAuthState.platform == "web",
+                TelegramOAuthState.used_at.is_(None),
+                TelegramOAuthState.expires_at > now,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if not record:
+        return _web_telegram_error("invalid_state")
+    try:
+        verifier = telegram_oidc.decrypt_verifier(record.encrypted_code_verifier)
+        nonce = telegram_oidc.decrypt_nonce(record.encrypted_nonce)
+    except ValueError:
+        record.used_at = now
+        await db.commit()
+        return _web_telegram_error("invalid_state")
+
+    record.used_at = now
+    await db.commit()
+    if provider_error:
+        return _web_telegram_error("cancelled" if provider_error == "access_denied" else "provider_error")
+    if not code:
+        return _web_telegram_error("invalid_callback")
+
+    try:
+        token_payload = await telegram_oidc.exchange_code(
+            code,
+            verifier,
+            redirect_uri=settings.TELEGRAM_OIDC_REDIRECT_URI,
+        )
+    except telegram_oidc.TelegramOIDCError:
+        return _web_telegram_error("token_exchange_failed")
+    try:
+        claims = await telegram_oidc.validate_id_token(str(token_payload["id_token"]), nonce)
+    except (KeyError, telegram_oidc.TelegramOIDCError):
+        return _web_telegram_error("invalid_id_token")
+
+    telegram_id = str(claims.get("id") or claims.get("sub") or "")
+    oidc_subject = str(claims.get("sub") or "")
+    username = claims.get("preferred_username") or claims.get("username")
+    response = RedirectResponse(settings.PUBLIC_APP_URL.rstrip("/") + "/", status_code=status.HTTP_303_SEE_OTHER)
+    _clear_web_telegram_state(response)
+    try:
+        await _telegram_session(response, db, telegram_id, str(username) if username else None, "telegram-oidc-web", None, oidc_subject)
+    except HTTPException as exc:
+        return _web_telegram_error("account_unavailable" if exc.status_code in {401, 403, 409} else "login_failed")
+    return response
 
 
 @router.post("/telegram", response_model=AccessTokenOut, response_model_exclude_none=True)
@@ -499,27 +649,6 @@ async def telegram_login(
     if not telegram_user or not telegram_id.isdigit():
         raise HTTPException(status_code=401, detail="Invalid Telegram login")
     return await _telegram_session(response, db, telegram_id, telegram_user.get("username"), "telegram-mini-app", origin)
-
-
-@router.post("/telegram-widget", response_model=AccessTokenOut, response_model_exclude_none=True)
-async def telegram_widget_login(
-    data: TelegramWidgetLogin,
-    response: Response,
-    origin: str | None = Header(default=None),
-    db: AsyncSession = Depends(get_db),
-):
-    """Verify the browser Login Widget payload and issue the same session."""
-    if not settings.BOT_TOKEN:
-        raise HTTPException(status_code=503, detail="Telegram authentication is not configured")
-    if abs(datetime.now(timezone.utc).timestamp() - data.auth_date) > 86400:
-        raise HTTPException(status_code=401, detail="Telegram login has expired")
-    payload = data.model_dump(exclude={"hash"}, exclude_none=True)
-    check_string = "\n".join(f"{key}={value}" for key, value in sorted(payload.items()))
-    secret_key = hashlib.sha256(settings.BOT_TOKEN.encode()).digest()
-    expected = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, data.hash):
-        raise HTTPException(status_code=401, detail="Invalid Telegram login")
-    return await _telegram_session(response, db, str(data.id), data.username, "telegram-login-widget", origin)
 
 
 @router.post("/refresh", response_model=AccessTokenOut, response_model_exclude_none=True)
