@@ -4,6 +4,7 @@
 - [x] Implement Telegram browser OIDC Authorization Code + PKCE login while preserving Mini App and native authentication (`backend/app/routers/enterprise_auth.py`, `frontend/src/pages/LoginPage.tsx`)
 - [x] Repair duplicate Alembic revision IDs and converge the mobile migrations (`backend/alembic/versions`, `backend/tests/test_alembic_graph.py`)
 - [x] Replace Capgo Cloud delivery with the self-hosted OYUNS OTA updater API, bundle storage, release tooling, and native endpoint configuration (`backend/app/routers/mobile_updates.py`, `frontend/src/platform/updater.tsx`, `frontend/capacitor.config.ts`)
+- [x] Automate staging OTA publication on `main` pushes and protected production promotion through GitHub Actions (`.github/workflows/ota-staging.yml`, `.github/workflows/ota-production.yml`)
 - [x] Register the `mn.oyuns.workspace` Android app in Firebase project `oyuns-finance`, download its Google Services configuration, and verify the Android build (`frontend/android/app/google-services.json`)
 - [x] Integrate Capacitor 8 iOS/Android shells, native session persistence, push-token enrollment, safe-area polish, and Capgo OTA delivery (`frontend`, `backend`, `docs`)
 - [x] Make Android Gradle commands select a supported JDK 21 when Java 26 is installed (`frontend/scripts/with-java21.sh`, `frontend/package.json`)

@@ -1,0 +1,38 @@
+name: OTA Production Promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Already-tested staging bundle version (for example 1.0.42.1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ota-production
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: production
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    env:
+      OTA_BUNDLE_VERSION: ${{ inputs.version }}
+      OTA_UPLOAD_TOKEN: ${{ secrets.OTA_UPLOAD_TOKEN }}
+      OTA_API_URL: ${{ vars.OTA_API_URL || 'https://erp.oyuns.mn/api/v1/mobile-updates' }}
+      OTA_CHANNEL: production
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Promote tested bundle to production
+        run: ./scripts/ota-promote-self-hosted.sh
