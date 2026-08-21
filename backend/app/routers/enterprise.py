@@ -108,6 +108,7 @@ from app.services.mcp.catalog import gateway_tool_for
 router = APIRouter()
 ai_gateway = AIGateway()
 MANAGEMENT_ROLES = ("admin", "manager", "team_lead")
+ANALYTICS_ROLES = (*MANAGEMENT_ROLES, "hr")
 WORKFLOW_STATUSES = {"backlog", "to_do", "in_progress", "review", "done", "cancelled"}
 LEGACY_STATUS = {
     "backlog": "open", "to_do": "open", "in_progress": "in_progress",
@@ -2852,17 +2853,17 @@ async def analytics_summary(
     period_start = date_from or period_end - timedelta(days=6)
     if period_start > period_end:
         raise HTTPException(status_code=400, detail="date_from must not be after date_to")
-    if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
+    if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*ANALYTICS_ROLES):
         raise HTTPException(status_code=403, detail="Worker analytics are outside your scope")
-    employee_scope = employee_id if actor.has_any_role(*MANAGEMENT_ROLES) and employee_id is not None else None if actor.has_any_role(*MANAGEMENT_ROLES) else actor.employee_id
-    if employee_scope is None and not actor.has_any_role(*MANAGEMENT_ROLES):
+    employee_scope = employee_id if actor.has_any_role(*ANALYTICS_ROLES) and employee_id is not None else None if actor.has_any_role(*ANALYTICS_ROLES) else actor.employee_id
+    if employee_scope is None and not actor.has_any_role(*ANALYTICS_ROLES):
         return {**await _performance_summary(db, actor, -1, period_start, period_end), "active_projects": 0, "scope": "personal"}
     summary = await _performance_summary(db, actor, employee_scope, period_start, period_end)
     project_query = select(func.count()).select_from(Project).where(Project.organization_id == actor.organization_id, Project.status == "active")
     if employee_scope is not None:
         project_query = project_query.where(Project.id.in_(select(ProjectMember.project_id).where(ProjectMember.employee_id == employee_scope)))
     summary["active_projects"] = await db.scalar(project_query) or 0
-    summary["scope"] = "organization" if employee_scope is None else "worker" if actor.has_any_role(*MANAGEMENT_ROLES) and employee_id else "personal"
+    summary["scope"] = "organization" if employee_scope is None else "worker" if actor.has_any_role(*ANALYTICS_ROLES) and employee_id else "personal"
     return summary
 
 
@@ -2876,9 +2877,9 @@ async def analytics_daily(
 ):
     if date_from > date_to or (date_to - date_from).days > 370:
         raise HTTPException(status_code=400, detail="Analytics period must be between 1 and 371 days")
-    if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
+    if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*ANALYTICS_ROLES):
         raise HTTPException(status_code=403, detail="Worker analytics are outside your scope")
-    target = employee_id if actor.has_any_role(*MANAGEMENT_ROLES) else actor.employee_id
+    target = employee_id if actor.has_any_role(*ANALYTICS_ROLES) else actor.employee_id
     analytics_now = datetime.now(timezone.utc)
     work_query = select(
         WorkTimeEntry.local_work_date,
@@ -2920,10 +2921,10 @@ async def analytics_work_hours(
 ):
     if date_from > date_to or (date_to - date_from).days > 370:
         raise HTTPException(status_code=400, detail="Analytics period must be between 1 and 371 days")
-    if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
+    if employee_id is not None and employee_id != actor.employee_id and not actor.has_any_role(*ANALYTICS_ROLES):
         raise HTTPException(status_code=403, detail="Worker analytics are outside your scope")
 
-    target = employee_id if actor.has_any_role(*MANAGEMENT_ROLES) else actor.employee_id or -1
+    target = employee_id if actor.has_any_role(*ANALYTICS_ROLES) else actor.employee_id or -1
     analytics_now = datetime.now(timezone.utc)
     conditions = [
         WorkTimeEntry.entry_type == "work",
@@ -2963,11 +2964,11 @@ async def analytics_work_hours(
     return {
         "date_from": date_from,
         "date_to": date_to,
-        "employee_id": None if actor.has_any_role(*MANAGEMENT_ROLES) and employee_id is None else target,
+        "employee_id": None if actor.has_any_role(*ANALYTICS_ROLES) and employee_id is None else target,
         "remote_minutes": remote_minutes,
         "office_minutes": office_minutes,
         "total_minutes": remote_minutes + office_minutes,
-        "scope": "organization" if actor.has_any_role(*MANAGEMENT_ROLES) and employee_id is None else "worker",
+        "scope": "organization" if actor.has_any_role(*ANALYTICS_ROLES) and employee_id is None else "worker",
     }
 
 
@@ -2978,7 +2979,7 @@ async def _drilldown_employee_ids(db: AsyncSession, actor: ActorContext, employe
     active = select(Employee.id).join(UserAccount, UserAccount.employee_id == Employee.id).where(
         UserAccount.organization_id == actor.organization_id, UserAccount.status == "active", Employee.is_active.is_(True),
     )
-    if actor.has_any_role("admin", "manager"):
+    if actor.has_any_role(*ANALYTICS_ROLES):
         if employee_id is not None:
             active = active.where(Employee.id == employee_id)
     elif actor.has_any_role("team_lead"):
@@ -3067,7 +3068,7 @@ async def analytics_drilldown(
             rows.append({"employee_id": target_id, "employee_name": employee.name, "value": values[metric], "worked_minutes": round(float(worked)), "available_minutes": capacity, "billable_minutes": round(float(billable)), "task_total": task_total, "completed_tasks": completed, "due_tasks": due_total, "overdue_tasks": overdue, "report_total": report_total, "submitted_reports": submitted})
     total_count = len(rows); start = (page - 1) * page_size; items = rows[start:start + page_size]
     numeric_values = [row["value"] for row in rows if row.get("value") is not None]
-    return {"metric": metric, "scope": "organization" if actor.has_any_role("admin", "manager") and employee_id is None else "scoped", "date_from": period_start, "date_to": period_end, "items": items, "totals": {"count": total_count, "average_value": round(sum(numeric_values) / len(numeric_values), 1) if numeric_values else None, "unpriced_minutes": sum(row.get("unpriced_minutes", 0) for row in rows)}, "page": page, "page_size": page_size, "total": total_count}
+    return {"metric": metric, "scope": "organization" if actor.has_any_role(*ANALYTICS_ROLES) and employee_id is None else "scoped", "date_from": period_start, "date_to": period_end, "items": items, "totals": {"count": total_count, "average_value": round(sum(numeric_values) / len(numeric_values), 1) if numeric_values else None, "unpriced_minutes": sum(row.get("unpriced_minutes", 0) for row in rows)}, "page": page, "page_size": page_size, "total": total_count}
 
 
 @router.get("/workers")

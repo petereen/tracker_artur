@@ -1,4 +1,5 @@
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { Download } from "lucide-react";
 import {
   AnalyticsMetric,
   useDailyAnalytics,
@@ -33,8 +34,8 @@ export function StatsWorkspacePage() {
   const [preset, setPreset] = useState<
     "custom" | "today" | "week" | "month" | "quarter"
   >("custom");
-  const [employeeId, setEmployeeId] = useState<number>();
   const [metric, setMetric] = useState<AnalyticsMetric>("utilization");
+  const actor = useAuthStore((state) => state.actor);
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES);
   const canReview = roles.some((role) =>
     ["admin", "manager", "team_lead", "hr"].includes(role),
@@ -42,6 +43,15 @@ export function StatsWorkspacePage() {
   const canExportWorktime = roles.some((role) =>
     ["admin", "manager", "team_lead", "hr"].includes(role),
   );
+  const isAdmin = roles.includes("admin");
+  const [employeeId, setEmployeeId] = useState<number | undefined>(() =>
+    isAdmin ? undefined : actor?.employee_id ?? undefined,
+  );
+  useEffect(() => {
+    if (!isAdmin && actor?.employee_id != null) {
+      setEmployeeId((current) => current ?? actor.employee_id ?? undefined);
+    }
+  }, [actor?.employee_id, isAdmin]);
   const [exportOpen, setExportOpen] = useState(false);
   const canSeeFinancials = roles.some((role) => ["admin", "manager"].includes(role));
   const workers = useWorkerDirectory();
@@ -87,9 +97,11 @@ export function StatsWorkspacePage() {
             <button
               type="button"
               className="secondary-action stats-worktime-export-trigger"
+              aria-label="Export Worktime"
               onClick={() => setExportOpen(true)}
             >
-              Export Worktime
+              <Download aria-hidden="true" size={16} strokeWidth={2.25} />
+              <span className="stats-worktime-export-label">Export</span>
             </button>
           )}
           <TimePeriodFilter

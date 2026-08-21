@@ -182,6 +182,23 @@ def test_work_hour_analytics_aggregates_modes_and_returns_total():
     assert "coalesce" in str(db.statement).lower()
 
 
+def test_hr_work_hour_analytics_can_open_the_organization_total():
+    class Rows:
+        def all(self):
+            return [("remote", 60), ("in_person", 120)]
+
+    class Db:
+        async def execute(self, _statement):
+            return Rows()
+
+    actor = ActorContext(account_id=1, organization_id=1, employee_id=3, email="hr", locale="mn", roles=frozenset({"hr"}))
+    result = asyncio.run(enterprise.analytics_work_hours(date(2026, 8, 1), date(2026, 8, 7), db=Db(), actor=actor))
+
+    assert result["scope"] == "organization"
+    assert result["employee_id"] is None
+    assert result["total_minutes"] == 180
+
+
 def test_work_hour_analytics_rejects_out_of_scope_employee():
     from fastapi import HTTPException
 

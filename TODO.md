@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Fix HR stats scope/default selection and polish the Worktime export control (`frontend/src/pages/StatsWorkspacePage.tsx`, `backend/app/routers/enterprise.py`, `frontend/src/index.css`)
 - [x] Move worktime export trigger into Stats beside the organization-total selector and include HR visibility (`frontend/src/pages/StatsWorkspacePage.tsx`)
 - [x] Refactor worktime CSV/XLSX output into repeated per-worker summary headers and daily interval blocks (`backend/app/services/worktime_report_service.py`)
 - [x] Add regression coverage and validate Stats UI plus export formatting (`frontend/src/pages`, `backend/tests`) — Stats role-placement and grouped-export contract coverage added; runtime validation pending
