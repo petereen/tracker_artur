@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Move worktime export trigger into Stats beside the organization-total selector and include HR visibility (`frontend/src/pages/StatsWorkspacePage.tsx`)
+- [x] Refactor worktime CSV/XLSX output into repeated per-worker summary headers and daily interval blocks (`backend/app/services/worktime_report_service.py`)
+- [x] Add regression coverage and validate Stats UI plus export formatting (`frontend/src/pages`, `backend/tests`) — Stats role-placement and grouped-export contract coverage added; runtime validation pending
 - [x] Add HR role definitions, validation, and migration for worktime reporting (`backend/app/models/models.py`, `backend/app/routers/enterprise_auth.py`, `backend/alembic/versions`)
 - [x] Add scoped worktime report preview/options/export service and RBAC endpoints (`backend/app/services/worktime_report_service.py`, `backend/app/routers/worktime_reports.py`) — tenant/team-lead scope and timezone/export helpers hardened
 - [x] Add Worktime export API hooks and responsive configuration/preview modal (`frontend/src/api/enterprise.ts`, `frontend/src/components/WorktimeExportModal.tsx`, `frontend/src/pages/WorktimePage.tsx`) — branded responsive modal now has dialog semantics, Escape handling, explicit shift-hours preview columns, and clean imports

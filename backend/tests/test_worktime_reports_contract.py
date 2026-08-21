@@ -44,10 +44,14 @@ def test_report_service_contract_covers_scope_timezone_pagination_and_exports():
         "entry_type == \"work\"",
         "ZoneInfo",
         "async def iter_report_rows",
+        "async def iter_worker_blocks",
+        "Workday Average Hours",
+        "Shift Intervals / Breakdown",
+        "wrap_text",
+        "column_dimensions",
         "async def csv_report",
         "async def xlsx_report",
         "average_daily_minutes_per_worker",
         "average_weekly_minutes_per_worker",
     ):
         assert marker in SERVICE
-

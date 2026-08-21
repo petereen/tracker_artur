@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser'
-import { Camera, CheckCircle2, Clock3, Coffee, Download, Laptop2, MapPin, RefreshCw, ScanLine, ShieldAlert } from 'lucide-react'
+import { Camera, CheckCircle2, Clock3, Coffee, Laptop2, MapPin, RefreshCw, ScanLine, ShieldAlert } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useClock, useWorktimeQrClock } from '../api/enterprise'
-import { WorktimeExportModal } from '../components/WorktimeExportModal'
-import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 
 function formatTime(value: string | null, timezone = 'Asia/Ulaanbaatar') {
   if (!value) return '—'
@@ -14,15 +12,12 @@ function formatTime(value: string | null, timezone = 'Asia/Ulaanbaatar') {
 export function WorktimePage() {
   const clock = useClock()
   const scan = useWorktimeQrClock()
-  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
-  const canExport = roles.some((role) => ['team_lead', 'hr', 'manager', 'admin'].includes(role))
   const videoRef = useRef<HTMLVideoElement>(null)
   const controlsRef = useRef<IScannerControls | null>(null)
   const handledRef = useRef(false)
   const [scanning, setScanning] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<{ action: string; replayed: boolean } | null>(null)
-  const [exportOpen, setExportOpen] = useState(false)
   const scanRef = useRef(scan)
   scanRef.current = scan
 
@@ -99,7 +94,6 @@ export function WorktimePage() {
   return <div className="worktime-page">
     <section className="worktime-status panel" aria-live="polite">
       <div className={`worktime-state ${active ? 'active' : ''}`}><Clock3 size={17} /><span>{active ? active.mode === 'remote' ? 'Remote ажиллаж байна' : active.entry_type === 'break' ? 'Завсарлага' : 'Ажиллаж байна' : 'Идэвхгүй'}</span></div>
-      {canExport && <button type="button" className="secondary-action worktime-export-trigger" onClick={() => setExportOpen(true)}><Download size={16} />Export Worktime</button>}
     </section>
     <div className="worktime-grid">
       <section className="worktime-scanner panel">
@@ -116,7 +110,6 @@ export function WorktimePage() {
         <div className="worktime-intervals">{clock.isLoading ? <p className="text-muted">Ачаалж байна…</p> : (clock.data?.today_entries ?? []).map((entry) => <div className="worktime-interval" key={entry.id}><span className={`interval-icon ${entry.entry_type}`}><>{entry.entry_type === 'break' ? <Coffee size={15} /> : entry.mode === 'remote' ? <Laptop2 size={15} /> : <MapPin size={15} />}</></span><div><strong>{entry.entry_type === 'break' ? 'Завсарлага' : entry.mode === 'remote' ? 'Remote' : 'Оффис'}</strong><small>{formatTime(entry.started_at, timezone)} – {entry.ended_at ? formatTime(entry.ended_at, timezone) : 'одоо'}</small></div></div>)}{!clock.isLoading && !clock.data?.today_entries.length && <p className="text-muted">Өнөөдөр та бүртгэл хийгээгүй байна.</p>}</div>
       </section>
     </div>
-    {exportOpen && <WorktimeExportModal onClose={() => setExportOpen(false)} />}
   </div>
 }
 

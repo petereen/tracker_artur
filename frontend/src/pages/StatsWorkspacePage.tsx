@@ -12,6 +12,7 @@ import { HeatmapCalendar } from "../components/HeatmapCalendar";
 import { QueryRegion, Skeleton } from "../components/Loading";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { WorkHourHierarchyChart } from "../components/WorkHourHierarchyChart";
+import { WorktimeExportModal } from "../components/WorktimeExportModal";
 
 function localDate(value: Date) {
   const offset = value.getTimezoneOffset() * 60_000;
@@ -36,8 +37,12 @@ export function StatsWorkspacePage() {
   const [metric, setMetric] = useState<AnalyticsMetric>("utilization");
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES);
   const canReview = roles.some((role) =>
-    ["admin", "manager", "team_lead"].includes(role),
+    ["admin", "manager", "team_lead", "hr"].includes(role),
   );
+  const canExportWorktime = roles.some((role) =>
+    ["admin", "manager", "team_lead", "hr"].includes(role),
+  );
+  const [exportOpen, setExportOpen] = useState(false);
   const canSeeFinancials = roles.some((role) => ["admin", "manager"].includes(role));
   const workers = useWorkerDirectory();
   const summary = useEnterpriseSummary(period, employeeId);
@@ -77,6 +82,15 @@ export function StatsWorkspacePage() {
                 ...(workers.data?.map((worker) => ({ value: String(worker.id), label: worker.name })) ?? []),
               ]}
             />
+          )}
+          {canExportWorktime && (
+            <button
+              type="button"
+              className="secondary-action stats-worktime-export-trigger"
+              onClick={() => setExportOpen(true)}
+            >
+              Export Worktime
+            </button>
           )}
           <TimePeriodFilter
             preset={preset}
@@ -182,6 +196,7 @@ export function StatsWorkspacePage() {
           />
         </>
       </QueryRegion>
+      {exportOpen && <WorktimeExportModal onClose={() => setExportOpen(false)} />}
     </div>
   );
 }

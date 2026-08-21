@@ -210,7 +210,7 @@ async def iter_report_rows(db: AsyncSession, filters: ReportFilters, scope: Repo
             select(WorkTimeEntry, Employee)
             .join(Employee, Employee.id == WorkTimeEntry.employee_id)
             .where(*where)
-            .order_by(WorkTimeEntry.local_work_date, Employee.name, WorkTimeEntry.started_at, WorkTimeEntry.id)
+            .order_by(Employee.name, Employee.id, WorkTimeEntry.local_work_date, WorkTimeEntry.started_at, WorkTimeEntry.id)
             .offset(offset)
             .limit(batch_size)
         )
@@ -232,6 +232,56 @@ def _hours(minutes: int) -> float:
     return round(minutes / 60, 2)
 
 
+def _clock_label(value: str | None) -> str:
+    if not value:
+        return "—"
+    try:
+        return datetime.fromisoformat(value).strftime("%H:%M")
+    except ValueError:
+        return value
+
+
+def _interval_label(row: dict[str, Any]) -> str:
+    start = _clock_label(row["clock_in"])
+    if row["total_minutes"] is None:
+        return f"{start} - In progress"
+    end = _clock_label(row["clock_out"])
+    return f"{start} - {end} ({_hours(row['total_minutes'])}h)"
+
+
+async def iter_worker_blocks(db: AsyncSession, filters: ReportFilters, scope: ReportScope) -> AsyncIterator[dict[str, Any]]:
+    """Yield one export block per worker, with one aggregate row per workday."""
+    current_worker: tuple[int, str, str] | None = None
+    days: dict[str, dict[str, Any]] = {}
+
+    async for row in iter_report_rows(db, filters, scope):
+        worker = (row["worker_id"], row["worker_name"], row["department"])
+        if current_worker is not None and worker != current_worker:
+            yield _worker_block(current_worker, days)
+            days = {}
+        current_worker = worker
+        day = days.setdefault(row["date"], {"date": row["date"], "total_minutes": 0, "intervals": []})
+        if row["total_minutes"] is not None:
+            day["total_minutes"] += row["total_minutes"]
+        day["intervals"].append(_interval_label(row))
+    if current_worker is not None:
+        yield _worker_block(current_worker, days)
+
+
+def _worker_block(worker: tuple[int, str, str], days: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    ordered_days = [days[key] for key in sorted(days)]
+    recorded_workdays = [day for day in ordered_days if day["total_minutes"] > 0]
+    period_total = sum(day["total_minutes"] for day in ordered_days)
+    return {
+        "worker_id": worker[0],
+        "worker_name": worker[1],
+        "department": worker[2],
+        "period_total_minutes": period_total,
+        "workday_average_minutes": round(period_total / len(recorded_workdays)) if recorded_workdays else 0,
+        "days": ordered_days,
+    }
+
+
 async def csv_report(db: AsyncSession, filters: ReportFilters, scope: ReportScope, summary: dict[str, int]) -> AsyncIterator[bytes]:
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\r\n")
@@ -239,35 +289,68 @@ async def csv_report(db: AsyncSession, filters: ReportFilters, scope: ReportScop
     writer.writerow(["Total Accumulated Hours", _hours(summary["total_minutes"])])
     writer.writerow(["Average Hours per Worker", _hours(summary["average_minutes_per_worker"])])
     writer.writerow([])
-    writer.writerow(["Worker ID", "Worker Name", "Department/Team", "Date", "Clock In", "Clock Out", "Total Hours"])
     yield ("\ufeff" + output.getvalue()).encode("utf-8")
-    async for row in iter_report_rows(db, filters, scope):
+    async for block in iter_worker_blocks(db, filters, scope):
         output.seek(0)
         output.truncate(0)
+        writer.writerow(["Worker Name / ID", "Department", "Period Total Hours", "Workday Average Hours"])
         writer.writerow([
-            _sheet_value(row["worker_id"]), _sheet_value(row["worker_name"]), _sheet_value(row["department"]),
-            row["date"], row["clock_in"], row["clock_out"],
-            "" if row["total_minutes"] is None else _hours(row["total_minutes"]),
+            _sheet_value(f"{block['worker_name']} / #{block['worker_id']}"), _sheet_value(block["department"]),
+            _hours(block["period_total_minutes"]), _hours(block["workday_average_minutes"]),
         ])
+        writer.writerow(["Date", "Total Daily Hours", "Shift Intervals / Breakdown"])
+        for day in block["days"]:
+            writer.writerow([day["date"], _hours(day["total_minutes"]), _sheet_value(", ".join(day["intervals"]))])
+        writer.writerow([])
         yield output.getvalue().encode("utf-8")
 
 
 async def xlsx_report(db: AsyncSession, filters: ReportFilters, scope: ReportScope, summary: dict[str, int]) -> SpooledTemporaryFile:
     from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Alignment, Font, PatternFill
 
     workbook = Workbook(write_only=True)
     sheet = workbook.create_sheet("Worktime Report")
-    sheet.append(["Selected Date Range", f"{filters.date_from.isoformat()} - {filters.date_to.isoformat()}"])
-    sheet.append(["Total Accumulated Hours", _hours(summary["total_minutes"])])
-    sheet.append(["Average Hours per Worker", _hours(summary["average_minutes_per_worker"])])
+    sheet.freeze_panes = "A5"
+    widths = [0, 0, 0, 0]
+    title_fill = PatternFill("solid", fgColor="0B172A")
+    worker_fill = PatternFill("solid", fgColor="DCE6FF")
+    daily_fill = PatternFill("solid", fgColor="EAF2FF")
+    title_font = Font(name="Montserrat", bold=True, color="FFFFFF")
+    header_font = Font(name="Montserrat", bold=True, color="231F20")
+    body_font = Font(name="Montserrat", color="231F20")
+
+    def cell(value: Any, *, fill=None, font=None, wrap=False):
+        item = WriteOnlyCell(sheet, value=_sheet_value(value))
+        item.fill = fill or PatternFill(fill_type=None)
+        item.font = font or body_font
+        item.alignment = Alignment(vertical="top", wrap_text=wrap)
+        return item
+
+    def append(values: list[Any], *, fill=None, font=None, wrap_columns: set[int] | None = None):
+        wrap_columns = wrap_columns or set()
+        sheet.append([cell(value, fill=fill, font=font, wrap=index in wrap_columns) for index, value in enumerate(values)])
+        for index, value in enumerate(values):
+            text = "" if value is None else str(value)
+            widths[index] = min(80 if index == 2 else 42, max(widths[index], max((len(line) for line in text.splitlines()), default=0) + 2))
+
+    append(["Selected Date Range", f"{filters.date_from.isoformat()} - {filters.date_to.isoformat()}", "", ""], fill=title_fill, font=title_font)
+    append(["Total Accumulated Hours", _hours(summary["total_minutes"]), "", ""], fill=title_fill, font=title_font)
+    append(["Average Hours per Worker", _hours(summary["average_minutes_per_worker"]), "", ""], fill=title_fill, font=title_font)
     sheet.append([])
-    sheet.append(["Worker ID", "Worker Name", "Department/Team", "Date", "Clock In", "Clock Out", "Total Hours"])
-    async for row in iter_report_rows(db, filters, scope):
-        sheet.append([
-            _sheet_value(row["worker_id"]), _sheet_value(row["worker_name"]), _sheet_value(row["department"]),
-            row["date"], row["clock_in"], row["clock_out"],
-            "" if row["total_minutes"] is None else _hours(row["total_minutes"]),
-        ])
+    async for block in iter_worker_blocks(db, filters, scope):
+        append(["Worker Name / ID", "Department", "Period Total Hours", "Workday Average Hours"], fill=worker_fill, font=header_font)
+        append([
+            f"{block['worker_name']} / #{block['worker_id']}", block["department"],
+            _hours(block["period_total_minutes"]), _hours(block["workday_average_minutes"]),
+        ], fill=worker_fill)
+        append(["Date", "Total Daily Hours", "Shift Intervals / Breakdown", ""], fill=daily_fill, font=header_font, wrap_columns={2})
+        for day in block["days"]:
+            append([day["date"], _hours(day["total_minutes"]), ", ".join(day["intervals"]), ""], wrap_columns={2})
+        sheet.append([])
+    for index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[chr(64 + index)].width = max(12, width)
     buffer = SpooledTemporaryFile(max_size=2 * 1024 * 1024, mode="w+b")
     workbook.save(buffer)
     buffer.seek(0)
