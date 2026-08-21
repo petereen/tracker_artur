@@ -883,7 +883,7 @@ export function EnterpriseDashboardPage() {
         </div>
         <section className="daily-focus panel">
           <span className="eyebrow">Өнөөдрийн төлөвлөгөө</span>
-          <h2>Хамгийн чухал ажлаа тодорхой болго.</h2>
+          <h2>Хамгийн чухал ажлаа тодорхой болго</h2>
           {todayCheckin.data?.template?.questions
             ?.slice(0, 2)
             .map((question: any, index: number) => (
