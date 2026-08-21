@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Repair duplicate Alembic revision IDs and converge the mobile migrations (`backend/alembic/versions`, `backend/tests/test_alembic_graph.py`)
 - [x] Replace Capgo Cloud delivery with the self-hosted OYUNS OTA updater API, bundle storage, release tooling, and native endpoint configuration (`backend/app/routers/mobile_updates.py`, `frontend/src/platform/updater.tsx`, `frontend/capacitor.config.ts`)
 - [x] Register the `mn.oyuns.workspace` Android app in Firebase project `oyuns-finance`, download its Google Services configuration, and verify the Android build (`frontend/android/app/google-services.json`)
 - [x] Integrate Capacitor 8 iOS/Android shells, native session persistence, push-token enrollment, safe-area polish, and Capgo OTA delivery (`frontend`, `backend`, `docs`)
@@ -259,6 +260,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Repair duplicate Alembic revision IDs and converge the mobile migrations (`backend/alembic/versions`, `backend/tests/test_alembic_graph.py`)
 - [x] Add solid notification surface styling and Gmail-style priority toggles with persisted filtering (`frontend/src/components/NotificationCenter.tsx`, `frontend/src/index.css`, `backend/app/routers/enterprise.py`, `backend/app/models/models.py`, `backend/alembic/versions`)
 - [x] Add a vertically draggable, pointer-aware workers drawer toggle with bounded positioning, click-vs-drag handling, and GPU-accelerated drawer transitions (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
 - [x] Close the workers drawer from its X button or outside pointer interaction and hide the draggable toggle while open (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)

@@ -1,15 +1,15 @@
 """Add self-hosted mobile web update bundles and channels.
 
-Revision ID: a6b7c8d9e0f1
-Revises: z4a5b6c7d8e9
+Revision ID: a6b7c8d9e0f2
+Revises: i1j2k3l4m5n6
 """
 
 from alembic import op
 import sqlalchemy as sa
 
 
-revision = "a6b7c8d9e0f1"
-down_revision = "z4a5b6c7d8e9"
+revision = "a6b7c8d9e0f2"
+down_revision = "i1j2k3l4m5n6"
 branch_labels = None
 depends_on = None
 
