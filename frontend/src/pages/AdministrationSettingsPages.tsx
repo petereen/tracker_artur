@@ -24,7 +24,7 @@ const SETTINGS = [
 ]
 
 const ROLES = [
-  ['member', 'Member'], ['manager', 'Supervisor'], ['team_lead', 'Team lead'],
+  ['member', 'Member'], ['manager', 'Supervisor'], ['team_lead', 'Team lead'], ['hr', 'HR'],
   ['contractor', 'Contractor'], ['client_auditor', 'Client auditor'], ['admin', 'Admin'],
 ] as const
 

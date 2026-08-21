@@ -116,7 +116,7 @@ LEGACY_STATUS = {
 
 
 class PermissionSettingsInput(BaseModel):
-    task_assignment_roles: list[Literal["admin", "manager", "team_lead", "member", "contractor", "client_auditor"]]
+    task_assignment_roles: list[Literal["admin", "manager", "team_lead", "hr", "member", "contractor", "client_auditor"]]
 
 
 BRANDING_KEY = "branding"

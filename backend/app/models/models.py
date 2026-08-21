@@ -718,7 +718,7 @@ class RoleAssignment(Base):
     __tablename__ = "role_assignments"
     __table_args__ = (
         CheckConstraint(
-            "role IN ('admin','manager','team_lead','member','contractor','client_auditor')",
+            "role IN ('admin','manager','team_lead','hr','member','contractor','client_auditor')",
             name="ck_role_assignments_role",
         ),
         Index("ix_role_assignments_account_role", "account_id", "role"),

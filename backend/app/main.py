@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
 from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssignment, UserAccount
-from app.routers import assistant_learning, auth, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, questions, realtime, schedules, tasks, work_reports, worktime_qr
+from app.routers import assistant_learning, auth, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, questions, realtime, schedules, tasks, work_reports, worktime_qr, worktime_reports
 from app.erp import router as erp
 from app import mcp_executor
 from sqlalchemy import func, or_, select
@@ -107,6 +107,7 @@ app.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
 app.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 app.include_router(tasks.miniapp_router, prefix="/miniapp", tags=["miniapp"])
 app.include_router(work_reports.router, prefix="/work-reports", tags=["work-reports"])
+app.include_router(worktime_reports.router, prefix="/v1/worktime-reports", tags=["v1-worktime-reports"])
 app.include_router(company_plans.router, prefix="/company-plans", tags=["company-plans"])
 app.include_router(knowledge.router, prefix="/knowledge", tags=["knowledge"])
 app.include_router(assistant_learning.router, prefix="/assistant-learning", tags=["assistant-learning"])

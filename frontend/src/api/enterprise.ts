@@ -105,6 +105,48 @@ export interface ClockEntry {
   work_location_id?: string | null
 }
 
+export interface WorktimeReportOptions {
+  departments: Array<{ value: string; label: string }>
+  workers: Array<{ id: number; name: string; department: string }>
+}
+
+export interface WorktimeReportSummary {
+  total_minutes: number
+  average_minutes_per_worker: number
+  average_daily_minutes_per_worker: number
+  average_weekly_minutes_per_worker: number
+  active_worker_count: number
+}
+
+export interface WorktimeReportRow {
+  worker_id: number
+  worker_name: string
+  department: string
+  date: string
+  clock_in: string | null
+  clock_out: string | null
+  total_minutes: number | null
+  status: 'complete' | 'in_progress'
+}
+
+export interface WorktimeReportPreview {
+  range: { from: string; to: string }
+  summary: WorktimeReportSummary
+  items: WorktimeReportRow[]
+  page: number
+  page_size: number
+  total: number
+}
+
+export interface WorktimeReportQuery {
+  from: string
+  to: string
+  department?: string
+  worker_id?: number
+  page?: number
+  page_size?: number
+}
+
 export interface WorktimeQrKiosk {
   id: number
   public_id: string
@@ -139,6 +181,36 @@ export interface WorktimeQrClockResult {
 }
 
 const worktimeQrKeys = ['v1', 'worktime-qr'] as const
+const worktimeReportKeys = ['v1', 'worktime-reports'] as const
+
+export function useWorktimeReportOptions(enabled = true) {
+  return useQuery<WorktimeReportOptions>({
+    queryKey: [...worktimeReportKeys, 'options'],
+    queryFn: () => api.get('/v1/worktime-reports/options').then((response) => response.data),
+    enabled,
+  })
+}
+
+export function useWorktimeReportPreview(query: WorktimeReportQuery, enabled = true) {
+  return useQuery<WorktimeReportPreview>({
+    queryKey: [...worktimeReportKeys, 'preview', query],
+    queryFn: () => api.get('/v1/worktime-reports/preview', { params: query }).then((response) => response.data),
+    enabled: enabled && Boolean(query.from && query.to),
+    placeholderData: (previous) => previous,
+  })
+}
+
+export async function downloadWorktimeReport(query: WorktimeReportQuery, format: 'csv' | 'xlsx') {
+  const response = await api.get('/v1/worktime-reports/export', {
+    params: { ...query, format },
+    responseType: 'blob',
+    timeout: 10 * 60 * 1000,
+  })
+  const disposition = response.headers['content-disposition'] as string | undefined
+  const filename = disposition?.match(/filename="?([^";]+)"?/i)?.[1]
+    || `worktime-report_${query.from}_${query.to}.${format}`
+  saveCompanyBlob(response.data as Blob, filename)
+}
 
 export function useWorktimeQrKiosks(enabled = true) {
   return useQuery<WorktimeQrKiosk[]>({ queryKey: [...worktimeQrKeys, 'kiosks'], queryFn: () => api.get('/v1/worktime-qr/kiosks').then((response) => response.data), enabled })

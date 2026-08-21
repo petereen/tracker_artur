@@ -5,7 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import Organization
 
 
-ALL_EMPLOYEE_ROLES = frozenset({"admin", "manager", "team_lead", "member", "contractor", "client_auditor"})
+from app.core.roles import SYSTEM_ROLES
+
+ALL_EMPLOYEE_ROLES = SYSTEM_ROLES
 SETTINGS_KEY = "task_assignment_roles"
 
 

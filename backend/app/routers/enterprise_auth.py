@@ -25,6 +25,7 @@ from app.core.security import (
 )
 from app.core.telegram_auth import verify_init_data
 from app.models.models import Employee, JobQueue, Organization, PasswordResetToken, RefreshSession, RoleAssignment, TelegramOAuthState, UserAccount
+from app.core.roles import SYSTEM_ROLES
 from app.services.email_service import email_is_configured
 from app.services.secret_box import encrypt_secret
 from app.services.avatar_storage import InvalidAvatar, read_avatar, save_avatar
@@ -888,7 +889,7 @@ async def create_account(
     db: AsyncSession = Depends(get_db),
     actor: ActorContext = Depends(require_roles("admin")),
 ):
-    allowed = {"admin", "manager", "team_lead", "member", "contractor", "client_auditor"}
+    allowed = SYSTEM_ROLES
     roles = sorted(set(data.roles))
     if not roles or not set(roles).issubset(allowed):
         raise HTTPException(status_code=400, detail="Invalid roles")
@@ -962,7 +963,7 @@ async def update_account(
     if account.id == actor.account_id and account.status == "disabled":
         raise HTTPException(status_code=400, detail="You cannot disable your own account")
     if roles is not None:
-        allowed = {"admin", "manager", "team_lead", "member", "contractor", "client_auditor"}
+        allowed = SYSTEM_ROLES
         roles = sorted(set(roles))
         if not roles or not set(roles).issubset(allowed):
             raise HTTPException(status_code=400, detail="Invalid roles")
@@ -998,7 +999,7 @@ async def invite_account(
         raise HTTPException(status_code=404, detail="Email invitations are disabled; provision accounts with a password from the admin panel")
     if not email_is_configured():
         raise HTTPException(status_code=503, detail="Authentication email delivery is not configured")
-    allowed = {"admin", "manager", "team_lead", "member", "contractor", "client_auditor"}
+    allowed = SYSTEM_ROLES
     roles = sorted(set(data.roles))
     if not roles or not set(roles).issubset(allowed):
         raise HTTPException(status_code=400, detail="Invalid roles")
