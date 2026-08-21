@@ -1,6 +1,23 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Replace Capgo Cloud delivery with the self-hosted OYUNS OTA updater API, bundle storage, release tooling, and native endpoint configuration (`backend/app/routers/mobile_updates.py`, `frontend/src/platform/updater.tsx`, `frontend/capacitor.config.ts`)
+- [x] Register the `mn.oyuns.workspace` Android app in Firebase project `oyuns-finance`, download its Google Services configuration, and verify the Android build (`frontend/android/app/google-services.json`)
+- [x] Integrate Capacitor 8 iOS/Android shells, native session persistence, push-token enrollment, safe-area polish, and Capgo OTA delivery (`frontend`, `backend`, `docs`)
+- [x] Make Android Gradle commands select a supported JDK 21 when Java 26 is installed (`frontend/scripts/with-java21.sh`, `frontend/package.json`)
+- [x] Keep Telegram widget/Mini App authentication web-only until native OAuth/deep-link support is implemented (`frontend/src/pages/LoginPage.tsx`, `frontend/src/pages/TgMiniAppPage.tsx`)
+- [x] Add native Telegram OIDC/PKCE authentication with secure callback state and native refresh-session exchange (`backend/app/services/telegram_oidc.py`, `backend/app/routers/enterprise_auth.py`, `backend/alembic/versions/i1j2k3l4m5n6_telegram_oidc_states.py`)
+- [x] Add Capacitor browser callback handling, native Telegram login UX, and iOS/Android app-link provisioning (`frontend/src/platform/telegram-auth.ts`, `frontend/src/pages/LoginPage.tsx`, `frontend/ios`, `frontend/android`, `frontend/docker-entrypoint.d`)
+- [x] Add native Telegram OIDC callback and PKCE regression coverage (`backend/tests/test_telegram_oidc.py`, `frontend/src/platform/telegram-auth.test.ts`, `frontend/src/pages/LoginPage.test.tsx`)
+- [x] Serve generated Universal Link/App Link association JSON with explicit JSON content types (`frontend/docker-entrypoint.d/20-mobile-association-files.sh`, `frontend/nginx.conf`)
+- [x] Advance Alembic head for Telegram OAuth transaction storage (`backend/tests/test_alembic_graph.py`, `backend/alembic/versions/i1j2k3l4m5n6_telegram_oidc_states.py`)
+- [x] Harden native Telegram state decryption failures into safe authentication errors (`backend/app/routers/enterprise_auth.py`)
+- [x] Validate Telegram ID-token expiry claims without leaking provider parsing errors (`backend/app/services/telegram_oidc.py`)
+- [x] Add Capacitor/Capgo dependencies, configuration, build scripts, and generated native projects (`frontend/package.json`, `frontend/capacitor.config.ts`, `frontend/ios`, `frontend/android`)
+- [x] Add platform-aware API/session/runtime services and native notification/OTA lifecycle integration (`frontend/src/platform`, `frontend/src/api`, `frontend/src/main.tsx`)
+- [x] Add encrypted mobile push registration persistence and native-origin refresh-token rotation (`backend/app`, `backend/alembic/versions`, `backend/tests`)
+- [x] Add native-only safe-area/interaction polish, permission UI, defensive browser capability gates, and tests (`frontend/src`, `frontend/index.html`)
+- [x] Document and validate web, native sync/build, APNs/FCM enrollment, and Capgo release/rollback workflows (`docs/mobile-release.md`, `README.md`) — frontend tests/build, native sync, migration-head validation, and unsigned iOS simulator build pass; Android build awaits a local Java/SDK 36 toolchain
 - [x] Temporarily remove the MCP edge service from local and Dokploy Compose deployments (`docker-compose.yml`, `docker-compose.dokploy.yml`)
 - [x] Enlarge world-clock tiles, remove decorative/icon/region-code clutter, and localize relative-day labels (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/index.css`)
 - [x] Stabilize the six-clock grid and guard over-capacity preferences with a visible six-city warning (`frontend/src/components/WorldClockWidget.tsx`, `frontend/src/index.css`)

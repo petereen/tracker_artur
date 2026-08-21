@@ -671,6 +671,32 @@ class RefreshSession(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class MobilePushRegistration(Base):
+    __tablename__ = "mobile_push_registrations"
+    __table_args__ = (
+        CheckConstraint("platform IN ('ios','android')", name="ck_mobile_push_platform"),
+        CheckConstraint("provider IN ('apns','fcm')", name="ck_mobile_push_provider"),
+        CheckConstraint(
+            "(platform = 'ios' AND provider = 'apns') OR (platform = 'android' AND provider = 'fcm')",
+            name="ck_mobile_push_platform_provider",
+        ),
+        Index("ix_mobile_push_account_active", "account_id", "is_active"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    platform = Column(String(16), nullable=False)
+    provider = Column(String(16), nullable=False)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    encrypted_token = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    last_registered_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    revoked_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
     __table_args__ = (
@@ -2036,3 +2062,50 @@ class GoogleCalendarOAuthState(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class TelegramOAuthState(Base):
+    __tablename__ = "telegram_oauth_states"
+    __table_args__ = (Index("ix_telegram_oauth_states_expiry", "expires_at"),)
+
+    id = Column(Integer, primary_key=True)
+    state_hash = Column(String(64), nullable=False, unique=True)
+    nonce_hash = Column(String(64), nullable=False, unique=True)
+    encrypted_nonce = Column(Text, nullable=False)
+    encrypted_code_verifier = Column(Text, nullable=False)
+    platform = Column(String(16), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MobileUpdateBundle(Base):
+    """Immutable web bundle metadata for the self-hosted native updater."""
+
+    __tablename__ = "mobile_update_bundles"
+    __table_args__ = (
+        UniqueConstraint("app_id", "version", name="uq_mobile_update_bundle_app_version"),
+        Index("ix_mobile_update_bundles_app_created", "app_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    app_id = Column(String(128), nullable=False)
+    version = Column(String(64), nullable=False)
+    storage_key = Column(String(512), nullable=False, unique=True)
+    checksum = Column(String(64), nullable=False)
+    size = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MobileUpdateChannel(Base):
+    """Mutable channel pointer; promotion is an atomic metadata-only change."""
+
+    __tablename__ = "mobile_update_channels"
+    __table_args__ = (UniqueConstraint("app_id", "name", name="uq_mobile_update_channel_app_name"),)
+
+    id = Column(Integer, primary_key=True)
+    app_id = Column(String(128), nullable=False)
+    name = Column(String(64), nullable=False)
+    active_bundle_id = Column(Integer, ForeignKey("mobile_update_bundles.id", ondelete="SET NULL"))
+    previous_bundle_id = Column(Integer, ForeignKey("mobile_update_bundles.id", ondelete="SET NULL"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

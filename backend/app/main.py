@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
 from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssignment, UserAccount
-from app.routers import assistant_learning, auth, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, onboarding, questions, realtime, schedules, tasks, work_reports, worktime_qr
+from app.routers import assistant_learning, auth, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, questions, realtime, schedules, tasks, work_reports, worktime_qr
 from app.erp import router as erp
 from app import mcp_executor
 from sqlalchemy import func, or_, select
@@ -81,9 +81,16 @@ async def seed_admin():
 
 app = FastAPI(title="OYUNS Agent — API", lifespan=lifespan)
 
+cors_origins = {
+    origin.strip()
+    for configured in (settings.CORS_ORIGINS, settings.NATIVE_APP_ORIGINS)
+    for origin in configured.split(",")
+    if origin.strip()
+}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()],
+    allow_origins=sorted(cors_origins),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -104,6 +111,8 @@ app.include_router(company_plans.router, prefix="/company-plans", tags=["company
 app.include_router(knowledge.router, prefix="/knowledge", tags=["knowledge"])
 app.include_router(assistant_learning.router, prefix="/assistant-learning", tags=["assistant-learning"])
 app.include_router(enterprise_auth.router, prefix="/v1/auth", tags=["v1-auth"])
+app.include_router(mobile.router, prefix="/v1/mobile", tags=["v1-mobile"])
+app.include_router(mobile_updates.router, prefix="/v1/mobile-updates", tags=["v1-mobile-updates"])
 app.include_router(realtime.router, prefix="/v1", tags=["v1-realtime"])
 app.include_router(company_files.router, prefix="/v1/company-files", tags=["v1-company-files"])
 app.include_router(contracts.router, prefix="/v1", tags=["v1-contracts"])

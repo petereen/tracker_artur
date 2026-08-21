@@ -1,11 +1,14 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { bootstrapSession } from './api/enterprise'
 import { EnterpriseShell } from './components/EnterpriseShell'
 import { useAuthStore } from './store/auth'
 import { LoginPage } from './pages/LoginPage'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordResetPages'
 import { InitialWorkspaceSkeleton } from './components/Loading'
+import { notificationService } from './platform/notifications'
+import { isNativePlatform } from './platform/runtime'
 
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
 const WorktimePage = lazy(() => import('./pages/WorktimePage').then((module) => ({ default: module.WorktimePage })))
@@ -34,6 +37,27 @@ const TgMiniAppPage = lazy(() => import('./pages/TgMiniAppPage').then((module) =
 const PrivacyPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.PrivacyPage })))
 const TermsPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.TermsPage })))
 
+function NativeNotificationBridge() {
+  const token = useAuthStore((state) => state.token)
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!token || !isNativePlatform()) return
+    const unsubscribe = notificationService.subscribeToEvents((event) => {
+      if (event.type === 'received') void queryClient.invalidateQueries({ queryKey: ['v1', 'notifications'] })
+      if (event.type === 'action') {
+        void queryClient.invalidateQueries({ queryKey: ['v1', 'notifications'] })
+        if (event.targetUrl) navigate(event.targetUrl)
+      }
+    })
+    void notificationService.initialize().then(() => notificationService.syncExistingRegistration())
+    return unsubscribe
+  }, [navigate, queryClient, token])
+
+  return null
+}
+
 function AuthenticatedApp() {
   const token = useAuthStore((state) => state.token)
   const initialized = useAuthStore((state) => state.initialized)
@@ -46,7 +70,9 @@ function AuthenticatedApp() {
   if (!token) return <LoginPage />
 
   return (
-    <Routes>
+    <>
+      <NativeNotificationBridge />
+      <Routes>
       <Route element={<EnterpriseShell />}>
         <Route index element={<EnterpriseDashboardPage />} />
         <Route path="worktime" element={<WorktimePage />} />
@@ -81,7 +107,8 @@ function AuthenticatedApp() {
       </Route>
       <Route path="contracts/:publicId/print" element={<ContractPrintPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </>
   )
 }
 

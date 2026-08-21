@@ -19,9 +19,23 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_DAYS: int = 30
     # Telegram Mini App sessions use a one-year absolute refresh lifetime.
     TELEGRAM_REFRESH_TOKEN_DAYS: int = 365
+    TELEGRAM_OIDC_CLIENT_ID: str = ""
+    TELEGRAM_OIDC_CLIENT_SECRET: str = ""
+    TELEGRAM_OIDC_REDIRECT_URI: str = "https://erp.oyuns.mn/mobile-auth/telegram/callback"
+    TELEGRAM_OIDC_ISSUER: str = "https://oauth.telegram.org"
     AUTH_COOKIE_SECURE: bool = True
     PUBLIC_APP_URL: str = "https://erp.oyuns.mn"
     CORS_ORIGINS: str = "https://erp.oyuns.mn"
+    NATIVE_APP_ORIGINS: str = "capacitor://localhost,https://localhost"
+    # Self-hosted Capacitor web-layer update delivery. Bundles are stored on
+    # the mounted VPS volume and are never treated as authenticated user data.
+    OTA_ENABLED: bool = False
+    OTA_APP_ID: str = "mn.oyuns.workspace"
+    OTA_PUBLIC_BASE_URL: str = "https://erp.oyuns.mn/api/v1/mobile-updates"
+    OTA_BUNDLE_DIR: str = "/app/uploads/ota"
+    OTA_DEFAULT_CHANNEL: str = "production"
+    OTA_MAX_BUNDLE_BYTES: int = 100 * 1024 * 1024
+    OTA_UPLOAD_TOKEN: str = ""
     AUTH_EMAIL_VERIFICATION_ENABLED: bool = False
     PASSWORD_RESET_MINUTES: int = 30
     INVITATION_EXPIRE_HOURS: int = 168

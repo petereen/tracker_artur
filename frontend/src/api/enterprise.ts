@@ -1,7 +1,10 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import toast from 'react-hot-toast'
-import { acceptSession, api, publicApi, refreshAccessToken } from './client'
+import { acceptSession, api, clearSessionCredentials, publicApi, refreshAccessToken } from './client'
+import { notificationService } from '../platform/notifications'
+import { getNativeRefreshToken } from '../platform/secure-session'
+import { isNativePlatform, requireWebCapability } from '../platform/runtime'
 import { useAuthStore, Actor } from '../store/auth'
 
 export type WorkflowStatus = 'backlog' | 'to_do' | 'in_progress' | 'review' | 'done' | 'cancelled'
@@ -218,12 +221,24 @@ export function useResolveContractComment() { const qc = useQueryClient(); retur
 export function useUploadContractFile() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, purpose, file }: { publicId: string; purpose: 'supporting' | 'signed_final'; file: File }) => { const form = new FormData(); form.append('file', file); return api.post(`/v1/contracts/${publicId}/files`, form, { params: { purpose } }).then((r) => r.data) }, onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }) }
 export function useConfirmContractFinal() { const qc = useQueryClient(); return useMutation({ mutationFn: (publicId: string) => api.post(`/v1/contracts/${publicId}/confirm-final`).then((r) => r.data), onSuccess: (_d, publicId) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', publicId] }) } }) }
 export function useMarkContractPrinted() { return useMutation({ mutationFn: (publicId: string) => api.post(`/v1/contracts/${publicId}/mark-printed`).then((r) => r.data) }) }
-export async function downloadContractFile(publicId: string, id: number, filename: string) { const response = await api.get(`/v1/contracts/${publicId}/files/${id}/download`, { responseType: 'blob' }); const url = URL.createObjectURL(response.data); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url) }
+export async function downloadContractFile(publicId: string, id: number, filename: string) { requireWebCapability('File downloads'); const response = await api.get(`/v1/contracts/${publicId}/files/${id}/download`, { responseType: 'blob' }); const url = URL.createObjectURL(response.data); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url) }
 
 export function useEnterpriseLogin() {
   return useMutation({
     mutationFn: (input: { email: string; password: string }) => api.post('/v1/auth/login', input).then((response) => response.data),
     onSuccess: acceptSession,
+  })
+}
+
+export interface AuthCapabilities { telegram_native: boolean }
+
+export function useAuthCapabilities(enabled = true) {
+  return useQuery<AuthCapabilities>({
+    queryKey: ['v1', 'auth', 'capabilities'],
+    queryFn: () => publicApi.get('/v1/auth/capabilities').then((response) => response.data),
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: false,
   })
 }
 
@@ -318,7 +333,18 @@ export function useActor(enabled = true) {
 
 export function useEnterpriseLogout() {
   const logout = useAuthStore((state) => state.logout)
-  return useMutation({ mutationFn: () => api.post('/v1/auth/logout'), onSettled: () => logout() })
+  return useMutation({
+    mutationFn: async () => {
+      if (isNativePlatform()) await notificationService.unregister()
+      const refreshToken = isNativePlatform() ? await getNativeRefreshToken() : null
+      try {
+        return await api.post('/v1/auth/logout', refreshToken ? { refresh_token: refreshToken } : undefined)
+      } finally {
+        await clearSessionCredentials()
+      }
+    },
+    onSettled: () => logout(),
+  })
 }
 
 export interface DateRange { date_from: string; date_to: string }
@@ -536,7 +562,7 @@ export function useDeleteTaskComment() { const qc = useQueryClient(); return use
 export function useAttachments(objectType: 'task' | 'report', objectId?: number) { return useQuery<EnterpriseAttachment[]>({ queryKey: ['v1', 'attachments', objectType, objectId], queryFn: () => api.get('/v1/attachments', { params: { object_type: objectType, object_id: objectId } }).then((r) => r.data), enabled: Boolean(objectId) }) }
 export function useUploadAttachment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ objectType, objectId, file, onProgress }: { objectType: 'task' | 'report'; objectId: number; file: File; onProgress?: (value: number) => void }) => { const form = new FormData(); form.append('file', file); return api.post('/v1/attachments', form, { params: { object_type: objectType, object_id: objectId }, onUploadProgress: (event) => onProgress?.(event.total ? Math.round(event.loaded * 100 / event.total) : 0) }).then((r) => r.data) }, onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['v1', 'attachments', v.objectType, v.objectId] }); if (v.objectType === 'task') invalidateTaskDetail(qc, v.objectId) }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Файл байршуулсангүй') }) }
 export function useDeleteAttachment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id }: { id: number; objectType: 'task' | 'report'; objectId: number }) => api.delete(`/v1/attachments/${id}`), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['v1', 'attachments', v.objectType, v.objectId] }); if (v.objectType === 'task') invalidateTaskDetail(qc, v.objectId) }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Файл устгагдсангүй') }) }
-export async function downloadAttachment(id: number, filename: string) { const response = await api.get(`/v1/attachments/${id}/download`, { responseType: 'blob' }); const url = URL.createObjectURL(response.data); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url) }
+export async function downloadAttachment(id: number, filename: string) { requireWebCapability('File downloads'); const response = await api.get(`/v1/attachments/${id}/download`, { responseType: 'blob' }); const url = URL.createObjectURL(response.data); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url) }
 
 export function useTaskActivity(id?: number) { return useQuery<TaskActivity[]>({ queryKey: ['v1', 'tasks', id, 'activity'], queryFn: () => api.get(`/v1/tasks/${id}/activity`).then((r) => r.data), enabled: Boolean(id) }) }
 export function useSavedViews(module: string) { return useQuery<SavedView[]>({ queryKey: ['v1', 'saved-views', module], queryFn: () => api.get('/v1/saved-views', { params: { module } }).then((r) => r.data) }) }
@@ -1096,6 +1122,7 @@ export async function downloadCompanyFile(item: CompanyLibraryItem) {
 }
 
 export function saveCompanyBlob(blob: Blob, name: string) {
+  requireWebCapability('File downloads')
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

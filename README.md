@@ -136,6 +136,10 @@ Open `http://localhost:5173`. Vite proxies `/api` to the Docker backend at
 `http://localhost:8010`; edits are applied automatically without rebuilding
 the frontend image. Use `Ctrl+C` to stop Vite.
 
+### iOS, Android, and OTA releases
+
+The same Vite/React source is wrapped by Capacitor 8 for `mn.oyuns.workspace` and distributed through iOS, Android, and the existing web deployment. Native push enrollment, secure native sessions, safe-area behavior, live reload, signing prerequisites, and self-hosted OYUNS OTA staging-to-production releases are documented in [docs/mobile-release.md](docs/mobile-release.md).
+
 ### Monthly report digest test
 
 Run the isolated digest test with deterministic dummy reports:

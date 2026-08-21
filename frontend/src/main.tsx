@@ -4,8 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
 import * as Sentry from '@sentry/react'
 import App from './App'
+import { initializeRuntimeClass } from './platform/runtime'
+import { NativeBootBoundary } from './platform/updater'
+import { installNativeTelegramAuth } from './platform/telegram-auth'
 import './index.css'
 import './i18n'
+
+initializeRuntimeClass()
+void installNativeTelegramAuth()
 
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
@@ -22,7 +28,7 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <NativeBootBoundary><App /></NativeBootBoundary>
       <Toaster position="top-right" toastOptions={{ style: { background: '#161B22', color: '#E6EDF3', border: '1px solid #30363D' } }} />
     </QueryClientProvider>
   </StrictMode>,

@@ -15,6 +15,17 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://erp.oyuns.mn}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://erp.oyuns.mn}
+      NATIVE_APP_ORIGINS: ${NATIVE_APP_ORIGINS:-capacitor://localhost,https://localhost}
+      OTA_ENABLED: ${OTA_ENABLED:-false}
+      OTA_APP_ID: ${OTA_APP_ID:-mn.oyuns.workspace}
+      OTA_PUBLIC_BASE_URL: ${OTA_PUBLIC_BASE_URL:-https://erp.oyuns.mn/api/v1/mobile-updates}
+      OTA_BUNDLE_DIR: ${OTA_BUNDLE_DIR:-/app/uploads/ota}
+      OTA_MAX_BUNDLE_BYTES: ${OTA_MAX_BUNDLE_BYTES:-104857600}
+      OTA_UPLOAD_TOKEN: ${OTA_UPLOAD_TOKEN:-}
+      TELEGRAM_OIDC_CLIENT_ID: ${TELEGRAM_OIDC_CLIENT_ID:-}
+      TELEGRAM_OIDC_CLIENT_SECRET: ${TELEGRAM_OIDC_CLIENT_SECRET:-}
+      TELEGRAM_OIDC_REDIRECT_URI: ${TELEGRAM_OIDC_REDIRECT_URI:-https://erp.oyuns.mn/mobile-auth/telegram/callback}
+      TELEGRAM_OIDC_ISSUER: ${TELEGRAM_OIDC_ISSUER:-https://oauth.telegram.org}
       ATTACHMENT_STORAGE_BACKEND: local
       CLAMAV_ENABLED: ${CLAMAV_ENABLED:-true}
       CLAMAV_HOST: clamav
@@ -26,9 +37,9 @@ services:
       - knowledge_uploads:/app/uploads/knowledge
       - attachment_uploads:/app/uploads/attachments
       - avatar_uploads:/app/uploads/avatars
+      - ota_bundles:/app/uploads/ota
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 5s
       timeout: 5s
       retries: 20
-

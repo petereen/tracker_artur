@@ -69,6 +69,7 @@ import {
   TableSkeleton,
 } from "../components/Loading";
 import { UserTagPicker } from "../components/UserTagPicker";
+import { resolvePublicAssetUrl } from "../platform/runtime";
 
 const COLUMNS: { key: WorkflowStatus; label: string }[] = [
   { key: "backlog", label: "Backlog" },
@@ -116,7 +117,7 @@ function TaskCreatorAvatar({ task, large = false }: { task: EnterpriseTask; larg
   const name = taskCreatorName(task);
   return (
     <span className={`task-creator-avatar ${large ? "large" : ""}`} aria-hidden="true">
-      {task.creator_avatar_url ? <img src={task.creator_avatar_url} alt="" /> : name.slice(0, 1).toUpperCase()}
+      {task.creator_avatar_url ? <img src={resolvePublicAssetUrl(task.creator_avatar_url) || undefined} alt="" /> : name.slice(0, 1).toUpperCase()}
     </span>
   );
 }
@@ -409,7 +410,7 @@ function TaskCollaboration({
             <div className="collaboration-panel-copy"><p>Шийдвэр, асуултаа нэг газар үлдээгээд холбогдох хүнээ дурдана.</p></div>
             {comments.isLoading ? <p className="collaboration-state">Сэтгэгдэл ачаалж байна…</p> : comments.isError ? <p className="collaboration-state error">Сэтгэгдэл ачаалж чадсангүй.</p> : comments.data?.length ? <div className="collaboration-list comment-list">
               {comments.data.map((item) => <article className={item.is_resolved ? "resolved" : ""} key={item.id}>
-                <div><span className="comment-avatar">{item.author_avatar_url ? <img src={item.author_avatar_url} alt="" /> : (item.author_name || "?").slice(0, 1)}</span><div><strong>{item.author_name || "Тодорхойгүй хэрэглэгч"}</strong><span>{item.text}</span><small>{new Date(item.created_at).toLocaleString("mn-MN")}</small></div></div>
+                <div><span className="comment-avatar">{item.author_avatar_url ? <img src={resolvePublicAssetUrl(item.author_avatar_url) || undefined} alt="" /> : (item.author_name || "?").slice(0, 1)}</span><div><strong>{item.author_name || "Тодорхойгүй хэрэглэгч"}</strong><span>{item.text}</span><small>{new Date(item.created_at).toLocaleString("mn-MN")}</small></div></div>
                 <div className="comment-actions"><button type="button" className={`comment-status-toggle ${item.is_resolved ? "is-resolved" : ""}`} aria-label={item.is_resolved ? "Сэтгэгдлийг дахин нээх" : "Сэтгэгдлийг шийдсэн гэж тэмдэглэх"} title={item.is_resolved ? "Нээх" : "Шийдсэн"} disabled={resolveComment.isPending} onClick={() => resolveComment.mutate({ taskId: task.id, id: item.id, is_resolved: !item.is_resolved })}><Check size={15} /></button><button type="button" className="icon-danger" aria-label="Сэтгэгдэл устгах" title="Устгах" disabled={deleteComment.isPending} onClick={() => { if (window.confirm("Энэ сэтгэгдлийг устгах уу?")) deleteComment.mutate({ taskId: task.id, id: item.id }); }}><Trash2 size={15} /></button></div>
               </article>)}
             </div> : <div className="collaboration-empty"><MessageSquare size={20} /><p>Сэтгэгдэл алга байна.</p></div>}

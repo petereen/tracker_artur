@@ -10,6 +10,7 @@ const mutate = vi.fn()
 vi.mock('../api/enterprise', () => ({
   useEnterpriseLogin: () => ({ mutateAsync, isPending: false }),
   useTelegramWidgetLogin: () => ({ mutate, isPending: false }),
+  useAuthCapabilities: () => ({ data: { telegram_native: false }, isLoading: false }),
 }))
 
 function renderLogin() {

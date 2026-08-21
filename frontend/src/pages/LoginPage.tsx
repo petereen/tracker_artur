@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { ArrowRight, LockKeyhole, Mail } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { useEnterpriseLogin, useTelegramWidgetLogin } from '../api/enterprise'
+import { useAuthCapabilities, useEnterpriseLogin, useTelegramWidgetLogin } from '../api/enterprise'
+import { isNativePlatform } from '../platform/runtime'
+import { startNativeTelegramLogin, subscribeToNativeTelegramAuth, type NativeTelegramAuthState } from '../platform/telegram-auth'
 
 declare global {
   interface Window { onTelegramAuth?: (user: Record<string, string | number>) => void }
@@ -12,8 +14,17 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const login = useEnterpriseLogin()
   const { mutate: loginWithTelegram } = useTelegramWidgetLogin()
+  const native = isNativePlatform()
+  const capabilities = useAuthCapabilities(native)
+  const [telegramState, setTelegramState] = useState<NativeTelegramAuthState>({ status: 'idle' })
 
   useEffect(() => {
+    if (!native) return
+    return subscribeToNativeTelegramAuth(setTelegramState)
+  }, [native])
+
+  useEffect(() => {
+    if (isNativePlatform()) return
     const username = import.meta.env.VITE_TELEGRAM_BOT_USERNAME
     if (!username) return
     window.onTelegramAuth = (user) => {
@@ -50,6 +61,14 @@ export function LoginPage() {
         <div className="eyebrow">OYUNS WORKSPACE</div>
         <h1 id="login-title">Илүү хурдан. Илүү хялбар.</h1>
         <p>Төсөл, даалгавар, цагийн бүртгэл, тайлан болон багийн ачааллаа нэг платформоос удирдана.</p>
+        {native && capabilities.data?.telegram_native && <>
+          <button className="primary-action native-telegram-action" type="button" onClick={() => void startNativeTelegramLogin()} disabled={telegramState.status === 'opening' || telegramState.status === 'waiting'}>
+            {telegramState.status === 'opening' || telegramState.status === 'waiting' ? 'Telegram нэвтрэлтийг хүлээж байна…' : 'Telegram-аар нэвтрэх'} <ArrowRight size={16} aria-hidden />
+          </button>
+          {telegramState.status === 'error' && <p className="login-inline-error" role="alert">{telegramState.message}</p>}
+          {telegramState.status === 'cancelled' && <p className="login-inline-hint">Telegram нэвтрэлтийг цуцалсан. Дахин оролдоно уу.</p>}
+          <div className="login-divider"><span>эсвэл нууц үгээр</span></div>
+        </>}
         <form onSubmit={submit} className="login-form">
           <label>
             <span>Нэвтрэх нэр</span>
@@ -63,7 +82,7 @@ export function LoginPage() {
             {login.isPending ? 'Нэвтэрч байна…' : 'Нэвтрэх'} <ArrowRight size={16} aria-hidden />
           </button>
         </form>
-        {import.meta.env.VITE_TELEGRAM_BOT_USERNAME && <div className="telegram-login"><span>эсвэл Telegram-аар</span><div id="telegram-login-widget" /></div>}
+        {!native && import.meta.env.VITE_TELEGRAM_BOT_USERNAME && <div className="telegram-login"><span>эсвэл Telegram-аар</span><div id="telegram-login-widget" /></div>}
         <footer><a href="/privacy">Нууцлал</a><a href="/terms">Үйлчилгээний нөхцөл</a></footer>
       </section>
     </main>

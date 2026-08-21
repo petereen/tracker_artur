@@ -13,6 +13,7 @@ import { OyunsAssistant } from './OyunsAssistant'
 import { NotificationCenter } from './NotificationCenter'
 import { WorkspaceSkeleton } from './Loading'
 import { GlobalCommandBar } from './GlobalCommandBar'
+import { getRealtimeUrl, resolvePublicAssetUrl, safeLocalStorage, safeSessionStorage } from '../platform/runtime'
 
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
@@ -55,15 +56,18 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     let retry: number | undefined
     let attempts = 0
     let closed = false
-    let cursor = Number(sessionStorage.getItem('oyuns-event-cursor') || 0)
+    const cursorStorage = safeSessionStorage()
+    let cursor = Number(cursorStorage.get('oyuns-event-cursor') || 0)
     const connect = () => {
-      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-      socket = new WebSocket(`${protocol}//${location.host}/api/v1/realtime?token=${encodeURIComponent(token)}&cursor=${cursor}`)
+      const endpoint = new URL(getRealtimeUrl())
+      endpoint.searchParams.set('token', token)
+      endpoint.searchParams.set('cursor', String(cursor))
+      socket = new WebSocket(endpoint)
       socket.onopen = () => { attempts = 0 }
       socket.onmessage = (message) => {
         const event = JSON.parse(message.data)
         cursor = event.id
-        sessionStorage.setItem('oyuns-event-cursor', String(cursor))
+        cursorStorage.set('oyuns-event-cursor', String(cursor))
         const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', contracts: 'contracts', okrs: 'objectives', notifications: 'notifications', company_files: 'company-files', erp: 'erp' }
         const key = topicMap[event.topic]
         if (key) queryClient.invalidateQueries({ queryKey: ['v1', key] })
@@ -100,7 +104,7 @@ export function EnterpriseShell() {
   const suppressWorkersClickRef = useRef(false)
   const [workerSearch, setWorkerSearch] = useState('')
   const [selectedWorker, setSelectedWorker] = useState<number>()
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('oyuns-theme') as 'light' | 'dark') || 'light')
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (safeLocalStorage().get('oyuns-theme') as 'light' | 'dark') || 'light')
   const workers = useWorkerDirectory()
   const branding = useBrandingSettings()
   const erp = useERPMetadata(Boolean(token))
@@ -124,7 +128,7 @@ export function EnterpriseShell() {
     window.addEventListener('resize', clampToggle)
     return () => window.removeEventListener('resize', clampToggle)
   }, [])
-  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('oyuns-theme', theme) }, [theme])
+  useEffect(() => { document.documentElement.dataset.theme = theme; safeLocalStorage().set('oyuns-theme', theme) }, [theme])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -219,7 +223,7 @@ export function EnterpriseShell() {
           <div className="sidebar-footer">
             <NavLink to="/company-files" className={({ isActive }) => isActive ? 'sidebar-library-link active' : 'sidebar-library-link'}><FolderArchive size={17} /><span>{t('nav.companyFiles')}</span></NavLink>
             <div className="sidebar-profile">
-              <button className="avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{actorQuery.data?.avatar_url ? <img src={actorQuery.data.avatar_url} alt="" /> : actorQuery.data?.name?.[0]?.toUpperCase() ?? actorQuery.data?.email?.[0]?.toUpperCase() ?? 'O'}</button>
+              <button className="avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{actorQuery.data?.avatar_url ? <img src={resolvePublicAssetUrl(actorQuery.data.avatar_url) || undefined} alt="" /> : actorQuery.data?.name?.[0]?.toUpperCase() ?? actorQuery.data?.email?.[0]?.toUpperCase() ?? 'O'}</button>
               <button className="profile-identity" onClick={() => navigate('/profile')}><strong>{actorQuery.data?.name ?? actorQuery.data?.email ?? '…'}</strong><span>{roles[0] ?? 'member'}</span></button>
               <button onClick={() => logout.mutate()} aria-label={t('action.logout')}><LogOut size={17} /></button>
             </div>
@@ -250,7 +254,7 @@ export function EnterpriseShell() {
             <span>Бусад</span>
           </button>
         </nav>
-        <aside ref={workersDrawerRef} className={`workers-drawer ${workersOpen ? 'open' : ''} ${workersDragging ? 'is-dragging' : ''}`} style={{ '--workers-toggle-y': `${workersToggleY}px` } as React.CSSProperties} aria-label="Ажилтны төлөв"><button ref={workersToggleRef} className="workers-toggle" onPointerDown={handleWorkersPointerDown} onPointerMove={handleWorkersPointerMove} onPointerUp={finishWorkersPointer} onPointerCancel={finishWorkersPointer} onClick={handleWorkersClick} aria-label="Ажилтны жагсаалт нээх"><ChevronLeft /><Users2 /></button><div className="workers-content"><header><div><span className="eyebrow">OYUNS</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)} aria-label="Ажилтны жагсаалт хаах"><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={worker.avatar_url} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Ажлын алба оруулаагүй'}</p>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer"><Send size={14} />Telegram-аар чатлах</a>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div></aside>
+        <aside ref={workersDrawerRef} className={`workers-drawer ${workersOpen ? 'open' : ''} ${workersDragging ? 'is-dragging' : ''}`} style={{ '--workers-toggle-y': `${workersToggleY}px` } as React.CSSProperties} aria-label="Ажилтны төлөв"><button ref={workersToggleRef} className="workers-toggle" onPointerDown={handleWorkersPointerDown} onPointerMove={handleWorkersPointerMove} onPointerUp={finishWorkersPointer} onPointerCancel={finishWorkersPointer} onClick={handleWorkersClick} aria-label="Ажилтны жагсаалт нээх"><ChevronLeft /><Users2 /></button><div className="workers-content"><header><div><span className="eyebrow">OYUNS</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)} aria-label="Ажилтны жагсаалт хаах"><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={resolvePublicAssetUrl(worker.avatar_url) || undefined} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Ажлын алба оруулаагүй'}</p>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer"><Send size={14} />Telegram-аар чатлах</a>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div></aside>
         <OyunsAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
         <GlobalCommandBar open={commandOpen} onClose={() => setCommandOpen(false)} accountId={actorQuery.data?.id} channels={commandChannels} features={commandFeatures} onWorker={(id) => { setSelectedWorker(id); setWorkersOpen(true) }} />
       </div>

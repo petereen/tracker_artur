@@ -1,25 +1,39 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
+import { clearNativeRefreshToken, getNativeRefreshToken, setNativeRefreshToken } from '../platform/secure-session'
+import { getApiBaseUrl, isNativePlatform } from '../platform/runtime'
 import { useAuthStore } from '../store/auth'
 
-export const api = axios.create({ baseURL: '/api', withCredentials: true })
+const apiBaseUrl = getApiBaseUrl()
+
+export const api = axios.create({ baseURL: apiBaseUrl, withCredentials: true })
 // Public kiosk endpoints must not trigger the employee session refresh flow.
 // A TV at /worktimeqr has no employee bearer token before pairing.
-export const publicApi = axios.create({ baseURL: '/api', withCredentials: true })
-const refreshClient = axios.create({ baseURL: '/api', withCredentials: true })
+export const publicApi = axios.create({ baseURL: apiBaseUrl, withCredentials: true })
+const refreshClient = axios.create({ baseURL: apiBaseUrl, withCredentials: true })
 let refreshPromise: Promise<string> | null = null
 let proactiveTimer: number | undefined
 
-export function acceptSession(data: { access_token: string; expires_in?: number }) {
+export async function acceptSession(data: { access_token: string; expires_in?: number; refresh_token?: string | null }) {
   const expiresIn = data.expires_in ?? 15 * 60
+  if (isNativePlatform() && data.refresh_token) await setNativeRefreshToken(data.refresh_token)
   useAuthStore.getState().setSession(data.access_token, expiresIn)
-  if (proactiveTimer) window.clearTimeout(proactiveTimer)
-  proactiveTimer = window.setTimeout(() => { refreshAccessToken().catch(() => undefined) }, Math.max(10_000, (expiresIn - 60) * 1000))
+  if (proactiveTimer && typeof window !== 'undefined') window.clearTimeout(proactiveTimer)
+  if (typeof window !== 'undefined') {
+    proactiveTimer = window.setTimeout(() => { refreshAccessToken().catch(() => undefined) }, Math.max(10_000, (expiresIn - 60) * 1000))
+  }
   return data.access_token
 }
 
 async function rotateSession() {
-  const { data } = await refreshClient.post('/v1/auth/refresh')
+  const refreshToken = isNativePlatform() ? await getNativeRefreshToken() : null
+  const { data } = await refreshClient.post('/v1/auth/refresh', refreshToken ? { refresh_token: refreshToken } : undefined)
   return acceptSession(data)
+}
+
+export async function clearSessionCredentials() {
+  if (proactiveTimer && typeof window !== 'undefined') window.clearTimeout(proactiveTimer)
+  proactiveTimer = undefined
+  await clearNativeRefreshToken()
 }
 
 export function refreshAccessToken(): Promise<string> {
@@ -30,7 +44,7 @@ export function refreshAccessToken(): Promise<string> {
     if (current.token && current.token !== tokenBeforeLock && (current.expiresAt ?? 0) > Date.now() + 30_000) return current.token
     return rotateSession()
   }
-  const locks = navigator.locks
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
   const operation = (locks ? locks.request('oyuns-session-refresh', async () => await run()) : run()) as Promise<string>
   const result = operation.finally(() => { refreshPromise = null })
   refreshPromise = result
@@ -54,6 +68,7 @@ api.interceptors.response.use(
       config.headers.Authorization = `Bearer ${await refreshAccessToken()}`
       return api.request(config)
     } catch (refreshError) {
+      await clearSessionCredentials()
       useAuthStore.getState().logout()
       throw refreshError
     }

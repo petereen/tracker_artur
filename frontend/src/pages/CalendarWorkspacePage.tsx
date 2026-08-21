@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useTransition } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { CalendarDays, ChevronDown, ExternalLink, LoaderCircle, Plus, RefreshCw, Unplug } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { isNativePlatform } from '../platform/runtime'
 import { useCalendarEvents, useCreateCalendarEntry, useCreateEnterpriseTask, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarList, useGoogleCalendarSelect, useGoogleCalendarStatus, useGoogleCalendarSync, useHolidaySettings, useSetHolidayCountry } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { CalendarSkeleton, QueryRegion } from '../components/Loading'
@@ -110,6 +111,10 @@ export function GoogleCalendarSyncControl() {
   }, [status])
 
   const openConnect = async () => {
+    if (isNativePlatform()) {
+      toast.error('Google Calendar холболтыг одоогоор вэб хувилбараас тохируулна уу')
+      return
+    }
     try {
       const result = await connect.mutateAsync()
       if (!result.authorization_url) {

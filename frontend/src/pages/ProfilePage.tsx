@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ImageUp, KeyRound, Save, UserRound, X } from "lucide-react";
+import { Bell, ImageUp, KeyRound, Save, UserRound, X } from "lucide-react";
 import {
   useChangeProfilePassword,
   useProfile,
@@ -8,6 +8,8 @@ import {
   useUploadAvatar,
 } from "../api/enterprise";
 import { DropdownSelect } from "../components/DropdownSelect";
+import { notificationService, type NotificationPermissionState } from "../platform/notifications";
+import { isNativePlatform, resolvePublicAssetUrl } from "../platform/runtime";
 
 const MEMOJI_OPTIONS = Array.from(
   { length: 10 },
@@ -33,6 +35,15 @@ export function ProfilePage() {
     new_password: "",
   });
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionState>('unsupported');
+  const [notificationPending, setNotificationPending] = useState(false);
+  useEffect(() => {
+    if (!isNativePlatform()) return;
+    void notificationService.getPermissionState().then(setNotificationPermission);
+    return notificationService.subscribeToEvents((event) => {
+      if (event.type === 'permission') setNotificationPermission(event.state);
+    });
+  }, []);
   useEffect(() => {
     if (profile.data)
       setForm((current) => ({
@@ -93,6 +104,14 @@ export function ProfilePage() {
     setForm((current) => ({ ...current, avatar_url: result.avatar_url }));
   };
   const needsPasswordSetup = profile.data?.requires_password_setup ?? false;
+  const requestNotifications = async () => {
+    setNotificationPending(true);
+    try {
+      setNotificationPermission(await notificationService.requestPermissionAndRegister());
+    } finally {
+      setNotificationPending(false);
+    }
+  };
   return (
     <div className="profile-page">
       <div className="view-toolbar">
@@ -105,7 +124,7 @@ export function ProfilePage() {
         <section className="panel profile-card">
           <div className="profile-avatar">
             {form.avatar_url ? (
-              <img src={form.avatar_url} alt="Профайл зураг" />
+              <img src={resolvePublicAssetUrl(form.avatar_url) || undefined} alt="Профайл зураг" />
             ) : (
               <UserRound />
             )}
@@ -133,6 +152,19 @@ export function ProfilePage() {
             </small>
           </div>
         </section>
+        {isNativePlatform() && (
+          <section className="panel native-notification-settings">
+            <div><Bell size={20} /><div><strong>Push мэдэгдэл</strong><small>Төхөөрөмж дээрх ажлын мэдэгдлийг удирдана.</small></div></div>
+            <button
+              type="button"
+              className="secondary-action compact"
+              onClick={requestNotifications}
+              disabled={notificationPending || notificationPermission === 'granted' || notificationPermission === 'denied'}
+            >
+              {notificationPermission === 'granted' ? 'Идэвхтэй' : notificationPermission === 'denied' ? 'Тохиргооноос зөвшөөрнө үү' : notificationPending ? 'Хүлээнэ үү…' : 'Push мэдэгдэл зөвшөөрөх'}
+            </button>
+          </section>
+        )}
         <form className="panel profile-form" onSubmit={submitProfile}>
           <div className="memoji-picker">
             <div>

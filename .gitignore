@@ -11,6 +11,17 @@ test-results/
 .DS_Store
 *.log
 pgdata/
+*.jks
+*.keystore
+*.mobileprovision
+*.p12
+*.cer
+**/google-services.json
+capgo*.pem
+capgo*.key
+.capgo/
+.capgo_key_v2
+.capgo_key_v2.pub
 
 # TS incremental build cache
 *.tsbuildinfo

@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { isNativePlatform, requireWebCapability } from "../platform/runtime";
 import {
   ContractDetail,
   ContractDocumentType,
@@ -605,6 +606,10 @@ function ContractDetailView({
       },
     );
   const openPrint = () => {
+    if (isNativePlatform()) {
+      toast.error("Хэвлэх үйлдлийг одоогоор вэб хувилбараас ашиглана уу");
+      return;
+    }
     print.mutate(detail.public_id);
     window.open(
       `/contracts/${detail.public_id}/print`,
@@ -854,21 +859,23 @@ function ContractDetailView({
               <button
                 className="contract-file-row"
                 key={file.id}
-                onClick={() =>
-                  api
-                    .get(
+                onClick={async () => {
+                  try {
+                    requireWebCapability("File downloads");
+                    const response = await api.get(
                       `/v1/contracts/${detail.public_id}/files/${file.id}/download`,
                       { responseType: "blob" },
-                    )
-                    .then((response) => {
-                      const url = URL.createObjectURL(response.data);
-                      const link = document.createElement("a");
-                      link.href = url;
-                      link.download = file.filename;
-                      link.click();
-                      URL.revokeObjectURL(url);
-                    })
-                }
+                    );
+                    const url = URL.createObjectURL(response.data);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = file.filename;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  } catch (error: any) {
+                    toast.error(error.message || "Файл татаж чадсангүй");
+                  }
+                }}
               >
                 <Paperclip size={15} />
                 <span>{file.filename}</span>
@@ -1102,7 +1109,7 @@ export function ContractPrintPage() {
   const editorValue =
     detail.data?.approved_body_json || detail.data?.body_json || EMPTY_BODY;
   useEffect(() => {
-    if (detail.data) window.setTimeout(() => window.print(), 350);
+    if (detail.data && !isNativePlatform()) window.setTimeout(() => window.print(), 350);
   }, [detail.data]);
   if (!detail.data)
     return (
