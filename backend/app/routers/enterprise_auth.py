@@ -230,7 +230,10 @@ def _set_refresh_cookie(response: Response, token: str, expires_at: datetime) ->
 
 
 def _web_telegram_error(code: str) -> RedirectResponse:
-    target = f"{settings.PUBLIC_APP_URL.rstrip('/')}/?{urlencode({'telegram_auth_error': code})}"
+    # Keep the browser on the host that completed OAuth. This matters while
+    # the legacy and current OYUNS domains are both reachable; an absolute
+    # PUBLIC_APP_URL redirect could strand the host-only refresh cookie.
+    target = f"/?{urlencode({'telegram_auth_error': code})}"
     response = RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie(TELEGRAM_WEB_STATE_COOKIE, path="/api/v1/auth/telegram")
     return response
@@ -627,7 +630,7 @@ async def telegram_web_callback(
     telegram_id = str(claims.get("id") or claims.get("sub") or "")
     oidc_subject = str(claims.get("sub") or "")
     username = claims.get("preferred_username") or claims.get("username")
-    response = RedirectResponse(settings.PUBLIC_APP_URL.rstrip("/") + "/", status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     _clear_web_telegram_state(response)
     try:
         await _telegram_session(response, db, telegram_id, str(username) if username else None, "telegram-oidc-web", None, oidc_subject)

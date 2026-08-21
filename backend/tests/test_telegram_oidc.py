@@ -186,7 +186,7 @@ def test_successful_browser_callback_validates_state_and_issues_existing_session
     monkeypatch.setattr(telegram_oidc, "validate_id_token", validate)
     monkeypatch.setattr("app.routers.enterprise_auth._telegram_session", session)
     response = asyncio.run(telegram_web_callback(code="authorization-code", state=state, state_cookie=telegram_oidc.encrypt_state(state), db=db))
-    assert response.headers["location"] == settings.PUBLIC_APP_URL.rstrip("/") + "/"
+    assert response.headers["location"] == "/"
     assert captured["telegram_id"] == "123"
     assert captured["device_label"] == "telegram-oidc-web"
     assert db.record.used_at is not None
