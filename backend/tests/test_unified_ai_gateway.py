@@ -20,6 +20,13 @@ def test_registry_prunes_mutations_and_privileged_reads_by_permission():
     assert admin == {"oyuns_erp_read"}
 
 
+def test_strict_tool_schemas_require_all_properties_for_responses():
+    for tool in ToolRegistry().visible_tools(actor(), {"tasks_write"}):
+        schema = tool["inputSchema"]
+        assert schema.get("additionalProperties") is False
+        assert set(schema.get("required", [])) == set(schema.get("properties", {}))
+
+
 def test_preview_is_explicitly_mutating_and_compactly_signed():
     tool = get_tool("oyuns_tasks_prepare_create")
     assert tool is not None and tool.is_mutation and not tool.read_only

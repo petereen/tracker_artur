@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import mimetypes
 import secrets
 import uuid
@@ -102,6 +103,8 @@ from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
 from app.services import enterprise_tools
 from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
+
+log = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -3165,6 +3168,7 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
         routed = await ai_gateway.execute_turn(db, actor, [*history, {"role": "user", "content": text}], conversation_id=conversation.id)
     except GatewayError as exc:
         await db.rollback()
+        log.warning("assistant_gateway_failed conversation_id=%s status=%s detail=%s", conversation.id, exc.status_code, str(exc)[:300])
         raise HTTPException(status_code=exc.status_code, detail="OYUNS live AI service is temporarily unavailable") from exc
     answer = routed.answer
     for mcp_result in routed.tool_results:

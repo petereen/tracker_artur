@@ -25,7 +25,7 @@ from app.core.enterprise_deps import ActorContext
 from app.services.ai_gateway.cache import ResponseCache, exact_key
 from app.services.ai_gateway.config import QueryCategory, registry
 from app.services.ai_gateway.tools.registry import ToolRegistry
-from app.services.mcp.catalog import get_tool
+from app.services.mcp.catalog import _strict_schema, get_tool
 
 log = logging.getLogger(__name__)
 RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -339,7 +339,7 @@ class AIGateway:
             definitions = self.tool_registry.visible_definitions(request.actor_context, classified_intents) if classified_intents else []
             tools = [
                 {"type": "function", "name": definition.name, "description": definition.description,
-                 "parameters": definition.model.model_json_schema(), "strict": True}
+                 "parameters": _strict_schema(definition.model), "strict": True}
                 for definition in definitions
             ]
             async def local_executor(name: str, arguments: dict) -> dict:

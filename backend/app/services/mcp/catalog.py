@@ -56,7 +56,12 @@ def _strict_schema(model: type[BaseModel]) -> dict:
     def visit(node: object) -> None:
         if isinstance(node, dict):
             if isinstance(node.get("properties"), dict):
+                # OpenAI Responses strict function tools require every
+                # property to be present in `required`; nullable fields carry
+                # optionality in their type rather than through omission.
+                node["required"] = list(node["properties"])
                 node["additionalProperties"] = False
+            node.pop("default", None)
             for child in node.values():
                 visit(child)
         elif isinstance(node, list):
