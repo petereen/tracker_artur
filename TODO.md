@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [ ] Revoke/rotate the SMTP credential in the provider and confirm GitHub secret-alert remediation externally
 - [x] Add tenant-safe chat conversations, membership, messages, receipts, presence, and migration (`backend/app/models/models.py`, `backend/app/routers/chat.py`, `backend/alembic/versions`)
 - [x] Extend authenticated realtime delivery with participant filtering, account-scoped cursors, and presence heartbeats (`backend/app/routers/realtime.py`, `frontend/src/components/EnterpriseShell.tsx`)
 - [x] Build typed chat API hooks and the responsive DM/group chat workspace (`frontend/src/api/enterprise.ts`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/index.css`)
@@ -282,6 +283,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Remove token-shaped SMTP credential placeholders from tracked environment and provider-configuration templates (`.env.example`, `docs/provider-configuration.md`)
 - [x] Make enterprise knowledge search match authorized document titles (including textless files) and add multilingual intent fallback for directory/knowledge requests (`backend/app/services/enterprise_tools.py`, `backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_unified_ai_gateway.py`)
 - [x] Repair duplicate Alembic revision IDs and converge the mobile migrations (`backend/alembic/versions`, `backend/tests/test_alembic_graph.py`)
 - [x] Add solid notification surface styling and Gmail-style priority toggles with persisted filtering (`frontend/src/components/NotificationCenter.tsx`, `frontend/src/index.css`, `backend/app/routers/enterprise.py`, `backend/app/models/models.py`, `backend/alembic/versions`)

@@ -26,7 +26,8 @@ ADMIN_PASSWORD=replace-on-first-login
 SMTP_HOST=smtp.resend.com
 SMTP_PORT=465
 SMTP_USERNAME=resend
-SMTP_PASSWORD=re_your_sending_only_key
+# Set this only in the local environment or deployment secret store.
+SMTP_PASSWORD=
 SMTP_FROM=OYUNS Workspace <auth@example.com>
 ```
 
