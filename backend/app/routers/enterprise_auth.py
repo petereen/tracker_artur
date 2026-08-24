@@ -188,6 +188,11 @@ class WorldClockPreferences(BaseModel):
         return normalized
 
 
+class ChatNotificationPreferences(BaseModel):
+    desktop_alerts_enabled: bool = False
+    sound_enabled: bool = True
+
+
 class PasswordResetRequest(BaseModel):
     email: str
 
@@ -770,6 +775,23 @@ async def update_world_clock_preferences(
         **(account.preferences or {}),
         "world_clock": data.model_dump(),
     }
+    await db.commit()
+    return data
+
+
+@router.get("/preferences/chat-notifications", response_model=ChatNotificationPreferences)
+async def chat_notification_preferences(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    account = await db.get(UserAccount, actor.account_id)
+    saved = (account.preferences or {}).get("chat_notifications") if account else None
+    return ChatNotificationPreferences.model_validate(saved or {})
+
+
+@router.put("/preferences/chat-notifications", response_model=ChatNotificationPreferences)
+async def update_chat_notification_preferences(data: ChatNotificationPreferences, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    account = await db.get(UserAccount, actor.account_id, with_for_update=True)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    account.preferences = {**(account.preferences or {}), "chat_notifications": data.model_dump()}
     await db.commit()
     return data
 

@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     CLAMAV_HOST: str = "clamav"
     CLAMAV_PORT: int = 3310
     CLAMAV_TIMEOUT_SECONDS: float = 10.0
+    MOBILE_PUSH_DELIVERY_ENABLED: bool = False
+    FCM_PROJECT_ID: str = ""
+    FCM_SERVICE_ACCOUNT_JSON: str = ""
+    APNS_TEAM_ID: str = ""
+    APNS_KEY_ID: str = ""
+    APNS_PRIVATE_KEY: str = ""
+    APNS_BUNDLE_ID: str = "mn.oyuns.workspace"
+    APNS_USE_SANDBOX: bool = False
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = ""

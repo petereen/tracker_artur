@@ -2,14 +2,17 @@ import { useEffect, useState } from "react";
 import { Bell, ImageUp, KeyRound, Save, UserRound, X } from "lucide-react";
 import {
   useChangeProfilePassword,
+  useChatNotificationPreferences,
   useProfile,
   useTelegramProfileLink,
   useUpdateProfile,
+  useUpdateChatNotificationPreferences,
   useUploadAvatar,
 } from "../api/enterprise";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { notificationService, type NotificationPermissionState } from "../platform/notifications";
 import { isNativePlatform, resolvePublicAssetUrl } from "../platform/runtime";
+import { desktopChatPermission, previewChatSound, requestDesktopChatPermission } from "../platform/chat-notifications";
 
 const MEMOJI_OPTIONS = Array.from(
   { length: 10 },
@@ -22,6 +25,8 @@ export function ProfilePage() {
   const changePassword = useChangeProfilePassword();
   const telegramLink = useTelegramProfileLink();
   const uploadAvatar = useUploadAvatar();
+  const chatNotifications = useChatNotificationPreferences(!isNativePlatform());
+  const updateChatNotifications = useUpdateChatNotificationPreferences();
   const [form, setForm] = useState({
     username: "",
     avatar_url: "",
@@ -37,6 +42,7 @@ export function ProfilePage() {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionState>('unsupported');
   const [notificationPending, setNotificationPending] = useState(false);
+  const [desktopPermission, setDesktopPermission] = useState(() => desktopChatPermission());
   useEffect(() => {
     if (!isNativePlatform()) return;
     void notificationService.getPermissionState().then(setNotificationPermission);
@@ -112,6 +118,19 @@ export function ProfilePage() {
       setNotificationPending(false);
     }
   };
+  const enableDesktopAlerts = async () => {
+    setNotificationPending(true);
+    try {
+      const permission = await requestDesktopChatPermission();
+      setDesktopPermission(permission);
+      if (permission === 'granted') {
+        await updateChatNotifications.mutateAsync({ desktop_alerts_enabled: true, sound_enabled: chatNotifications.data?.sound_enabled ?? true });
+        if (chatNotifications.data?.sound_enabled ?? true) await previewChatSound();
+      }
+    } finally {
+      setNotificationPending(false);
+    }
+  };
   return (
     <div className="profile-page">
       <div className="view-toolbar">
@@ -163,6 +182,17 @@ export function ProfilePage() {
             >
               {notificationPermission === 'granted' ? 'Идэвхтэй' : notificationPermission === 'denied' ? 'Тохиргооноос зөвшөөрнө үү' : notificationPending ? 'Хүлээнэ үү…' : 'Push мэдэгдэл зөвшөөрөх'}
             </button>
+          </section>
+        )}
+        {!isNativePlatform() && (
+          <section className="panel native-notification-settings chat-notification-settings">
+            <div><Bell size={20} /><div><strong>Чатын desktop мэдэгдэл</strong><small>Апп нуугдсан эсвэл minimize үед зурагт мэдэгдэл болон дуу ашиглана.</small></div></div>
+            <div className="chat-notification-actions">
+              <button type="button" className="secondary-action compact" onClick={enableDesktopAlerts} disabled={notificationPending || desktopPermission === 'denied'}>
+                {desktopPermission === 'denied' ? 'Browser тохиргооноос зөвшөөрнө үү' : chatNotifications.data?.desktop_alerts_enabled && desktopPermission === 'granted' ? 'Идэвхтэй' : notificationPending ? 'Хүлээнэ үү…' : 'Desktop мэдэгдэл зөвшөөрөх'}
+              </button>
+              {desktopPermission === 'granted' && <label className="chat-sound-toggle"><input type="checkbox" checked={chatNotifications.data?.sound_enabled ?? true} onChange={(event) => updateChatNotifications.mutate({ desktop_alerts_enabled: chatNotifications.data?.desktop_alerts_enabled ?? true, sound_enabled: event.target.checked })} /><span>Мэдэгдлийн дуу</span><button type="button" onClick={() => previewChatSound()}>Сонсох</button></label>}
+            </div>
           </section>
         )}
         <form className="panel profile-form" onSubmit={submitProfile}>

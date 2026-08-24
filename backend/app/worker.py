@@ -96,6 +96,10 @@ async def execute_job(job_id: int) -> None:
                 for row in rows:
                     row.encrypted_payload = None
                 await db.execute(AssistantToolAudit.__table__.delete().where(AssistantToolAudit.metadata_expires_at <= now))
+            elif job.job_type == "chat_push":
+                from app.services.mobile_push_delivery import deliver_chat_push
+
+                await deliver_chat_push(db, int(job.payload["message_id"]), int(job.payload["recipient_account_id"]))
             elif job.job_type in {"voice_transcription", "assistant_action"}:
                 raise RuntimeError(f"{job.job_type} provider is not configured")
             else:
@@ -127,6 +131,7 @@ async def run() -> None:
     last_watch_scan = datetime.min.replace(tzinfo=timezone.utc)
     last_audit_purge = datetime.min.replace(tzinfo=timezone.utc)
     last_index_scan = datetime.min.replace(tzinfo=timezone.utc)
+    last_chat_upload_cleanup = datetime.min.replace(tzinfo=timezone.utc)
     while True:
         now = datetime.now(timezone.utc)
         if now - last_watch_scan >= timedelta(minutes=15):
@@ -162,6 +167,13 @@ async def run() -> None:
                 if file_rows or article_rows:
                     await db.commit()
             last_index_scan = now
+        if now - last_chat_upload_cleanup >= timedelta(minutes=15):
+            from app.services.mobile_push_delivery import purge_expired_chat_uploads
+
+            async with AsyncSessionLocal() as db:
+                if await purge_expired_chat_uploads(db):
+                    await db.commit()
+            last_chat_upload_cleanup = now
         job_id = await claim_job()
         if job_id is None:
             await asyncio.sleep(2)

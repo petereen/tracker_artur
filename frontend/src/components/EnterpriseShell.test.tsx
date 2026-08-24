@@ -63,6 +63,21 @@ describe('enterprise sidebar', () => {
     expect(chatLinks[0].querySelector('.nav-unread-badge')).toHaveTextContent('3')
   })
 
+  it('keeps Chat below Worktime and starts the Reports project section', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
+    const sidebarNav = container.querySelector('.workspace-sidebar nav')
+    const links = Array.from(sidebarNav?.querySelectorAll<HTMLAnchorElement>('.nav-item') ?? [])
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/', '/worktime', '/chat', '/calendar', '/tasks', '/reports', '/projects', '/plans', '/contracts', '/analytics', '/administration',
+    ])
+    expect(links[2].parentElement).not.toHaveClass('nav-group-break')
+    expect(links[5].parentElement).toHaveClass('nav-group-break')
+    expect(links[6].parentElement).not.toHaveClass('nav-group-break')
+    expect(links[7].parentElement).not.toHaveClass('nav-group-break')
+    expect(links[8].parentElement).not.toHaveClass('nav-group-break')
+  })
+
   it('uses a full in-app chat action and an icon-only Telegram squircle for workers', () => {
     mocks.workers = [{ id: 7, name: 'Бат', avatar_url: null, job_title: 'Engineer', telegram_username: '@bat', presence: 'offline' }]
     mocks.profile = { id: 7, name: 'Бат', chat_available: true, telegram_chat_url: 'https://t.me/bat' }

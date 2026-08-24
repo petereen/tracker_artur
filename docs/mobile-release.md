@@ -56,6 +56,21 @@ Use `VITE_OTA_CHANNEL=staging` for internal/TestFlight/Play Internal binaries. T
 
 ## Push notification provisioning and checks
 
+Provider delivery is disabled until `MOBILE_PUSH_DELIVERY_ENABLED=true`. The worker reads credentials only from deployment secrets:
+
+```env
+MOBILE_PUSH_DELIVERY_ENABLED=true
+FCM_PROJECT_ID=oyuns-finance
+FCM_SERVICE_ACCOUNT_JSON={...single-line service account JSON...}
+APNS_TEAM_ID=...
+APNS_KEY_ID=...
+APNS_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
+APNS_BUNDLE_ID=mn.oyuns.workspace
+APNS_USE_SANDBOX=false
+```
+
+Never expose these values to the Vite bundle. The backend queues one idempotent `chat_push` worker job per eligible recipient, re-checks conversation membership and mute state at delivery time, and deactivates provider-rejected device tokens.
+
 ### iOS/APNs
 
 1. In Apple Developer/Xcode, confirm `mn.oyuns.workspace`, the Push Notifications capability, the correct team, and `aps-environment` entitlement.
@@ -70,7 +85,7 @@ The simulator is suitable for UI and simulated payload checks, but physical-devi
 1. Provision `frontend/android/app/google-services.json` without committing it.
 2. Sync and build with SDK 36; confirm the generated package is `mn.oyuns.workspace` and produce a signed AAB.
 3. On Android 13+, verify the native permission prompt appears only after the Profile action. Android 12 and older should register without an OS prompt.
-4. Confirm channel `oyuns-default`, the monochrome status icon, enrollment as provider `fcm`, token rotation, foreground/background payloads, Doze behavior, and both Play-enabled emulator and physical-device delivery.
+4. Confirm channels `oyuns-default` and `oyuns-chat-v1`, the custom chat sound, monochrome status icon, enrollment as provider `fcm`, token rotation, foreground/background payloads, Doze behavior, and both Play-enabled emulator and physical-device delivery.
 
 Permission rejection never disables the in-app bell. The app does not repeatedly prompt after denial; the Profile control directs the user to device settings. Logout attempts backend revocation before deleting native session credentials. An offline revocation is retained securely and retried before the next registration.
 
@@ -134,4 +149,4 @@ The upload script runs tests, creates a ZIP from `dist`, and calls `POST /api/v1
 - On web, verify no Capacitor push permission, browser Notification API, updater, or secure-storage method runs. Authentication remains HTTP-only refresh-cookie based and no refresh token appears in JSON.
 - Verify the bell, unread count, priority/read actions, WebSocket invalidation, desktop selection/keyboard behavior, Telegram Mini App, popup OAuth, printing, downloads, microphone, and camera flows.
 - Native refresh tokens live only in Keychain/Android Keystore and are returned/accepted only for exact allowlisted Capacitor origins. Push and refresh tokens must never be logged or sent to Sentry.
-- Provider-side APNs/FCM sending is deliberately outside this milestone; only secure device-token enrollment is implemented.
+- APNs/FCM provider delivery remains a safe no-op until its feature flag and secrets are configured. Validate the custom sound on signed physical devices before production enablement.

@@ -695,6 +695,9 @@ class ChatParticipant(Base):
     account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
     role = Column(String(12), nullable=False, server_default="member", default="member")
     visible_after_message_id = Column(Integer)
+    pinned_at = Column(DateTime(timezone=True))
+    archived_at = Column(DateTime(timezone=True))
+    muted_until = Column(DateTime(timezone=True))
     joined_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     left_at = Column(DateTime(timezone=True))
 
@@ -703,16 +706,99 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
     __table_args__ = (
         UniqueConstraint("conversation_id", "sender_account_id", "client_nonce", name="uq_chat_messages_client_nonce"),
-        CheckConstraint("char_length(body) BETWEEN 1 AND 4000", name="ck_chat_messages_body_length"),
+        CheckConstraint("body IS NULL OR char_length(body) BETWEEN 1 AND 4000", name="ck_chat_messages_body_length"),
         Index("ix_chat_messages_conversation_id", "conversation_id", "id"),
+        Index("ix_chat_messages_thread_root", "thread_root_message_id", "id"),
     )
 
     id = Column(Integer, primary_key=True)
     conversation_id = Column(Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False)
     sender_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     client_nonce = Column(UUID(as_uuid=True), nullable=False)
-    body = Column(Text, nullable=False)
+    body = Column(Text)
+    reply_to_message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="SET NULL"))
+    thread_root_message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="SET NULL"))
+    forwarded_from_message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="SET NULL"))
+    forwarded_sender_name = Column(Text)
+    edited_at = Column(DateTime(timezone=True))
+    deleted_at = Column(DateTime(timezone=True))
+    deleted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatAttachment(Base):
+    __tablename__ = "chat_attachments"
+    __table_args__ = (
+        CheckConstraint("media_kind IN ('image','video','audio','document')", name="ck_chat_attachments_media_kind"),
+        CheckConstraint("size > 0", name="ck_chat_attachments_positive_size"),
+        Index("ix_chat_attachments_message", "message_id", "id"),
+        Index("ix_chat_attachments_staged_expiry", "message_id", "expires_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(UUID(as_uuid=True), nullable=False, unique=True, default=uuid.uuid4, server_default=sa_text("gen_random_uuid()"))
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    conversation_id = Column(Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False)
+    message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="CASCADE"))
+    staged_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    storage_key = Column(Text, nullable=False, unique=True)
+    filename = Column(Text, nullable=False)
+    content_type = Column(Text, nullable=False)
+    media_kind = Column(String(12), nullable=False)
+    size = Column(Integer, nullable=False)
+    checksum = Column(String(64), nullable=False)
+    duration_seconds = Column(Float)
+    scan_status = Column(Text, nullable=False, server_default="pending", default="pending")
+    expires_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatMessageReaction(Base):
+    __tablename__ = "chat_message_reactions"
+    __table_args__ = (
+        UniqueConstraint("message_id", "account_id", "emoji", name="uq_chat_message_reaction_actor"),
+        Index("ix_chat_message_reactions_message", "message_id", "emoji"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    emoji = Column(String(16), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatMessageStar(Base):
+    __tablename__ = "chat_message_stars"
+    __table_args__ = (UniqueConstraint("message_id", "account_id", name="uq_chat_message_star_actor"),)
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatMessagePin(Base):
+    __tablename__ = "chat_message_pins"
+    __table_args__ = (
+        UniqueConstraint("message_id", name="uq_chat_message_pin"),
+        Index("ix_chat_message_pins_conversation", "conversation_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    conversation_id = Column(Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False)
+    message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False)
+    pinned_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatMessageHidden(Base):
+    __tablename__ = "chat_message_hidden"
+    __table_args__ = (UniqueConstraint("message_id", "account_id", name="uq_chat_message_hidden_actor"),)
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    hidden_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class ChatMessageReceipt(Base):

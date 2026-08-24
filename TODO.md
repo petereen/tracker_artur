@@ -1,6 +1,12 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Reorganize desktop sidebar navigation grouping for Chat and Reports (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/EnterpriseShell.test.tsx`)
+- [x] Suppress Telegram task digests on configured non-workdays unless a task is due that day (`backend/app/services/digest_service.py`, `backend/app/bot/scheduler.py`, `backend/tests`) — daily scheduler jobs, local-time deadline exception checks, and focused regression coverage added; Python syntax/static validation passes, pytest is unavailable in the environment
+- [x] Extend chat persistence and APIs for rich media, message actions, reactions, threads, search, and per-user conversation state (`backend/app/models/models.py`, `backend/app/routers/chat.py`, `backend/alembic/versions`)
+- [x] Build the responsive rich-chat workspace with uploads, voice notes, message actions, threads, search, sorting, pinning, archiving, and muting (`frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`)
+- [x] Add background browser alerts, custom notification sound assets, and queued APNs/FCM delivery (`frontend/src/platform`, `frontend/ios`, `frontend/android`, `backend/app/services`, `backend/app/worker.py`)
+- [x] Add rich-chat, notification-provider, migration, frontend, responsive browser, build, and native regression validation (`backend/tests`, `frontend/src`, `frontend/e2e`, `docs`) — focused backend tests, 82 frontend tests, 12 Playwright scenarios, production build, Python compilation, isolated PostgreSQL upgrade/downgrade/re-upgrade, Capacitor sync, Android debug build, and unsigned iOS simulator build pass; the full backend baseline remains at 327 passed/33 unrelated failures, and signed physical-device delivery remains a release gate
 - [ ] Revoke/rotate the SMTP credential in the provider and confirm GitHub secret-alert remediation externally
 - [x] Add tenant-safe chat conversations, membership, messages, receipts, presence, and migration (`backend/app/models/models.py`, `backend/app/routers/chat.py`, `backend/alembic/versions`)
 - [x] Extend authenticated realtime delivery with participant filtering, account-scoped cursors, and presence heartbeats (`backend/app/routers/realtime.py`, `frontend/src/components/EnterpriseShell.tsx`)

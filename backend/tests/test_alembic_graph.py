@@ -11,4 +11,4 @@ def test_alembic_has_one_deployable_head():
 
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["s8t9u0v1w2x3"]
+    assert script.get_heads() == ["t9u0v1w2x3y4"]

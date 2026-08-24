@@ -870,6 +870,7 @@ export interface ChatIdentity {
 export interface ChatMessageSummary {
   id: number
   body: string
+  attachment_count: number
   sender_account_id: number | null
   sender_name: string | null
   created_at: string
@@ -887,8 +888,27 @@ export interface ChatConversation {
   can_manage: boolean
   last_message: ChatMessageSummary | null
   unread_count: number
+  is_pinned: boolean
+  pinned_at: string | null
+  is_archived: boolean
+  archived_at: string | null
+  is_muted: boolean
+  muted_until: string | null
+  pinned_message_count: number
   created_at: string
   updated_at: string
+}
+
+export interface ChatAttachment {
+  id: number
+  public_id: string
+  filename: string
+  content_type: string
+  media_kind: 'image' | 'video' | 'audio' | 'document'
+  size: number
+  duration_seconds: number | null
+  scan_status: string
+  download_url: string
 }
 
 export interface ChatMessage {
@@ -897,11 +917,25 @@ export interface ChatMessage {
   sender: ChatIdentity | null
   sender_account_id: number | null
   client_nonce: string
-  body: string
+  body: string | null
+  attachments: ChatAttachment[]
+  reply_to_message_id: number | null
+  thread_root_message_id: number | null
+  reply_preview: { id: number; body: string | null; sender_name: string | null; is_deleted: boolean } | null
+  thread_reply_count: number
+  forwarded_from_message_id: number | null
+  forwarded_sender_name: string | null
+  reactions: Array<{ emoji: string; count: number; reacted: boolean }>
+  is_starred: boolean
+  is_pinned: boolean
+  is_deleted: boolean
+  edited_at: string | null
+  deleted_at: string | null
   created_at: string
   is_mine: boolean
   status: 'sending' | 'failed' | 'sent' | 'delivered' | 'read' | null
   receipts: { total: number; delivered: number; read: number }
+  capabilities: { can_edit: boolean; can_delete_everyone: boolean; can_delete_self: boolean; can_forward: boolean; can_react: boolean; can_pin: boolean }
 }
 
 export interface ChatMessagePage { items: ChatMessage[]; next_before_id: number | null }
@@ -921,10 +955,12 @@ export function useChatContacts(search = '', enabled = true) {
   })
 }
 
-export function useChatConversations(search = '') {
+export type ChatConversationFilter = 'all' | 'unread' | 'groups' | 'direct' | 'archived'
+
+export function useChatConversations(search = '', filter: ChatConversationFilter = 'all') {
   return useQuery<ChatConversationPage>({
-    queryKey: ['v1', 'chat', 'conversations', search],
-    queryFn: () => api.get('/v1/chat/conversations', { params: { q: search || undefined, limit: 50 } }).then((response) => response.data),
+    queryKey: ['v1', 'chat', 'conversations', search, filter],
+    queryFn: () => api.get('/v1/chat/conversations', { params: { q: search || undefined, filter, limit: 50 } }).then((response) => response.data),
     refetchInterval: 20_000,
   })
 }
@@ -953,6 +989,14 @@ export function useChatMessages(publicId?: string) {
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (lastPage) => lastPage.next_before_id || undefined,
     enabled: Boolean(publicId),
+  })
+}
+
+export function useChatMessageContext(publicId?: string, aroundId?: number) {
+  return useQuery<ChatMessagePage & { anchor_message_id?: number }>({
+    queryKey: ['v1', 'chat', 'message-context', publicId, aroundId],
+    queryFn: () => api.get(`/v1/chat/conversations/${publicId}/messages`, { params: { around_id: aroundId, limit: 50 } }).then((response) => response.data),
+    enabled: Boolean(publicId && aroundId),
   })
 }
 
@@ -999,7 +1043,7 @@ export function useLeaveChatGroup(publicId?: string) {
 
 export function useSendChatMessage(publicId?: string) {
   const queryClient = useQueryClient()
-  return useMutation<ChatMessage, any, { body: string; client_nonce: string }, { previous?: InfiniteData<ChatMessagePage>; nonce: string }>({
+  return useMutation<ChatMessage, any, { body?: string | null; client_nonce: string; upload_ids?: string[]; reply_to_message_id?: number | null }, { previous?: InfiniteData<ChatMessagePage>; nonce: string }>({
     mutationFn: (input) => api.post(`/v1/chat/conversations/${publicId}/messages`, input).then((response) => response.data),
     onMutate: async (input) => {
       const key = ['v1', 'chat', 'messages', publicId]
@@ -1008,7 +1052,7 @@ export function useSendChatMessage(publicId?: string) {
       const actor = useAuthStore.getState().actor
       const optimistic: ChatMessage = {
         id: -Date.now(), conversation_id: 0, sender: actor ? { account_id: actor.id, employee_id: actor.employee_id, name: actor.name || actor.email, email: actor.email, avatar_url: actor.avatar_url || null, is_online: true, last_seen_at: new Date().toISOString() } : null,
-        sender_account_id: actor?.id ?? null, client_nonce: input.client_nonce, body: input.body, created_at: new Date().toISOString(), is_mine: true, status: 'sending', receipts: { total: 0, delivered: 0, read: 0 },
+        sender_account_id: actor?.id ?? null, client_nonce: input.client_nonce, body: input.body || null, attachments: [], reply_to_message_id: input.reply_to_message_id || null, thread_root_message_id: null, reply_preview: null, thread_reply_count: 0, forwarded_from_message_id: null, forwarded_sender_name: null, reactions: [], is_starred: false, is_pinned: false, is_deleted: false, edited_at: null, deleted_at: null, created_at: new Date().toISOString(), is_mine: true, status: 'sending', receipts: { total: 0, delivered: 0, read: 0 }, capabilities: { can_edit: false, can_delete_everyone: false, can_delete_self: false, can_forward: false, can_react: false, can_pin: false },
       }
       queryClient.setQueryData<InfiniteData<ChatMessagePage>>(key, (current) => current ? ({ ...current, pages: current.pages.map((page, index) => index === 0 ? { ...page, items: [...page.items.filter((message) => message.client_nonce !== input.client_nonce), optimistic] } : page) }) : { pages: [{ items: [optimistic], next_before_id: null }], pageParams: [undefined] })
       return { previous, nonce: input.client_nonce }
@@ -1024,6 +1068,44 @@ export function useSendChatMessage(publicId?: string) {
     },
   })
 }
+
+export async function uploadChatAttachment(publicId: string, file: File, onProgress?: (value: number) => void, signal?: AbortSignal) {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post(`/v1/chat/conversations/${publicId}/uploads`, form, {
+    signal,
+    onUploadProgress: (event) => onProgress?.(event.total ? Math.round(event.loaded * 100 / event.total) : 0),
+  }).then((response) => response.data as ChatAttachment)
+}
+
+export function cancelChatUpload(publicId: string, uploadId: string) {
+  return api.delete(`/v1/chat/conversations/${publicId}/uploads/${uploadId}`)
+}
+
+export async function downloadChatAttachment(publicId: string, attachment: ChatAttachment) {
+  const response = await api.get(`/v1/chat/conversations/${publicId}/attachments/${attachment.public_id}`, { responseType: 'blob' })
+  return URL.createObjectURL(response.data)
+}
+
+function useChatMessageMutation(publicId?: string) {
+  const queryClient = useQueryClient()
+  return (message?: ChatMessage) => {
+    invalidateChat(queryClient)
+    queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'messages', publicId] })
+    queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'conversation', publicId] })
+    return message
+  }
+}
+
+export function useEditChatMessage(publicId?: string) { const done = useChatMessageMutation(publicId); return useMutation({ mutationFn: ({ messageId, body }: { messageId: number; body: string }) => api.patch(`/v1/chat/conversations/${publicId}/messages/${messageId}`, { body }).then((r) => r.data as ChatMessage), onSuccess: done }) }
+export function useDeleteChatMessage(publicId?: string) { const done = useChatMessageMutation(publicId); return useMutation({ mutationFn: ({ messageId, scope }: { messageId: number; scope: 'self' | 'everyone' }) => api.delete(`/v1/chat/conversations/${publicId}/messages/${messageId}`, { params: { scope } }).then((r) => r.data), onSuccess: () => done() }) }
+export function useReactChatMessage(publicId?: string) { const done = useChatMessageMutation(publicId); return useMutation({ mutationFn: ({ messageId, emoji, remove }: { messageId: number; emoji: string; remove?: boolean }) => api.request({ url: `/v1/chat/conversations/${publicId}/messages/${messageId}/reaction`, method: remove ? 'DELETE' : 'PUT', data: { emoji } }).then((r) => r.data as ChatMessage), onSuccess: done }) }
+export function useStarChatMessage(publicId?: string) { const done = useChatMessageMutation(publicId); return useMutation({ mutationFn: ({ messageId, starred }: { messageId: number; starred: boolean }) => api.request({ url: `/v1/chat/conversations/${publicId}/messages/${messageId}/star`, method: starred ? 'PUT' : 'DELETE' }).then((r) => r.data as ChatMessage), onSuccess: done }) }
+export function usePinChatMessage(publicId?: string) { const done = useChatMessageMutation(publicId); return useMutation({ mutationFn: ({ messageId, pinned }: { messageId: number; pinned: boolean }) => api.request({ url: `/v1/chat/conversations/${publicId}/messages/${messageId}/pin`, method: pinned ? 'PUT' : 'DELETE' }).then((r) => r.data as ChatMessage), onSuccess: done }) }
+export function useChatThread(publicId?: string, messageId?: number) { return useQuery<{ root: ChatMessage; items: ChatMessage[] }>({ queryKey: ['v1', 'chat', 'thread', publicId, messageId], queryFn: () => api.get(`/v1/chat/conversations/${publicId}/messages/${messageId}/thread`).then((r) => r.data), enabled: Boolean(publicId && messageId) }) }
+export function useForwardChatMessage(publicId?: string) { const done = useChatMessageMutation(publicId); return useMutation({ mutationFn: ({ messageId, destinations }: { messageId: number; destinations: Array<{ conversation_public_id: string; client_nonce: string }> }) => api.post(`/v1/chat/conversations/${publicId}/messages/${messageId}/forward`, { destinations }).then((r) => r.data), onSuccess: () => done() }) }
+export function useChatSearch(search: string, conversationPublicId?: string, enabled = true) { return useQuery<{ items: Array<{ conversation: { public_id: string; title: string }; message: ChatMessage }>; next_before_id: number | null }>({ queryKey: ['v1', 'chat', 'search', search, conversationPublicId], queryFn: () => api.get('/v1/chat/search', { params: { q: search, conversation_public_id: conversationPublicId || undefined } }).then((r) => r.data), enabled: enabled && Boolean(search.trim()) }) }
+export function useUpdateChatConversationPreferences(publicId?: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { pinned?: boolean; archived?: boolean; mute_for?: '1h' | '8h' | '1w' | 'forever' | 'off' }) => api.patch(`/v1/chat/conversations/${publicId}/preferences`, input).then((r) => r.data as ChatConversation), onSuccess: () => { invalidateChat(qc); qc.invalidateQueries({ queryKey: ['v1', 'chat', 'conversation', publicId] }) } }) }
 
 export function useAcknowledgeChat(publicId?: string) {
   const queryClient = useQueryClient()
@@ -1181,6 +1263,10 @@ export function useUpdateWorldClockPreferences() {
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Цагийн тохиргоо хадгалагдсангүй'),
   })
 }
+
+export interface ChatNotificationPreferences { desktop_alerts_enabled: boolean; sound_enabled: boolean }
+export function useChatNotificationPreferences(enabled = true) { return useQuery<ChatNotificationPreferences>({ queryKey: ['v1', 'auth', 'preferences', 'chat-notifications'], queryFn: () => api.get('/v1/auth/preferences/chat-notifications').then((response) => response.data), enabled }) }
+export function useUpdateChatNotificationPreferences() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: ChatNotificationPreferences) => api.put('/v1/auth/preferences/chat-notifications', input).then((response) => response.data as ChatNotificationPreferences), onSuccess: (data) => qc.setQueryData(['v1', 'auth', 'preferences', 'chat-notifications'], data), onError: (error: any) => toast.error(error.response?.data?.detail || 'Чатын мэдэгдлийн тохиргоо хадгалагдсангүй') }) }
 
 export function useUpdateProfile() {
   const queryClient = useQueryClient()

@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
+import { api } from '../api/client'
 import {
   BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine,
   FolderArchive, LayoutDashboard, LogOut, Menu, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
@@ -15,13 +16,14 @@ import { NotificationCenter } from './NotificationCenter'
 import { WorkspaceSkeleton } from './Loading'
 import { GlobalCommandBar } from './GlobalCommandBar'
 import { getRealtimeUrl, resolvePublicAssetUrl, safeLocalStorage, safeSessionStorage } from '../platform/runtime'
+import { showDesktopChatAlert } from '../platform/chat-notifications'
 
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
   { to: '/worktime', label: 'nav.worktime', icon: ScanLine, roles: [] },
+  { to: '/chat', label: 'nav.chat', icon: MessageCircle, roles: [] },
   { to: '/calendar', label: 'nav.calendar', icon: CalendarDays, roles: [] },
   { to: '/tasks', label: 'nav.tasks', icon: CheckSquare2, roles: [] },
-  { to: '/chat', label: 'nav.chat', icon: MessageCircle, roles: [] },
   { to: '/reports', label: 'nav.reports', icon: FileCheck2, roles: [] },
   { to: '/projects', label: 'nav.projects', icon: BriefcaseBusiness, roles: [] },
   { to: '/plans', label: 'nav.plans', icon: Goal, roles: [] },
@@ -30,7 +32,7 @@ const NAV = [
   { to: '/administration', label: 'nav.settings', icon: Settings2, roles: ['admin', 'manager', 'team_lead'] },
 ]
 
-const NAV_GROUP_BREAKS = new Set(['/calendar', '/chat', '/projects', '/analytics', '/administration'])
+const NAV_GROUP_BREAKS = new Set(['/calendar', '/reports', '/analytics', '/administration'])
 
 const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/worktime': 'Ажлын цагийн бүртгэл', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
@@ -53,6 +55,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((state) => state.token)
   const accountId = useAuthStore((state) => state.actor?.id)
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (!token || !accountId) return
@@ -82,6 +85,20 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         if (key) queryClient.invalidateQueries({ queryKey: ['v1', key] })
         if (event.topic === 'chat' && event.operation === 'message_sent' && event.payload?.sender_account_id !== accountId) {
           void acknowledgeChatReceipt(event.payload.conversation_public_id, event.payload.message_id, 'delivered')
+          if (document.visibilityState !== 'visible') {
+            void Promise.all([
+              api.get('/v1/auth/preferences/chat-notifications').then((response) => response.data),
+              api.get(`/v1/chat/conversations/${event.payload.conversation_public_id}`).then((response) => response.data),
+            ]).then(([preferences, conversation]) => {
+              if (!preferences.desktop_alerts_enabled || conversation.is_muted) return
+              return showDesktopChatAlert({
+                title: event.payload.conversation_title || event.payload.sender_name || 'OYUNS Chat',
+                body: event.payload.preview || 'Шинэ мессеж',
+                targetUrl: event.payload.target_url || `/chat/${event.payload.conversation_public_id}`,
+                soundEnabled: preferences.sound_enabled,
+              }, navigate)
+            }).catch(() => undefined)
+          }
         }
       }
       socket.onclose = () => {
@@ -93,7 +110,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     document.addEventListener('visibilitychange', onVisibility)
     connect()
     return () => { closed = true; document.removeEventListener('visibilitychange', onVisibility); if (retry) clearTimeout(retry); if (heartbeat) clearInterval(heartbeat); socket?.close() }
-  }, [accountId, queryClient, token])
+  }, [accountId, navigate, queryClient, token])
 
   return <>{children}</>
 }

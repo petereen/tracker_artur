@@ -60,6 +60,35 @@ def _is_due_today(t: dict, tz: str | None, now: datetime) -> bool:
     return dl.astimezone(zone).date() == _local_today(tz)
 
 
+def _is_task_on_day(t: dict, tz: str | None, day: date) -> bool:
+    """Return whether a task's deadline falls on ``day`` in its local zone."""
+    dl = _deadline(t)
+    if not dl:
+        return False
+    zone = pytz.timezone(tz or "Asia/Ulaanbaatar")
+    return dl.astimezone(zone).date() == day
+
+
+def _has_employee_task_on_day(emp_id: int, tz: str | None, day: date) -> bool:
+    return any(
+        _is_task_on_day(task, tz, day)
+        for task in task_service.list_assigned_to(emp_id, only_active=True)
+    )
+
+
+def _has_manager_task_on_day(day: date) -> bool:
+    return any(
+        _is_task_on_day(task, task.get("assignee_tz"), day)
+        for tasks in task_service.all_active_grouped_by_assignee().values()
+        for task in tasks
+    )
+
+
+def _digest_allowed_on_day(day: date, work_weekdays, has_task: bool) -> bool:
+    """Allow configured workdays, plus non-workdays with a task due that day."""
+    return day.isoweekday() in set(work_weekdays) or has_task
+
+
 def _line(t: dict, *, with_assignee: bool = False) -> str:
     em = _PRI.get(t["priority"], "🟡")
     who = f" → {t['assignee_name']}" if with_assignee and t.get("assignee_name") else ""
@@ -171,7 +200,17 @@ async def send_employee_morning_digest(emp_id: int) -> None:
     emp = _get_employee(emp_id)
     if not emp:
         return
-    await _send(emp.telegram_id, build_employee_morning(emp_id, emp.timezone))
+    message = build_employee_morning(emp_id, emp.timezone)
+    from app.bot.db import get_schedule
+    from app.bot.scheduler import _schedule_weekdays
+    local_day = _local_today(emp.timezone)
+    if not _digest_allowed_on_day(
+        local_day,
+        _schedule_weekdays(get_schedule(emp_id)),
+        _has_employee_task_on_day(emp_id, emp.timezone, local_day),
+    ):
+        return
+    await _send(emp.telegram_id, message)
 
 
 async def send_employee_evening_digest(emp_id: int) -> None:
@@ -180,7 +219,17 @@ async def send_employee_evening_digest(emp_id: int) -> None:
     emp = _get_employee(emp_id)
     if not emp:
         return
-    await _send(emp.telegram_id, build_employee_evening(emp_id, emp.timezone))
+    message = build_employee_evening(emp_id, emp.timezone)
+    from app.bot.db import get_schedule
+    from app.bot.scheduler import _schedule_weekdays
+    local_day = _local_today(emp.timezone)
+    if not _digest_allowed_on_day(
+        local_day,
+        _schedule_weekdays(get_schedule(emp_id)),
+        _has_employee_task_on_day(emp_id, emp.timezone, local_day),
+    ):
+        return
+    await _send(emp.telegram_id, message)
 
 
 async def send_manager_task_digest() -> None:
@@ -188,6 +237,13 @@ async def send_manager_task_digest() -> None:
         return
     from app.bot.db import get_manager_settings
     ms = get_manager_settings()
+    local_day = _local_today("Asia/Ulaanbaatar")
+    if not _digest_allowed_on_day(
+        local_day,
+        _policy().work_weekdays,
+        _has_manager_task_on_day(local_day),
+    ):
+        return
     message = build_manager_overview()
     for recipient in manager_telegram_ids(ms):
         await _send(recipient, message)

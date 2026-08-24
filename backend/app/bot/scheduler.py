@@ -52,7 +52,6 @@ def _rebuild_jobs_unlocked():
     employees = get_all_active_employees()
     manager_settings = get_manager_settings()
     policy = load_policy(manager_settings)
-    digest_dow = ",".join(str(d - 1) for d in sorted(policy.work_weekdays)) or "0,1,2,3,4"
 
     global _last_schedule_fingerprint
     for job in scheduler.get_jobs():
@@ -74,12 +73,13 @@ def _rebuild_jobs_unlocked():
         employee_weekdays = _schedule_weekdays(sch)
         employee_dow = ",".join(str(d - 1) for d in employee_weekdays)
 
-        # Worker task digests follow each employee's configured workweek.
+        # Evaluate task digests every calendar day. The digest service skips
+        # empty non-workdays but still sends when a task is due that day.
         scheduler.add_job(send_employee_morning_digest, "cron",
-            hour=md.hour, minute=md.minute, day_of_week=employee_dow, timezone=tz,
+            hour=md.hour, minute=md.minute, timezone=tz,
             id=f"task_morning_{emp.id}", replace_existing=True, args=[emp.id])
         scheduler.add_job(send_employee_evening_digest, "cron",
-            hour=ed.hour, minute=ed.minute, day_of_week=employee_dow, timezone=tz,
+            hour=ed.hour, minute=ed.minute, timezone=tz,
             id=f"task_evening_{emp.id}", replace_existing=True, args=[emp.id])
 
         # Monthly reports apply to every active employee. Employees without a
@@ -149,11 +149,13 @@ def _rebuild_jobs_unlocked():
             timezone=DEFAULT_TIMEZONE,
             id="weekly_summary", replace_existing=True)
 
-    # Manager task digest uses the application's default timezone.
+    # Manager task digest uses the application's default timezone. It runs
+    # daily so a task due on a configured non-workday can be an exception;
+    # the digest service suppresses empty non-workday messages.
     md = policy.morning_digest
     from app.services.digest_service import send_manager_task_digest
     scheduler.add_job(send_manager_task_digest, "cron",
-        hour=md.hour, minute=md.minute, day_of_week=digest_dow,
+        hour=md.hour, minute=md.minute,
         timezone=DEFAULT_TIMEZONE,
         id="task_manager_digest", replace_existing=True)
 

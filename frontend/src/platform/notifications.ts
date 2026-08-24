@@ -104,6 +104,14 @@ class CapacitorNotificationService implements NotificationService {
             importance: 4,
             visibility: 1,
           })
+          await PushNotifications.createChannel({
+            id: 'oyuns-chat-v1',
+            name: 'OYUNS Chat',
+            description: 'Chat message notifications',
+            importance: 4,
+            visibility: 1,
+            sound: 'oyuns_chat_notification.wav',
+          })
         }
       })()
     }

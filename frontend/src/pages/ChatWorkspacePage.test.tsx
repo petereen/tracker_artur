@@ -14,6 +14,7 @@ vi.mock('../api/enterprise', () => ({
   useChatConversations: () => ({ data: { items: [conversation], next_cursor: null } }),
   useChatConversation: () => ({ data: conversation }),
   useChatMessages: () => ({ data: { pages: [{ items: [incoming, outgoing], next_before_id: null }] }, hasNextPage: false, isLoading: false, isFetchingNextPage: false, fetchNextPage: vi.fn() }),
+  useChatMessageContext: () => ({ data: undefined }),
   useSendChatMessage: () => ({ mutate: mocks.send, isPending: false }),
   useAcknowledgeChat: () => ({ mutate: mocks.acknowledge }),
   useChatContacts: () => ({ data: [member] }),
@@ -24,6 +25,18 @@ vi.mock('../api/enterprise', () => ({
   useRemoveChatMember: () => ({ mutate: vi.fn() }),
   useLeaveChatGroup: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useChatReceiptDetails: () => ({ isLoading: false, data: { message_id: 13, counts: { total: 1, delivered: 1, read: 1 }, items: [{ account: member, status: 'read', delivered_at: new Date().toISOString(), read_at: new Date().toISOString() }] } }),
+  useEditChatMessage: () => ({ mutate: vi.fn() }),
+  useDeleteChatMessage: () => ({ mutate: vi.fn() }),
+  useReactChatMessage: () => ({ mutate: vi.fn() }),
+  useStarChatMessage: () => ({ mutate: vi.fn() }),
+  usePinChatMessage: () => ({ mutate: vi.fn() }),
+  useForwardChatMessage: () => ({ mutate: vi.fn() }),
+  useUpdateChatConversationPreferences: () => ({ mutate: vi.fn() }),
+  useChatSearch: () => ({ data: { items: [] }, isFetching: false }),
+  useChatThread: () => ({ data: undefined, isLoading: false }),
+  uploadChatAttachment: vi.fn(),
+  cancelChatUpload: vi.fn(),
+  downloadChatAttachment: vi.fn(),
 }))
 
 vi.mock('../platform/runtime', () => ({
@@ -50,7 +63,7 @@ describe('chat workspace', () => {
     const composer = screen.getByRole('textbox', { name: 'Мессеж' })
     fireEvent.change(composer, { target: { value: 'Шинэ мессеж' } })
     fireEvent.keyDown(composer, { key: 'Enter' })
-    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Шинэ мессеж' }))
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Шинэ мессеж' }), expect.any(Object))
     await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith({ message_id: 12, status: 'read' }))
   })
 
