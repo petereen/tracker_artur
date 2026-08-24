@@ -488,7 +488,17 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
     if not candidate_ids:
         return _result("empty", {"query": data.query, "results": []})
     chunks = list((await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.document_id.in_(candidate_ids)))).scalars().all())
-    keyword_ranked = sorted(((chunk, (chunk.content.casefold().count(query) * 10) + sum(chunk.content.casefold().count(token) for token in query.split())) for chunk in chunks), key=lambda pair: pair[1], reverse=True)
+    # A repository search must match both content and the file/entry title.
+    # Filename-only requests such as "presentation template" otherwise score
+    # zero when the document body does not repeat its filename.
+    query_terms = [token for token in query.split() if token]
+    def keyword_score(chunk: KnowledgeChunk) -> int:
+        body = chunk.content.casefold()
+        title = titles.get(chunk.document_id, "").casefold()
+        body_score = body.count(query) * 10 + sum(body.count(token) for token in query_terms)
+        title_score = title.count(query) * 40 + sum(title.count(token) for token in query_terms) * 12
+        return title_score + body_score
+    keyword_ranked = sorted(((chunk, keyword_score(chunk)) for chunk in chunks), key=lambda pair: pair[1], reverse=True)
     query_embedding = await _embed(data.query) if data.search_mode in {"hybrid", "semantic"} else None
     def cosine(left, right) -> float:
         try:
@@ -531,6 +541,22 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
         source_id_public = f"{source_type}:{source_id}"
         rows.append({"source_id": source_id_public, "title": titles[chunk.document_id], "excerpt": chunk.content[:900], "locator": chunk.locator, "score": score, "classification": classification})
         if len(rows) >= data.limit: break
+    # A valid, authorized file can contain no extractable text (for example a
+    # slide deck made only of images). Still return it when its title matches;
+    # callers can then open/download it through the trusted file flow.
+    if not rows:
+        for document_id in candidate_ids:
+            title = titles[document_id].casefold()
+            if query not in title and not all(token in title for token in query_terms):
+                continue
+            source_type, source_id, classification = source_by_doc[document_id]
+            rows.append({
+                "source_id": f"{source_type}:{source_id}", "title": titles[document_id],
+                "excerpt": "", "locator": {"kind": "title"}, "score": 1,
+                "classification": classification,
+            })
+            if len(rows) >= data.limit:
+                break
     if not rows:
         return _result("empty", {"query": data.query, "results": []})
     deliveries = _file_deliveries(rows, data.delivery)

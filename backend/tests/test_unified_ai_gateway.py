@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.core.enterprise_deps import ActorContext, permissions_for_roles
 from app.core.security import create_action_preview_token, decode_action_preview_token, verify_action_preview_token
+from app.services.ai_gateway.gateway import AIGateway
 from app.services.ai_gateway.tools.registry import ToolRegistry
 from app.services.mcp.catalog import get_tool
 
@@ -36,3 +37,8 @@ def test_preview_is_explicitly_mutating_and_compactly_signed():
     assert claims and claims["action_id"] == "123"
     assert verify_action_preview_token(token, payload_digest="a" * 64, account_id=7, organization_id=3, channel="telegram")
     assert not verify_action_preview_token(token, payload_digest="b" * 64, account_id=7, organization_id=3, channel="telegram")
+
+
+def test_multilingual_intent_fallback_keeps_authorized_data_tools_visible():
+    assert "directory" in AIGateway._infer_enterprise_intents("ажилчдын жагсаалт")
+    assert "knowledge" in AIGateway._infer_enterprise_intents("presentation template файл")

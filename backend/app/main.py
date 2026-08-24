@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
 from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssignment, UserAccount
-from app.routers import assistant_learning, auth, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, questions, realtime, schedules, tasks, work_reports, worktime_qr, worktime_reports
+from app.routers import assistant_learning, auth, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, questions, realtime, schedules, tasks, work_reports, worktime_qr, worktime_reports
 from app.erp import router as erp
 from app import mcp_executor
 from sqlalchemy import func, or_, select
@@ -115,6 +115,7 @@ app.include_router(enterprise_auth.router, prefix="/v1/auth", tags=["v1-auth"])
 app.include_router(mobile.router, prefix="/v1/mobile", tags=["v1-mobile"])
 app.include_router(mobile_updates.router, prefix="/v1/mobile-updates", tags=["v1-mobile-updates"])
 app.include_router(realtime.router, prefix="/v1", tags=["v1-realtime"])
+app.include_router(chat.router, prefix="/v1/chat", tags=["v1-chat"])
 app.include_router(company_files.router, prefix="/v1/company-files", tags=["v1-company-files"])
 app.include_router(contracts.router, prefix="/v1", tags=["v1-contracts"])
 app.include_router(enterprise.router, prefix="/v1", tags=["v1-enterprise"])

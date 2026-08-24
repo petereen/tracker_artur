@@ -1,4 +1,4 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { InfiniteData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { acceptSession, api, clearSessionCredentials, publicApi, refreshAccessToken } from './client'
@@ -854,6 +854,191 @@ export interface WorkerDirectoryItem {
   telegram_username: string | null
   avatar_url: string | null
   presence: 'offline' | 'in_person' | 'remote' | 'break'
+}
+
+export interface ChatIdentity {
+  account_id: number
+  employee_id: number | null
+  name: string
+  email: string
+  avatar_url: string | null
+  is_online: boolean
+  last_seen_at: string | null
+  role?: 'owner' | 'member'
+}
+
+export interface ChatMessageSummary {
+  id: number
+  body: string
+  sender_account_id: number | null
+  sender_name: string | null
+  created_at: string
+}
+
+export interface ChatConversation {
+  id: number
+  public_id: string
+  kind: 'direct' | 'group'
+  title: string
+  avatar_urls: string[]
+  presence: 'online' | 'offline' | null
+  members: ChatIdentity[]
+  member_count: number
+  can_manage: boolean
+  last_message: ChatMessageSummary | null
+  unread_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatMessage {
+  id: number
+  conversation_id: number
+  sender: ChatIdentity | null
+  sender_account_id: number | null
+  client_nonce: string
+  body: string
+  created_at: string
+  is_mine: boolean
+  status: 'sending' | 'failed' | 'sent' | 'delivered' | 'read' | null
+  receipts: { total: number; delivered: number; read: number }
+}
+
+export interface ChatMessagePage { items: ChatMessage[]; next_before_id: number | null }
+export interface ChatConversationPage { items: ChatConversation[]; next_cursor: number | null }
+export interface ChatReceiptDetail {
+  message_id: number
+  counts: { total: number; delivered: number; read: number }
+  items: Array<{ account: ChatIdentity; status: 'sent' | 'delivered' | 'read'; delivered_at: string | null; read_at: string | null }>
+}
+
+export function useChatContacts(search = '', enabled = true) {
+  return useQuery<ChatIdentity[]>({
+    queryKey: ['v1', 'chat', 'contacts', search],
+    queryFn: () => api.get('/v1/chat/contacts', { params: { q: search || undefined, limit: 100 } }).then((response) => response.data),
+    enabled,
+    refetchInterval: 20_000,
+  })
+}
+
+export function useChatConversations(search = '') {
+  return useQuery<ChatConversationPage>({
+    queryKey: ['v1', 'chat', 'conversations', search],
+    queryFn: () => api.get('/v1/chat/conversations', { params: { q: search || undefined, limit: 50 } }).then((response) => response.data),
+    refetchInterval: 20_000,
+  })
+}
+
+export function useChatUnreadCount(enabled = true) {
+  return useQuery<{ unread_count: number }>({
+    queryKey: ['v1', 'chat', 'unread-count'],
+    queryFn: () => api.get('/v1/chat/unread-count').then((response) => response.data),
+    enabled,
+  })
+}
+
+export function useChatConversation(publicId?: string) {
+  return useQuery<ChatConversation>({
+    queryKey: ['v1', 'chat', 'conversation', publicId],
+    queryFn: () => api.get(`/v1/chat/conversations/${publicId}`).then((response) => response.data),
+    enabled: Boolean(publicId),
+    refetchInterval: 20_000,
+  })
+}
+
+export function useChatMessages(publicId?: string) {
+  return useInfiniteQuery<ChatMessagePage>({
+    queryKey: ['v1', 'chat', 'messages', publicId],
+    queryFn: ({ pageParam }) => api.get(`/v1/chat/conversations/${publicId}/messages`, { params: { before_id: pageParam || undefined, limit: 50 } }).then((response) => response.data),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_before_id || undefined,
+    enabled: Boolean(publicId),
+  })
+}
+
+function invalidateChat(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'conversations'] })
+  queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'unread-count'] })
+}
+
+export function useOpenDirectConversation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { account_id?: number; employee_id?: number }) => api.post('/v1/chat/conversations/direct', input).then((response) => response.data as ChatConversation),
+    onSuccess: () => invalidateChat(queryClient),
+  })
+}
+
+export function useCreateChatGroup() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { title: string; member_account_ids: number[] }) => api.post('/v1/chat/conversations/groups', input).then((response) => response.data as ChatConversation),
+    onSuccess: () => invalidateChat(queryClient),
+  })
+}
+
+export function useRenameChatGroup(publicId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (title: string) => api.patch(`/v1/chat/conversations/${publicId}`, { title }).then((response) => response.data as ChatConversation), onSuccess: () => { invalidateChat(queryClient); queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'conversation', publicId] }) } })
+}
+
+export function useAddChatMembers(publicId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (account_ids: number[]) => api.post(`/v1/chat/conversations/${publicId}/members`, { account_ids }).then((response) => response.data as ChatConversation), onSuccess: () => { invalidateChat(queryClient); queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'conversation', publicId] }) } })
+}
+
+export function useRemoveChatMember(publicId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: (accountId: number) => api.delete(`/v1/chat/conversations/${publicId}/members/${accountId}`), onSuccess: () => { invalidateChat(queryClient); queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'conversation', publicId] }) } })
+}
+
+export function useLeaveChatGroup(publicId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: () => api.post(`/v1/chat/conversations/${publicId}/leave`).then((response) => response.data), onSuccess: () => invalidateChat(queryClient) })
+}
+
+export function useSendChatMessage(publicId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation<ChatMessage, any, { body: string; client_nonce: string }, { previous?: InfiniteData<ChatMessagePage>; nonce: string }>({
+    mutationFn: (input) => api.post(`/v1/chat/conversations/${publicId}/messages`, input).then((response) => response.data),
+    onMutate: async (input) => {
+      const key = ['v1', 'chat', 'messages', publicId]
+      await queryClient.cancelQueries({ queryKey: key })
+      const previous = queryClient.getQueryData<InfiniteData<ChatMessagePage>>(key)
+      const actor = useAuthStore.getState().actor
+      const optimistic: ChatMessage = {
+        id: -Date.now(), conversation_id: 0, sender: actor ? { account_id: actor.id, employee_id: actor.employee_id, name: actor.name || actor.email, email: actor.email, avatar_url: actor.avatar_url || null, is_online: true, last_seen_at: new Date().toISOString() } : null,
+        sender_account_id: actor?.id ?? null, client_nonce: input.client_nonce, body: input.body, created_at: new Date().toISOString(), is_mine: true, status: 'sending', receipts: { total: 0, delivered: 0, read: 0 },
+      }
+      queryClient.setQueryData<InfiniteData<ChatMessagePage>>(key, (current) => current ? ({ ...current, pages: current.pages.map((page, index) => index === 0 ? { ...page, items: [...page.items.filter((message) => message.client_nonce !== input.client_nonce), optimistic] } : page) }) : { pages: [{ items: [optimistic], next_before_id: null }], pageParams: [undefined] })
+      return { previous, nonce: input.client_nonce }
+    },
+    onError: (_error, _input, context) => {
+      const key = ['v1', 'chat', 'messages', publicId]
+      queryClient.setQueryData<InfiniteData<ChatMessagePage>>(key, (current) => current ? ({ ...current, pages: current.pages.map((page) => ({ ...page, items: page.items.map((message) => message.client_nonce === context?.nonce ? { ...message, status: 'failed' } : message) })) }) : context?.previous)
+    },
+    onSuccess: (message) => {
+      const key = ['v1', 'chat', 'messages', publicId]
+      queryClient.setQueryData<InfiniteData<ChatMessagePage>>(key, (current) => current ? ({ ...current, pages: current.pages.map((page) => ({ ...page, items: page.items.map((item) => item.client_nonce === message.client_nonce ? message : item) })) }) : current)
+      invalidateChat(queryClient)
+    },
+  })
+}
+
+export function useAcknowledgeChat(publicId?: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { message_id: number; status: 'delivered' | 'read' }) => acknowledgeChatReceipt(publicId!, input.message_id, input.status),
+    onSuccess: () => { invalidateChat(queryClient); queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'messages', publicId] }) },
+  })
+}
+
+export function acknowledgeChatReceipt(publicId: string, messageId: number, status: 'delivered' | 'read') {
+  return api.post(`/v1/chat/conversations/${publicId}/receipts`, { message_id: messageId, status })
+}
+
+export function useChatReceiptDetails(publicId?: string, messageId?: number) {
+  return useQuery<ChatReceiptDetail>({ queryKey: ['v1', 'chat', 'receipts', publicId, messageId], queryFn: () => api.get(`/v1/chat/conversations/${publicId}/messages/${messageId}/receipts`).then((response) => response.data), enabled: Boolean(publicId && messageId) })
 }
 
 export function useWorkerDirectory() {

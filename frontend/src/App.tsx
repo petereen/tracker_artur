@@ -33,6 +33,7 @@ const AdminAccessSettingsPage = lazy(() => import('./pages/AdministrationSetting
 const OyunsAssistantSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.OyunsAssistantSettingsPage })))
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })))
 const CompanyFilesPage = lazy(() => import('./pages/CompanyFilesPage').then((module) => ({ default: module.CompanyFilesPage })))
+const ChatWorkspacePage = lazy(() => import('./pages/ChatWorkspacePage').then((module) => ({ default: module.ChatWorkspacePage })))
 const TgMiniAppPage = lazy(() => import('./pages/TgMiniAppPage').then((module) => ({ default: module.TgMiniAppPage })))
 const PrivacyPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.PrivacyPage })))
 const TermsPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.TermsPage })))
@@ -97,6 +98,7 @@ function AuthenticatedApp() {
         <Route path="administration/oyuns" element={<OyunsAssistantSettingsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="company-files" element={<CompanyFilesPage />} />
+        <Route path="chat/:conversationId?" element={<ChatWorkspacePage />} />
         <Route path="legacy/employees" element={<Navigate to="/administration/access" replace />} />
         <Route path="legacy/questions" element={<Navigate to="/administration/collaboration" replace />} />
         <Route path="legacy/schedule" element={<Navigate to="/administration/collaboration" replace />} />

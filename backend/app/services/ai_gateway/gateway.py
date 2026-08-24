@@ -39,6 +39,30 @@ For multi-statement requests, separate read intents from action intents. Complet
 For file requests, use the available knowledge-search tool (legacy `file_search_tool` or `oyuns_knowledge_search`) for content or semantic search; use the legacy directory operation only when that legacy tool is present. Report only authorized results and cite returned sources. For tool results with status=empty, explain that no matching authorized records were found. For status=denied, explain the access or missing-parameter issue without revealing restricted data. For status=unavailable or partial, acknowledge the specific affected capability, state whether any action was performed, and offer a safe retry or focused clarification. Never expose internal IDs, action tokens, raw JSON, credentials, hidden fields, or retrieval metadata. For current/factual requests, use web search and cite returned sources. Never claim an action was performed until the application confirms it."""
 
 
+# The classifier is a routing hint and can miss short multilingual requests.
+# These server-side hints only widen the candidate intent set; RBAC and the
+# dispatcher still decide whether a tool may be shown or executed.
+ENTERPRISE_INTENT_HINTS: dict[str, tuple[str, ...]] = {
+    "knowledge": (
+        "file", "files", "document", "presentation", "template", "knowledge",
+        "файл", "документ", "презентац", "шаблон", "файлы", "знани",
+        "баримт", "танилцуул", "загвар", "мэдлэг", "компани", "дотоод",
+    ),
+    "directory": (
+        "employee", "employees", "staff", "directory", "personnel",
+        "сотрудник", "сотрудники", "персонал", "работник",
+        "ажилтан", "ажилч", "ажилтны", "ажиллагс",
+    ),
+    "tasks_read": ("task", "tasks", "даалгав", "задач"),
+    "tasks_write": ("create task", "assign task", "создай задачу", "даалгавар үүсгэ", "даалгавар өг"),
+    "projects": ("project", "projects", "төсөл", "проект"),
+    "calendar": ("calendar", "availability", "meeting", "schedule", "хуанли", "уулзалт", "зав"),
+    "analytics": ("statistics", "analytics", "report", "stats", "тайлан", "статистик", "шинжилгээ"),
+    "erp": ("erp", "payroll", "inventory", "invoice", "бараа", "цалин", "нэхэмжлэл", "агуулах"),
+    "exchange_rates": ("exchange rate", "currency", "ханш", "валют", "курс валют"),
+}
+
+
 class Classification(BaseModel):
     model_config = ConfigDict(extra="forbid")
     category: QueryCategory
@@ -192,6 +216,15 @@ class AIGateway:
             return latin / len(letters) > 0.55
         return True
 
+    @staticmethod
+    def _infer_enterprise_intents(text: str) -> set[str]:
+        lowered = (text or "").casefold()
+        return {
+            intent
+            for intent, hints in ENTERPRISE_INTENT_HINTS.items()
+            if any(hint in lowered for hint in hints)
+        }
+
     async def _post(self, payload: dict, *, model_key: str, retries: int = 2) -> dict:
         key = settings.OPENAI_API_KEY.strip()
         if not key:
@@ -334,8 +367,19 @@ class AIGateway:
         # caller has already supplied ACL-scoped tools and an executor for this
         # Intent classification narrows exposure before the model sees any
         # enterprise schema. Authorization is repeated by the dispatcher.
+        classified_intents = set(classification.enterprise_intents)
         if request.actor_context is not None:
-            classified_intents = set(classification.enterprise_intents)
+            classified_intents.update(self._infer_enterprise_intents(request.text))
+            # If the model marked this as an enterprise request but omitted
+            # tags, keep the catalog useful by exposing only read intents. A
+            # classifier omission must never turn into an authorization grant
+            # or hide data the caller is already allowed to read.
+            if classification.requires_enterprise_tools and not classified_intents:
+                classified_intents = {
+                    "knowledge", "directory", "tasks_read", "projects", "calendar",
+                    "analytics", "erp", "exchange_rates",
+                }
+        if request.actor_context is not None:
             definitions = self.tool_registry.visible_definitions(request.actor_context, classified_intents) if classified_intents else []
             tools = [
                 {"type": "function", "name": definition.name, "description": definition.description,
@@ -430,7 +474,7 @@ class AIGateway:
                     if total_tool_calls > settings.AI_GATEWAY_MAX_TOOL_CALLS:
                         raise GatewayError("Live model exceeded tool-call budget", status_code=502)
                     inputs.extend(output)
-                    definitions_by_name = {item.name: item for item in self.tool_registry.visible_definitions(request.actor_context, set(classification.enterprise_intents))} if request.actor_context and classification.enterprise_intents else {}
+                    definitions_by_name = {item.name: item for item in self.tool_registry.visible_definitions(request.actor_context, classified_intents)} if request.actor_context and classified_intents else {}
                     def definition_for(call: dict):
                         return definitions_by_name.get(call.get("name", "")) or get_tool(call.get("name", ""))
                     mutation_calls = [call for call in calls if (definition_for(call) and definition_for(call).is_mutation)] if request.actor_context else []

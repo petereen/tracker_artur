@@ -862,7 +862,8 @@ async def worker_profile(employee_id: int, db: AsyncSession = Depends(get_db), a
     if not employee or not employee.is_active:
         raise HTTPException(status_code=404, detail="Worker not found")
     telegram_chat_url = f"https://t.me/{employee.telegram_username.lstrip('@')}" if employee.telegram_username else (f"tg://user?id={employee.telegram_id}" if employee.telegram_id else None)
-    return {"id": employee.id, "name": employee.name, "avatar_url": (employee.metadata_json or {}).get("avatar_url"), "phone_number": employee.phone_number, "birthday": employee.birthday, "work_direction": employee.work_direction, "work_branch": employee.work_branch, "telegram_username": employee.telegram_username, "telegram_connected": bool(employee.telegram_id), "telegram_chat_url": telegram_chat_url, "job_title": employee.job_title}
+    chat_available = bool(await db.scalar(select(UserAccount.id).where(UserAccount.employee_id == employee.id, UserAccount.organization_id == actor.organization_id, UserAccount.status == "active")))
+    return {"id": employee.id, "name": employee.name, "avatar_url": (employee.metadata_json or {}).get("avatar_url"), "phone_number": employee.phone_number, "birthday": employee.birthday, "work_direction": employee.work_direction, "work_branch": employee.work_branch, "telegram_username": employee.telegram_username, "telegram_connected": bool(employee.telegram_id), "telegram_chat_url": telegram_chat_url, "chat_available": chat_available, "job_title": employee.job_title}
 
 
 @router.post("/profile/telegram-link")

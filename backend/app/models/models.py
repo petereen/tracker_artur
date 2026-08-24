@@ -657,6 +657,89 @@ class UserAccount(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class ChatConversation(Base):
+    __tablename__ = "chat_conversations"
+    __table_args__ = (
+        CheckConstraint("kind IN ('direct','group')", name="ck_chat_conversations_kind"),
+        CheckConstraint(
+            "(kind = 'direct' AND direct_key IS NOT NULL AND title IS NULL) OR "
+            "(kind = 'group' AND direct_key IS NULL AND title IS NOT NULL)",
+            name="ck_chat_conversations_shape",
+        ),
+        UniqueConstraint("organization_id", "direct_key", name="uq_chat_conversations_direct_key"),
+        Index("ix_chat_conversations_org_updated", "organization_id", "updated_at", "id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(UUID(as_uuid=True), nullable=False, unique=True, default=uuid.uuid4, server_default=sa_text("gen_random_uuid()"))
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(12), nullable=False)
+    title = Column(Text)
+    direct_key = Column(Text)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    archived_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ChatParticipant(Base):
+    __tablename__ = "chat_participants"
+    __table_args__ = (
+        CheckConstraint("role IN ('owner','member')", name="ck_chat_participants_role"),
+        UniqueConstraint("conversation_id", "account_id", name="uq_chat_participants_conversation_account"),
+        Index("ix_chat_participants_account_active", "account_id", "left_at", "conversation_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    conversation_id = Column(Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String(12), nullable=False, server_default="member", default="member")
+    visible_after_message_id = Column(Integer)
+    joined_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    left_at = Column(DateTime(timezone=True))
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "sender_account_id", "client_nonce", name="uq_chat_messages_client_nonce"),
+        CheckConstraint("char_length(body) BETWEEN 1 AND 4000", name="ck_chat_messages_body_length"),
+        Index("ix_chat_messages_conversation_id", "conversation_id", "id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    conversation_id = Column(Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False)
+    sender_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    client_nonce = Column(UUID(as_uuid=True), nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatMessageReceipt(Base):
+    __tablename__ = "chat_message_receipts"
+    __table_args__ = (
+        UniqueConstraint("message_id", "account_id", name="uq_chat_message_receipts_message_account"),
+        CheckConstraint("read_at IS NULL OR delivered_at IS NOT NULL", name="ck_chat_message_receipts_read_delivered"),
+        Index("ix_chat_receipts_account_unread", "account_id", "read_at", "message_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    delivered_at = Column(DateTime(timezone=True))
+    read_at = Column(DateTime(timezone=True))
+
+
+class WorkspacePresence(Base):
+    __tablename__ = "workspace_presence"
+    __table_args__ = (Index("ix_workspace_presence_org_seen", "organization_id", "last_seen_at"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False, unique=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class RefreshSession(Base):
     __tablename__ = "refresh_sessions"
     __table_args__ = (Index("ix_refresh_sessions_account_expiry", "account_id", "expires_at"),)
