@@ -23,9 +23,52 @@ class ActorContext:
     email: str
     locale: str
     roles: frozenset[str]
+    # These fields are derived by trusted server code.  They are deliberately
+    # optional for compatibility with existing dependency/test constructors.
+    permissions: frozenset[str] = frozenset()
+    detected_language: str = "mn"
+    channel: str = "web"
 
     def has_any_role(self, *roles: str) -> bool:
         return bool(self.roles.intersection(roles))
+
+    def can(self, permission: str) -> bool:
+        return permission in self.permissions
+
+
+ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
+    "admin": frozenset({"assistant.read", "assistant.preview", "assistant.directory", "assistant.analytics", "assistant.erp"}),
+    "manager": frozenset({"assistant.read", "assistant.preview", "assistant.directory", "assistant.analytics", "assistant.erp"}),
+    "hr": frozenset({"assistant.read", "assistant.directory", "assistant.analytics"}),
+    "team_lead": frozenset({"assistant.read", "assistant.preview", "assistant.analytics"}),
+    "member": frozenset({"assistant.read", "assistant.preview"}),
+    "contractor": frozenset({"assistant.read"}),
+    "client_auditor": frozenset({"assistant.read", "assistant.analytics"}),
+}
+
+
+def permissions_for_roles(roles: frozenset[str]) -> frozenset[str]:
+    permissions: set[str] = set()
+    for role in roles:
+        permissions.update(ROLE_PERMISSIONS.get(role, ()))
+    return frozenset(permissions)
+
+
+def build_actor_context(*, account_id: int, organization_id: int, employee_id: int | None,
+                        email: str, locale: str, roles: frozenset[str],
+                        detected_language: str = "mn", channel: str = "web") -> ActorContext:
+    """Construct an actor only from trusted account/role data."""
+    return ActorContext(
+        account_id=account_id,
+        organization_id=organization_id,
+        employee_id=employee_id,
+        email=email,
+        locale=locale,
+        roles=roles,
+        permissions=permissions_for_roles(roles),
+        detected_language=detected_language,
+        channel=channel,
+    )
 
 
 async def actor_from_account_id(account_id: int, db: AsyncSession) -> ActorContext:
@@ -43,7 +86,7 @@ async def actor_from_account_id(account_id: int, db: AsyncSession) -> ActorConte
             )
         )
     ).scalars().all()
-    return ActorContext(
+    return build_actor_context(
         account_id=account.id,
         organization_id=account.organization_id,
         employee_id=account.employee_id,
@@ -77,7 +120,7 @@ async def actor_from_telegram_id(telegram_id: str, db: AsyncSession) -> ActorCon
         return None
     today = date.today()
     roles = (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id, or_(RoleAssignment.valid_from.is_(None), RoleAssignment.valid_from <= today), or_(RoleAssignment.valid_until.is_(None), RoleAssignment.valid_until >= today)))).scalars().all()
-    return ActorContext(account_id=account.id, organization_id=account.organization_id, employee_id=account.employee_id, email=account.email, locale=account.locale, roles=frozenset(roles))
+    return build_actor_context(account_id=account.id, organization_id=account.organization_id, employee_id=account.employee_id, email=account.email, locale=account.locale, roles=frozenset(roles), channel="telegram")
 
 
 async def get_actor(

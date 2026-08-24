@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 
 class StrictInput(BaseModel):
@@ -94,6 +94,21 @@ class ERPReadInput(StrictInput):
     resource: Literal["dashboard", "documents"] = "dashboard"
     document_type: str | None = Field(default=None, max_length=64)
     limit: int = Field(default=10, ge=1, le=25)
+
+
+class ExchangeRateInput(StrictInput):
+    provider: str = Field(min_length=1, max_length=100)
+    pair: str = Field(min_length=1, max_length=500)
+    force_refresh: StrictBool = False
+    request_type: Literal["single", "all", "calculated"] = "single"
+
+    @field_validator("provider", "pair")
+    @classmethod
+    def non_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
 
 
 class TaskPrepareCreateInput(StrictInput):

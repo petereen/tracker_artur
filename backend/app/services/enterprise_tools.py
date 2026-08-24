@@ -26,7 +26,8 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.enterprise_deps import ActorContext
+from app.core.enterprise_deps import ActorContext, permissions_for_roles
+from app.core.security import create_action_preview_token, decode_action_preview_token, verify_action_preview_token
 from app.models.models import (
     AssistantPendingAction, AssistantToolAudit, CalendarEntry, CompanyKnowledge, CompanyPlanItem,
     CompanyLibraryItem, KnowledgeChunk, KnowledgeDocument, Milestone,
@@ -246,6 +247,12 @@ def tool_specs() -> list[dict]:
 
 def _result(status: TOOL_STATUS, data: dict | None = None, *, sources: list[dict] | None = None, deliveries: list[dict] | None = None, warnings: list[str] | None = None) -> dict:
     return {"status": status, "data": data or {}, "sources": sources or [], "deliveries": deliveries or [], "warnings": warnings or []}
+
+
+def _action_payload_digest(payload: dict) -> str:
+    """Canonical digest used to bind a signed preview to validated state."""
+    packed = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(packed.encode("utf-8")).hexdigest()
 
 
 FILE_ATTACHMENT_TERMS = (
@@ -770,19 +777,26 @@ def _assistant_task_output(task: Task, *, assignee_ids: list[int], reviewer_ids:
 
 async def prepare_task_creation(db: AsyncSession, actor: ActorContext, data: AssistantTaskInput, *, action_type: str, channel: str) -> dict:
     payload = await _resolve_task_action_payload(db, actor, data, action_type=action_type)
-    token = secrets.token_urlsafe(24)
     now = datetime.now(timezone.utc)
     action = AssistantPendingAction(
-        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        token_hash=hashlib.sha256(secrets.token_bytes(32)).hexdigest(),
         organization_id=actor.organization_id,
         account_id=actor.account_id,
         action_type=action_type,
         channel=channel,
         payload=payload,
-        expires_at=now + timedelta(minutes=10),
+        expires_at=now + timedelta(seconds=settings.AI_PREVIEW_TOKEN_TTL_SECONDS),
     )
     db.add(action)
     await db.flush()
+    token = create_action_preview_token(
+        action_id=action.id,
+        payload_digest=_action_payload_digest(payload),
+        account_id=actor.account_id,
+        organization_id=actor.organization_id,
+        channel=channel,
+    )
+    action.token_hash = hashlib.sha256(token.encode()).hexdigest()
     people = {}
     target_ids = {payload.get("assignee_id"), payload.get("reviewer_id")} - {None}
     if target_ids:
@@ -882,9 +896,11 @@ async def prepare_task_update(db: AsyncSession, actor: ActorContext, data: Proje
     if not changes:
         return _result("empty", {"reason": "No changes supplied"})
     await _validate_task_mutation_targets(db, actor, changes)
-    token = secrets.token_urlsafe(24); now = datetime.now(timezone.utc)
-    action = AssistantPendingAction(token_hash=hashlib.sha256(token.encode()).hexdigest(), organization_id=actor.organization_id, account_id=actor.account_id, action_type="update_task", task_id=task.id, expected_version=task.version, channel=channel, payload=changes, expires_at=now + timedelta(minutes=10))
+    now = datetime.now(timezone.utc)
+    action = AssistantPendingAction(token_hash=hashlib.sha256(secrets.token_bytes(32)).hexdigest(), organization_id=actor.organization_id, account_id=actor.account_id, action_type="update_task", task_id=task.id, expected_version=task.version, channel=channel, payload=changes, expires_at=now + timedelta(seconds=settings.AI_PREVIEW_TOKEN_TTL_SECONDS))
     db.add(action); await db.flush()
+    token = create_action_preview_token(action_id=action.id, payload_digest=_action_payload_digest(changes), account_id=actor.account_id, organization_id=actor.organization_id, channel=channel)
+    action.token_hash = hashlib.sha256(token.encode()).hexdigest()
     before = {key: getattr(task, {"primary_owner_id": "assignee_id"}.get(key, key), None) for key in changes}
     return _result("ok", {"pending_action": {"action_type": "update_task", "token": token, "task_id": str(task.public_id), "expires_at": action.expires_at.isoformat(), "before": before, "after": changes}})
 
@@ -899,12 +915,21 @@ async def confirm_task_update(db: AsyncSession, actor: ActorContext, token: str,
             token = resolve_action_reference(actor, token, channel=channel)
         except ValueError:
             return _result("denied", {"reason": "Action is unavailable or expired"})
+    claims = decode_action_preview_token(token)
+    if not claims:
+        return _result("denied", {"reason": "Action is unavailable or expired"})
+    if "assistant.preview" not in (actor.permissions or permissions_for_roles(actor.roles)):
+        return _result("denied", {"reason": "Action is unavailable or expired"})
     from app.services.mcp.guard import guard
     if not await guard.allow_confirmation(account_id=actor.account_id):
         return _result("denied", {"reason": "Too many confirmations. Please retry shortly.", "retry_after_seconds": 1})
     action = await db.scalar(select(AssistantPendingAction).where(AssistantPendingAction.token_hash == hashlib.sha256(token.encode()).hexdigest()).with_for_update())
     now = datetime.now(timezone.utc)
-    if not action or action.account_id != actor.account_id or action.organization_id != actor.organization_id or action.channel != channel:
+    if not action or str(action.id) != str(claims.get("action_id")) or action.account_id != actor.account_id or action.organization_id != actor.organization_id or action.channel != channel:
+        return _result("denied", {"reason": "Action is unavailable or expired"})
+    original_payload = {key: value for key, value in (action.payload or {}).items() if key != "_result"}
+    payload_digest = _action_payload_digest(original_payload)
+    if claims.get("digest_prefix") != payload_digest[:12] or not verify_action_preview_token(token, payload_digest=payload_digest, account_id=actor.account_id, organization_id=actor.organization_id, channel=channel):
         return _result("denied", {"reason": "Action is unavailable or expired"})
     if action.action_type in {"create_task", "delegate_task"}:
         return await _confirm_task_creation(db, actor, action, channel=channel)

@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import actor_from_account_id
-from app.services.mcp.adapters import execute
 from app.services.mcp.catalog import allowed_tool_names, get_tool
+from app.services.ai_gateway.tools.registry import dispatch_tool
 
 router = APIRouter()
 
@@ -70,12 +70,13 @@ async def execute_mcp_tool(
     # scoped and is reset automatically after the request commits/rolls back.
     if tool.access_mode == "read":
         await db.execute(text("SET LOCAL statement_timeout = '5000ms'"))
-    result = await execute(
-        db,
+    from dataclasses import replace
+    actor = replace(actor, channel=str(claims.get("channel") or "web"))
+    result = await dispatch_tool(
+        body.tool_name,
+        body.arguments,
         actor,
-        tool_name=body.tool_name,
-        arguments=body.arguments,
-        channel=str(claims.get("channel") or "web"),
+        db=db,
         request_id=body.request_id,
         conversation_id=claims.get("conversation_id"),
     )

@@ -7,6 +7,7 @@ import html
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
+from dataclasses import replace
 
 import pytz
 from aiogram import F, Router
@@ -31,7 +32,6 @@ from app.core.enterprise_deps import actor_from_telegram_id
 from app.models.models import AssistantConversation, AssistantMessage, CompanyLibraryItem
 from app.services import enterprise_tools
 from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
-from app.services.mcp.catalog import gateway_tool_for
 from app.services.mcp.references import resolve_action_reference
 from app.services.attachment_storage import get_attachment
 from sqlalchemy import select
@@ -136,23 +136,6 @@ async def _enterprise_route(
     """
     if not tg_id:
         return False
-    if assistant_ai.is_task_creation_request(text):
-        async with AsyncSessionLocal() as db:
-            actor = await actor_from_telegram_id(tg_id, db)
-            if not actor:
-                await _answer(message, "OYUNS access requires a linked active platform account.")
-                return True
-        await begin_task_draft(
-            message,
-            state,
-            text,
-            employee=employee,
-            is_manager=is_manager,
-            tg_id=tg_id,
-            show_preview=True,
-            allow_ai_structuring=True,
-        )
-        return True
     async with AsyncSessionLocal() as db:
         actor = await actor_from_telegram_id(tg_id, db)
         if not actor:
@@ -166,24 +149,14 @@ async def _enterprise_route(
         rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation.id).order_by(AssistantMessage.id.desc()).limit(12))).scalars().all()
         history = [{"role": row.role, "content": row.content} for row in reversed(rows)]
         db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-        mcp_tool = gateway_tool_for(actor, channel="telegram", conversation_id=conversation.id)
-        grounding = {"context": {}, "sources": []} if mcp_tool else await enterprise_tools.retrieve_turn_context(db, actor, text, channel="telegram", conversation_id=conversation.id)
-        tool_sources: list[dict] = list(grounding.get("sources", []))
+        detected = assistant_ai.detect_language(text).value
+        actor = replace(actor, channel="telegram", detected_language=detected)
+        tool_sources: list[dict] = []
         tool_deliveries: list[dict] = []
         pending_action = None
 
-        async def execute_gateway_tool(name: str, arguments: dict) -> dict:
-            nonlocal pending_action
-            if name == "file_search_tool" and enterprise_tools.wants_file_attachment(text):
-                arguments = {**arguments, "delivery": "attachment"}
-            result = await enterprise_tools.execute(db, actor, name, arguments, channel="telegram", prompt=text, conversation_id=conversation.id)
-            tool_sources.extend(result.get("sources", []))
-            tool_deliveries.extend(result.get("deliveries", []))
-            pending_action = result.get("data", {}).get("pending_action") or pending_action
-            return result
-
         try:
-            routed = await ai_gateway.respond(db, GatewayRequest(text=text, history=history, channel="telegram", language_hint="mn", tools=[] if mcp_tool else enterprise_tools.tool_specs(), execute_tool=None if mcp_tool else execute_gateway_tool, conversation_id=conversation.id, grounding_context=grounding.get("context"), grounding_sources=grounding.get("sources", []), mcp_tool=mcp_tool, mcp_context=conversation.mcp_context if mcp_tool else []))
+            routed = await ai_gateway.execute_turn(db, actor, [*history, {"role": "user", "content": text}], conversation_id=conversation.id)
         except GatewayError:
             await db.rollback()
             await _answer(message, "OYUNS live AI service is temporarily unavailable. Please try again shortly.")
@@ -197,7 +170,7 @@ async def _enterprise_route(
         result = {"answer": routed.answer, "action": pending_action, "sources": list(source_map.values()), "deliveries": tool_deliveries}
         attachments = enterprise_tools.attachment_metadata(tool_deliveries)
         db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=routed.answer, action=action, sources=result["sources"], attachments=attachments))
-        conversation.mcp_context = routed.mcp_context if mcp_tool else []
+        conversation.mcp_context = []
         conversation.updated_at = datetime.now(timezone.utc)
         await db.commit()
         action_reference = (result.get("action") or {}).get("action_reference")

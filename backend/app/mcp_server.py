@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.security import decode_mcp_access_token
 from app.core.enterprise_deps import ActorContext
-from app.services.mcp.catalog import get_tool, tool_list
+from app.services.mcp.catalog import CATALOG, get_tool, tool_list
 from app.services.mcp.guard import guard
 
 log = logging.getLogger(__name__)
@@ -57,6 +57,8 @@ def _actor_from_claims(claims: dict) -> ActorContext:
         email="mcp-edge@oyuns.invalid",
         locale="mn",
         roles=frozenset(),
+        permissions=frozenset(permission for tool in CATALOG for permission in tool.required_permissions),
+        channel=str(claims.get("channel") or "web"),
     )
 
 

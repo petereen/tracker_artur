@@ -1,4 +1,9 @@
-"""OpenAI ReAct orchestration and deterministic fallback for the OYUNS assistant."""
+"""Deprecated compatibility contracts for the pre-gateway assistant path.
+
+Conversational Web and Telegram turns no longer call this module; it remains
+temporarily importable for explicit legacy command integrations and migration
+compatibility. New AI behavior belongs in ``services.ai_gateway``.
+"""
 
 from __future__ import annotations
 

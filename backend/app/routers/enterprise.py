@@ -102,7 +102,6 @@ from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
 from app.services import enterprise_tools
 from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
-from app.services.mcp.catalog import gateway_tool_for
 
 
 router = APIRouter()
@@ -671,7 +670,7 @@ class AssistantToolRequest(BaseModel):
 
 
 class AssistantActionConfirmInput(BaseModel):
-    token: str = Field(min_length=20, max_length=200)
+    token: str = Field(min_length=20, max_length=4096)
 
 
 class ResourceGrantInput(BaseModel):
@@ -3155,34 +3154,15 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     history_rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation.id).order_by(AssistantMessage.id.desc()).limit(12))).scalars().all()
     history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
     text = data.text.strip()
+    from dataclasses import replace
+    actor = replace(actor, channel="web", detected_language=assistant_ai.detect_language(text).value)
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-    # MCP is deliberately opt-in.  While enabled, discovery and retrieval run
-    # through the remote, actor-scoped catalog; otherwise this retains the
-    # existing in-process FastAPI tools as an immediate rollback path.
-    mcp_tool = gateway_tool_for(actor, channel="web", conversation_id=conversation.id)
-    grounding = {"context": {}, "sources": []} if mcp_tool else await enterprise_tools.retrieve_turn_context(db, actor, text, channel="web", conversation_id=conversation.id)
-    tool_sources: list[dict] = list(grounding.get("sources", []))
+    tool_sources: list[dict] = []
     tool_deliveries: list[dict] = []
     pending_action = None
 
-    async def execute_gateway_tool(name: str, arguments: dict) -> dict:
-        nonlocal pending_action
-        if name == "file_search_tool" and enterprise_tools.wants_file_attachment(text):
-            arguments = {**arguments, "delivery": "attachment"}
-        result = await enterprise_tools.execute(db, actor, name, arguments, channel="web", prompt=text, conversation_id=conversation.id)
-        tool_sources.extend(result.get("sources", []))
-        tool_deliveries.extend(result.get("deliveries", []))
-        pending_action = result.get("data", {}).get("pending_action") or pending_action
-        return result
-
     try:
-        routed = await ai_gateway.respond(db, GatewayRequest(
-            text=text, history=history, channel="web", language_hint="mn",
-            tools=[] if mcp_tool else enterprise_tools.tool_specs(), execute_tool=None if mcp_tool else execute_gateway_tool,
-            conversation_id=conversation.id, grounding_context=grounding.get("context"),
-            grounding_sources=grounding.get("sources", []),
-            mcp_tool=mcp_tool, mcp_context=conversation.mcp_context if mcp_tool else [],
-        ))
+        routed = await ai_gateway.execute_turn(db, actor, [*history, {"role": "user", "content": text}], conversation_id=conversation.id)
     except GatewayError as exc:
         await db.rollback()
         raise HTTPException(status_code=exc.status_code, detail="OYUNS live AI service is temporarily unavailable") from exc
@@ -3197,7 +3177,7 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     attachments = enterprise_tools.attachment_metadata(tool_deliveries)
     assistant_message = AssistantMessage(conversation_id=conversation.id, role="assistant", content=answer, action=action, sources=sources, attachments=attachments)
     db.add(assistant_message)
-    conversation.mcp_context = routed.mcp_context if mcp_tool else []
+    conversation.mcp_context = []
     conversation.updated_at = datetime.now(timezone.utc)
     await db.commit()
     result = {"conversation_id": conversation.id, "message": {"id": assistant_message.id, "role": "assistant", "content": answer, "action": action, "sources": sources, "attachments": attachments}}

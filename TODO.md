@@ -1,6 +1,12 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Implement unified in-process AI Gateway, typed MCP registry, parallel read execution, signed previews, and Web/Telegram cutover (`backend/app/services/ai_gateway`, `backend/app/services/mcp`, `backend/app/bot/assistant_handlers.py`, `backend/app/routers/enterprise.py`)
+- [x] Add gateway registry/dispatcher and permission-aware catalog contracts (`backend/app/services/ai_gateway/tools`, `backend/app/services/mcp`)
+- [x] Add signed stateful action preview tokens and trusted callback verification (`backend/app/services/enterprise_tools.py`, `backend/app/core/security.py`)
+- [x] Route Web and Telegram conversational turns through the unified gateway (`backend/app/routers/enterprise.py`, `backend/app/bot/assistant_handlers.py`)
+- [x] Add gateway security, concurrency, token, and channel-parity regression tests (`backend/tests`)
+- [ ] Run focused backend tests, compile checks, and router/startup smoke validation — changed modules compile with `PYTHONPYCACHEPREFIX=/tmp/tracker-pycache`; pytest cannot run because `pytest` is not installed
 - [x] Fix HR stats scope/default selection and polish the Worktime export control (`frontend/src/pages/StatsWorkspacePage.tsx`, `backend/app/routers/enterprise.py`, `frontend/src/index.css`)
 - [x] Move worktime export trigger into Stats beside the organization-total selector and include HR visibility (`frontend/src/pages/StatsWorkspacePage.tsx`)
 - [x] Refactor worktime CSV/XLSX output into repeated per-worker summary headers and daily interval blocks (`backend/app/services/worktime_report_service.py`)

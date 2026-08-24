@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.core.enterprise_deps import ActorContext
 from app.models.models import CompanyKnowledge, CompanyLibraryItem, Employee, KnowledgeChunk, KnowledgeDocument, ResourcePolicy, Task
 from app.services import enterprise_tools
+from app.services import exchange_rate_service
 from app.services.mcp import schemas
 from app.services.mcp.references import action_reference, resolve_resource_reference, resource_reference
 from app.services.mcp.results import envelope
@@ -198,6 +199,19 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
             if "stock_balances" in safe:
                 safe = {"stock_balances": [{"quantity": row.get("quantity"), "value": row.get("value")} for row in safe["stock_balances"]]}
             return envelope(result=result, request_id=request_id, summary=_summary(result, "Returned authorized ERP data."), data=safe)
+
+        if tool_name == "oyuns_exchange_rate_get":
+            data = schemas.ExchangeRateInput.model_validate(arguments)
+            result = await exchange_rate_service.get_exchange_rate(
+                provider=data.provider,
+                pair=data.pair,
+                force_refresh=data.force_refresh,
+                request_type=data.request_type,
+            )
+            status = "ok" if result.get("ok", True) else "unavailable"
+            return envelope(result={"status": status, "data": result}, request_id=request_id,
+                            summary="Returned the requested exchange rate." if status == "ok" else "The exchange-rate service is unavailable.",
+                            data=result)
 
         if tool_name == "oyuns_tasks_prepare_create":
             data = schemas.TaskPrepareCreateInput.model_validate(arguments)

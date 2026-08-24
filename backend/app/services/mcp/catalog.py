@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from app.core.enterprise_deps import ActorContext
+from app.core.enterprise_deps import ActorContext, permissions_for_roles
 from app.core.config import settings
 from app.core.security import create_mcp_access_token
 from app.services.mcp import schemas
@@ -24,27 +24,29 @@ class ToolDefinition:
     domain: str
     access_mode: AccessMode
     required_roles: frozenset[str] = frozenset()
+    required_permissions: frozenset[str] = frozenset({"assistant.read"})
+    intent_tags: frozenset[str] = frozenset()
+    is_mutation: bool = False
 
     @property
     def read_only(self) -> bool:
-        # Previews create only an expiring confirmation record; they never
-        # apply an ERP mutation and require a separate trusted-channel click.
-        return self.access_mode in {"read", "preview"}
+        return not self.is_mutation
 
 
 CATALOG: tuple[ToolDefinition, ...] = (
-    ToolDefinition("oyuns_knowledge_search", "Search company knowledge", "Search authorized company knowledge and file excerpts. Returns cited, bounded passages.", schemas.KnowledgeSearchInput, "knowledge", "read"),
-    ToolDefinition("oyuns_knowledge_fetch", "Fetch knowledge excerpt", "Fetch a single authorized knowledge source by opaque reference.", schemas.KnowledgeFetchInput, "knowledge", "read"),
-    ToolDefinition("oyuns_records_search", "Search employee directory", "Search authorized employee directory fields only.", schemas.RecordsSearchInput, "records", "read"),
-    ToolDefinition("oyuns_records_get", "Get employee record", "Get one authorized employee record by opaque reference.", schemas.RecordsGetInput, "records", "read"),
-    ToolDefinition("oyuns_records_aggregate", "Aggregate employee directory", "Return a permitted aggregate over the employee directory.", schemas.RecordsAggregateInput, "records", "read"),
-    ToolDefinition("oyuns_tasks_search", "Search tasks", "Search tasks, blockers, and review work in the caller's permitted scope.", schemas.TasksSearchInput, "tasks", "read"),
-    ToolDefinition("oyuns_projects_search", "Search projects", "Search projects, plans, and milestones in the caller's permitted scope.", schemas.ProjectsSearchInput, "projects", "read"),
-    ToolDefinition("oyuns_calendar_availability", "Get calendar availability", "Retrieve authorized availability; private events are reduced to free/busy when required.", schemas.CalendarAvailabilityInput, "calendar", "read"),
-    ToolDefinition("oyuns_stats_get", "Get governed statistics", "Return authorized OYUNS ERP metrics; unsupported metrics are rejected.", schemas.StatsGetInput, "analytics", "read"),
-    ToolDefinition("oyuns_erp_read", "Read ERP records", "Read authorized ERP dashboard totals or documents. This never creates, posts, pays, or finalizes payroll.", schemas.ERPReadInput, "erp", "read"),
-    ToolDefinition("oyuns_tasks_prepare_create", "Prepare task creation", "Prepare a task for explicit Web or Telegram confirmation. This never creates a task directly.", schemas.TaskPrepareCreateInput, "tasks", "preview"),
-    ToolDefinition("oyuns_tasks_prepare_update", "Prepare task update", "Prepare a task update for explicit Web or Telegram confirmation. This never changes a task directly.", schemas.TaskPrepareUpdateInput, "tasks", "preview"),
+    ToolDefinition("oyuns_knowledge_search", "Search company knowledge", "Search authorized company knowledge and file excerpts. Returns cited, bounded passages.", schemas.KnowledgeSearchInput, "knowledge", "read", intent_tags=frozenset({"knowledge"})),
+    ToolDefinition("oyuns_knowledge_fetch", "Fetch knowledge excerpt", "Fetch a single authorized knowledge source by opaque reference.", schemas.KnowledgeFetchInput, "knowledge", "read", intent_tags=frozenset({"knowledge"})),
+    ToolDefinition("oyuns_records_search", "Search employee directory", "Search authorized employee directory fields only.", schemas.RecordsSearchInput, "records", "read", required_permissions=frozenset({"assistant.directory"}), intent_tags=frozenset({"directory"})),
+    ToolDefinition("oyuns_records_get", "Get employee record", "Get one authorized employee record by opaque reference.", schemas.RecordsGetInput, "records", "read", required_permissions=frozenset({"assistant.directory"}), intent_tags=frozenset({"directory"})),
+    ToolDefinition("oyuns_records_aggregate", "Aggregate employee directory", "Return a permitted aggregate over the employee directory.", schemas.RecordsAggregateInput, "records", "read", required_permissions=frozenset({"assistant.directory"}), intent_tags=frozenset({"directory", "analytics"})),
+    ToolDefinition("oyuns_tasks_search", "Search tasks", "Search tasks, blockers, and review work in the caller's permitted scope.", schemas.TasksSearchInput, "tasks", "read", intent_tags=frozenset({"tasks_read"})),
+    ToolDefinition("oyuns_projects_search", "Search projects", "Search projects, plans, and milestones in the caller's permitted scope.", schemas.ProjectsSearchInput, "projects", "read", intent_tags=frozenset({"projects"})),
+    ToolDefinition("oyuns_calendar_availability", "Get calendar availability", "Retrieve authorized availability; private events are reduced to free/busy when required.", schemas.CalendarAvailabilityInput, "calendar", "read", intent_tags=frozenset({"calendar"})),
+    ToolDefinition("oyuns_stats_get", "Get governed statistics", "Return authorized OYUNS ERP metrics; unsupported metrics are rejected.", schemas.StatsGetInput, "analytics", "read", required_permissions=frozenset({"assistant.analytics"}), intent_tags=frozenset({"analytics"})),
+    ToolDefinition("oyuns_erp_read", "Read ERP records", "Read authorized ERP dashboard totals or documents. This never creates, posts, pays, or finalizes payroll.", schemas.ERPReadInput, "erp", "read", required_permissions=frozenset({"assistant.erp"}), intent_tags=frozenset({"erp"})),
+    ToolDefinition("oyuns_exchange_rate_get", "Get exchange rate", "Retrieve a current exchange rate from the configured provider.", schemas.ExchangeRateInput, "exchange", "read", intent_tags=frozenset({"exchange_rates"})),
+    ToolDefinition("oyuns_tasks_prepare_create", "Prepare task creation", "Prepare a task for explicit Web or Telegram confirmation. This never creates a task directly.", schemas.TaskPrepareCreateInput, "tasks", "preview", required_permissions=frozenset({"assistant.preview"}), intent_tags=frozenset({"tasks_write"}), is_mutation=True),
+    ToolDefinition("oyuns_tasks_prepare_update", "Prepare task update", "Prepare a task update for explicit Web or Telegram confirmation. This never changes a task directly.", schemas.TaskPrepareUpdateInput, "tasks", "preview", required_permissions=frozenset({"assistant.preview"}), intent_tags=frozenset({"tasks_write"}), is_mutation=True),
 )
 
 
@@ -65,24 +67,29 @@ def _strict_schema(model: type[BaseModel]) -> dict:
     return schema
 
 
-def allowed_tool_names(actor: ActorContext) -> list[str]:
+def allowed_tool_names(actor: ActorContext, intents: set[str] | frozenset[str] | None = None) -> list[str]:
     """Return model-visible tools; confirmation is intentionally absent."""
-    return [tool.name for tool in CATALOG if not tool.required_roles or actor.has_any_role(*tool.required_roles)]
+    intents = set(intents or ())
+    permissions = actor.permissions or permissions_for_roles(actor.roles)
+    return [tool.name for tool in CATALOG
+            if (not tool.required_roles or actor.has_any_role(*tool.required_roles))
+            and tool.required_permissions.issubset(permissions)
+            and (not intents or bool(tool.intent_tags.intersection(intents)))]
 
 
 def get_tool(name: str) -> ToolDefinition | None:
     return next((tool for tool in CATALOG if tool.name == name), None)
 
 
-def tool_list(actor: ActorContext) -> list[dict]:
-    allowed = set(allowed_tool_names(actor))
+def tool_list(actor: ActorContext, intents: set[str] | frozenset[str] | None = None) -> list[dict]:
+    allowed = set(allowed_tool_names(actor, intents))
     return [
         {
             "name": tool.name,
             "title": tool.title,
             "description": tool.description,
             "inputSchema": _strict_schema(tool.model),
-            "annotations": {"readOnlyHint": tool.read_only, "destructiveHint": False, "idempotentHint": tool.access_mode == "read"},
+            "annotations": {"readOnlyHint": tool.read_only, "destructiveHint": tool.is_mutation, "idempotentHint": tool.access_mode == "read"},
         }
         for tool in CATALOG
         if tool.name in allowed
