@@ -38,9 +38,10 @@ import {
   periodFromPreset,
   TimePeriodFilter,
 } from "../components/TimePeriodFilter";
-import { EMPTY_ROLES, useAuthStore } from "../store/auth";
+import { useAuthStore } from "../store/auth";
 import { UserTagPicker } from "../components/UserTagPicker";
 import { WorldClockWidget } from "../components/WorldClockWidget";
+import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
 
 function formatDuration(seconds: number) {
   seconds = Math.max(0, Math.floor(seconds));
@@ -323,8 +324,9 @@ export function EnterpriseDashboardPage() {
     "week",
   );
   const [period, setPeriod] = useState(() => periodFromPreset("week"));
-  const summary = useEnterpriseSummary(period);
   const employeeId = useAuthStore((state) => state.actor?.employee_id);
+  const { isManagerMode } = useWorkspaceMode();
+  const summary = useEnterpriseSummary(period, isManagerMode ? undefined : employeeId ?? undefined);
   const clock = useClock(employeeId != null);
   const action = useClockAction();
   const todayCheckin = useTodayCheckin();
@@ -338,7 +340,7 @@ export function EnterpriseDashboardPage() {
   const todayTasks = useEnterpriseTasks(undefined, {
     date_from: today,
     date_to: today,
-  });
+  }, { scope: isManagerMode ? "organization" : "mine" });
   const delegatedTasks = useEnterpriseTasks(undefined, undefined, {
     scope: "delegated",
   });
@@ -362,14 +364,14 @@ export function EnterpriseDashboardPage() {
   const miniCalendarTasks = useEnterpriseTasks(undefined, {
     date_from: localDateKey(monthDays[0]),
     date_to: localDateKey(monthDays[monthDays.length - 1]),
-  });
-  const miniCalendarEvents = useCalendarEvents("private", monthDays[20]);
-  const miniCalendarCompanyEvents = useCalendarEvents("corporate", monthDays[20]);
+  }, { scope: isManagerMode ? "organization" : "mine" });
+  const calendarScope = isManagerMode ? "corporate" : "private";
+  const miniCalendarEvents = useCalendarEvents(calendarScope, monthDays[20]);
   const miniCalendarVisibleTasks = useMemo(() => {
     const tasks = new Map<number, EnterpriseTask>();
-    [...(miniCalendarEvents.data?.tasks ?? []), ...(miniCalendarCompanyEvents.data?.tasks ?? []), ...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(delegatedTasks.data ?? []), ...(agenda.data?.tasks ?? [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
+    [...(miniCalendarEvents.data?.tasks ?? []), ...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(isManagerMode ? delegatedTasks.data ?? [] : []), ...(!isManagerMode ? agenda.data?.tasks ?? [] : [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
     return [...tasks.values()];
-  }, [agenda.data?.tasks, delegatedTasks.data, miniCalendarCompanyEvents.data?.tasks, miniCalendarEvents.data?.tasks, miniCalendarTasks.data, todayTasks.data]);
+  }, [agenda.data?.tasks, delegatedTasks.data, isManagerMode, miniCalendarEvents.data?.tasks, miniCalendarTasks.data, todayTasks.data]);
   const miniCalendarMarkers = useMemo(() => {
     type MarkerKind = "task" | "event" | "reminder" | "time-block";
     const dates = new Map<string, Set<MarkerKind>>();
@@ -383,10 +385,10 @@ export function EnterpriseDashboardPage() {
       if (task.start_at && task.deadline_at) return;
       add(task.start_at || task.deadline_at, "task");
     });
-    [...(miniCalendarEvents.data?.entries ?? []), ...(miniCalendarCompanyEvents.data?.entries ?? []), ...(agenda.data?.entries ?? [])].forEach((item: any) => add(item.remind_at || item.starts_at || item.start_at, item.kind === "reminder" ? "reminder" : "event"));
-    [...(miniCalendarEvents.data?.time_blocks ?? []), ...(miniCalendarCompanyEvents.data?.time_blocks ?? [])].forEach((item: any) => add(item.starts_at || item.start_at, "time-block"));
+    [...(miniCalendarEvents.data?.entries ?? []), ...(!isManagerMode ? agenda.data?.entries ?? [] : [])].forEach((item: any) => add(item.remind_at || item.starts_at || item.start_at, item.kind === "reminder" ? "reminder" : "event"));
+    [...(miniCalendarEvents.data?.time_blocks ?? [])].forEach((item: any) => add(item.starts_at || item.start_at, "time-block"));
     return dates;
-  }, [agenda.data?.entries, miniCalendarCompanyEvents.data?.entries, miniCalendarCompanyEvents.data?.time_blocks, miniCalendarEvents.data?.entries, miniCalendarEvents.data?.time_blocks, miniCalendarVisibleTasks]);
+  }, [agenda.data?.entries, isManagerMode, miniCalendarEvents.data?.entries, miniCalendarEvents.data?.time_blocks, miniCalendarVisibleTasks]);
   const miniCalendarRanges = useMemo(() => {
     const visibleStart = localDateKey(monthDays[0]);
     const visibleEnd = localDateKey(monthDays[monthDays.length - 1]);
@@ -429,10 +431,10 @@ export function EnterpriseDashboardPage() {
     }
     return segments;
   }, [miniCalendarVisibleTasks, monthDays]);
-  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES);
-  const isSupervisor = roles.some((role) =>
-    ["admin", "manager", "team_lead"].includes(role),
-  );
+  const isSupervisor = isManagerMode;
+  useEffect(() => {
+    if (!isManagerMode) setTaskTab("today");
+  }, [isManagerMode]);
   const active = clock.data?.active;
   const clockReady = Boolean(clock.data);
   const [clientNow, setClientNow] = useState(() => Date.now());
@@ -523,9 +525,7 @@ export function EnterpriseDashboardPage() {
       )
     );
   }, 0);
-  const activeTasks = (todayTasks.data ?? []).filter((task) =>
-    task.assignee_ids.includes(employeeId ?? -1),
-  );
+  const activeTasks = isManagerMode ? (todayTasks.data ?? []) : (todayTasks.data ?? []).filter((task) => task.assignee_ids.includes(employeeId ?? -1));
   const delegated = delegatedTasks.data ?? [];
   const completeDelegatedTask = (task: EnterpriseTask) =>
     updateTask.mutate({
@@ -798,14 +798,14 @@ export function EnterpriseDashboardPage() {
             >
               Надад өгсөн
             </button>
-            <button
+            {isManagerMode && <button
               className={taskTab === "delegated" ? "active" : ""}
               onClick={() => setTaskTab("delegated")}
               role="tab"
               aria-selected={taskTab === "delegated"}
             >
               Миний өгсөн даалгаврууд
-            </button>
+            </button>}
           </div>
           <div className="today-task-list">
           {taskTab === "today" ? (

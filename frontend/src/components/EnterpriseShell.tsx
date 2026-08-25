@@ -13,6 +13,8 @@ import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { periodFromPreset } from './TimePeriodFilter'
 import { OyunsAssistant } from './OyunsAssistant'
 import { NotificationCenter } from './NotificationCenter'
+import { WorkspaceModeProvider } from './WorkspaceModeProvider'
+import { WorkspaceModeToggle } from './WorkspaceModeToggle'
 import { WorkspaceSkeleton } from './Loading'
 import { GlobalCommandBar } from './GlobalCommandBar'
 import { getRealtimeUrl, resolvePublicAssetUrl, safeLocalStorage, safeSessionStorage } from '../platform/runtime'
@@ -249,6 +251,7 @@ export function EnterpriseShell() {
   }
 
   return (
+    <WorkspaceModeProvider>
     <RealtimeProvider>
       <div className="workspace-shell">
         <button className="mobile-menu-button" onClick={() => setMobileOpen(true)} aria-label="Цэс нээх"><Menu /></button>
@@ -277,6 +280,7 @@ export function EnterpriseShell() {
           <header className="workspace-header">
             <div><span className="eyebrow">OYUNS / Workspace</span><h1>{title}</h1></div>
             <div className="header-actions">
+              <WorkspaceModeToggle />
               <NotificationCenter />
               <button className="theme-toggle" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={theme === 'light' ? 'Dark mode идэвхжүүлэх' : 'Light mode идэвхжүүлэх'} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
               <button className="search-trigger" onClick={() => setCommandOpen(true)}><Search size={16} /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
@@ -302,5 +306,6 @@ export function EnterpriseShell() {
         <GlobalCommandBar open={commandOpen} onClose={() => setCommandOpen(false)} accountId={actorQuery.data?.id} channels={commandChannels} features={commandFeatures} onWorker={(id) => { setSelectedWorker(id); setWorkersOpen(true) }} />
       </div>
     </RealtimeProvider>
+    </WorkspaceModeProvider>
   )
 }

@@ -193,6 +193,10 @@ class ChatNotificationPreferences(BaseModel):
     sound_enabled: bool = True
 
 
+class WorkspaceModePreferences(BaseModel):
+    mode: Literal["member", "manager"] = "manager"
+
+
 class PasswordResetRequest(BaseModel):
     email: str
 
@@ -774,6 +778,36 @@ async def update_world_clock_preferences(
     account.preferences = {
         **(account.preferences or {}),
         "world_clock": data.model_dump(),
+    }
+    await db.commit()
+    return data
+
+
+@router.get("/preferences/workspace-mode", response_model=WorkspaceModePreferences)
+async def workspace_mode_preferences(
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    if not actor.has_any_role("admin", "manager", "team_lead"):
+        return WorkspaceModePreferences(mode="member")
+    account = await db.get(UserAccount, actor.account_id)
+    saved = (account.preferences or {}).get("workspace_mode") if account else None
+    mode = saved.get("mode") if isinstance(saved, dict) else saved
+    return WorkspaceModePreferences(mode=mode if mode in {"member", "manager"} else "manager")
+
+
+@router.put("/preferences/workspace-mode", response_model=WorkspaceModePreferences)
+async def update_workspace_mode_preferences(
+    data: WorkspaceModePreferences,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(require_roles("admin", "manager", "team_lead")),
+):
+    account = await db.get(UserAccount, actor.account_id, with_for_update=True)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    account.preferences = {
+        **(account.preferences or {}),
+        "workspace_mode": data.model_dump(),
     }
     await db.commit()
     return data

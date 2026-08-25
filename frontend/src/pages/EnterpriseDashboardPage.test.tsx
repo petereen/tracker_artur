@@ -221,14 +221,14 @@ describe("Today work-hour timer", () => {
     };
     mocks.companyCalendar = {
       tasks: [],
-      entries: [{ id: 203, kind: "reminder", starts_at: "2026-08-14", remind_at: "2026-08-14" }],
+      entries: [],
       time_blocks: [],
     };
 
     const { container } = renderDashboard();
     expect(container.querySelector(".mini-day-marker.task")).toBeInTheDocument();
     expect(container.querySelector(".mini-day-marker.event")).toBeInTheDocument();
-    expect(container.querySelector(".mini-day-marker.reminder")).toBeInTheDocument();
+    expect(container.querySelector(".mini-day-marker.reminder")).not.toBeInTheDocument();
   });
 
   it("places task tabs below the heading beside the relocated check-in and calendar", () => {

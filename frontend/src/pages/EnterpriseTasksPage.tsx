@@ -69,6 +69,7 @@ import {
   TableSkeleton,
 } from "../components/Loading";
 import { UserTagPicker } from "../components/UserTagPicker";
+import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
 import { resolvePublicAssetUrl } from "../platform/runtime";
 
 const COLUMNS: { key: WorkflowStatus; label: string }[] = [
@@ -506,10 +507,12 @@ export function EnterpriseTasksPage() {
   const canReview = roles.some((role) =>
     ["admin", "manager", "team_lead"].includes(role),
   );
+  const { isManagerMode } = useWorkspaceMode();
+  const scopedFilters: TaskFilters = { ...filters, scope: isManagerMode ? "organization" : "mine" };
   const tasks = useEnterpriseTasks(
     filterProjectId,
     Object.keys(dateFilters).length ? dateFilters : undefined,
-    filters,
+    scopedFilters,
   );
   const deepLinkedTask = useEnterpriseTask(params.get("task") ? Number(params.get("task")) : undefined);
   const deadlineTask = useEnterpriseTask(deadlineTaskId);

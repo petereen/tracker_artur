@@ -1,6 +1,12 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add account-persisted Manager/Member workspace mode, header switch, global state, and scoped workspace views (`backend/app/routers/enterprise_auth.py`, `frontend/src`)
+- [x] Add workspace-mode regression coverage and run focused frontend/backend validation (`backend/tests`, `frontend/src`) — frontend Vitest 84 tests and production build pass; backend syntax compilation passes; backend pytest is unavailable because the `pytest` module is not installed
+- [x] Fix Telegram AI response handoff ordering and add a regression test for linked-account replies (`backend/app/bot/assistant_handlers.py`, `backend/tests/test_assistant_handlers.py`)
+- [x] Add Telegram transport-level empty-response and unexpected-failure fallbacks so updates never fail silently (`backend/app/bot/assistant_handlers.py`)
+- [x] Cover Telegram gateway replies and unexpected route failures with focused regression tests (`backend/tests/test_assistant_handlers.py`)
+- [x] Align Telegram enterprise-route documentation with the shared gateway implementation (`backend/app/bot/assistant_handlers.py`)
 - [x] Implement universal company file search service, authoritative metadata search, shared ACLs, diagnostics, and delivery parity (`backend/app/services/file_search_service.py`, `backend/app/services/enterprise_tools.py`)
 - [x] Add company-file metadata/index-state schema migration and default tenant file-search principal (`backend/app/models/models.py`, `backend/alembic/versions`, `backend/app/core/enterprise_deps.py`)
 - [x] Route browser, command-bar, Web, Telegram, MCP, preview, download, archive, and chat attachment flows through shared file search and authorization (`backend/app/routers`, `backend/app/services`, `frontend/src`)

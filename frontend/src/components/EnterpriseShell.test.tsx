@@ -23,6 +23,8 @@ vi.mock('../api/enterprise', () => ({
   useOpenDirectConversation: () => ({ mutateAsync: mocks.openDirect, isPending: false }),
   acknowledgeChatReceipt: vi.fn(),
   useGlobalSearch: () => ({ data: undefined, isFetching: false }),
+  useWorkspaceModePreferences: () => ({ data: { mode: 'manager' }, isLoading: false, isError: false }),
+  useUpdateWorkspaceModePreferences: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('./NotificationCenter', () => ({ NotificationCenter: () => null }))
 vi.mock('./OyunsAssistant', () => ({ OyunsAssistant: () => null }))

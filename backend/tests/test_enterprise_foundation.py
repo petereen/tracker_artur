@@ -18,7 +18,7 @@ from app.main import app
 from app.models.models import Base, Task
 from app.routers import enterprise
 from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _calendar_task_visible_to_employee, _holiday_provider_rows, _task_out
-from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE, WorldClockPreferences
+from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE, WorkspaceModePreferences, WorldClockPreferences, workspace_mode_preferences
 from app.services.enterprise_events import _json_safe, _redact
 from app.services.work_report_service import summarize_work_time
 
@@ -134,9 +134,9 @@ def test_assistant_pending_actions_support_creation_and_update_contracts():
     assert table.c.expected_version.nullable is True
 
 
-def test_versioned_routes_include_auth_clock_tasks_reports_and_realtime():
+def test_versioned_routes_include_auth_clock_tasks_reports_realtime_and_workspace_mode():
     paths = {route.path for route in app.routes}
-    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/auth/profile", "/v1/auth/profile/password", "/v1/auth/preferences/world-clock", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime", "/v1/checkins/today", "/v1/calendar/events", "/v1/analytics/daily", "/v1/analytics/work-hours"}.issubset(paths)
+    assert {"/v1/auth/login", "/v1/auth/telegram", "/v1/auth/profile", "/v1/auth/profile/password", "/v1/auth/preferences/world-clock", "/v1/auth/preferences/workspace-mode", "/v1/clock/start", "/v1/tasks", "/v1/reports", "/v1/realtime", "/v1/checkins/today", "/v1/calendar/events", "/v1/analytics/daily", "/v1/analytics/work-hours"}.issubset(paths)
 
 
 def test_world_clock_preferences_default_and_boundary_validation():
@@ -157,6 +157,34 @@ def test_world_clock_preferences_reject_duplicate_invalid_and_over_capacity_time
         WorldClockPreferences(clocks=["Mars/Phobos"])
     with pytest.raises(ValueError):
         WorldClockPreferences(clocks=["UTC"] * 7)
+
+
+def test_workspace_mode_preferences_default_and_enum_validation():
+    assert WorkspaceModePreferences().mode == "manager"
+    assert WorkspaceModePreferences(mode="member").mode == "member"
+    import pytest
+    with pytest.raises(ValueError):
+        WorkspaceModePreferences(mode="company")
+
+
+def test_workspace_mode_preferences_fall_back_to_manager_for_corrupt_saved_values():
+    class Db:
+        async def get(self, *_args):
+            return SimpleNamespace(preferences={"workspace_mode": {"mode": "corrupt"}})
+
+    actor = ActorContext(account_id=1, organization_id=1, employee_id=2, email="manager@example.com", locale="mn", roles=frozenset({"manager"}))
+    import asyncio
+    assert asyncio.run(workspace_mode_preferences(db=Db(), actor=actor)).mode == "manager"
+
+
+def test_workspace_mode_preferences_force_member_for_non_management_roles():
+    class Db:
+        async def get(self, *_args):
+            return SimpleNamespace(preferences={"workspace_mode": {"mode": "manager"}})
+
+    actor = ActorContext(account_id=1, organization_id=1, employee_id=2, email="member@example.com", locale="mn", roles=frozenset({"member"}))
+    import asyncio
+    assert asyncio.run(workspace_mode_preferences(db=Db(), actor=actor)).mode == "member"
 
 
 def test_work_hour_analytics_aggregates_modes_and_returns_total():

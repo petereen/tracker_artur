@@ -104,7 +104,10 @@ def _now_in_timezone(timezone_name: str) -> datetime:
 
 async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=None) -> None:
     """Send Telegram-sized chunks; model output remains plain text by default."""
-    remaining = text.strip()
+    remaining = (text or "").strip()
+    if not remaining:
+        log.warning("assistant.telegram_empty_response")
+        remaining = "I could not generate a response right now. Please try again shortly."
     while remaining:
         if len(remaining) <= 3_900:
             chunk, remaining = remaining, ""
@@ -129,12 +132,7 @@ async def _enterprise_route(
     is_manager: bool,
     tg_id: str | None,
 ) -> bool:
-    """Route Telegram task intake to the legacy draft controls.
-
-    The Web assistant keeps the enterprise preview/action contract. Telegram
-    already has a richer, familiar draft state with confirm, edit, and delete
-    callbacks, so task-intake messages should enter that workflow directly.
-    """
+    """Run Telegram enterprise turns through the shared gateway and file search."""
     if not tg_id:
         return False
     async with AsyncSessionLocal() as db:
@@ -182,7 +180,8 @@ async def _enterprise_route(
                 return True
             await _answer(message, "OYUNS enterprise tools require a linked active platform account.")
             return True
-        thread_key = str(getattr(message.chat, "id", tg_id))
+        chat = getattr(message, "chat", None)
+        thread_key = str(getattr(chat, "id", tg_id))
         conversation = await db.scalar(select(AssistantConversation).where(AssistantConversation.account_id == actor.account_id, AssistantConversation.channel == "telegram", AssistantConversation.external_thread_key == thread_key))
         if not conversation:
             conversation = AssistantConversation(account_id=actor.account_id, organization_id=actor.organization_id, channel="telegram", external_thread_key=thread_key, title=text[:120])
@@ -192,16 +191,15 @@ async def _enterprise_route(
         db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
         detected = assistant_ai.detect_language(text).value
         actor = replace(actor, channel="telegram", detected_language=detected)
-        tool_sources: list[dict] = []
-        tool_deliveries: list[dict] = list(routed.deliveries)
-        pending_action = None
-
         try:
             routed = await ai_gateway.execute_turn(db, actor, [*history, {"role": "user", "content": text}], conversation_id=conversation.id)
         except GatewayError:
             await db.rollback()
             await _answer(message, "OYUNS live AI service is temporarily unavailable. Please try again shortly.")
             return True
+        tool_sources: list[dict] = []
+        tool_deliveries: list[dict] = list(routed.deliveries)
+        pending_action = None
         for mcp_result in routed.tool_results:
             tool_sources.extend(mcp_result.get("sources", []))
             tool_deliveries.extend(mcp_result.get("deliveries", []))
@@ -497,14 +495,20 @@ async def route_and_respond(
     tg_id: str | None,
     voice_mode: bool,
 ) -> None:
-    if await _enterprise_route(
-        message,
-        state,
-        text,
-        employee=employee,
-        is_manager=is_manager,
-        tg_id=tg_id,
-    ):
+    try:
+        handled = await _enterprise_route(
+            message,
+            state,
+            text,
+            employee=employee,
+            is_manager=is_manager,
+            tg_id=tg_id,
+        )
+    except Exception:
+        log.exception("assistant.telegram_route_failed", extra={"telegram_id": tg_id})
+        await _answer(message, "OYUNS is temporarily unavailable. Please try again shortly.")
+        return
+    if handled:
         return
     # Telegram messages without a verified platform identity cannot safely be
     # sent to the assistant. Do not drop into the historical heuristic router.

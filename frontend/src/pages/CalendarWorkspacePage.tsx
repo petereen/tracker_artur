@@ -6,6 +6,7 @@ import { isNativePlatform } from '../platform/runtime'
 import { useCalendarEvents, useCreateCalendarEntry, useCreateEnterpriseTask, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarList, useGoogleCalendarSelect, useGoogleCalendarStatus, useGoogleCalendarSync, useHolidaySettings, useSetHolidayCountry } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { CalendarSkeleton, QueryRegion } from '../components/Loading'
+import { useWorkspaceMode } from '../components/WorkspaceModeProvider'
 
 function localDate(value: Date) { const offset = value.getTimezoneOffset() * 60_000; return new Date(value.getTime() - offset).toISOString().slice(0, 10) }
 function calendarDate(value: unknown) {
@@ -140,7 +141,6 @@ export function GoogleCalendarSyncControl() {
 }
 
 export function CalendarWorkspacePage() {
-  const [scope, setScope] = useState<'private' | 'corporate'>('private')
   const [anchor, setAnchor] = useState(() => new Date())
   const [selectedMobileDate, setSelectedMobileDate] = useState(() => localDate(new Date()))
   const [creating, setCreating] = useState(false)
@@ -149,13 +149,15 @@ export function CalendarWorkspacePage() {
   const [form, setForm] = useState({ title: '', description: '', starts_at: '', ends_at: '', visibility: 'private' })
   const [, startTransition] = useTransition()
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
+  const { isManagerMode } = useWorkspaceMode()
+  const scope: 'private' | 'corporate' = isManagerMode ? 'corporate' : 'private'
   const canPublish = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const isAdmin = roles.includes('admin')
   const days = useMemo(() => { const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1); first.setDate(first.getDate() - ((first.getDay() + 6) % 7)); return Array.from({ length: 42 }, (_, index) => { const day = new Date(first); day.setDate(day.getDate() + index); return day }) }, [anchor])
   const events = useCalendarEvents(scope, anchor)
   const holidaySettings = useHolidaySettings(); const setCountry = useSetHolidayCountry()
   const createEntry = useCreateCalendarEntry(); const createTask = useCreateEnterpriseTask()
-  const submit = async (event: React.FormEvent) => { event.preventDefault(); const starts_at = new Date(form.starts_at).toISOString(); const ends_at = new Date(form.ends_at).toISOString(); if (kind === 'task') await createTask.mutateAsync({ title: form.title, description: form.description || null, start_at: starts_at, deadline_at: ends_at, workflow_status: 'to_do' }); else await createEntry.mutateAsync({ kind, visibility: form.visibility, title: form.title, description: form.description || null, starts_at, ends_at, remind_at: kind === 'reminder' ? starts_at : null }); setForm({ title: '', description: '', starts_at: '', ends_at: '', visibility: 'private' }); setCreating(false) }
+  const submit = async (event: React.FormEvent) => { event.preventDefault(); const starts_at = new Date(form.starts_at).toISOString(); const ends_at = new Date(form.ends_at).toISOString(); if (kind === 'task') await createTask.mutateAsync({ title: form.title, description: form.description || null, start_at: starts_at, deadline_at: ends_at, workflow_status: 'to_do' }); else await createEntry.mutateAsync({ kind, visibility: isManagerMode ? form.visibility : 'private', title: form.title, description: form.description || null, starts_at, ends_at, remind_at: kind === 'reminder' ? starts_at : null }); setForm({ title: '', description: '', starts_at: '', ends_at: '', visibility: 'private' }); setCreating(false) }
   const all = useMemo(() => uniqueCalendarItems([...(events.data?.tasks ?? []), ...(events.data?.projects ?? []), ...(events.data?.plans ?? []), ...(events.data?.entries ?? []), ...(events.data?.holidays ?? []), ...(events.data?.time_blocks ?? [])]), [events.data])
   const rangeSegments = useMemo(() => calendarRangeSegments(all, days), [all, days])
   const mobileDays = days
@@ -177,7 +179,7 @@ export function CalendarWorkspacePage() {
   }, [anchor, mobileMonthDays, mobileItemsByDate, selectedMobileDate])
   const holidayKeys = new Set((events.data?.holidays ?? []).filter((item: any) => item.kind === 'holiday').flatMap(itemDates))
   const todayKey = localDate(new Date())
-  return <div className="calendar-workspace"><div className="workspace-toolbar calendar-toolbar"><div className="toolbar-start"><GoogleCalendarSyncControl /><div className="segmented-control"><button className={scope === 'private' ? 'active' : ''} onClick={() => startTransition(() => setScope('private'))}>Хувийн</button><button className={scope === 'corporate' ? 'active' : ''} onClick={() => startTransition(() => setScope('corporate'))}>Компаний</button></div></div><button className="primary-action compact" onClick={() => { setForm({ ...form, visibility: scope === 'corporate' && canPublish ? 'company' : 'private' }); setCreating(true) }}><Plus size={16} />Үүсгэх</button></div>
+  return <div className="calendar-workspace"><div className="workspace-toolbar calendar-toolbar"><div className="toolbar-start"><GoogleCalendarSyncControl /><span className="calendar-scope-badge">{isManagerMode ? 'Компаний харагдац' : 'Хувийн харагдац'}</span></div><button className="primary-action compact" onClick={() => { setForm({ ...form, visibility: scope === 'corporate' && canPublish ? 'company' : 'private' }); setCreating(true) }}><Plus size={16} />Үүсгэх</button></div>
     <div className="calendar-month-nav"><strong>{anchor.toLocaleDateString('mn-MN', { year: 'numeric', month: 'long' })}</strong><div className="calendar-holiday-setting"><span className="holiday-country">Амралт: {holidaySettings.data?.country || 'MN'}</span>{isAdmin && <select aria-label="Амралтын өдрийн улс" value={holidaySettings.data?.country || 'MN'} onChange={(event) => setCountry.mutate(event.target.value)} disabled={setCountry.isPending}>{holidaySettings.data?.countries.map((country) => <option key={country.countryCode} value={country.countryCode}>{country.name}</option>)}</select>}</div><div className="calendar-nav-actions"><button onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1)))} aria-label="Өмнөх сар">←</button><button className="calendar-today-button" onClick={() => startTransition(() => { const today = new Date(); setAnchor(new Date(today.getFullYear(), today.getMonth(), 1)) })}>Өнөөдөр</button><button onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1)))} aria-label="Дараагийн сар">→</button></div></div>
     {events.isError && <div className="panel calendar-status error">Календарийн мэдээлэл ачаалагдсангүй. Дахин оролдоно уу.</div>}
     <QueryRegion pending={events.isLoading || events.isFetching} skeleton={<CalendarSkeleton />}><>

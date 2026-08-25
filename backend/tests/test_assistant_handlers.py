@@ -9,6 +9,7 @@ import pytz
 import pytest
 
 from app.bot import assistant_handlers, tasks_handlers
+from app.core.enterprise_deps import build_actor_context
 from app.services import voice_service
 from app.bot.tasks_handlers import (
     _ambiguous_roster_names,
@@ -42,6 +43,7 @@ class FakeMessage:
         self.voice = object()
         self.bot = FakeBot()
         self.from_user = SimpleNamespace(full_name="Tester", username="tester")
+        self.chat = SimpleNamespace(id=1234)
         self.reply_to_message = None
         self.answers = []
         self.audios = []
@@ -250,28 +252,53 @@ def test_voice_transcript_uses_shared_router(monkeypatch):
     assert captured["employee"] is EMPLOYEE
 
 
-def test_telegram_task_intake_uses_legacy_draft_controls(monkeypatch):
-    captured = {}
-
+def test_telegram_linked_account_sends_gateway_answer(monkeypatch):
     class Session:
         async def __aenter__(self):
-            return object()
+            return self
 
         async def __aexit__(self, *_args):
             return None
 
-    async def actor_lookup(_tg_id, _db):
-        return object()
+        async def scalar(self, _statement):
+            return None
 
-    async def begin(message, state, text, **kwargs):
-        captured.update({"message": message, "state": state, "text": text, **kwargs})
-        return {"ok": True}
+        async def execute(self, _statement):
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+
+        def add(self, _record):
+            return None
+
+        async def flush(self):
+            return None
+
+        async def commit(self):
+            return None
+
+    async def actor_lookup(_tg_id, _db):
+        return build_actor_context(
+            account_id=11,
+            organization_id=1,
+            employee_id=7,
+            email="tester@example.com",
+            locale="en",
+            roles=frozenset({"member"}),
+        )
+
+    async def execute_turn(_db, _actor, _history, *, conversation_id):
+        assert conversation_id is None
+        return SimpleNamespace(
+            answer="Telegram gateway reply",
+            sources=[],
+            deliveries=[],
+            tool_results=[],
+        )
 
     monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", lambda: Session())
     monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", actor_lookup)
-    monkeypatch.setattr(assistant_handlers, "begin_task_draft", begin)
+    monkeypatch.setattr(assistant_handlers.ai_gateway, "execute_turn", execute_turn)
 
-    message = FakeMessage("Create a task to prepare the report")
+    message = FakeMessage("What can you help me with?")
     state = FakeState()
     handled = asyncio.run(
         assistant_handlers._enterprise_route(
@@ -285,9 +312,29 @@ def test_telegram_task_intake_uses_legacy_draft_controls(monkeypatch):
     )
 
     assert handled is True
-    assert captured["state"] is state
-    assert captured["show_preview"] is True
-    assert captured["allow_ai_structuring"] is True
+    assert message.answers[-1][0] == "Telegram gateway reply"
+
+
+def test_telegram_route_reports_unexpected_failure_instead_of_silence(monkeypatch):
+    async def fail(*_args, **_kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(assistant_handlers, "_enterprise_route", fail)
+    message = FakeMessage("What can you help me with?")
+
+    asyncio.run(
+        assistant_handlers.route_and_respond(
+            message,
+            FakeState(),
+            message.text,
+            employee=EMPLOYEE,
+            is_manager=False,
+            tg_id="77",
+            voice_mode=False,
+        )
+    )
+
+    assert "temporarily unavailable" in message.answers[-1][0]
 
 
 def test_verified_telegram_employee_can_search_without_workspace_account(monkeypatch):

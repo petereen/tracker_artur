@@ -10,6 +10,7 @@ import { KpiDrilldownCard } from "../components/KpiDrilldownCard";
 import { TimePeriodFilter } from "../components/TimePeriodFilter";
 import { EMPTY_ROLES, useAuthStore } from "../store/auth";
 import { HeatmapCalendar } from "../components/HeatmapCalendar";
+import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
 import { QueryRegion, Skeleton } from "../components/Loading";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { WorkHourHierarchyChart } from "../components/WorkHourHierarchyChart";
@@ -44,14 +45,17 @@ export function StatsWorkspacePage() {
     ["admin", "manager", "team_lead", "hr"].includes(role),
   );
   const isAdmin = roles.includes("admin");
+  const { isManagerMode, isEligible } = useWorkspaceMode();
   const [employeeId, setEmployeeId] = useState<number | undefined>(() =>
-    isAdmin ? undefined : actor?.employee_id ?? undefined,
+    isManagerMode || isAdmin ? undefined : actor?.employee_id ?? undefined,
   );
   useEffect(() => {
-    if (!isAdmin && actor?.employee_id != null) {
+    if (isEligible) {
+      setEmployeeId(isManagerMode ? undefined : actor?.employee_id ?? undefined);
+    } else if (!isAdmin && actor?.employee_id != null) {
       setEmployeeId((current) => current ?? actor.employee_id ?? undefined);
     }
-  }, [actor?.employee_id, isAdmin]);
+  }, [actor?.employee_id, isAdmin, isEligible, isManagerMode]);
   const [exportOpen, setExportOpen] = useState(false);
   const canSeeFinancials = roles.some((role) => ["admin", "manager"].includes(role));
   const workers = useWorkerDirectory();
@@ -76,7 +80,7 @@ export function StatsWorkspacePage() {
     <div className="stats-workspace">
       <div className="workspace-toolbar analytics-toolbar">
         <div className="toolbar-cluster">
-          {canReview && (
+          {canReview && (!isEligible || isManagerMode) && (
             <DropdownSelect
               ariaLabel="Ажилтан сонгох"
               value={employeeId ? String(employeeId) : ""}

@@ -5190,6 +5190,85 @@ html.capacitor-native .native-boot-error {
 .notification-center {
   position: relative;
 }
+.workspace-mode-toggle {
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text);
+  display: inline-flex;
+  gap: 7px;
+  height: 36px;
+  max-width: 184px;
+  padding: 0 9px;
+  text-align: left;
+  transition: border-color .18s ease, background-color .18s ease, transform .18s ease;
+}
+.workspace-mode-toggle:hover:not(:disabled) {
+  border-color: var(--color-accent);
+}
+.workspace-mode-toggle:active:not(:disabled) {
+  transform: scale(.97);
+}
+.workspace-mode-toggle:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+.workspace-mode-icon {
+  align-items: center;
+  background: var(--color-surface-2);
+  border-radius: 7px;
+  color: var(--color-accent);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+.workspace-mode-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+  min-width: 0;
+}
+.workspace-mode-copy strong {
+  font-size: .66rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+.workspace-mode-copy small {
+  color: var(--color-muted);
+  font-size: .55rem;
+  margin-top: 3px;
+  white-space: nowrap;
+}
+.workspace-mode-track {
+  background: var(--color-border);
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 16px;
+  margin-left: 2px;
+  padding: 2px;
+  transition: background-color .18s ease;
+  width: 28px;
+}
+.workspace-mode-track i {
+  background: var(--color-surface);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  display: block;
+  height: 12px;
+  transform: translateX(0);
+  transition: transform .2s ease;
+  width: 12px;
+}
+.workspace-mode-toggle.is-manager .workspace-mode-track {
+  background: var(--color-accent);
+}
+.workspace-mode-toggle.is-manager .workspace-mode-track i {
+  transform: translateX(12px);
+}
 .notification-trigger,
 .theme-toggle {
   align-items: center;
@@ -7146,6 +7225,15 @@ html.capacitor-native .native-boot-error {
   }
 }
 @media (max-width: 540px) {
+  .workspace-mode-toggle {
+    gap: 0;
+    max-width: 36px;
+    padding: 0 6px;
+  }
+  .workspace-mode-toggle .workspace-mode-copy,
+  .workspace-mode-toggle .workspace-mode-track {
+    display: none;
+  }
   .theme-toggle {
     min-width: 36px;
   }

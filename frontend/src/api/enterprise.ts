@@ -1267,6 +1267,29 @@ export function useWorldClockPreferences() {
   })
 }
 
+export type WorkspaceMode = 'member' | 'manager'
+export interface WorkspaceModePreferences { mode: WorkspaceMode }
+export const workspaceModeQueryKey = (accountId?: number | null) => ['v1', 'auth', 'preferences', 'workspace-mode', accountId ?? 'anonymous'] as const
+
+export function useWorkspaceModePreferences(enabled = true) {
+  const accountId = useAuthStore((state) => state.actor?.id)
+  return useQuery<WorkspaceModePreferences>({
+    queryKey: workspaceModeQueryKey(accountId),
+    queryFn: () => api.get('/v1/auth/preferences/workspace-mode').then((response) => response.data),
+    enabled,
+  })
+}
+
+export function useUpdateWorkspaceModePreferences() {
+  const queryClient = useQueryClient()
+  const accountId = useAuthStore((state) => state.actor?.id)
+  return useMutation({
+    mutationFn: (input: WorkspaceModePreferences) => api.put('/v1/auth/preferences/workspace-mode', input).then((response) => response.data as WorkspaceModePreferences),
+    onSuccess: (data) => queryClient.setQueryData(workspaceModeQueryKey(accountId), data),
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Ажлын горим хадгалагдсангүй'),
+  })
+}
+
 export function useUpdateWorldClockPreferences() {
   const queryClient = useQueryClient()
   return useMutation({
