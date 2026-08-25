@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Archive, BellOff, Bookmark, Check, CheckCheck, ChevronLeft, Download, FileText, Forward, Info, Menu, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Pin, Plus, Reply, RotateCcw, Search, Send, Square, Star, Trash2,
+  Archive, BellOff, Bookmark, Check, CheckCheck, ChevronLeft, Download, FileText, Forward, Info, Menu, MessageCircle, Mic, MoreHorizontal, Paperclip, Pause, Pencil, Pin, Play, Plus, Reply, RotateCcw, Search, Send, Square, Star, Trash2,
   UserMinus, X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -192,6 +192,122 @@ function formatBytes(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 
+const RECORDER_FORMATS = [
+  { mime: 'audio/webm;codecs=opus', type: 'audio/webm', extension: 'webm' },
+  { mime: 'audio/ogg;codecs=opus', type: 'audio/ogg', extension: 'ogg' },
+  { mime: 'audio/mp4', type: 'audio/mp4', extension: 'm4a' },
+  { mime: 'audio/wav', type: 'audio/wav', extension: 'wav' },
+] as const
+
+function formatDuration(value: number) {
+  if (!Number.isFinite(value) || value < 0) return '0:00'
+  const seconds = Math.floor(value)
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function WaveformBars({ values, progress = 0, recording = false }: { values: number[]; progress?: number; recording?: boolean }) {
+  return <span className={`chat-waveform ${recording ? 'recording' : ''}`} aria-hidden>
+    {values.map((value, index) => <i key={index} className={index / Math.max(values.length, 1) <= progress ? 'played' : ''} style={{ height: `${Math.max(16, Math.min(100, value * 100))}%` }} />)}
+  </span>
+}
+
+function RecordingVisualizer({ stream }: { stream: MediaStream | null }) {
+  const [levels, setLevels] = useState<number[]>(() => Array.from({ length: 28 }, () => 0.18))
+  useEffect(() => {
+    if (!stream) return
+    const context = new AudioContext()
+    const source = context.createMediaStreamSource(stream)
+    const analyser = context.createAnalyser()
+    analyser.fftSize = 64
+    source.connect(analyser)
+    const data = new Uint8Array(analyser.frequencyBinCount)
+    let frame = 0
+    const update = () => {
+      analyser.getByteFrequencyData(data)
+      setLevels(Array.from(data).map((value) => Math.max(0.12, value / 255)).slice(0, 28))
+      frame = requestAnimationFrame(update)
+    }
+    update()
+    return () => { cancelAnimationFrame(frame); source.disconnect(); analyser.disconnect(); void context.close() }
+  }, [stream])
+  return <div className="chat-recording-visualizer" role="status" aria-label="Аудио бичиж байна"><WaveformBars values={levels} recording /><span>Бичиж байна…</span></div>
+}
+
+function VoiceMessagePlayer({ conversationId, attachment }: { conversationId: string; attachment: ChatAttachment }) {
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const waveformRef = useRef<HTMLButtonElement>(null)
+  const [url, setUrl] = useState<string>()
+  const [waveform, setWaveform] = useState<number[]>([])
+  const [playing, setPlaying] = useState(false)
+  const [current, setCurrent] = useState(0)
+  const [duration, setDuration] = useState(attachment.duration_seconds || 0)
+  const [speed, setSpeed] = useState(1)
+
+  useEffect(() => {
+    let active = true
+    let objectUrl: string | undefined
+    void downloadChatAttachment(conversationId, attachment).then(async (value) => {
+      objectUrl = value
+      if (!active) { URL.revokeObjectURL(value); return }
+      setUrl(value)
+      try {
+        const response = await fetch(value)
+        const buffer = await response.arrayBuffer()
+        const context = new AudioContext()
+        const decoded = await context.decodeAudioData(buffer)
+        const data = decoded.getChannelData(0)
+        const bars = 44
+        const block = Math.max(1, Math.floor(data.length / bars))
+        const samples = Array.from({ length: bars }, (_, index) => {
+          let peak = 0
+          for (let offset = index * block; offset < Math.min(data.length, (index + 1) * block); offset += 1) peak = Math.max(peak, Math.abs(data[offset]))
+          return peak || 0.12
+        })
+        if (active) { setWaveform(samples); setDuration(decoded.duration) }
+        await context.close()
+      } catch { if (active) setWaveform(Array.from({ length: 44 }, () => 0.35)) }
+    }).catch(() => undefined)
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [attachment.public_id, conversationId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (audio) audio.playbackRate = speed
+  }, [speed])
+
+  const seek = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const audio = audioRef.current
+    const element = waveformRef.current
+    if (!audio || !element || !duration) return
+    const update = (clientX: number) => {
+      const bounds = element.getBoundingClientRect()
+      const ratio = Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width))
+      audio.currentTime = ratio * duration
+      setCurrent(audio.currentTime)
+    }
+    update(event.clientX)
+    element.setPointerCapture(event.pointerId)
+    const move = (moveEvent: PointerEvent) => update(moveEvent.clientX)
+    const up = () => { element.removeEventListener('pointermove', move); element.removeEventListener('pointerup', up) }
+    element.addEventListener('pointermove', move)
+    element.addEventListener('pointerup', up, { once: true })
+  }
+
+  const toggle = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (audio.paused) void audio.play().catch(() => undefined)
+    else audio.pause()
+  }
+
+  return <div className="chat-voice-player">
+    <button className="chat-voice-toggle" onClick={toggle} disabled={!url} aria-label={playing ? 'Түр зогсоох' : 'Тоглуулах'}>{playing ? <Pause /> : <Play />}</button>
+    <div className="chat-voice-track"><button ref={waveformRef} className="chat-waveform-button" onPointerDown={seek} aria-label="Дууны байрлал сонгох"><WaveformBars values={waveform.length ? waveform : Array.from({ length: 44 }, () => 0.2)} progress={duration ? current / duration : 0} /></button><div className="chat-voice-meta"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div></div>
+    <button className="chat-voice-speed" onClick={() => setSpeed((value) => value >= 2 ? 1 : value + 0.5)} aria-label={`Хурд ${speed}x`}>{speed}x</button>
+    <audio ref={audioRef} src={url} preload="metadata" onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || duration)} onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); setCurrent(0) }} />
+  </div>
+}
+
 function ChatAttachmentView({ conversationId, attachment }: { conversationId: string; attachment: ChatAttachment }) {
   const [url, setUrl] = useState<string>()
   const [loading, setLoading] = useState(false)
@@ -211,7 +327,7 @@ function ChatAttachmentView({ conversationId, attachment }: { conversationId: st
   }
   if (attachment.media_kind === 'image') return <button className="chat-media-image" onClick={download} aria-label={`${attachment.filename} татах`}>{url ? <img src={url} alt={attachment.filename} /> : <span>Зураг ачаалж байна…</span>}</button>
   if (attachment.media_kind === 'video') return <div className="chat-media-player">{url ? <video controls preload="metadata" src={url} /> : <span>Видео ачаалж байна…</span>}<small>{attachment.filename} · {formatBytes(attachment.size)}</small></div>
-  if (attachment.media_kind === 'audio') return <div className="chat-media-player audio">{url ? <audio controls preload="metadata" src={url}><track kind="captions" /></audio> : <span>Аудио ачаалж байна…</span>}<small>{attachment.filename} · {formatBytes(attachment.size)}</small></div>
+  if (attachment.media_kind === 'audio') return <div className="chat-media-player audio"><VoiceMessagePlayer conversationId={conversationId} attachment={attachment} /><small>{attachment.filename} · {formatBytes(attachment.size)}</small></div>
   return <button className="chat-document-card" onClick={download} disabled={loading}><FileText /><span><strong>{attachment.filename}</strong><small>{formatBytes(attachment.size)} · {attachment.content_type}</small></span><Download /></button>
 }
 
@@ -331,6 +447,7 @@ export function ChatWorkspacePage() {
   const [forwardMessage, setForwardMessage] = useState<ChatMessage>()
   const [uploads, setUploads] = useState<PendingUpload[]>([])
   const [recording, setRecording] = useState(false)
+  const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null)
   const [draft, setDraft] = useState('')
   const drawerRef = useRef<HTMLElement>(null)
   const paneShellRef = useRef<HTMLDivElement>(null)
@@ -341,6 +458,7 @@ export function ChatWorkspacePage() {
   const logRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const recorderRef = useRef<MediaRecorder>()
+  const recordingStreamRef = useRef<MediaStream | null>(null)
   const recordingTimerRef = useRef<number>()
   const uploadsRef = useRef<PendingUpload[]>([])
   const lastAckRef = useRef('')
@@ -408,6 +526,9 @@ export function ChatWorkspacePage() {
       })
       if (recordingTimerRef.current) window.clearTimeout(recordingTimerRef.current)
       recorderRef.current?.stream.getTracks().forEach((track) => track.stop())
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
+      recordingStreamRef.current = null
+      setRecordingStream(null)
     }
   }, [conversationId])
 
@@ -448,17 +569,22 @@ export function ChatWorkspacePage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const chunks: Blob[] = []
-      const recorder = new MediaRecorder(stream)
+      const selected = RECORDER_FORMATS.find(({ mime }) => MediaRecorder.isTypeSupported(mime)) || RECORDER_FORMATS.find(({ type }) => MediaRecorder.isTypeSupported(type))
+      if (!selected) { stream.getTracks().forEach((track) => track.stop()); toast.error('Дэмжигдсэн аудио формат олдсонгүй'); return }
+      const recorder = new MediaRecorder(stream, { mimeType: selected.mime })
       recorderRef.current = recorder
+      recordingStreamRef.current = stream
+      setRecordingStream(stream)
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data) }
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop())
+        recordingStreamRef.current = null
+        setRecordingStream(null)
         setRecording(false)
         if (recordingTimerRef.current) window.clearTimeout(recordingTimerRef.current)
         if (chunks.length) {
-          const type = recorder.mimeType || 'audio/webm'
-          const extension = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm'
-          queueFiles([new File([new Blob(chunks, { type })], `voice-note-${Date.now()}.${extension}`, { type })])
+          const blob = new Blob(chunks, { type: selected.type })
+          queueFiles([new File([blob], `voice-note-${Date.now()}.${selected.extension}`, { type: selected.type })])
         }
       }
       recorder.start()
@@ -521,7 +647,7 @@ export function ChatWorkspacePage() {
             </div>
           </article>)}
         </div>
-        <footer className="chat-composer-shell">{replyingTo && <div className="chat-composer-reply"><Reply /><span><strong>{replyingTo.sender?.name}</strong>{replyingTo.body || 'Хавсралт'}</span><button onClick={() => setReplyingTo(undefined)} aria-label="Хариултыг болих"><X /></button></div>}{uploads.length > 0 && <div className="chat-upload-queue">{uploads.map((item) => <div key={item.localId} className={item.status}><Paperclip /><span><strong>{item.file.name}</strong><small>{item.status === 'failed' ? item.error : item.status === 'ready' ? 'Бэлэн' : `${item.progress}%`}</small>{item.status === 'uploading' && <i style={{ width: `${item.progress}%` }} />}</span>{item.status === 'failed' && <button onClick={() => retryUpload(item)} aria-label={`${item.file.name} дахин upload хийх`}><RotateCcw /></button>}<button onClick={() => discardUpload(item)} aria-label={`${item.file.name} хасах`}><X /></button></div>)}</div>}<div className="chat-composer"><input ref={fileInputRef} type="file" hidden multiple accept="image/*,video/mp4,video/webm,video/quicktime,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md" onChange={(event) => { queueFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = '' }} /><button className="chat-composer-tool" onClick={() => fileInputRef.current?.click()} disabled={uploads.length >= 10} aria-label="Файл хавсаргах"><Paperclip /></button><textarea ref={textareaRef} rows={1} maxLength={4000} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onComposerKeyDown} placeholder="Мессеж бичих…" aria-label="Мессеж" /><button className={`chat-composer-tool ${recording ? 'recording' : ''}`} onClick={recording ? stopRecording : startRecording} aria-label={recording ? 'Бичлэг дуусгах' : 'Аудио бичих'}>{recording ? <Square /> : <Mic />}</button><button className="chat-send-button" onClick={() => submit()} disabled={(!draft.trim() && !uploads.some((item) => item.status === 'ready')) || uploads.some((item) => item.status !== 'ready') || send.isPending} aria-label="Илгээх"><Send /></button></div></footer>
+        <footer className="chat-composer-shell">{recording && <RecordingVisualizer stream={recordingStream} />}{replyingTo && <div className="chat-composer-reply"><Reply /><span><strong>{replyingTo.sender?.name}</strong>{replyingTo.body || 'Хавсралт'}</span><button onClick={() => setReplyingTo(undefined)} aria-label="Хариултыг болих"><X /></button></div>}{uploads.length > 0 && <div className="chat-upload-queue">{uploads.map((item) => <div key={item.localId} className={item.status}><Paperclip /><span><strong>{item.file.name}</strong><small>{item.status === 'failed' ? item.error : item.status === 'ready' ? 'Бэлэн' : `${item.progress}%`}</small>{item.status === 'uploading' && <i style={{ width: `${item.progress}%` }} />}</span>{item.status === 'failed' && <button onClick={() => retryUpload(item)} aria-label={`${item.file.name} дахин upload хийх`}><RotateCcw /></button>}<button onClick={() => discardUpload(item)} aria-label={`${item.file.name} хасах`}><X /></button></div>)}</div>}<div className="chat-composer"><input ref={fileInputRef} type="file" hidden multiple accept="image/*,video/mp4,video/webm,video/quicktime,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md" onChange={(event) => { queueFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = '' }} /><button className="chat-composer-tool" onClick={() => fileInputRef.current?.click()} disabled={uploads.length >= 10} aria-label="Файл хавсаргах"><Paperclip /></button><textarea ref={textareaRef} rows={1} maxLength={4000} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onComposerKeyDown} placeholder="Мессеж бичих…" aria-label="Мессеж" /><button className={`chat-composer-tool ${recording ? 'recording' : ''}`} onClick={recording ? stopRecording : startRecording} aria-label={recording ? 'Бичлэг дуусгах' : 'Аудио бичих'}>{recording ? <Square /> : <Mic />}</button><button className="chat-send-button" onClick={() => submit()} disabled={(!draft.trim() && !uploads.some((item) => item.status === 'ready')) || uploads.some((item) => item.status !== 'ready') || send.isPending} aria-label="Илгээх"><Send /></button></div></footer>
       </> : <div className="chat-no-selection"><div><MessageCircle /><h2>OYUNS Chat</h2><p>Хамтран ажиллагсадтайгаа шууд эсвэл бүлгээр аюулгүй харилцана уу.</p><button className="chat-primary-button" onClick={() => mobile ? setDrawerOpen(true) : setCreateOpen(true)}>{mobile ? 'Чат сонгох' : 'Шинэ чат'}</button></div></div>}
     </section>
     {searchOpen && <ChatSearchPanel conversationId={conversationId} onClose={() => setSearchOpen(false)} onOpenResult={(id, messageId) => { setSearchOpen(false); navigate(`/chat/${id}?message=${messageId}`) }} />}
