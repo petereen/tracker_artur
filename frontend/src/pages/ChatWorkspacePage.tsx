@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Archive, BellOff, Bookmark, Check, CheckCheck, ChevronLeft, Download, FileText, Forward, Info, Menu, MessageCircle, Mic, MoreHorizontal, Paperclip, Pencil, Pin, Plus, Reply, RotateCcw, Search, Send, Square, Star, Trash2,
@@ -238,6 +239,72 @@ function ThreadPanel({ conversationId, rootId, onClose, onReply }: { conversatio
   </aside>
 }
 
+type ChatActionMenuProps = {
+  anchorRef: React.RefObject<HTMLButtonElement>
+  boundsRef: React.RefObject<HTMLElement>
+  onClose: () => void
+  children: React.ReactNode
+}
+
+function ChatActionMenu({ anchorRef, boundsRef, onClose, children }: ChatActionMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [position, setPosition] = useState<{ left: number; top: number; placement: 'above' | 'below' }>()
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current
+    const menu = menuRef.current
+    if (!anchor || !menu) return
+
+    const updatePosition = () => {
+      const anchorRect = anchor.getBoundingClientRect()
+      const menuRect = menu.getBoundingClientRect()
+      const paneRect = boundsRef.current?.getBoundingClientRect()
+      const padding = 8
+      const minLeft = Math.max(padding, paneRect?.left ?? padding)
+      const maxRight = Math.min(window.innerWidth - padding, paneRect?.right ?? window.innerWidth - padding)
+      const minTop = Math.max(padding, paneRect?.top ?? padding)
+      const maxBottom = Math.min(window.innerHeight - padding, paneRect?.bottom ?? window.innerHeight - padding)
+      const availableAbove = anchorRect.top - minTop
+      const placement = availableAbove >= menuRect.height + padding || anchorRect.bottom + menuRect.height + padding > maxBottom ? 'above' : 'below'
+      const preferredTop = placement === 'above' ? anchorRect.top - menuRect.height - padding : anchorRect.bottom + padding
+      const top = Math.max(minTop, Math.min(preferredTop, maxBottom - menuRect.height))
+      const preferredLeft = anchorRect.right - menuRect.width
+      const left = Math.max(minLeft, Math.min(preferredLeft, maxRight - menuRect.width))
+      setPosition({ left, top, placement })
+    }
+
+    updatePosition()
+    const onViewportChange = () => updatePosition()
+    window.addEventListener('resize', onViewportChange)
+    window.addEventListener('scroll', onViewportChange, true)
+    return () => {
+      window.removeEventListener('resize', onViewportChange)
+      window.removeEventListener('scroll', onViewportChange, true)
+    }
+  }, [anchorRef, boundsRef])
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!menuRef.current?.contains(target) && !anchorRef.current?.contains(target)) onClose()
+    }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [anchorRef, onClose])
+
+  return createPortal(
+    <div ref={menuRef} className="chat-popover-menu message chat-portal-menu" data-placement={position?.placement} style={position ? { left: position.left, top: position.top } : undefined}>
+      {children}
+    </div>,
+    document.body,
+  )
+}
+
 function ForwardDialog({ message, conversations, onClose, onForward }: { message: ChatMessage; conversations: ChatConversation[]; onClose: () => void; onForward: (ids: string[]) => void }) {
   const [selected, setSelected] = useState<string[]>([])
   const modalRef = useFocusTrap<HTMLElement>(true, onClose)
@@ -268,6 +335,8 @@ export function ChatWorkspacePage() {
   const drawerRef = useRef<HTMLElement>(null)
   const paneShellRef = useRef<HTMLDivElement>(null)
   const drawerTriggerRef = useRef<HTMLButtonElement>(null)
+  const threadPaneRef = useRef<HTMLElement>(null)
+  const actionButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({})
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const logRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -426,7 +495,7 @@ export function ChatWorkspacePage() {
     <div ref={paneShellRef} className={`chat-pane-shell ${sidebarVisible ? 'open' : ''}`} aria-hidden={!sidebarVisible}>
       <ConversationList drawerRef={drawerRef} conversations={conversationList.data?.items ?? []} selectedId={conversationId} search={search} filter={filter} onFilter={setFilter} onSearch={setSearch} onSelect={selectConversation} onCreate={() => setCreateOpen(true)} />
     </div>
-    <section className="chat-thread-pane">
+    <section ref={threadPaneRef} className="chat-thread-pane">
       {conversationId && conversation.data ? <>
         <header className="chat-thread-header">
           <button ref={drawerTriggerRef} className="chat-icon-button" onClick={() => mobile ? setDrawerOpen(true) : setCollapsed((value) => !value)} aria-label={sidebarVisible ? 'Чатын жагсаалт нуух' : 'Чатын жагсаалт нээх'}>{mobile || collapsed ? <Menu /> : <ChevronLeft />}</button>
@@ -448,7 +517,7 @@ export function ChatWorkspacePage() {
             <div className="chat-message-content"><div className="chat-bubble">{!message.is_mine && conversation.data.kind === 'group' && <strong>{message.sender?.name}</strong>}{message.forwarded_sender_name && <small className="chat-forwarded"><Forward /> {message.forwarded_sender_name}-с дамжуулсан</small>}{message.reply_preview && <button className="chat-reply-preview" onClick={() => setThreadRootId(message.thread_root_message_id || message.reply_preview!.id)}><strong>{message.reply_preview.sender_name}</strong><span>{message.reply_preview.is_deleted ? 'Устгасан мессеж' : message.reply_preview.body || 'Хавсралт'}</span></button>}{message.is_deleted ? <p className="chat-deleted-message">Энэ мессеж устгагдсан</p> : <>{message.body && <p>{message.body}</p>}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((attachment) => <ChatAttachmentView key={attachment.public_id} conversationId={conversationId} attachment={attachment} />)}</div> : null}</>} </div>
               {!!message.reactions?.length && <div className="chat-reaction-row">{message.reactions.map((reaction) => <button key={reaction.emoji} className={reaction.reacted ? 'active' : ''} onClick={() => react.mutate({ messageId: message.id, emoji: reaction.emoji, remove: reaction.reacted })}>{reaction.emoji} <span>{reaction.count}</span></button>)}</div>}
               <footer><time>{formatTimestamp(message.created_at)}{message.edited_at ? ' · зассан' : ''}</time>{message.is_pinned && <Pin size={11} fill="currentColor" />}{message.is_starred && <Star size={11} fill="currentColor" />}{message.thread_reply_count > 0 && <button onClick={() => setThreadRootId(message.thread_root_message_id || message.id)}>{message.thread_reply_count} хариулт</button>}{message.is_mine && <button disabled={message.id < 1} onClick={() => message.id > 0 && setReceiptMessageId(message.id)}><ReceiptLabel message={message} /></button>}{message.status === 'failed' && message.body && <button className="chat-retry" onClick={() => submit(message.body, message.client_nonce)}>Дахин илгээх</button>}</footer>
-              {message.id > 0 && !message.is_deleted && <div className="chat-message-actions"><button onClick={() => setActionMessageId(actionMessageId === message.id ? undefined : message.id)} aria-label="Мессежийн үйлдэл"><MoreHorizontal /></button>{actionMessageId === message.id && <div className="chat-popover-menu message"><div className="chat-quick-reactions">{['👍', '❤️', '😂', '🎉', '😮', '😢'].map((emoji) => <button key={emoji} onClick={() => react.mutate({ messageId: message.id, emoji, remove: message.reactions?.some((item) => item.emoji === emoji && item.reacted) })}>{emoji}</button>)}</div><button onClick={() => { setReplyingTo(message); setActionMessageId(undefined); textareaRef.current?.focus() }}><Reply />Хариулах</button>{message.thread_root_message_id == null && <button onClick={() => { setThreadRootId(message.id); setActionMessageId(undefined) }}><MessageCircle />Thread нээх</button>}{message.capabilities?.can_edit && <button onClick={() => editMessage(message)}><Pencil />Засах</button>}<button onClick={() => { setForwardMessage(message); setActionMessageId(undefined) }}><Forward />Дамжуулах</button><button onClick={() => pinMessage.mutate({ messageId: message.id, pinned: !message.is_pinned }, { onSuccess: () => setActionMessageId(undefined) })}><Pin />{message.is_pinned ? 'Салгах' : 'Тогтоох'}</button><button onClick={() => star.mutate({ messageId: message.id, starred: !message.is_starred }, { onSuccess: () => setActionMessageId(undefined) })}><Star />{message.is_starred ? 'Star болиулах' : 'Star'}</button><button onClick={() => { setReceiptMessageId(message.id); setActionMessageId(undefined) }}><Info />Мэдээлэл</button><button className="danger" onClick={() => remove.mutate({ messageId: message.id, scope: 'self' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Өөрөөс устгах</button>{message.capabilities?.can_delete_everyone && <button className="danger" onClick={() => window.confirm('Бүх хүнээс устгах уу?') && remove.mutate({ messageId: message.id, scope: 'everyone' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Бүгдээс устгах</button>}</div>}</div>}
+              {message.id > 0 && !message.is_deleted && <div className="chat-message-actions"><button ref={(element) => { actionButtonRefs.current[message.id] = element }} onClick={() => setActionMessageId(actionMessageId === message.id ? undefined : message.id)} aria-label="Мессежийн үйлдэл"><MoreHorizontal /></button>{actionMessageId === message.id && <ChatActionMenu anchorRef={{ current: actionButtonRefs.current[message.id] }} boundsRef={threadPaneRef} onClose={() => setActionMessageId(undefined)}><div className="chat-quick-reactions">{['👍', '❤️', '😂', '🎉', '😮', '😢'].map((emoji) => <button key={emoji} onClick={() => react.mutate({ messageId: message.id, emoji, remove: message.reactions?.some((item) => item.emoji === emoji && item.reacted) })}>{emoji}</button>)}</div><button onClick={() => { setReplyingTo(message); setActionMessageId(undefined); textareaRef.current?.focus() }}><Reply />Хариулах</button>{message.thread_root_message_id == null && <button onClick={() => { setThreadRootId(message.id); setActionMessageId(undefined) }}><MessageCircle />Thread нээх</button>}{message.capabilities?.can_edit && <button onClick={() => editMessage(message)}><Pencil />Засах</button>}<button onClick={() => { setForwardMessage(message); setActionMessageId(undefined) }}><Forward />Дамжуулах</button><button onClick={() => pinMessage.mutate({ messageId: message.id, pinned: !message.is_pinned }, { onSuccess: () => setActionMessageId(undefined) })}><Pin />{message.is_pinned ? 'Салгах' : 'Тогтоох'}</button><button onClick={() => star.mutate({ messageId: message.id, starred: !message.is_starred }, { onSuccess: () => setActionMessageId(undefined) })}><Star />{message.is_starred ? 'Star болиулах' : 'Star'}</button><button onClick={() => { setReceiptMessageId(message.id); setActionMessageId(undefined) }}><Info />Мэдээлэл</button><button className="danger" onClick={() => remove.mutate({ messageId: message.id, scope: 'self' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Өөрөөс устгах</button>{message.capabilities?.can_delete_everyone && <button className="danger" onClick={() => window.confirm('Бүх хүнээс устгах уу?') && remove.mutate({ messageId: message.id, scope: 'everyone' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Бүгдээс устгах</button>}</ChatActionMenu>}</div>}
             </div>
           </article>)}
         </div>

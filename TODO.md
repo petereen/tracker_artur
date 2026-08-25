@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Fix chat message action menu positioning with a body portal, fixed z-index, and chat-pane collision-aware flipping (`frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Reorganize desktop sidebar navigation grouping for Chat and Reports (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/EnterpriseShell.test.tsx`)
 - [x] Suppress Telegram task digests on configured non-workdays unless a task is due that day (`backend/app/services/digest_service.py`, `backend/app/bot/scheduler.py`, `backend/tests`) — daily scheduler jobs, local-time deadline exception checks, and focused regression coverage added; Python syntax/static validation passes, pytest is unavailable in the environment
 - [x] Extend chat persistence and APIs for rich media, message actions, reactions, threads, search, and per-user conversation state (`backend/app/models/models.py`, `backend/app/routers/chat.py`, `backend/alembic/versions`)
