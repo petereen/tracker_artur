@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Make company storage filename searches work without a ready knowledge index, including newly uploaded and image-only files (`backend/app/services/enterprise_tools.py`)
 - [x] Remove role-derived read-tool blocking for the single-company internal assistant while retaining mutation confirmation and assignment controls (`backend/app/core/enterprise_deps.py`, `backend/app/services/mcp/catalog.py`, `backend/tests`)
 - [x] Fix enterprise employee-directory lookup to read the internal company employee table even when an employee has no linked workspace account (`backend/app/services/enterprise_tools.py`)
 - [x] Add OYUNS Agent as a tenant-scoped chat user, expose it in New chat, and route agent DMs through the OYUNS AI Gateway (`backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`)
@@ -294,6 +295,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Make company storage filename searches work without a ready knowledge index, including newly uploaded and image-only files (`backend/app/services/enterprise_tools.py`)
 - [x] Remove role-derived read-tool blocking for the single-company internal assistant while retaining mutation confirmation and assignment controls (`backend/app/core/enterprise_deps.py`)
 - [x] Fix enterprise employee-directory lookup to read the internal company employee table even when an employee has no linked workspace account (`backend/app/services/enterprise_tools.py`)
 - [x] Add OYUNS Agent as a tenant-scoped chat user, expose it in New chat, and route agent DMs through the OYUNS AI Gateway (`backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`)

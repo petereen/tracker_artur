@@ -466,6 +466,48 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
     if not data.query:
         return _result("denied", {"reason": "A search query is required."})
     query = data.query.casefold().strip()
+    # The company library is the source of truth for file names. Do not make
+    # filename discovery depend on the asynchronous content index: uploads,
+    # image-only slide decks, and files with an extraction error must still be
+    # searchable by their stored name.
+    storage_items = list((await db.execute(select(CompanyLibraryItem).where(
+        CompanyLibraryItem.organization_id == actor.organization_id,
+        CompanyLibraryItem.kind == "file",
+        CompanyLibraryItem.deleted_at.is_(None),
+    ))).scalars().all())
+    if data.folder_id is not None:
+        storage_items = [item for item in storage_items if item.parent_id == data.folder_id]
+    if data.file_types:
+        allowed_types = {value.casefold().lstrip(".") for value in data.file_types}
+        storage_items = [item for item in storage_items if Path(item.name).suffix.casefold().lstrip(".") in allowed_types]
+    visible_storage: list[tuple[CompanyLibraryItem, str]] = []
+    for item in storage_items:
+        policy = await _policy_for_file(db, item)
+        if await can_read_policy(db, actor, policy):
+            visible_storage.append((item, policy.classification if policy else "internal"))
+
+    def metadata_score(name: str) -> int:
+        normalized_name = re.sub(r"[^\w]+", " ", name.casefold()).strip()
+        normalized_query = re.sub(r"[^\w]+", " ", query).strip()
+        name_terms = set(normalized_name.split())
+        query_terms = [term for term in normalized_query.split() if term]
+        if not normalized_query or not query_terms:
+            return 0
+        if normalized_query in normalized_name:
+            return 1000
+        matched = sum(term in name_terms or term in normalized_name for term in query_terms)
+        presentation_request = any(term.startswith(("презентац", "танилцуул", "presentation", "slide")) for term in query_terms)
+        template_request = any(term.startswith(("загвар", "template", "шаблон")) for term in query_terms)
+        presentation_file = Path(name).suffix.casefold().lstrip(".") in {"ppt", "pptx", "pot", "potx", "potm"}
+        if presentation_request and template_request and presentation_file:
+            return 80
+        return matched * 100 if matched == len(query_terms) else matched
+
+    metadata_matches = sorted(
+        ((item, classification, metadata_score(item.name)) for item, classification in visible_storage),
+        key=lambda value: (-value[2], value[0].name.casefold()),
+    )
+    metadata_matches = [value for value in metadata_matches if value[2] > 0]
     documents = list((await db.execute(select(KnowledgeDocument).where(KnowledgeDocument.organization_id == actor.organization_id, KnowledgeDocument.index_status == "ready"))).scalars().all())
     candidate_ids: list[int] = []
     titles: dict[int, str] = {}
@@ -486,7 +528,18 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
             source_by_doc[document.id] = ("company_knowledge", document.source_id, policy.classification if policy else "internal")
         candidate_ids.append(document.id); titles[document.id] = document.title
     if not candidate_ids:
-        return _result("empty", {"query": data.query, "results": []})
+        rows = [{
+            "source_id": f"company_file:{item.id}",
+            "title": item.name,
+            "excerpt": "",
+            "locator": {"kind": "title"},
+            "score": score,
+            "classification": classification,
+        } for item, classification, score in metadata_matches[:data.limit]]
+        if not rows:
+            return _result("empty", {"query": data.query, "results": []})
+        deliveries = _file_deliveries(rows, data.delivery)
+        return _result("ok", {"query": data.query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"], "locator": row["locator"]} for row in rows], deliveries=deliveries)
     chunks = list((await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.document_id.in_(candidate_ids)))).scalars().all())
     # A repository search must match both content and the file/entry title.
     # Filename-only requests such as "presentation template" otherwise score
@@ -557,6 +610,22 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
             })
             if len(rows) >= data.limit:
                 break
+    existing_sources = {row["source_id"] for row in rows}
+    for item, classification, score in metadata_matches:
+        source_id = f"company_file:{item.id}"
+        if source_id in existing_sources:
+            continue
+        rows.append({
+            "source_id": source_id,
+            "title": item.name,
+            "excerpt": "",
+            "locator": {"kind": "title"},
+            "score": score,
+            "classification": classification,
+        })
+        existing_sources.add(source_id)
+        if len(rows) >= data.limit:
+            break
     if not rows:
         return _result("empty", {"query": data.query, "results": []})
     deliveries = _file_deliveries(rows, data.delivery)
