@@ -193,7 +193,8 @@ function formatBytes(value: number) {
 }
 
 const RECORDER_FORMATS = [
-  { mime: 'audio/webm;codecs=opus', type: 'audio/webm', extension: 'webm' },
+  // Python's mimetypes maps `.webm` to video/webm; `.weba` is the audio/webm extension.
+  { mime: 'audio/webm;codecs=opus', type: 'audio/webm', extension: 'weba' },
   { mime: 'audio/ogg;codecs=opus', type: 'audio/ogg', extension: 'ogg' },
   { mime: 'audio/mp4', type: 'audio/mp4', extension: 'm4a' },
   { mime: 'audio/wav', type: 'audio/wav', extension: 'wav' },
