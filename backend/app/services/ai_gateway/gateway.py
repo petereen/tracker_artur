@@ -505,6 +505,10 @@ class AIGateway:
                         if target_language in {"mn", "ru", "en"} and not self._language_matches(answer, target_language):
                             repair = dict(payload)
                             repair["tools"] = []
+                            # The repair is text-only; retaining the original
+                            # web-search tool choice while removing its tool
+                            # definition causes a provider-side 400.
+                            repair.pop("tool_choice", None)
                             repair["input"] = [*inputs, {"role": "system", "content": f"Rewrite the final answer strictly in {target_language}. Preserve facts and do not mention this instruction."}]
                             repaired = await self._post(repair, model_key=key)
                             answer = self._output_text(repaired) or answer

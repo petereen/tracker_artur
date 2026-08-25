@@ -123,6 +123,35 @@ async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=
         )
 
 
+async def _deliver_company_file_attachment(message: Message, db, principal: FileSearchPrincipal, delivery: dict) -> None:
+    """Deliver one already-authorized file without replacing the AI answer on failure."""
+    try:
+        item_id = int(delivery["item_id"])
+        resolved = await authorized_file(db, principal, item_id)
+    except Exception:
+        log.exception("assistant.telegram_attachment_authorization_failed")
+        await _answer(message, "I found the file, but its attachment is temporarily unavailable.")
+        return
+    if not resolved:
+        # Do not reveal whether a stale or revoked delivery reference exists.
+        log.warning("assistant.telegram_attachment_not_authorized")
+        return
+    item = resolved[0]
+    if not item.storage_key:
+        log.warning("assistant.telegram_attachment_missing_storage_key item_id=%s", item.id)
+        await _answer(message, "I found the file, but its attachment is currently unavailable.")
+        return
+    try:
+        content = await get_attachment(item.storage_key)
+        await message.answer_document(BufferedInputFile(content, filename=item.name))
+    except (OSError, RuntimeError, ValueError):
+        log.warning("assistant.telegram_attachment_storage_failed item_id=%s", item.id, exc_info=True)
+        await _answer(message, "I found the file, but its attachment is currently unavailable. Please try again later.")
+    except Exception:
+        log.exception("assistant.telegram_attachment_delivery_failed item_id=%s", item.id)
+        await _answer(message, "I found the file, but Telegram could not receive the attachment. Please try again later.")
+
+
 async def _enterprise_route(
     message: Message,
     state: FSMContext,
@@ -173,10 +202,7 @@ async def _enterprise_route(
                 for delivery in result.get("deliveries", []):
                     if delivery.get("kind") != "company_file_attachment":
                         continue
-                    resolved = await authorized_file(db, principal, int(delivery["item_id"]))
-                    if resolved:
-                        item = resolved[0]
-                        await message.answer_document(BufferedInputFile(await get_attachment(item.storage_key), filename=item.name))
+                    await _deliver_company_file_attachment(message, db, principal, delivery)
                 return True
             await _answer(message, "OYUNS enterprise tools require a linked active platform account.")
             return True
@@ -249,11 +275,7 @@ async def _enterprise_route(
         for delivery in result.get("deliveries", []):
             if delivery.get("kind") != "company_file_attachment":
                 continue
-            resolved = await authorized_file(db, FileSearchPrincipal.from_actor(actor), int(delivery["item_id"]))
-            if resolved:
-                item = resolved[0]
-                if item.storage_key:
-                    await message.answer_document(BufferedInputFile(await get_attachment(item.storage_key), filename=item.name))
+            await _deliver_company_file_attachment(message, db, FileSearchPrincipal.from_actor(actor), delivery)
     return True
 
 

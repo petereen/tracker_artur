@@ -54,6 +54,60 @@ def test_explicit_prompt_cache_uses_provider_supported_ttl():
     assert EXPLICIT_PROMPT_CACHE_TTL == "30m"
 
 
+def test_freshness_language_repair_does_not_keep_removed_web_tool_choice(monkeypatch):
+    gateway = AIGateway()
+    posted = []
+
+    class Cache:
+        async def circuit_open(self, _key):
+            return False
+
+        async def record_model_success(self, _key):
+            return None
+
+        async def record_model_failure(self, _key):
+            return None
+
+    gateway.cache = Cache()
+
+    async def classify(_text):
+        return Classification(
+            category="simple_qa",
+            language="mn",
+            requires_freshness=True,
+            requires_enterprise_tools=False,
+            requested_modalities=["text"],
+            cache_eligible=False,
+        )
+
+    async def post(payload, *, model_key, retries=2):
+        del model_key, retries
+        posted.append(payload)
+        if len(posted) == 1:
+            assert payload["tool_choice"] == {"type": "web_search"}
+            return {
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "English answer"}]}],
+                "usage": {},
+            }
+        assert payload["tools"] == []
+        assert "tool_choice" not in payload
+        return {
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": "Монгол хариу"}]}],
+            "usage": {},
+        }
+
+    monkeypatch.setattr(gateway, "_classify", classify)
+    monkeypatch.setattr(gateway, "_post", post)
+    response = asyncio.run(gateway.respond(None, GatewayRequest(
+        text="What is the latest company update?",
+        history=[],
+        channel="web",
+    )))
+
+    assert response.answer == "Монгол хариу"
+    assert len(posted) == 2
+
+
 def test_exact_cache_key_is_stable_for_whitespace_only_changes():
     assert exact_key(prompt_version="v1", language="mn", text="сайн байна уу") == exact_key(
         prompt_version="v1", language="mn", text="  сайн   байна уу  "

@@ -47,12 +47,16 @@ class FakeMessage:
         self.reply_to_message = None
         self.answers = []
         self.audios = []
+        self.documents = []
 
     async def answer(self, text, **kwargs):
         self.answers.append((text, kwargs))
 
     async def answer_audio(self, audio, **kwargs):
         self.audios.append((audio, kwargs))
+
+    async def answer_document(self, document, **kwargs):
+        self.documents.append((document, kwargs))
 
 
 class FakeState:
@@ -335,6 +339,30 @@ def test_telegram_route_reports_unexpected_failure_instead_of_silence(monkeypatc
     )
 
     assert "temporarily unavailable" in message.answers[-1][0]
+
+
+def test_missing_telegram_attachment_does_not_replace_successful_answer(monkeypatch):
+    async def authorized(_db, _principal, _item_id):
+        return [SimpleNamespace(id=9, name="Brand deck.pptx", storage_key="1/library/missing")]
+
+    async def missing(_storage_key):
+        raise FileNotFoundError("attachment volume is missing the object")
+
+    monkeypatch.setattr(assistant_handlers, "authorized_file", authorized)
+    monkeypatch.setattr(assistant_handlers, "get_attachment", missing)
+    message = FakeMessage("Send me the brand deck")
+
+    asyncio.run(
+        assistant_handlers._deliver_company_file_attachment(
+            message,
+            object(),
+            FileSearchPrincipal(organization_id=1, employee_id=7, channel="telegram"),
+            {"item_id": 9},
+        )
+    )
+
+    assert message.documents == []
+    assert "attachment is currently unavailable" in message.answers[-1][0]
 
 
 def test_verified_telegram_employee_can_search_without_workspace_account(monkeypatch):

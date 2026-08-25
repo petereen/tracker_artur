@@ -135,6 +135,8 @@ services:
   bot:
     build: ./backend
     restart: unless-stopped
+    volumes:
+      - attachment_uploads:/app/uploads/attachments
     depends_on:
       backend:
         condition: service_healthy
