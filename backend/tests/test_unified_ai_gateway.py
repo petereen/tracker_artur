@@ -41,4 +41,5 @@ def test_preview_is_explicitly_mutating_and_compactly_signed():
 
 def test_multilingual_intent_fallback_keeps_authorized_data_tools_visible():
     assert "directory" in AIGateway._infer_enterprise_intents("ажилчдын жагсаалт")
-    assert "knowledge" in AIGateway._infer_enterprise_intents("presentation template файл")
+    for query in ("presentation template файл", "презентация шаблон", "презентаци загвар"):
+        assert "knowledge" in AIGateway._infer_enterprise_intents(query)

@@ -26,6 +26,8 @@ from app.services.ai_gateway.cache import ResponseCache, exact_key
 from app.services.ai_gateway.config import QueryCategory, registry
 from app.services.ai_gateway.tools.registry import ToolRegistry
 from app.services.mcp.catalog import _strict_schema, get_tool
+from app.services.mcp.references import resolve_resource_reference
+from app.services.file_search_service import is_file_search_query
 
 log = logging.getLogger(__name__)
 RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -36,7 +38,7 @@ ANSWER_SYSTEM = """You are OYUNS, a reliable enterprise assistant shared by Tele
 
 For multi-statement requests, separate read intents from action intents. Complete safe retrieval first when it is needed to resolve the action. For task creation or delegation, call the available task-preview tool (either the legacy create/delegate tool or an `oyuns_tasks_prepare_*` tool) with a concise title, all relevant context in the description, the resolved assignee, priority, and an ISO-8601 deadline with UTC offset when the user supplied a time. Creating a task for the current user requires only a title: use assignee="self" and the default priority when no assignee or priority was supplied. Delegating a task requires only a title and a clearly named target employee. Treat description, reviewer, project, priority, and deadline as optional; pass null/default values instead of asking the user for them. Ask one focused clarification question only when the title, delegated target, or a supplied date/time cannot be safely resolved. Always present a task/update preview for confirmation; never claim a mutation happened from a preview. A calendar read does not create or schedule an event; do not claim it did. If the product has no write tool for a requested meeting/reminder, say that clearly and ask whether the user wants an authorized task/reminder draft instead.
 
-For file requests, use the available knowledge-search tool (legacy `file_search_tool` or `oyuns_knowledge_search`) for content or semantic search; use the legacy directory operation only when that legacy tool is present. Report only authorized results and cite returned sources. For tool results with status=empty, explain that no matching authorized records were found. For status=denied, explain the access or missing-parameter issue without revealing restricted data. For status=unavailable or partial, acknowledge the specific affected capability, state whether any action was performed, and offer a safe retry or focused clarification. Never expose internal IDs, action tokens, raw JSON, credentials, hidden fields, or retrieval metadata. For current/factual requests, use web search and cite returned sources. Never claim an action was performed until the application confirms it."""
+For file requests, use the available knowledge-search tool (legacy `file_search_tool` or `oyuns_knowledge_search`) for content or semantic search; use the legacy directory operation only when that legacy tool is present. Report only authorized results and cite returned sources. For tool results with status=empty, explain that no matching authorized records were found. For status=indexing, explain that metadata matched while content indexing is still pending and offer the file itself when delivery was requested. For status=denied, explain the access or missing-parameter issue without revealing restricted data. For status=unavailable or partial, acknowledge the specific affected capability, state whether any action was performed, and offer a safe retry or focused clarification. Never expose internal IDs, action tokens, raw JSON, credentials, hidden fields, or retrieval metadata. For current/factual requests, use web search and cite returned sources. Never claim an action was performed until the application confirms it."""
 
 
 # The classifier is a routing hint and can miss short multilingual requests.
@@ -146,6 +148,7 @@ class GatewayResponse:
     usage: dict
     tool_results: list[dict] = field(default_factory=list)
     mcp_context: list[dict] = field(default_factory=list)
+    deliveries: list[dict] = field(default_factory=list)
 
 
 class GatewayError(RuntimeError):
@@ -219,11 +222,57 @@ class AIGateway:
     @staticmethod
     def _infer_enterprise_intents(text: str) -> set[str]:
         lowered = (text or "").casefold()
-        return {
+        intents = {
             intent
             for intent, hints in ENTERPRISE_INTENT_HINTS.items()
             if any(hint in lowered for hint in hints)
         }
+        if is_file_search_query(text):
+            intents.add("knowledge")
+        return intents
+
+    @staticmethod
+    def _materialize_file_deliveries(result: dict, actor: ActorContext | None) -> list[dict]:
+        """Turn MCP opaque delivery references into internal transport metadata.
+
+        Opaque references remain in model/MCP-visible data. Web, Telegram, and
+        chat consumers receive only after this server-side step, and each
+        download/send path performs the final shared ACL check again.
+        """
+        if not actor or not isinstance(result, dict):
+            return [item for item in result.get("deliveries", []) if isinstance(item, dict)]
+        deliveries = [item for item in result.get("deliveries", []) if isinstance(item, dict)]
+        data = result.get("data", {}) if isinstance(result.get("data", {}), dict) else {}
+        items = {item.get("reference"): item for item in data.get("items", []) if isinstance(item, dict)}
+        for delivery in data.get("deliveries", []) if isinstance(data.get("deliveries", []), list) else []:
+            if not isinstance(delivery, dict):
+                continue
+            reference = delivery.get("reference")
+            if not reference or reference not in items:
+                continue
+            try:
+                value = resolve_resource_reference(actor, reference, kind="knowledge_source")
+            except ValueError:
+                continue
+            if not isinstance(value, str) or not value.startswith("company_file:"):
+                continue
+            try:
+                item_id = int(value.split(":", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            item = items[reference]
+            if delivery.get("kind") == "company_file_attachment":
+                deliveries.append({
+                    "source_id": value, "kind": "company_file_attachment", "item_id": item_id,
+                    "filename": item.get("title"), "content_type": item.get("content_type"),
+                    "size": item.get("size"),
+                })
+            else:
+                deliveries.append({
+                    "source_id": value, "kind": "authenticated_link",
+                    "url": f"{settings.PUBLIC_APP_URL.rstrip('/')}/company-files?item={item_id}",
+                })
+        return deliveries
 
     async def _post(self, payload: dict, *, model_key: str, retries: int = 2) -> dict:
         key = settings.OPENAI_API_KEY.strip()
@@ -460,7 +509,14 @@ class AIGateway:
                             repaired = await self._post(repair, model_key=key)
                             answer = self._output_text(repaired) or answer
                         usage = body.get("usage", {})
-                        response = GatewayResponse(answer=answer, sources=[*request.grounding_sources, *self._sources(output)], route=classification.category.value, model=model.id, cache="miss", web_search_used=classification.requires_freshness, usage=usage, tool_results=[*collected_tool_results, *self._mcp_results(output)], mcp_context=self._mcp_context(output) or request.mcp_context)
+                        tool_results = [*collected_tool_results, *self._mcp_results(output)]
+                        deliveries = [
+                            delivery
+                            for result in collected_tool_results
+                            if isinstance(result, dict)
+                            for delivery in self._materialize_file_deliveries(result, request.actor_context)
+                        ]
+                        response = GatewayResponse(answer=answer, sources=[*request.grounding_sources, *self._sources(output)], route=classification.category.value, model=model.id, cache="miss", web_search_used=classification.requires_freshness, usage=usage, tool_results=tool_results, mcp_context=self._mcp_context(output) or request.mcp_context, deliveries=deliveries)
                         if cache_ok and embedding:
                             packed = {"answer": answer, "sources": [], "route": response.route, "model": model.id, "web_search_used": False, "usage": usage}
                             await self.cache.put_exact(cache_key, packed)

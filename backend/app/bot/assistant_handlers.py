@@ -28,12 +28,13 @@ from app.services import (
 )
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.enterprise_deps import actor_from_telegram_id
+from app.core.enterprise_deps import actor_from_telegram_id, file_search_principal_from_telegram_id
 from app.models.models import AssistantConversation, AssistantMessage, CompanyLibraryItem
 from app.services import enterprise_tools
 from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
 from app.services.mcp.references import resolve_action_reference
 from app.services.attachment_storage import get_attachment
+from app.services.file_search_service import FileSearchPrincipal, FileSearchServiceError, authorized_file, is_file_search_query, search_files
 from sqlalchemy import select
 
 log = logging.getLogger(__name__)
@@ -139,6 +140,46 @@ async def _enterprise_route(
     async with AsyncSessionLocal() as db:
         actor = await actor_from_telegram_id(tg_id, db)
         if not actor:
+            # Telegram identity is already verified by the Employee link. A
+            # workspace UserAccount is not required for constrained company
+            # file discovery in the fixed internal tenant.
+            principal = await file_search_principal_from_telegram_id(tg_id, db)
+            if principal and is_file_search_query(text):
+                request = type("FileRequest", (), {
+                    "operation": "search", "query": text[:500], "search_mode": "hybrid",
+                    "folder_id": None, "file_types": [], "limit": 5,
+                    "delivery": "attachment" if enterprise_tools.wants_file_attachment(text) else "none",
+                })()
+                try:
+                    result = await search_files(db, principal, request)
+                except FileSearchServiceError:
+                    await _answer(message, "Company file search is temporarily unavailable. Please try again shortly.")
+                    return True
+                status_messages = {
+                    "empty": "No matching authorized company files were found.",
+                    "indexing": "I found matching file metadata, but content indexing is still in progress.",
+                    "partial": "I found an authorized file, but content enrichment is incomplete.",
+                    "unavailable": "Company file search is temporarily unavailable. Please try again shortly.",
+                    "denied": "That company-file request is not authorized.",
+                }
+                rows = result.get("data", {}).get("results", [])
+                if rows and result.get("status") not in {"unavailable", "denied"}:
+                    lines = ["Authorized company files:"]
+                    for row in rows:
+                        state = row.get("content_state")
+                        suffix = f" ({state})" if state in {"indexing", "empty", "failed"} else ""
+                        lines.append(f"• {row.get('title') or 'company file'}{suffix}")
+                    await _answer(message, "\n".join(lines))
+                else:
+                    await _answer(message, status_messages.get(result.get("status"), "Company file search returned no usable result."))
+                for delivery in result.get("deliveries", []):
+                    if delivery.get("kind") != "company_file_attachment":
+                        continue
+                    resolved = await authorized_file(db, principal, int(delivery["item_id"]))
+                    if resolved:
+                        item = resolved[0]
+                        await message.answer_document(BufferedInputFile(await get_attachment(item.storage_key), filename=item.name))
+                return True
             await _answer(message, "OYUNS enterprise tools require a linked active platform account.")
             return True
         thread_key = str(getattr(message.chat, "id", tg_id))
@@ -152,7 +193,7 @@ async def _enterprise_route(
         detected = assistant_ai.detect_language(text).value
         actor = replace(actor, channel="telegram", detected_language=detected)
         tool_sources: list[dict] = []
-        tool_deliveries: list[dict] = []
+        tool_deliveries: list[dict] = list(routed.deliveries)
         pending_action = None
 
         try:
@@ -163,8 +204,24 @@ async def _enterprise_route(
             return True
         for mcp_result in routed.tool_results:
             tool_sources.extend(mcp_result.get("sources", []))
+            tool_deliveries.extend(mcp_result.get("deliveries", []))
             action_data = mcp_result.get("data", {}).get("pending_action")
             pending_action = action_data or pending_action
+        validated_deliveries: list[dict] = []
+        for delivery in tool_deliveries:
+            try:
+                item_id = int(delivery.get("item_id"))
+            except (AttributeError, TypeError, ValueError):
+                source_id = str(delivery.get("source_id", ""))
+                if not source_id.startswith("company_file:"):
+                    continue
+                try:
+                    item_id = int(source_id.split(":", 1)[1])
+                except (IndexError, ValueError):
+                    continue
+            if await authorized_file(db, FileSearchPrincipal.from_actor(actor), item_id):
+                validated_deliveries.append(delivery)
+        tool_deliveries = validated_deliveries
         action = {"type": "task_action_preview", "payload": pending_action} if pending_action else None
         source_map = {str(item.get("id") or item.get("reference")): item for item in [*tool_sources, *routed.sources] if item.get("id") or item.get("reference")}
         result = {"answer": routed.answer, "action": pending_action, "sources": list(source_map.values()), "deliveries": tool_deliveries}
@@ -194,9 +251,11 @@ async def _enterprise_route(
         for delivery in result.get("deliveries", []):
             if delivery.get("kind") != "company_file_attachment":
                 continue
-            item = await db.get(CompanyLibraryItem, int(delivery["item_id"]))
-            if item and item.storage_key:
-                await message.answer_document(BufferedInputFile(await get_attachment(item.storage_key), filename=item.name))
+            resolved = await authorized_file(db, FileSearchPrincipal.from_actor(actor), int(delivery["item_id"]))
+            if resolved:
+                item = resolved[0]
+                if item.storage_key:
+                    await message.answer_document(BufferedInputFile(await get_attachment(item.storage_key), filename=item.name))
     return True
 
 
@@ -325,6 +384,7 @@ async def execute_tool(
     is_manager: bool,
     tg_id: str | None,
     timezone_name: str,
+    db=None,
 ) -> tuple[dict, object | None, str | None]:
     """Execute one validated assistant function and return raw data + UI controls."""
     if tool_name == assistant_ai.AssistantToolName.CREATE_TASK_DRAFT:
@@ -366,8 +426,20 @@ async def execute_tool(
 
     if tool_name == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE:
         query = arguments["query"]
-        entries = knowledge_service.search_knowledge([query], limit=5)
-        return _knowledge_raw_data(entries, query=query), None, None
+        if db is None or not tg_id:
+            return {"status": "unavailable", "reason": "Company file search requires the shared storage context."}, None, None
+        principal = await file_search_principal_from_telegram_id(tg_id, db)
+        if not principal:
+            return {"status": "denied", "reason": "A verified Telegram employee link is required."}, None, None
+        request = type("FileRequest", (), {
+            "operation": "search", "query": query, "search_mode": "hybrid", "folder_id": None,
+            "file_types": [], "limit": 5, "delivery": "none",
+        })()
+        try:
+            result = await search_files(db, principal, request)
+        except FileSearchServiceError:
+            return {"status": "unavailable", "reason": "Company file search is temporarily unavailable."}, None, None
+        return result, None, None
 
     if tool_name == assistant_ai.AssistantToolName.GET_EXCHANGE_RATE:
         return await exchange_rate_service.get_exchange_rate(

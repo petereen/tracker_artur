@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     ADMIN_EMAIL: str = "admin@company.ru"
     ADMIN_USERNAME: str = ""
     ADMIN_PASSWORD: str = "admin123"
+    # This deployment has one authoritative internal company tenant.  File
+    # discovery uses it directly, including for a verified Telegram employee
+    # who has no UserAccount yet.
+    DEFAULT_COMPANY_ORGANIZATION_ID: int = 1
     ACCESS_TOKEN_EXPIRE_HOURS: int = 24
     ENTERPRISE_ACCESS_TOKEN_MINUTES: int = 15
     REFRESH_TOKEN_DAYS: int = 30
@@ -78,6 +82,9 @@ class Settings(BaseSettings):
     ENTERPRISE_TOOLS_ENABLED: bool = False
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBEDDING_DIMENSIONS: int = 1536
+    # JSON object of concept name -> aliases. Empty uses the built-in
+    # multilingual defaults in the shared file-search service.
+    FILE_SEARCH_SYNONYMS_JSON: str = ""
     ASSISTANT_AUDIT_CONTENT_DAYS: int = 30
     ASSISTANT_AUDIT_METADATA_DAYS: int = 365
     # AI gateway: Redis accelerates exact/circuit cache operations while

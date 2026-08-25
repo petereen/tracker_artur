@@ -97,12 +97,13 @@ def rank_knowledge(
     return selected
 
 
-def list_active_knowledge() -> list[dict]:
+def list_active_knowledge(*, organization_id: int) -> list[dict]:
+    """Return curated entries only for the already-resolved company tenant."""
     try:
         with get_session() as session:
             rows = session.execute(
                 select(CompanyKnowledge)
-                .where(CompanyKnowledge.is_active.is_(True))
+                .where(CompanyKnowledge.organization_id == organization_id, CompanyKnowledge.is_active.is_(True))
                 .order_by(CompanyKnowledge.updated_at.desc(), CompanyKnowledge.id.desc())
             ).scalars().all()
             return [
@@ -120,16 +121,16 @@ def list_active_knowledge() -> list[dict]:
         return []
 
 
-def search_knowledge(terms: Iterable[str], *, limit: int = 5) -> list[dict]:
-    return rank_knowledge(list_active_knowledge(), terms, limit=limit)
+def search_knowledge(terms: Iterable[str], *, organization_id: int, limit: int = 5) -> list[dict]:
+    return rank_knowledge(list_active_knowledge(organization_id=organization_id), terms, limit=limit)
 
 
-def active_knowledge_count() -> int:
+def active_knowledge_count(*, organization_id: int) -> int:
     try:
         with get_session() as session:
             return int(
                 session.execute(
-                    select(func.count()).where(CompanyKnowledge.is_active.is_(True))
+                    select(func.count()).where(CompanyKnowledge.organization_id == organization_id, CompanyKnowledge.is_active.is_(True))
                 ).scalar_one()
             )
     except SQLAlchemyError:

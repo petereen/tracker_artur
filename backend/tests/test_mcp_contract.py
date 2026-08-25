@@ -8,6 +8,8 @@ from app.services.ai_gateway.gateway import AIGateway, Classification, GatewayRe
 from app.services.mcp.catalog import allowed_tool_names, tool_list
 from app.services.mcp.references import resolve_resource_reference, resource_reference
 from app.services.mcp.results import MAX_RESULT_BYTES, envelope
+from app.services.mcp.adapters import _summary
+from app.services.mcp.schemas import KnowledgeSearchInput
 
 
 def _actor(*, account_id: int = 7, organization_id: int = 3) -> ActorContext:
@@ -70,6 +72,27 @@ def test_mcp_envelope_redacts_internal_secrets_and_marks_oversized_results_parti
     assert "OUTPUT_TRUNCATED" in output["warnings"]
 
 
+def test_mcp_file_contract_preserves_distinct_indexing_and_partial_states():
+    assert KnowledgeSearchInput(query="презентаци загвар", delivery="link").delivery == "link"
+    assert "indexing" in _summary({"status": "indexing"}, "fallback")
+    assert "incomplete" in _summary({"status": "partial"}, "fallback")
+
+
+def test_gateway_materializes_opaque_mcp_file_delivery_for_authenticated_channels():
+    actor = _actor()
+    reference = resource_reference(actor, "knowledge_source", "company_file:17")
+    result = {
+        "data": {
+            "items": [{"reference": reference, "title": "policy.pdf", "content_type": "application/pdf", "size": 12}],
+            "deliveries": [{"reference": reference, "kind": "company_file_attachment"}],
+        },
+        "deliveries": [],
+    }
+    deliveries = AIGateway._materialize_file_deliveries(result, actor)
+    assert deliveries[0]["item_id"] == 17
+    assert deliveries[0]["filename"] == "policy.pdf"
+
+
 def test_gateway_uses_remote_mcp_and_preserves_deferred_list_context(monkeypatch):
     gateway = AIGateway()
 
@@ -107,4 +130,3 @@ def test_gateway_uses_remote_mcp_and_preserves_deferred_list_context(monkeypatch
     assert response.answer == "Done."
     assert response.tool_results[0]["status"] == "ok"
     assert response.mcp_context[0]["type"] == "mcp_list_tools"
-

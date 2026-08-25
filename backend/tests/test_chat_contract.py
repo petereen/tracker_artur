@@ -47,6 +47,7 @@ def test_chat_constraints_cover_direct_uniqueness_message_idempotency_and_receip
     assert "uq_chat_participants_conversation_account" in participant_constraints
     assert "uq_chat_messages_client_nonce" in message_constraints
     assert "ck_chat_messages_body_length" in message_constraints
+    assert "company_file_attachments" in ChatMessage.__table__.columns
     assert "uq_chat_message_receipts_message_account" in receipt_constraints
     assert "ck_chat_message_receipts_read_delivered" in receipt_constraints
     assert "ix_chat_messages_thread_root" in {index.name for index in ChatMessage.__table__.indexes}

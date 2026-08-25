@@ -16,6 +16,7 @@ class KnowledgeSearchInput(StrictInput):
     search_mode: Literal["hybrid", "semantic", "keyword"] = "hybrid"
     file_types: list[str] = Field(default_factory=list, max_length=10)
     limit: int = Field(default=5, ge=1, le=5)
+    delivery: Literal["none", "attachment", "link"] = "none"
 
     @field_validator("query")
     @classmethod

@@ -102,6 +102,7 @@ from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable
 from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
 from app.services import enterprise_tools
+from app.services.file_search_service import FileSearchPrincipal, FileSearchServiceError, search_files
 from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
 
 log = logging.getLogger(__name__)
@@ -870,12 +871,26 @@ async def global_search(
         if score >= 0.28:
             worker_results.append({"id": worker.id, "type": "worker", "title": worker.name, "subtitle": worker.job_title or worker.telegram_username, "score": score, "metadata": {"avatar_url": (worker.metadata_json or {}).get("avatar_url"), "role": worker.job_title, "presence": "offline"}})
 
-    files = list((await db.execute(select(CompanyLibraryItem).where(CompanyLibraryItem.organization_id == actor.organization_id, CompanyLibraryItem.deleted_at.is_(None)))).scalars().all())
     file_results = []
-    for item in files:
-        score = _search_score(q, item.name, item.content_type, item.kind)
-        if score >= 0.28:
-            file_results.append({"id": item.id, "type": "file", "title": item.name, "subtitle": item.content_type or item.kind, "score": score, "metadata": {"kind": item.kind, "size": item.size, "parent_id": item.parent_id}})
+    file_request = type("FileRequest", (), {
+        "operation": "search", "query": q, "search_mode": "keyword", "folder_id": None,
+        "file_types": [], "limit": limit_per_group, "delivery": "none",
+    })()
+    try:
+        file_result = await search_files(db, FileSearchPrincipal.from_actor(actor), file_request)
+    except FileSearchServiceError as exc:
+        raise HTTPException(status_code=503, detail="Company file search is temporarily unavailable") from exc
+    for row in file_result["data"].get("results", []):
+        item_id = int(row["source_id"].split(":", 1)[1])
+        file_results.append({
+            "id": item_id, "type": "file", "title": row["title"],
+            "subtitle": row.get("content_type") or row.get("extension") or "file",
+            "score": row["score"],
+            "metadata": {
+                "kind": row.get("kind", "file"), "size": row.get("size"),
+                "parent_id": row.get("parent_id"), "content_state": row.get("content_state"),
+            },
+        })
     rank = lambda rows: sorted(rows, key=lambda row: (-row["score"], row["title"].casefold()))[:limit_per_group]
     return {"query": q, "groups": {"tasks": rank(task_results), "workers": rank(worker_results), "files": rank(file_results)}}
 
@@ -3161,7 +3176,7 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     actor = replace(actor, channel="web", detected_language=assistant_ai.detect_language(text).value)
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
     tool_sources: list[dict] = []
-    tool_deliveries: list[dict] = []
+    tool_deliveries: list[dict] = list(routed.deliveries)
     pending_action = None
 
     try:
@@ -3173,6 +3188,7 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     answer = routed.answer
     for mcp_result in routed.tool_results:
         tool_sources.extend(mcp_result.get("sources", []))
+        tool_deliveries.extend(mcp_result.get("deliveries", []))
         action_data = mcp_result.get("data", {}).get("pending_action")
         pending_action = action_data or pending_action
     action = {"type": "task_action_preview", "payload": pending_action} if pending_action else None

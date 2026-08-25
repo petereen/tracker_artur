@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from app.core.enterprise_deps import ActorContext, get_actor
 from app.main import app
 from app.models.models import Base
-from app.routers.company_files import _active_descendants, _clean_name, _has_deleted_ancestor, _item_for_actor, browse_company_files, upload_company_file
+from app.routers.company_files import _active_descendants, _clean_name, _has_deleted_ancestor, _item_for_actor, _previewable_file, browse_company_files, upload_company_file
 
 
 def actor(*roles: str, organization_id: int = 1) -> ActorContext:
@@ -78,3 +78,21 @@ def test_archive_descendants_preserve_nested_paths_and_skip_deleted_items():
     deleted = SimpleNamespace(id=4, parent_id=1, kind="file", name="old.txt", deleted_at=datetime.now(timezone.utc))
     descendants = _active_descendants(folder, [folder, nested, file, deleted])
     assert [(item.id, path) for item, path in descendants] == [(2, "Policies/2026"), (3, "Policies/2026/guide.txt")]
+
+
+def test_preview_and_download_resolution_share_acl_decision(monkeypatch):
+    item = SimpleNamespace(id=9, kind="file", deleted_at=None, storage_key="1/library/file")
+
+    async def allow(*_args):
+        return item, None
+
+    monkeypatch.setattr("app.routers.company_files.authorized_file", allow)
+    assert asyncio.run(_previewable_file(SimpleNamespace(), 9, actor("member"))) is item
+
+    async def deny(*_args):
+        return None
+
+    monkeypatch.setattr("app.routers.company_files.authorized_file", deny)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_previewable_file(SimpleNamespace(), 9, actor("member")))
+    assert exc.value.status_code == 404

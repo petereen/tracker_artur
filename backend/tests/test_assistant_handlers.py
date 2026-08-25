@@ -28,6 +28,7 @@ from app.services.assistant_ai import (
     RouterIntent,
     TaskScope,
 )
+from app.services.file_search_service import FileSearchPrincipal
 
 
 class FakeBot:
@@ -287,6 +288,38 @@ def test_telegram_task_intake_uses_legacy_draft_controls(monkeypatch):
     assert captured["state"] is state
     assert captured["show_preview"] is True
     assert captured["allow_ai_structuring"] is True
+
+
+def test_verified_telegram_employee_can_search_without_workspace_account(monkeypatch):
+    class Session:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    async def no_account(_tg_id, _db):
+        return None
+
+    async def principal_lookup(_tg_id, _db):
+        return FileSearchPrincipal(organization_id=1, employee_id=7, channel="telegram")
+
+    async def search(_db, _principal, _request):
+        return {
+            "status": "indexing",
+            "data": {"results": [{"title": "Brand deck.pptx", "content_state": "indexing"}]},
+            "deliveries": [],
+        }
+
+    monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", lambda: Session())
+    monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", no_account)
+    monkeypatch.setattr(assistant_handlers, "file_search_principal_from_telegram_id", principal_lookup)
+    monkeypatch.setattr(assistant_handlers, "search_files", search)
+
+    message = FakeMessage("презентаци загвар")
+    handled = asyncio.run(assistant_handlers._enterprise_route(message, FakeState(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77"))
+    assert handled is True
+    assert "indexing" in message.answers[0][0]
 
 
 def test_delegate_route_enters_existing_draft_without_direct_creation(monkeypatch):

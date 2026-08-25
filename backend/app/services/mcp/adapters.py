@@ -11,6 +11,7 @@ from app.core.enterprise_deps import ActorContext
 from app.models.models import CompanyKnowledge, CompanyLibraryItem, Employee, KnowledgeChunk, KnowledgeDocument, ResourcePolicy, Task
 from app.services import enterprise_tools
 from app.services import exchange_rate_service
+from app.services.file_search_service import FileSearchPrincipal, authorized_file
 from app.services.mcp import schemas
 from app.services.mcp.references import action_reference, resolve_resource_reference, resource_reference
 from app.services.mcp.results import envelope
@@ -39,6 +40,10 @@ def _summary(result: dict, fallback: str) -> str:
     status = result.get("status")
     if status == "empty":
         return "No matching authorized records were found."
+    if status == "indexing":
+        return "Matching company-file metadata was found; content indexing is still in progress."
+    if status == "partial":
+        return "Authorized company-file metadata was found, but content enrichment is incomplete."
     if status == "denied":
         return "You do not have access to that resource."
     if status == "unavailable":
@@ -73,17 +78,24 @@ async def _knowledge_fetch(db, actor: ActorContext, reference: str) -> dict:
     source_type, raw_id = value.split(":", 1)
     if source_type not in {"company_file", "company_knowledge"} or not raw_id.isdigit():
         return {"status": "denied", "data": {}}
-    document = await db.scalar(select(KnowledgeDocument).where(KnowledgeDocument.organization_id == actor.organization_id, KnowledgeDocument.source_type == source_type, KnowledgeDocument.source_id == int(raw_id), KnowledgeDocument.index_status == "ready"))
-    if not document:
-        return {"status": "empty", "data": {}}
     # Reuse the same file/knowledge policy checks as search before returning
     # anything. A fetch reference never widens the user's entitlement.
     if source_type == "company_file":
-        source = await db.get(CompanyLibraryItem, int(raw_id))
-        if not source or source.organization_id != actor.organization_id or source.deleted_at:
+        resolved = await authorized_file(db, FileSearchPrincipal.from_actor(actor), int(raw_id))
+        if not resolved:
             return {"status": "empty", "data": {}}
-        if not await enterprise_tools.can_read_policy(db, actor, await enterprise_tools._policy_for_file(db, source)):
-            return {"status": "empty", "data": {}}
+        source, policy = resolved
+        document = await db.scalar(select(KnowledgeDocument).where(
+            KnowledgeDocument.organization_id == actor.organization_id,
+            KnowledgeDocument.source_type == source_type,
+            KnowledgeDocument.source_id == int(raw_id),
+        ))
+        state = "indexing" if document is None or document.index_status in {"pending", "indexing"} else "failed" if document.index_status == "failed" else "empty" if not getattr(document, "content_available", False) else "ready"
+        if state != "ready":
+            return {"status": "partial" if state == "failed" else "indexing", "data": {
+                "title": getattr(source, "title", None) or source.name,
+                "reference": reference, "content_state": state, "passages": [],
+            }}
     else:
         source = await db.get(CompanyKnowledge, int(raw_id))
         if not source or source.organization_id != actor.organization_id or not source.is_active:
@@ -91,6 +103,9 @@ async def _knowledge_fetch(db, actor: ActorContext, reference: str) -> dict:
         policy = await db.scalar(select(ResourcePolicy).where(ResourcePolicy.organization_id == actor.organization_id, ResourcePolicy.resource_type == "company_knowledge", ResourcePolicy.resource_id == source.id))
         if not await enterprise_tools.can_read_policy(db, actor, policy):
             return {"status": "empty", "data": {}}
+        document = await db.scalar(select(KnowledgeDocument).where(KnowledgeDocument.organization_id == actor.organization_id, KnowledgeDocument.source_type == source_type, KnowledgeDocument.source_id == int(raw_id)))
+        if not document:
+            return {"status": "indexing", "data": {"title": source.title, "reference": reference, "content_state": "indexing", "passages": []}}
     chunks = list((await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.document_id == document.id).order_by(KnowledgeChunk.position).limit(2))).scalars().all())
     return {
         "status": "ok" if chunks else "empty",
@@ -122,11 +137,12 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
         arguments = _sanitize_arguments(arguments)
         if tool_name == "oyuns_knowledge_search":
             data = schemas.KnowledgeSearchInput.model_validate(arguments)
-            result = await enterprise_tools.execute(db, actor, "file_search_tool", {"operation": "search", "query": data.query, "search_mode": data.search_mode, "file_types": data.file_types, "limit": data.limit, "delivery": "none"}, channel=channel, prompt=data.query, conversation_id=conversation_id)
+            result = await enterprise_tools.execute(db, actor, "file_search_tool", {"operation": "search", "query": data.query, "search_mode": data.search_mode, "file_types": data.file_types, "limit": data.limit, "delivery": data.delivery}, channel=channel, prompt=data.query, conversation_id=conversation_id)
             rows = result.get("data", {}).get("results", [])
-            items = [{"reference": resource_reference(actor, "knowledge_source", row["source_id"]), "title": row.get("title"), "excerpt": row.get("excerpt"), "locator": row.get("locator"), "classification": row.get("classification")} for row in rows]
+            items = [{"reference": resource_reference(actor, "knowledge_source", row["source_id"]), "title": row.get("title"), "excerpt": row.get("excerpt"), "locator": row.get("locator"), "classification": row.get("classification"), "content_state": row.get("content_state"), "content_type": row.get("content_type"), "extension": row.get("extension")} for row in rows]
             sources = [{"reference": item["reference"], "title": item["title"], "locator": item.get("locator")} for item in items]
-            return envelope(result=result, request_id=request_id, summary=_summary(result, f"Found {len(items)} authorized knowledge passages."), data={"items": items}, sources=sources)
+            safe_deliveries = [{"reference": item["reference"], "kind": "company_file_attachment" if data.delivery == "attachment" else "authenticated_file_reference"} for item in items] if data.delivery != "none" else []
+            return envelope(result=result, request_id=request_id, summary=_summary(result, f"Found {len(items)} authorized company files."), data={"items": items, "deliveries": safe_deliveries}, sources=sources)
 
         if tool_name == "oyuns_knowledge_fetch":
             data = schemas.KnowledgeFetchInput.model_validate(arguments)

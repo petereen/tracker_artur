@@ -429,7 +429,7 @@ class WorkReport(Base):
     report_type = Column(Text, nullable=False)
     period_date = Column(Date, nullable=False)
     status = Column(Text, nullable=False, server_default="awaiting", default="awaiting")
-    title = Column(Text)
+    title = Column(Text, nullable=False)
     submitted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     reviewer_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     submitted_at = Column(DateTime(timezone=True))
@@ -716,6 +716,9 @@ class ChatMessage(Base):
     sender_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     client_nonce = Column(UUID(as_uuid=True), nullable=False)
     body = Column(Text)
+    # References are re-authorized by each reader; this is not a storage-key
+    # cache and never grants access by itself.
+    company_file_attachments = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     reply_to_message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="SET NULL"))
     thread_root_message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="SET NULL"))
     forwarded_from_message_id = Column(Integer, ForeignKey("chat_messages.id", ondelete="SET NULL"))
@@ -1184,6 +1187,7 @@ class CompanyLibraryItem(Base):
         ),
         Index("ix_company_library_items_parent", "organization_id", "parent_id"),
         Index("ix_company_library_items_deleted", "organization_id", "deleted_at"),
+        Index("ix_company_library_items_search_key", "organization_id", "search_key"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -1191,6 +1195,12 @@ class CompanyLibraryItem(Base):
     parent_id = Column(Integer, ForeignKey("company_library_items.id", ondelete="CASCADE"))
     kind = Column(String(12), nullable=False)
     name = Column(Text, nullable=False)
+    # Discovery metadata lives on the authoritative storage row.  The content
+    # index may lag or fail without making the file undiscoverable.
+    title = Column(Text)
+    extension = Column(String(32))
+    searchable_metadata = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    search_key = Column(Text, nullable=False)
     storage_key = Column(Text, unique=True)
     content_type = Column(Text)
     size = Column(Integer)
@@ -1256,6 +1266,9 @@ class KnowledgeDocument(Base):
     content_type = Column(Text)
     checksum = Column(String(64))
     index_status = Column(String(16), nullable=False, server_default="pending", default="pending")
+    # ``ready`` only means indexing completed.  Image-only and otherwise
+    # unextractable files are ready with ``content_available = false``.
+    content_available = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     indexed_at = Column(DateTime(timezone=True))
     last_error = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

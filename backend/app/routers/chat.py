@@ -39,6 +39,8 @@ from app.services.enterprise_events import record_change
 from app.services.malware_scanner import MalwareDetected, scan_upload
 from app.services.ai_gateway import AIGateway, GatewayError
 from app.services import assistant_ai
+from app.services import enterprise_tools
+from app.services.file_search_service import FileSearchPrincipal, authorized_file
 
 
 router = APIRouter()
@@ -271,6 +273,7 @@ async def _send_oyuns_reply(
         return
     text = history[-1]["content"]
     routed_actor = actor
+    routed = None
     try:
         from dataclasses import replace
         routed_actor = replace(actor, channel="web", detected_language=assistant_ai.detect_language(text).value)
@@ -280,17 +283,22 @@ async def _send_oyuns_reply(
         answer = "Уучлаарай, OYUNS Agent одоогоор хариу өгөх боломжгүй байна. Түр хүлээгээд дахин илгээнэ үү."
     if not answer:
         return
+    delivery_rows = list(getattr(routed, "deliveries", [])) if routed else []
+    if routed:
+        for tool_result in routed.tool_results:
+            delivery_rows.extend(tool_result.get("deliveries", []))
     response = ChatMessage(
         conversation_id=conversation.id,
         sender_account_id=agent.id,
         client_nonce=uuid.uuid4(),
         body=answer[:4000],
+        company_file_attachments=enterprise_tools.attachment_metadata(delivery_rows),
     )
     db.add(response)
     await db.flush()
     participants = await _active_participants(db, conversation.id)
     recipient_ids = [item.account_id for item in participants if item.account_id != agent.id]
-    db.add_all(ChatMessageReceipt(message_id=response.id, account_id=account_id) for account_id in recipient_ids)
+    db.add_all(ChatMessageReceipt(message_id=response.id, account_id=recipient_id) for recipient_id in recipient_ids)
     conversation.updated_at = _now()
     await _emit(
         db,
@@ -396,6 +404,25 @@ async def _message_out(db: AsyncSession, message: ChatMessage, actor: ActorConte
         conversation_public_id = await db.scalar(select(ChatConversation.public_id).where(ChatConversation.id == message.conversation_id))
         rows = list((await db.execute(select(ChatAttachment).where(ChatAttachment.message_id == message.id).order_by(ChatAttachment.id))).scalars().all())
         attachments = [_attachment_out(item, conversation_public_id) for item in rows]
+        company_file_attachments = []
+        for delivery in getattr(message, "company_file_attachments", None) or []:
+            try:
+                item_id = int(delivery.get("item_id"))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            resolved = await authorized_file(db, FileSearchPrincipal.from_actor(actor), item_id)
+            if not resolved:
+                continue
+            item = resolved[0]
+            company_file_attachments.append({
+                "item_id": item.id,
+                "filename": item.name,
+                "content_type": item.content_type,
+                "size": item.size,
+                "download_url": f"/v1/company-files/{item.id}/download",
+            })
+    else:
+        company_file_attachments = []
     reaction_rows = (
         await db.execute(
             select(ChatMessageReaction.emoji, func.count(ChatMessageReaction.id))
@@ -429,6 +456,7 @@ async def _message_out(db: AsyncSession, message: ChatMessage, actor: ActorConte
         "client_nonce": str(message.client_nonce),
         "body": None if message.deleted_at else message.body,
         "attachments": attachments,
+        "company_file_attachments": company_file_attachments,
         "reply_to_message_id": message.reply_to_message_id,
         "thread_root_message_id": message.thread_root_message_id,
         "reply_preview": reply_preview,

@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.models.models import Employee, RoleAssignment, UserAccount
+from app.services.file_search_service import FileSearchPrincipal
+from app.core.config import settings
 
 
 bearer = HTTPBearer()
@@ -131,6 +133,28 @@ async def actor_from_telegram_id(telegram_id: str, db: AsyncSession) -> ActorCon
     today = date.today()
     roles = (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id, or_(RoleAssignment.valid_from.is_(None), RoleAssignment.valid_from <= today), or_(RoleAssignment.valid_until.is_(None), RoleAssignment.valid_until >= today)))).scalars().all()
     return build_actor_context(account_id=account.id, organization_id=account.organization_id, employee_id=account.employee_id, email=account.email, locale=account.locale, roles=frozenset(roles), channel="telegram")
+
+
+async def file_search_principal_from_telegram_id(telegram_id: str, db: AsyncSession) -> FileSearchPrincipal | None:
+    """Resolve a verified Telegram employee for constrained company-file reads.
+
+    This intentionally does not manufacture a UserAccount or workspace actor.
+    The fixed company tenant is used for discovery, while restricted account
+    grants remain unsatisfied unless a real workspace account exists.
+    """
+    employee = await db.scalar(select(Employee).where(
+        Employee.telegram_id == str(telegram_id),
+        Employee.is_active.is_(True),
+    ))
+    if not employee:
+        return None
+    return FileSearchPrincipal(
+        organization_id=settings.DEFAULT_COMPANY_ORGANIZATION_ID,
+        employee_id=employee.id,
+        channel="telegram",
+        locale="mn",
+        telegram_id=str(telegram_id),
+    )
 
 
 async def get_actor(

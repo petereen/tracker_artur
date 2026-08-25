@@ -21,6 +21,13 @@ from app.core.enterprise_deps import ActorContext, get_actor, require_roles
 from app.models.models import CompanyLibraryItem, JobQueue
 from app.services.attachment_storage import delete_attachment, get_attachment, iter_attachment_chunks, put_attachment
 from app.services.enterprise_events import record_change
+from app.services.file_search_service import (
+    FileSearchPrincipal,
+    FileSearchServiceError,
+    authorized_file,
+    compact_search_text,
+    search_files,
+)
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.enterprise_tools import _policy_for_file, can_read_policy
 
@@ -43,6 +50,7 @@ class FolderInput(BaseModel):
 
 class ItemPatch(BaseModel):
     name: str | None = None
+    title: str | None = None
     parent_id: int | None = None
     move_to_root: bool = False
 
@@ -62,6 +70,9 @@ def _item_out(item: CompanyLibraryItem) -> dict:
         "parent_id": item.parent_id,
         "kind": item.kind,
         "name": item.name,
+        "title": getattr(item, "title", None) or item.name,
+        "extension": getattr(item, "extension", None),
+        "searchable_metadata": getattr(item, "searchable_metadata", None) or {},
         "content_type": item.content_type,
         "size": item.size,
         "checksum": item.checksum,
@@ -98,6 +109,8 @@ async def _active_folder(db: AsyncSession, folder_id: int | None, actor: ActorCo
         raise HTTPException(status_code=404, detail="Folder not found")
     items = await _organization_items(db, actor.organization_id)
     if _has_deleted_ancestor(folder, {item.id: item for item in items}):
+        raise HTTPException(status_code=404, detail="Folder not found")
+    if not await can_read_policy(db, actor, await _policy_for_file(db, folder)):
         raise HTTPException(status_code=404, detail="Folder not found")
     return folder
 
@@ -166,14 +179,21 @@ def _file_extension(item: CompanyLibraryItem) -> str:
 
 
 async def _previewable_file(db: AsyncSession, item_id: int, actor: ActorContext) -> CompanyLibraryItem:
-    item = await _item_for_actor(db, item_id, actor)
-    all_items = await _organization_items(db, actor.organization_id)
-    if item.kind != "file" or item.deleted_at is not None or _has_deleted_ancestor(item, {candidate.id: candidate for candidate in all_items}):
-        raise HTTPException(status_code=404, detail="File not found")
-    if not await can_read_policy(db, actor, await _policy_for_file(db, item)):
+    try:
+        resolved = await authorized_file(db, FileSearchPrincipal.from_actor(actor), item_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="File authorization is temporarily unavailable") from exc
+    if not resolved:
         # Match a missing resource to avoid leaking restricted file names.
         raise HTTPException(status_code=404, detail="File not found")
-    return item
+    return resolved[0]
+
+
+async def _read_file_storage(item: CompanyLibraryItem) -> bytes:
+    try:
+        return await get_attachment(item.storage_key)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="File storage is temporarily unavailable") from exc
 
 
 @router.get("")
@@ -189,15 +209,32 @@ async def browse_company_files(
     if trash and not can_manage:
         raise HTTPException(status_code=403, detail="Insufficient permission")
     parent = None if trash else await _active_folder(db, parent_id, actor)
-    all_items = await _organization_items(db, actor.organization_id)
+    try:
+        all_items = await _organization_items(db, actor.organization_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Company file storage is temporarily unavailable") from exc
     by_id = {item.id: item for item in all_items}
+    search_status = None
+    search_diagnostics: list[dict] = []
+    search_warnings: list[str] = []
     if trash:
         items = [item for item in all_items if item.deleted_at is not None and not _has_deleted_ancestor(item, by_id)]
     else:
         items = [item for item in all_items if item.deleted_at is None and not _has_deleted_ancestor(item, by_id)]
         if q and q.strip():
-            needle = q.strip().casefold()
-            items = [item for item in items if needle in item.name.casefold()]
+            request = type("FileRequest", (), {
+                "operation": "search", "query": q.strip(), "search_mode": "keyword",
+                "folder_id": parent_id, "file_types": [], "limit": 500, "delivery": "none",
+            })()
+            try:
+                search_result = await search_files(db, FileSearchPrincipal.from_actor(actor), request)
+            except FileSearchServiceError as exc:
+                raise HTTPException(status_code=503, detail="Company file search is temporarily unavailable") from exc
+            search_status = search_result["status"]
+            search_diagnostics = search_result.get("diagnostics", [])
+            search_warnings = search_result.get("warnings", [])
+            matched_ids = {int(row["source_id"].split(":", 1)[1]) for row in search_result["data"].get("results", [])}
+            items = [item for item in items if item.id in matched_ids]
         else:
             items = [item for item in items if item.parent_id == parent_id]
     if not can_manage:
@@ -225,6 +262,9 @@ async def browse_company_files(
         "can_manage": can_manage,
         "is_search": bool(q and q.strip()),
         "is_trash": trash,
+        "search_status": search_status,
+        "search_diagnostics": search_diagnostics,
+        "search_warnings": search_warnings,
     }
 
 
@@ -237,7 +277,7 @@ async def create_folder(
     name = _clean_name(data.name)
     await _active_folder(db, data.parent_id, actor)
     await _ensure_name_available(db, actor, name, data.parent_id)
-    item = CompanyLibraryItem(organization_id=actor.organization_id, parent_id=data.parent_id, kind="folder", name=name, uploaded_by_account_id=actor.account_id)
+    item = CompanyLibraryItem(organization_id=actor.organization_id, parent_id=data.parent_id, kind="folder", name=name, title=name, searchable_metadata={}, search_key=compact_search_text(name), uploaded_by_account_id=actor.account_id)
     db.add(item)
     try:
         await db.flush()
@@ -293,6 +333,10 @@ async def upload_company_file(
                 parent_id=parent_id,
                 kind="file",
                 name=name,
+                title=PurePosixPath(name).stem,
+                extension=PurePosixPath(name).suffix.casefold().lstrip("."),
+                searchable_metadata={"filename": name, "mime_type": content_type},
+                search_key=compact_search_text(name),
                 storage_key=storage_key,
                 content_type=content_type,
                 size=len(content),
@@ -350,10 +394,21 @@ async def update_company_item(
     await _ensure_name_available(db, actor, new_name, target_parent_id, exclude_id=item.id)
     before = {"name": item.name, "parent_id": item.parent_id}
     item.name = new_name
+    if data.title is not None:
+        title = data.title.strip()
+        if not title or len(title) > 240:
+            raise HTTPException(status_code=422, detail="Title must be 1-240 characters")
+        item.title = title
+    elif item.kind == "file" and data.name is not None:
+        item.title = PurePosixPath(new_name).stem
+    if item.kind == "file":
+        item.extension = PurePosixPath(new_name).suffix.casefold().lstrip(".")
+        item.search_key = compact_search_text(new_name)
+        item.searchable_metadata = {**(getattr(item, "searchable_metadata", None) or {}), "filename": new_name}
     item.parent_id = target_parent_id
     item.updated_at = datetime.now(timezone.utc)
     try:
-        await record_change(db, actor=actor, topic="company_files", aggregate_type="company_library_item", aggregate_id=item.id, operation="updated", before=before, after={"name": item.name, "parent_id": item.parent_id})
+        await record_change(db, actor=actor, topic="company_files", aggregate_type="company_library_item", aggregate_id=item.id, operation="updated", before=before, after={"name": item.name, "title": getattr(item, "title", None), "parent_id": item.parent_id})
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -438,8 +493,20 @@ async def download_company_folder_archive(
     """Stream an organization-scoped folder as a ZIP without buffering the archive."""
     folder = await _active_folder(db, folder_id, actor)
     assert folder is not None
-    descendants = _active_descendants(folder, await _organization_items(db, actor.organization_id))
-    files = [(item, path) for item, path in descendants if item.kind == "file"]
+    try:
+        descendants = _active_descendants(folder, await _organization_items(db, actor.organization_id))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Company file storage is temporarily unavailable") from exc
+    files: list[tuple[CompanyLibraryItem, str]] = []
+    for item, path in descendants:
+        if item.kind != "file":
+            continue
+        try:
+            allowed = await authorized_file(db, FileSearchPrincipal.from_actor(actor), item.id)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="File authorization is temporarily unavailable") from exc
+        if allowed:
+            files.append((item, path))
     total_bytes = sum(item.size or 0 for item, _ in files)
     if len(files) > ARCHIVE_MAX_FILES or total_bytes > ARCHIVE_MAX_BYTES:
         raise HTTPException(
@@ -454,11 +521,12 @@ async def download_company_folder_archive(
 
     archive = zipstream.ZipStream(compress_type=zipstream.ZIP_DEFLATED)
     archive.mkdir(f"{folder.name}/")
+    allowed_paths = {path for _, path in files}
     for item, path in descendants:
-        if item.kind == "folder":
+        if item.kind == "folder" and any(file_path.startswith(f"{path}/") for file_path in allowed_paths):
             archive.mkdir(f"{path}/")
-        else:
-            archive.add(iter_attachment_chunks(item.storage_key), arcname=path)
+    for item, path in files:
+        archive.add(iter_attachment_chunks(item.storage_key), arcname=path)
     encoded_name = quote(f"{folder.name}.zip", safe="")
     return StreamingResponse(
         archive,
@@ -481,7 +549,7 @@ async def preview_company_file(
     item = await _previewable_file(db, item_id, actor)
     extension = _file_extension(item)
     if extension in TEXT_PREVIEW_EXTENSIONS:
-        content = await get_attachment(item.storage_key)
+        content = await _read_file_storage(item)
         truncated = len(content) > TEXT_PREVIEW_MAX_BYTES
         snippet = content[:TEXT_PREVIEW_MAX_BYTES].decode("utf-8", errors="replace")
         return Response(
@@ -491,7 +559,7 @@ async def preview_company_file(
         )
     if extension not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=415, detail="Preview is unavailable for this file type")
-    content = await get_attachment(item.storage_key)
+    content = await _read_file_storage(item)
     # SVG and animated GIF stay intact: rasterising them would remove their useful fidelity.
     if extension in {".svg", ".gif"}:
         return Response(content, media_type=item.content_type or mimetypes.guess_type(item.name)[0] or "image/*", headers={"X-Content-Type-Options": "nosniff"})
@@ -520,7 +588,7 @@ async def download_company_file(
     actor: ActorContext = Depends(get_actor),
 ):
     item = await _previewable_file(db, item_id, actor)
-    content = await get_attachment(item.storage_key)
+    content = await _read_file_storage(item)
     encoded_name = quote(item.name, safe="")
     return Response(
         content,

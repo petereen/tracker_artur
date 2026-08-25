@@ -87,7 +87,7 @@ def test_text_extraction_produces_safe_locations_and_overlap_chunks():
 def test_offline_route_recognizes_mongolian_enterprise_requests():
     assert _offline_route("файлын сангаас powerpoint template ол") == (
         "file_search_tool",
-        {"query": "файлын сангаас powerpoint template ол", "file_types": ["pptx", "potx", "potm"], "limit": 5, "delivery": "none"},
+        {"query": "файлын сангаас powerpoint template ол", "file_types": [], "limit": 5, "delivery": "none"},
     )
     assert _offline_route("Ажилчдын жагсаалт") == (
         "employee_directory_tool",
@@ -112,7 +112,7 @@ def test_explicit_file_delivery_requests_create_safe_attachment_metadata():
     assert wants_file_attachment("файлын жагсаалтыг харуул") is False
     assert _offline_route("Надад powerpoint template-ийг илгээ") == (
         "file_search_tool",
-        {"query": "Надад powerpoint template-ийг илгээ", "file_types": ["pptx", "potx", "potm"], "limit": 5, "delivery": "attachment"},
+        {"query": "Надад powerpoint template-ийг илгээ", "file_types": [], "limit": 5, "delivery": "attachment"},
     )
     deliveries = [
         {"kind": "company_file_attachment", "item_id": 7, "filename": "policy.pdf", "content_type": "application/pdf", "size": 12},

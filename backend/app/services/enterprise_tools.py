@@ -37,12 +37,20 @@ from app.models.models import (
 from app.services.attachment_storage import get_attachment
 from app.services.collaboration_permissions import actor_can_assign_tasks
 from app.services.enterprise_events import record_change
+from app.services.file_search_service import (
+    FileSearchPrincipal,
+    FileSearchServiceError,
+    can_read_policy as shared_can_read_policy,
+    is_file_search_query,
+    policy_for_item as shared_policy_for_item,
+    search_files,
+)
 from app.services.user_notifications import create_notifications
 from app.services.secret_box import encrypt_secret
 from app.erp.service import DOCUMENT_TYPES, as_money, require_capability
 
 log = logging.getLogger(__name__)
-TOOL_STATUS = Literal["ok", "empty", "partial", "denied", "unavailable"]
+TOOL_STATUS = Literal["ok", "empty", "indexing", "partial", "denied", "unavailable"]
 MANAGEMENT_ROLES = frozenset({"admin", "manager"})
 METRICS = frozenset({"task_completion", "deadline_health", "work_hours", "utilization", "billable_ratio", "report_compliance", "active_projects", "budget_burn"})
 
@@ -324,31 +332,11 @@ def attachment_metadata(deliveries: list[dict]) -> list[dict]:
 
 
 async def _policy_for_file(db: AsyncSession, item: CompanyLibraryItem) -> ResourcePolicy | None:
-    current: CompanyLibraryItem | None = item
-    while current:
-        policy = await db.scalar(select(ResourcePolicy).where(ResourcePolicy.organization_id == item.organization_id, ResourcePolicy.resource_type == "company_file", ResourcePolicy.resource_id == current.id))
-        if policy and (current.id == item.id or policy.inherit_from_parent):
-            return policy
-        current = await db.get(CompanyLibraryItem, current.parent_id) if current.parent_id else None
-    return None
+    return await shared_policy_for_item(db, item)
 
 
 async def can_read_policy(db: AsyncSession, actor: ActorContext, policy: ResourcePolicy | None) -> bool:
-    if policy is None or policy.classification in {"internal", "public_link_safe"}:
-        return True
-    if actor.has_any_role("admin") or (policy.classification == "confidential" and actor.has_any_role("manager")):
-        return True
-    grants = list((await db.execute(select(ResourceGrant).where(ResourceGrant.policy_id == policy.id))).scalars().all())
-    if policy.classification == "restricted":
-        return any(grant.principal_type == "account" and grant.principal_key == str(actor.account_id) for grant in grants)
-    team_ids = set((await db.execute(select(TeamMember.team_id).where(TeamMember.employee_id == actor.employee_id))).scalars().all()) if actor.employee_id else set()
-    project_ids = set((await db.execute(select(ProjectMember.project_id).where(ProjectMember.employee_id == actor.employee_id))).scalars().all()) if actor.employee_id else set()
-    for grant in grants:
-        if grant.principal_type == "account" and grant.principal_key == str(actor.account_id): return True
-        if grant.principal_type == "role" and grant.principal_key in actor.roles: return True
-        if grant.principal_type == "team" and grant.principal_key.isdigit() and int(grant.principal_key) in team_ids: return True
-        if grant.principal_type == "project" and grant.principal_key.isdigit() and int(grant.principal_key) in project_ids: return True
-    return False
+    return await shared_can_read_policy(db, FileSearchPrincipal.from_actor(actor), policy)
 
 
 async def _embed(text: str) -> list[float] | None:
@@ -405,19 +393,19 @@ def extract_content(filename: str, content: bytes) -> list[tuple[str, dict]]:
 async def index_company_file(db: AsyncSession, item: CompanyLibraryItem) -> KnowledgeDocument:
     document = await db.scalar(select(KnowledgeDocument).where(KnowledgeDocument.organization_id == item.organization_id, KnowledgeDocument.source_type == "company_file", KnowledgeDocument.source_id == item.id))
     if not document:
-        document = KnowledgeDocument(organization_id=item.organization_id, source_type="company_file", source_id=item.id, title=item.name, content_type=item.content_type, checksum=item.checksum)
+        document = KnowledgeDocument(organization_id=item.organization_id, source_type="company_file", source_id=item.id, title=getattr(item, "title", None) or item.name, content_type=item.content_type, checksum=item.checksum)
         db.add(document); await db.flush()
     if document.checksum == item.checksum and document.index_status == "ready":
         return document
-    document.index_status = "indexing"; document.checksum = item.checksum; document.last_error = None
+    document.index_status = "indexing"; document.content_available = False; document.title = getattr(item, "title", None) or item.name; document.checksum = item.checksum; document.last_error = None
     await db.execute(KnowledgeChunk.__table__.delete().where(KnowledgeChunk.document_id == document.id))
     try:
         pieces = extract_content(item.name, await get_attachment(item.storage_key))
         for position, (content, locator) in enumerate(pieces):
             db.add(KnowledgeChunk(document_id=document.id, position=position, content=content, locator=locator, search_vector=content.casefold(), embedding=await _embed(content)))
-        document.index_status = "ready"; document.indexed_at = datetime.now(timezone.utc)
+        document.index_status = "ready"; document.content_available = bool(pieces); document.indexed_at = datetime.now(timezone.utc)
     except Exception as exc:  # parsing errors are surfaced as index state, not chat failures
-        document.index_status = "failed"; document.last_error = str(exc)[:1000]
+        document.index_status = "failed"; document.content_available = False; document.last_error = str(exc)[:1000]
     return document
 
 
@@ -437,13 +425,13 @@ async def index_company_knowledge(db: AsyncSession, entry: CompanyKnowledge) -> 
     try:
         for position, (content, locator) in enumerate(_chunks(f"{entry.title}\n{entry.category or ''}\n{entry.content}", {"kind": "article"})):
             db.add(KnowledgeChunk(document_id=document.id, position=position, content=content, locator=locator, search_vector=content.casefold(), embedding=await _embed(content)))
-        document.index_status = "ready"; document.indexed_at = datetime.now(timezone.utc)
+        document.index_status = "ready"; document.content_available = True; document.indexed_at = datetime.now(timezone.utc)
     except Exception as exc:
-        document.index_status = "failed"; document.last_error = str(exc)[:1000]
+        document.index_status = "failed"; document.content_available = False; document.last_error = str(exc)[:1000]
     return document
 
 
-async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInput) -> dict:
+async def _legacy_file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInput) -> dict:
     if data.operation == "list":
         rows = []
         items = list((await db.execute(select(CompanyLibraryItem).where(
@@ -496,11 +484,6 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
         if normalized_query in normalized_name:
             return 1000
         matched = sum(term in name_terms or term in normalized_name for term in query_terms)
-        presentation_request = any(term.startswith(("презентац", "танилцуул", "presentation", "slide")) for term in query_terms)
-        template_request = any(term.startswith(("загвар", "template", "шаблон")) for term in query_terms)
-        presentation_file = Path(name).suffix.casefold().lstrip(".") in {"ppt", "pptx", "pot", "potx", "potm"}
-        if presentation_request and template_request and presentation_file:
-            return 80
         return matched * 100 if matched == len(query_terms) else matched
 
     metadata_matches = sorted(
@@ -630,6 +613,14 @@ async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInp
         return _result("empty", {"query": data.query, "results": []})
     deliveries = _file_deliveries(rows, data.delivery)
     return _result("ok", {"query": data.query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"], "locator": row["locator"]} for row in rows], deliveries=deliveries)
+
+
+async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInput) -> dict:
+    """Compatibility façade: every enterprise caller uses one file service."""
+    try:
+        return await search_files(db, FileSearchPrincipal.from_actor(actor), data)
+    except FileSearchServiceError:
+        return _result("unavailable", {"reason": "Company file search is temporarily unavailable."}, diagnostics=[{"code": "authoritative_storage_unavailable"}])
 
 
 def _period(data: StatsInput | CalendarInput) -> tuple[date, date]:
@@ -1254,6 +1245,18 @@ def _fallback_answer(result: dict, *, text: str = "") -> str:
         "mn": "Зөвшөөрөгдсөн компанийн мэдлэгийн сангаас тохирох мэдээлэл олдсонгүй.",
     }[language]
     if result["status"] == "empty": return empty
+    if result["status"] == "indexing":
+        return {
+            "en": "I found matching company-file metadata, but content indexing is still in progress.",
+            "ru": "Я нашёл подходящий файл по метаданным, но индексация содержимого ещё выполняется.",
+            "mn": "Файлын мета мэдээллээс тохирох файл олдлоо, харин агуулгын индексжүүлэлт үргэлжилж байна.",
+        }[language]
+    if result["status"] == "partial":
+        return {
+            "en": "I found an authorized company file, but content enrichment is incomplete.",
+            "ru": "Разрешённый файл найден, но обогащение содержимого завершено не полностью.",
+            "mn": "Зөвшөөрөгдсөн компанийн файл олдсон боловч агуулгын баяжуулалт бүрэн дуусаагүй байна.",
+        }[language]
     if result["status"] in {"denied", "unavailable"}: return result["data"].get("reason", empty)
     data = result["data"]
     if "results" in data:
@@ -1284,11 +1287,12 @@ def _fallback_answer(result: dict, *, text: str = "") -> str:
 def _offline_route(text: str) -> tuple[str | None, dict]:
     """Route high-confidence enterprise requests without an LLM call."""
     lowered = (text or "").casefold()
-    if any(term in lowered for term in (
-        "файлын сан", "файл", "баримт", "document", "powerpoint", "template", "pptx", "журам",
-    )):
+    if is_file_search_query(text) or any(term in lowered for term in ("файлын сан", "журам")):
         delivery = "attachment" if wants_file_attachment(text) else "none"
-        file_types = ["pptx", "potx", "potm"] if any(term in lowered for term in ("powerpoint", "pptx", "presentation", "танилцуулга", "template")) else []
+        # Only an explicit extension narrows the authoritative metadata
+        # search. Concepts such as presentation/template remain enrichment
+        # signals and must not become a hidden filename/type special case.
+        file_types = sorted(set(re.findall(r"(?<![a-z0-9])(pdf|docx?|xlsx?|pptx?|potm|csv|txt|md)(?![a-z0-9])", lowered)))
         listing_terms = (
             "ямар файл", "файлууд байна", "файлын жагсаалт", "файлуудын жагсаалт",
             "list files", "file list", "directory", "repository contents", "what files",

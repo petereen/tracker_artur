@@ -15,7 +15,7 @@ export interface GlobalSearchResult {
   title: string
   subtitle: string | null
   score: number
-  metadata: { status?: WorkflowStatus; assignee?: string | null; project?: string | null; avatar_url?: string | null; role?: string | null; presence?: string; kind?: 'file' | 'folder'; size?: number | null; parent_id?: number | null }
+  metadata: { status?: WorkflowStatus; assignee?: string | null; project?: string | null; avatar_url?: string | null; role?: string | null; presence?: string; kind?: 'file' | 'folder'; size?: number | null; parent_id?: number | null; content_state?: string }
 }
 export interface GlobalSearchResponse { query: string; groups: { tasks: GlobalSearchResult[]; workers: GlobalSearchResult[]; files: GlobalSearchResult[] } }
 
@@ -912,6 +912,14 @@ export interface ChatAttachment {
   download_url: string
 }
 
+export interface CompanyFileChatAttachment {
+  item_id: number
+  filename: string
+  content_type: string
+  size: number | null
+  download_url: string
+}
+
 export interface ChatMessage {
   id: number
   conversation_id: number
@@ -920,6 +928,7 @@ export interface ChatMessage {
   client_nonce: string
   body: string | null
   attachments: ChatAttachment[]
+  company_file_attachments: CompanyFileChatAttachment[]
   reply_to_message_id: number | null
   thread_root_message_id: number | null
   reply_preview: { id: number; body: string | null; sender_name: string | null; is_deleted: boolean } | null
@@ -1053,7 +1062,7 @@ export function useSendChatMessage(publicId?: string) {
       const actor = useAuthStore.getState().actor
       const optimistic: ChatMessage = {
         id: -Date.now(), conversation_id: 0, sender: actor ? { account_id: actor.id, employee_id: actor.employee_id, name: actor.name || actor.email, email: actor.email, avatar_url: actor.avatar_url || null, is_online: true, last_seen_at: new Date().toISOString() } : null,
-        sender_account_id: actor?.id ?? null, client_nonce: input.client_nonce, body: input.body || null, attachments: [], reply_to_message_id: input.reply_to_message_id || null, thread_root_message_id: null, reply_preview: null, thread_reply_count: 0, forwarded_from_message_id: null, forwarded_sender_name: null, reactions: [], is_starred: false, is_pinned: false, is_deleted: false, edited_at: null, deleted_at: null, created_at: new Date().toISOString(), is_mine: true, status: 'sending', receipts: { total: 0, delivered: 0, read: 0 }, capabilities: { can_edit: false, can_delete_everyone: false, can_delete_self: false, can_forward: false, can_react: false, can_pin: false },
+        sender_account_id: actor?.id ?? null, client_nonce: input.client_nonce, body: input.body || null, attachments: [], company_file_attachments: [], reply_to_message_id: input.reply_to_message_id || null, thread_root_message_id: null, reply_preview: null, thread_reply_count: 0, forwarded_from_message_id: null, forwarded_sender_name: null, reactions: [], is_starred: false, is_pinned: false, is_deleted: false, edited_at: null, deleted_at: null, created_at: new Date().toISOString(), is_mine: true, status: 'sending', receipts: { total: 0, delivered: 0, read: 0 }, capabilities: { can_edit: false, can_delete_everyone: false, can_delete_self: false, can_forward: false, can_react: false, can_pin: false },
       }
       queryClient.setQueryData<InfiniteData<ChatMessagePage>>(key, (current) => current ? ({ ...current, pages: current.pages.map((page, index) => index === 0 ? { ...page, items: [...page.items.filter((message) => message.client_nonce !== input.client_nonce), optimistic] } : page) }) : { pages: [{ items: [optimistic], next_before_id: null }], pageParams: [undefined] })
       return { previous, nonce: input.client_nonce }
@@ -1085,6 +1094,11 @@ export function cancelChatUpload(publicId: string, uploadId: string) {
 
 export async function downloadChatAttachment(publicId: string, attachment: ChatAttachment) {
   const response = await api.get(`/v1/chat/conversations/${publicId}/attachments/${attachment.public_id}`, { responseType: 'blob' })
+  return URL.createObjectURL(response.data)
+}
+
+export async function downloadCompanyFileChatAttachment(attachment: CompanyFileChatAttachment) {
+  const response = await api.get(`/v1/company-files/${attachment.item_id}/download`, { responseType: 'blob' })
   return URL.createObjectURL(response.data)
 }
 
@@ -1374,6 +1388,9 @@ export interface CompanyLibraryItem {
   parent_id: number | null
   kind: 'folder' | 'file'
   name: string
+  title: string
+  extension: string | null
+  searchable_metadata: Record<string, unknown>
   content_type: string | null
   size: number | null
   checksum: string | null
@@ -1392,6 +1409,9 @@ export interface CompanyFilesPageData {
   can_manage: boolean
   is_search: boolean
   is_trash: boolean
+  search_status?: 'ok' | 'empty' | 'indexing' | 'partial' | 'denied' | 'unavailable' | null
+  search_diagnostics?: Array<Record<string, unknown>>
+  search_warnings?: string[]
 }
 
 export function useCompanyFiles(input: { parentId?: number; search?: string; sort?: string; trash?: boolean }) {
