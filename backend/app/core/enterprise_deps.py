@@ -48,10 +48,20 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
 
 
 def permissions_for_roles(roles: frozenset[str]) -> frozenset[str]:
-    permissions: set[str] = set()
-    for role in roles:
-        permissions.update(ROLE_PERMISSIONS.get(role, ()))
-    return frozenset(permissions)
+    # This deployment serves one internal company. Authenticated workspace
+    # accounts may read company assistant data directly; role permissions still
+    # remain relevant to non-assistant APIs and mutation-specific checks.
+    # Assistant writes continue to require an explicit preview/confirmation
+    # flow, while assignment policy is enforced by collaboration_permissions.
+    if roles:
+        return frozenset({
+            "assistant.read",
+            "assistant.directory",
+            "assistant.analytics",
+            "assistant.erp",
+            "assistant.preview",
+        })
+    return frozenset()
 
 
 def build_actor_context(*, account_id: int, organization_id: int, employee_id: int | None,

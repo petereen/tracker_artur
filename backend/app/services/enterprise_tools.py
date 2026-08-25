@@ -686,11 +686,12 @@ async def calendar(db: AsyncSession, actor: ActorContext, data: CalendarInput) -
 
 
 async def _organization_employees(db: AsyncSession, actor: ActorContext, *, include_inactive: bool = False) -> list[Employee]:
-    query = (
-        select(Employee)
-        .join(UserAccount, UserAccount.employee_id == Employee.id)
-        .where(UserAccount.organization_id == actor.organization_id, UserAccount.status == "active")
-    )
+    # This deployment has one company tenant and the employee directory is the
+    # authoritative internal company table. A workspace UserAccount is an
+    # optional access link, not a prerequisite for appearing in that directory.
+    # Requiring the join made valid employees disappear before web access was
+    # provisioned for them.
+    query = select(Employee)
     if not include_inactive:
         query = query.where(Employee.is_active.is_(True))
     return list((await db.execute(query.order_by(Employee.name))).scalars().all())

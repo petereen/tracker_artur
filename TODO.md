@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Remove role-derived read-tool blocking for the single-company internal assistant while retaining mutation confirmation and assignment controls (`backend/app/core/enterprise_deps.py`, `backend/app/services/mcp/catalog.py`, `backend/tests`)
+- [x] Fix enterprise employee-directory lookup to read the internal company employee table even when an employee has no linked workspace account (`backend/app/services/enterprise_tools.py`)
 - [x] Add OYUNS Agent as a tenant-scoped chat user, expose it in New chat, and route agent DMs through the OYUNS AI Gateway (`backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`)
 - [x] Fix chat voice upload MIME/filename handling, including Python `.webm`/`video-webm` extension inference, add live recording visualization, and build Telegram-style waveform playback (`frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Fix chat message action menu positioning with a body portal, fixed z-index, and chat-pane collision-aware flipping (`frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/index.css`)
@@ -292,6 +294,8 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Remove role-derived read-tool blocking for the single-company internal assistant while retaining mutation confirmation and assignment controls (`backend/app/core/enterprise_deps.py`)
+- [x] Fix enterprise employee-directory lookup to read the internal company employee table even when an employee has no linked workspace account (`backend/app/services/enterprise_tools.py`)
 - [x] Add OYUNS Agent as a tenant-scoped chat user, expose it in New chat, and route agent DMs through the OYUNS AI Gateway (`backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`)
 - [x] Remove token-shaped SMTP credential placeholders from tracked environment and provider-configuration templates (`.env.example`, `docs/provider-configuration.md`)
 - [x] Make enterprise knowledge search match authorized document titles (including textless files) and add multilingual intent fallback for directory/knowledge requests (`backend/app/services/enterprise_tools.py`, `backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_unified_ai_gateway.py`)
