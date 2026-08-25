@@ -4354,6 +4354,10 @@ a {
 .chat-avatar-wrap .chat-presence { bottom: -1px; position: absolute; right: -1px; }
 .chat-presence { background: var(--color-muted-2); border: 2px solid var(--color-surface); border-radius: 50%; height: 12px; width: 12px; }
 .chat-presence.online { background: var(--chat-green); }
+.chat-agent-contact { background: color-mix(in srgb, #2D62EC 5%, var(--color-surface)); }
+.chat-agent-contact:hover { background: color-mix(in srgb, #2D62EC 11%, var(--color-surface)) !important; }
+.chat-agent-contact .chat-avatar { background: linear-gradient(135deg, #0B172A 0%, #2D62EC 100%); border-color: #2D62EC; color: #fff; }
+.chat-agent-badge { align-items: center; background: #00C885; border: 2px solid var(--color-surface); border-radius: 999px; bottom: -3px; color: #fff; display: inline-flex; font: 700 .42rem 'Montserrat', sans-serif; height: 15px; justify-content: center; position: absolute; right: -5px; width: 20px; }
 .chat-conversation-copy { min-width: 0; }
 .chat-conversation-copy > span { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
 .chat-conversation-copy strong,

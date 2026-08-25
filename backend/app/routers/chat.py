@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor
+from app.core.security import hash_account_password
 from app.models.models import (
     ChatAttachment,
     ChatConversation,
@@ -35,9 +37,13 @@ from app.models.models import (
 from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
 from app.services.enterprise_events import record_change
 from app.services.malware_scanner import MalwareDetected, scan_upload
+from app.services.ai_gateway import AIGateway, GatewayError
+from app.services import assistant_ai
 
 
 router = APIRouter()
+ai_gateway = AIGateway()
+OYUNS_AGENT_EMAIL_PREFIX = "oyuns-agent+"
 ONLINE_WINDOW = timedelta(seconds=60)
 MAX_GROUP_MEMBERS = 100
 MAX_MESSAGE_ATTACHMENTS = 10
@@ -111,6 +117,7 @@ def _file_signature_matches(content_type: str, content: bytes) -> bool:
 class DirectConversationIn(BaseModel):
     account_id: int | None = None
     employee_id: int | None = None
+    agent: bool = False
 
 
 class GroupConversationIn(BaseModel):
@@ -206,14 +213,101 @@ async def _identity_map(db: AsyncSession, account_ids: list[int]) -> dict[int, d
         account.id: {
             "account_id": account.id,
             "employee_id": account.employee_id,
-            "name": employee.name if employee else account.email,
-            "email": account.email,
+            "name": "OYUNS Agent" if account.email.startswith(OYUNS_AGENT_EMAIL_PREFIX) else (employee.name if employee else account.email),
+            "email": "AI туслах" if account.email.startswith(OYUNS_AGENT_EMAIL_PREFIX) else account.email,
             "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None,
-            "is_online": bool(presence and presence.last_seen_at >= cutoff),
+            "is_online": account.email.startswith(OYUNS_AGENT_EMAIL_PREFIX) or bool(presence and presence.last_seen_at >= cutoff),
             "last_seen_at": presence.last_seen_at if presence else None,
+            "is_agent": account.email.startswith(OYUNS_AGENT_EMAIL_PREFIX),
         }
         for account, employee, presence in rows
     }
+
+
+async def _ensure_oyuns_agent(db: AsyncSession, organization_id: int) -> UserAccount:
+    agent = await db.scalar(
+        select(UserAccount).where(
+            UserAccount.organization_id == organization_id,
+            UserAccount.email == f"{OYUNS_AGENT_EMAIL_PREFIX}{organization_id}@oyuns.ai",
+        )
+    )
+    if agent:
+        return agent
+    agent = UserAccount(
+        organization_id=organization_id,
+        email=f"{OYUNS_AGENT_EMAIL_PREFIX}{organization_id}@oyuns.ai",
+        password_hash=hash_account_password(secrets.token_urlsafe(48)),
+        status="active",
+        locale="mn",
+        preferences={"system_agent": "oyuns"},
+    )
+    db.add(agent)
+    await db.flush()
+    return agent
+
+
+async def _send_oyuns_reply(
+    db: AsyncSession,
+    actor: ActorContext,
+    conversation: ChatConversation,
+    agent: UserAccount,
+) -> None:
+    rows = list(
+        (
+            await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.conversation_id == conversation.id, ChatMessage.deleted_at.is_(None))
+                .order_by(ChatMessage.id.desc())
+                .limit(12)
+            )
+        ).scalars().all()
+    )
+    history = [
+        {"role": "assistant" if item.sender_account_id == agent.id else "user", "content": item.body or ""}
+        for item in reversed(rows)
+        if item.body
+    ]
+    if not history or history[-1]["role"] != "user":
+        return
+    text = history[-1]["content"]
+    routed_actor = actor
+    try:
+        from dataclasses import replace
+        routed_actor = replace(actor, channel="web", detected_language=assistant_ai.detect_language(text).value)
+        routed = await ai_gateway.execute_turn(db, routed_actor, history, conversation_id=conversation.id)
+        answer = routed.answer.strip()
+    except GatewayError:
+        answer = "Уучлаарай, OYUNS Agent одоогоор хариу өгөх боломжгүй байна. Түр хүлээгээд дахин илгээнэ үү."
+    if not answer:
+        return
+    response = ChatMessage(
+        conversation_id=conversation.id,
+        sender_account_id=agent.id,
+        client_nonce=uuid.uuid4(),
+        body=answer[:4000],
+    )
+    db.add(response)
+    await db.flush()
+    participants = await _active_participants(db, conversation.id)
+    recipient_ids = [item.account_id for item in participants if item.account_id != agent.id]
+    db.add_all(ChatMessageReceipt(message_id=response.id, account_id=account_id) for account_id in recipient_ids)
+    conversation.updated_at = _now()
+    await _emit(
+        db,
+        actor,
+        conversation,
+        "message_sent",
+        aggregate_type="chat_message",
+        aggregate_id=response.id,
+        recipient_ids=recipient_ids,
+        extra={
+            "message_id": response.id,
+            "sender_account_id": agent.id,
+            "sender_name": "OYUNS Agent",
+            "preview": answer[:160],
+            "target_url": f"/chat/{conversation.public_id}?message={response.id}",
+        },
+    )
 
 
 async def _membership(
@@ -468,6 +562,8 @@ async def contacts(
     db: AsyncSession = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ):
+    agent = await _ensure_oyuns_agent(db, actor.organization_id)
+    await db.commit()
     statement = (
         select(UserAccount.id)
         .outerjoin(Employee, Employee.id == UserAccount.employee_id)
@@ -475,6 +571,7 @@ async def contacts(
             UserAccount.organization_id == actor.organization_id,
             UserAccount.status == "active",
             UserAccount.id != actor.account_id,
+            UserAccount.id != agent.id,
         )
         .order_by(func.coalesce(Employee.name, UserAccount.email))
         .limit(limit)
@@ -483,8 +580,12 @@ async def contacts(
         term = f"%{q.strip()}%"
         statement = statement.where(func.coalesce(Employee.name, UserAccount.email).ilike(term))
     ids = list((await db.execute(statement)).scalars().all())
+    agent_identity = (await _identity_map(db, [agent.id])).get(agent.id)
     identities = await _identity_map(db, ids)
-    return [identities[account_id] for account_id in ids if account_id in identities]
+    results = [identities[account_id] for account_id in ids if account_id in identities]
+    if not q.strip() or "oyuns" in q.lower() or "agent" in q.lower():
+        return [agent_identity, *results] if agent_identity else results
+    return results
 
 
 @router.get("/conversations")
@@ -560,13 +661,18 @@ async def open_direct(
     db: AsyncSession = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ):
-    if bool(data.account_id) == bool(data.employee_id):
+    if data.agent:
+        if data.account_id or data.employee_id:
+            raise HTTPException(status_code=422, detail="Agent conversations cannot include a worker identifier")
+        target = await _ensure_oyuns_agent(db, actor.organization_id)
+    elif bool(data.account_id) == bool(data.employee_id):
         raise HTTPException(status_code=422, detail="Provide exactly one account_id or employee_id")
-    target = None
-    if data.account_id:
-        target = await db.get(UserAccount, data.account_id)
-    elif data.employee_id:
-        target = await db.scalar(select(UserAccount).where(UserAccount.employee_id == data.employee_id))
+    else:
+        target = None
+        if data.account_id:
+            target = await db.get(UserAccount, data.account_id)
+        elif data.employee_id:
+            target = await db.scalar(select(UserAccount).where(UserAccount.employee_id == data.employee_id))
     if not target or target.organization_id != actor.organization_id or target.status != "active":
         raise HTTPException(status_code=409, detail="This worker cannot receive workspace chat messages")
     if target.id == actor.account_id:
@@ -994,6 +1100,16 @@ async def send_message(
     })
     await db.commit()
     await db.refresh(message)
+    agent = await db.scalar(
+        select(UserAccount).join(ChatParticipant, ChatParticipant.account_id == UserAccount.id).where(
+            ChatParticipant.conversation_id == conversation.id,
+            UserAccount.email.like(f"{OYUNS_AGENT_EMAIL_PREFIX}%"),
+            ChatParticipant.left_at.is_(None),
+        )
+    )
+    if agent and body:
+        await _send_oyuns_reply(db, actor, conversation, agent)
+        await db.commit()
     return await _message_out(db, message, actor)
 
 

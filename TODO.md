@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add OYUNS Agent as a tenant-scoped chat user, expose it in New chat, and route agent DMs through the OYUNS AI Gateway (`backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`)
 - [x] Fix chat voice upload MIME/filename handling, including Python `.webm`/`video-webm` extension inference, add live recording visualization, and build Telegram-style waveform playback (`frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Fix chat message action menu positioning with a body portal, fixed z-index, and chat-pane collision-aware flipping (`frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Reorganize desktop sidebar navigation grouping for Chat and Reports (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/EnterpriseShell.test.tsx`)
@@ -291,6 +292,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Add OYUNS Agent as a tenant-scoped chat user, expose it in New chat, and route agent DMs through the OYUNS AI Gateway (`backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`)
 - [x] Remove token-shaped SMTP credential placeholders from tracked environment and provider-configuration templates (`.env.example`, `docs/provider-configuration.md`)
 - [x] Make enterprise knowledge search match authorized document titles (including textless files) and add multilingual intent fallback for directory/knowledge requests (`backend/app/services/enterprise_tools.py`, `backend/app/services/ai_gateway/gateway.py`, `backend/tests/test_unified_ai_gateway.py`)
 - [x] Repair duplicate Alembic revision IDs and converge the mobile migrations (`backend/alembic/versions`, `backend/tests/test_alembic_graph.py`)

@@ -865,6 +865,7 @@ export interface ChatIdentity {
   is_online: boolean
   last_seen_at: string | null
   role?: 'owner' | 'member'
+  is_agent?: boolean
 }
 
 export interface ChatMessageSummary {
@@ -1008,7 +1009,7 @@ function invalidateChat(queryClient: ReturnType<typeof useQueryClient>) {
 export function useOpenDirectConversation() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { account_id?: number; employee_id?: number }) => api.post('/v1/chat/conversations/direct', input).then((response) => response.data as ChatConversation),
+    mutationFn: (input: { account_id?: number; employee_id?: number; agent?: boolean }) => api.post('/v1/chat/conversations/direct', input).then((response) => response.data as ChatConversation),
     onSuccess: () => invalidateChat(queryClient),
   })
 }

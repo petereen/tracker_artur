@@ -126,8 +126,8 @@ function NewChatDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
   const modalRef = useFocusTrap<HTMLElement>(open, onClose)
   useEffect(() => { if (!open) { setSearch(''); setTitle(''); setSelected([]); setMode('direct') } }, [open])
   if (!open) return null
-  const chooseDirect = async (accountId: number) => {
-    try { onCreated(await openDirect.mutateAsync({ account_id: accountId })) } catch (error: any) { toast.error(error.response?.data?.detail || 'Чат нээж чадсангүй') }
+  const chooseDirect = async (contact: ChatIdentity) => {
+    try { onCreated(await openDirect.mutateAsync(contact.is_agent ? { agent: true } : { account_id: contact.account_id })) } catch (error: any) { toast.error(error.response?.data?.detail || 'Чат нээж чадсангүй') }
   }
   const create = async () => {
     if (!title.trim() || selected.length < 2) return
@@ -142,8 +142,8 @@ function NewChatDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
       <div className="chat-contact-list">
         {(contacts.data ?? []).map((contact) => {
           const checked = selected.includes(contact.account_id)
-          return <button key={contact.account_id} onClick={() => mode === 'direct' ? chooseDirect(contact.account_id) : setSelected((current) => checked ? current.filter((id) => id !== contact.account_id) : [...current, contact.account_id])}>
-            <span className="chat-avatar-wrap"><Avatar identity={contact} /><PresenceDot online={contact.is_online} /></span><span><strong>{contact.name}</strong><small>{contact.email}</small></span>{mode === 'group' && <i className={`chat-check ${checked ? 'selected' : ''}`}>{checked && <Check />}</i>}
+          return <button key={contact.account_id} className={contact.is_agent ? 'chat-agent-contact' : ''} onClick={() => mode === 'direct' ? chooseDirect(contact) : setSelected((current) => checked ? current.filter((id) => id !== contact.account_id) : [...current, contact.account_id])}>
+            <span className="chat-avatar-wrap"><Avatar identity={contact} />{contact.is_agent ? <i className="chat-agent-badge">AI</i> : <PresenceDot online={contact.is_online} />}</span><span><strong>{contact.name}</strong><small>{contact.is_agent ? 'Компанийн AI туслах' : contact.email}</small></span>{mode === 'group' && <i className={`chat-check ${checked ? 'selected' : ''}`}>{checked && <Check />}</i>}
           </button>
         })}
       </div>
