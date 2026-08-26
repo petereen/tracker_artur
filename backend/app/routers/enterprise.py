@@ -3176,7 +3176,7 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     actor = replace(actor, channel="web", detected_language=assistant_ai.detect_language(text).value)
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
     tool_sources: list[dict] = []
-    tool_deliveries: list[dict] = list(routed.deliveries)
+    tool_deliveries: list[dict] = []
     pending_action = None
 
     try:
@@ -3185,6 +3185,7 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
         await db.rollback()
         log.warning("assistant_gateway_failed conversation_id=%s status=%s detail=%s", conversation.id, exc.status_code, str(exc)[:300])
         raise HTTPException(status_code=exc.status_code, detail="OYUNS live AI service is temporarily unavailable") from exc
+    tool_deliveries.extend(routed.deliveries)
     answer = routed.answer
     for mcp_result in routed.tool_results:
         tool_sources.extend(mcp_result.get("sources", []))

@@ -57,4 +57,15 @@ describe('OYUNS assistant actions', () => {
 
     await waitFor(() => expect(download).toHaveBeenCalledWith(attachment))
   })
+
+  it('sends the message when Enter is pressed in the assistant input', async () => {
+    chat.mockResolvedValue({ conversation_id: 9, message: { content: 'Хариу', sources: [] } })
+
+    render(<OyunsAssistant open onClose={vi.fn()} />)
+    const input = screen.getByPlaceholderText('Компаний журам, миний ажил, эсвэл даалгаврын талаар асуу…')
+    fireEvent.change(input, { target: { value: 'Сайн байна уу' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(chat).toHaveBeenCalledWith({ text: 'Сайн байна уу', conversation_id: undefined, voice_mode: false }))
+  })
 })

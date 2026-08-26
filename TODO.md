@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Make the “Компаний туслах” assistant send on Enter while preserving Shift+Enter for new lines (`frontend/src/components/OyunsAssistant.tsx`, `frontend/src/components/OyunsAssistant.test.tsx`)
+- [x] Fix OYUNS Web assistant 500 caused by reading the gateway response before it was assigned (`backend/app/routers/enterprise.py`) — initialize deliveries before the gateway call and append gateway deliveries after a successful response
 - [x] Add mobile call audio routing with earpiece/headset default and explicit loudspeaker selection (`frontend/src/platform/audio-route.ts`, `frontend/src/hooks/useWebRTC.ts`, `frontend/src/components/CallModal.tsx`, `frontend/ios`, `frontend/android`) — native bridge, call control, mobile permissions, 85 frontend tests, and production build pass; native compile is pending a local JDK/Xcode toolchain and physical headset/Bluetooth routing remains a device smoke test
 - [x] Use the supplied AI generating/loading animation for pending responses in the OYUNS assistant and agent chatbox (`frontend/public/animations/ai-generating-response.json`, `frontend/src/components/AiGeneratingAnimation.tsx`, `frontend/src/components/OyunsAssistant.tsx`, `frontend/src/pages/ChatWorkspacePage.tsx`)
 - [x] Fix chat audio/video calls so remote media is attached and played (`frontend/src/components/CallModal.tsx`, `frontend/src/hooks/useWebRTC.ts`) — remote audio now has an explicit autoplay sink with mobile gesture retry, video avoids duplicate audio playback, and remote track handling clones the shared stream so late video tracks trigger rendering
