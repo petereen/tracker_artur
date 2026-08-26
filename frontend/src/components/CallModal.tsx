@@ -54,7 +54,7 @@ export function CallModal({ call, onOpenConversation }: { call: CallController; 
   const hasRemoteVideo = Boolean(call.remoteStream?.getVideoTracks().some((track) => track.enabled))
   const hasLocalVideo = Boolean(call.localStream?.getVideoTracks().some((track) => track.enabled))
   return <AnimatePresence>{visible && <motion.div className="call-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-    <motion.section ref={dialog} className={`call-modal ${connected ? 'active' : 'ringing'}`} role="dialog" aria-modal="true" aria-label={`${active.name} дуудлага`} initial={{ opacity: 0, scale: .96, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
+    <motion.section ref={dialog} onPointerDown={() => { void remoteAudio.current?.play().catch(() => undefined) }} className={`call-modal ${connected ? 'active' : 'ringing'}`} role="dialog" aria-modal="true" aria-label={`${active.name} дуудлага`} initial={{ opacity: 0, scale: .96, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
       {connected ? <div className="call-stage">
         <audio ref={remoteAudio} autoPlay />
         {hasRemoteVideo ? <video ref={remoteVideo} autoPlay muted playsInline className="call-remote-video" /> : <div className="call-audio-stage"><CallAvatar name={active.name} avatar={active.avatar} /></div>}

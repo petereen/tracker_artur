@@ -110,10 +110,12 @@ export function useWebRTC() {
     }
     peer.ontrack = (event) => setRemoteStream((current) => {
       // Browsers normally provide one shared stream for the audio and video
-      // tracks. Keep it when available so the media element receives both
-      // tracks, while retaining a fallback for implementations that omit
-      // event.streams.
-      const stream = event.streams[0] || current || new MediaStream()
+      // tracks. Clone it on every event: the browser may mutate the same
+      // MediaStream object when the second track arrives, which would leave
+      // React with the same object identity and prevent the video element
+      // from mounting after audio connected first.
+      const source = event.streams[0] || current
+      const stream = new MediaStream(source?.getTracks() || [])
       if (!stream.getTracks().some((track) => track.id === event.track.id)) stream.addTrack(event.track)
       return stream
     })

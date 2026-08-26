@@ -1,7 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
-- [x] Fix chat audio/video calls so remote media is attached and played (`frontend/src/components/CallModal.tsx`, `frontend/src/hooks/useWebRTC.ts`) — remote audio now has an explicit autoplay sink, video avoids duplicate audio playback, and remote track handling preserves the browser-provided shared stream
+- [x] Fix chat audio/video calls so remote media is attached and played (`frontend/src/components/CallModal.tsx`, `frontend/src/hooks/useWebRTC.ts`) — remote audio now has an explicit autoplay sink with mobile gesture retry, video avoids duplicate audio playback, and remote track handling clones the shared stream so late video tracks trigger rendering
 - [x] Add persistent, tenant-safe 1-on-1 call records and lifecycle APIs (`backend/app`, `backend/alembic/versions`)
 - [x] Add the shared typed call protocol and Redis-backed Socket.io signaling sidecar (`types/call.ts`, `server`)
 - [x] Add the WebRTC engine, synthesized tones, global call provider, and responsive call UI (`frontend/src`)
