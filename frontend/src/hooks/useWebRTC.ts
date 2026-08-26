@@ -109,7 +109,11 @@ export function useWebRTC() {
       if (event.candidate && call) socketRef.current?.emit('call:ice-candidate', { callId: call.callId, targetUserId: call.userId, candidate: event.candidate.toJSON() })
     }
     peer.ontrack = (event) => setRemoteStream((current) => {
-      const stream = current || new MediaStream()
+      // Browsers normally provide one shared stream for the audio and video
+      // tracks. Keep it when available so the media element receives both
+      // tracks, while retaining a fallback for implementations that omit
+      // event.streams.
+      const stream = event.streams[0] || current || new MediaStream()
       if (!stream.getTracks().some((track) => track.id === event.track.id)) stream.addTrack(event.track)
       return stream
     })

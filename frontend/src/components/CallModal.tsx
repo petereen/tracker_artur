@@ -16,9 +16,20 @@ function CallAvatar({ name, avatar }: { name: string; avatar?: string | null }) 
 
 export function CallModal({ call, onOpenConversation }: { call: CallController; onOpenConversation: () => void }) {
   const remoteVideo = useRef<HTMLVideoElement>(null)
+  const remoteAudio = useRef<HTMLAudioElement>(null)
   const localVideo = useRef<HTMLVideoElement>(null)
   const dialog = useRef<HTMLElement>(null)
-  useEffect(() => { if (remoteVideo.current) remoteVideo.current.srcObject = call.remoteStream; return () => { if (remoteVideo.current) remoteVideo.current.srcObject = null } }, [call.remoteStream])
+  useEffect(() => {
+    if (remoteVideo.current) remoteVideo.current.srcObject = call.remoteStream
+    if (remoteAudio.current) {
+      remoteAudio.current.srcObject = call.remoteStream
+      void remoteAudio.current.play().catch(() => undefined)
+    }
+    return () => {
+      if (remoteVideo.current) remoteVideo.current.srcObject = null
+      if (remoteAudio.current) remoteAudio.current.srcObject = null
+    }
+  }, [call.remoteStream])
   useEffect(() => { if (localVideo.current) localVideo.current.srcObject = call.localStream; return () => { if (localVideo.current) localVideo.current.srcObject = null } }, [call.localStream])
   useEffect(() => {
     if (!call.activeCall || call.state === 'idle') return
@@ -45,7 +56,8 @@ export function CallModal({ call, onOpenConversation }: { call: CallController; 
   return <AnimatePresence>{visible && <motion.div className="call-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
     <motion.section ref={dialog} className={`call-modal ${connected ? 'active' : 'ringing'}`} role="dialog" aria-modal="true" aria-label={`${active.name} дуудлага`} initial={{ opacity: 0, scale: .96, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
       {connected ? <div className="call-stage">
-        {hasRemoteVideo ? <video ref={remoteVideo} autoPlay playsInline className="call-remote-video" /> : <div className="call-audio-stage"><CallAvatar name={active.name} avatar={active.avatar} /></div>}
+        <audio ref={remoteAudio} autoPlay />
+        {hasRemoteVideo ? <video ref={remoteVideo} autoPlay muted playsInline className="call-remote-video" /> : <div className="call-audio-stage"><CallAvatar name={active.name} avatar={active.avatar} /></div>}
         <button className="call-identity" onClick={onOpenConversation}><strong>{active.name}</strong><span>{status}</span></button>
         {hasLocalVideo && <video ref={localVideo} autoPlay muted playsInline className="call-local-video" />}
       </div> : <div className="call-ringing-content">
