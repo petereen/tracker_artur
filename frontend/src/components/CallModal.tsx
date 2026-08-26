@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Camera, CameraOff, Mic, MicOff, Phone, PhoneOff } from 'lucide-react'
+import { Camera, CameraOff, Mic, MicOff, Phone, PhoneOff, Volume2, VolumeX } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import type { useWebRTC } from '../hooks/useWebRTC'
 import { resolvePublicAssetUrl } from '../platform/runtime'
@@ -30,7 +30,13 @@ export function CallModal({ call, onOpenConversation }: { call: CallController; 
       if (remoteAudio.current) remoteAudio.current.srcObject = null
     }
   }, [call.remoteStream])
-  useEffect(() => { if (localVideo.current) localVideo.current.srcObject = call.localStream; return () => { if (localVideo.current) localVideo.current.srcObject = null } }, [call.localStream])
+  useEffect(() => {
+    if (localVideo.current) {
+      localVideo.current.srcObject = call.localStream
+      void localVideo.current.play().catch(() => undefined)
+    }
+    return () => { if (localVideo.current) localVideo.current.srcObject = null }
+  }, [call.localStream, call.videoMuted])
   useEffect(() => {
     if (!call.activeCall || call.state === 'idle') return
     const previous = document.activeElement as HTMLElement | null
@@ -56,7 +62,7 @@ export function CallModal({ call, onOpenConversation }: { call: CallController; 
   return <AnimatePresence>{visible && <motion.div className="call-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
     <motion.section ref={dialog} onPointerDown={() => { void remoteAudio.current?.play().catch(() => undefined) }} className={`call-modal ${connected ? 'active' : 'ringing'}`} role="dialog" aria-modal="true" aria-label={`${active.name} дуудлага`} initial={{ opacity: 0, scale: .96, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
       {connected ? <div className="call-stage">
-        <audio ref={remoteAudio} autoPlay />
+        <audio ref={remoteAudio} data-call-audio autoPlay />
         {hasRemoteVideo ? <video ref={remoteVideo} autoPlay muted playsInline className="call-remote-video" /> : <div className="call-audio-stage"><CallAvatar name={active.name} avatar={active.avatar} /></div>}
         <button className="call-identity" onClick={onOpenConversation}><strong>{active.name}</strong><span>{status}</span></button>
         {hasLocalVideo && <video ref={localVideo} autoPlay muted playsInline className="call-local-video" />}
@@ -68,6 +74,7 @@ export function CallModal({ call, onOpenConversation }: { call: CallController; 
       <div className="call-controls">
         {call.state === 'incoming_ring' ? <><button className="call-control accept" onClick={call.accept}><Phone /><span>Хүлээн авах</span></button><button className="call-control end" onClick={call.decline}><PhoneOff /><span>Татгалзах</span></button></> : call.state === 'outgoing_ring' ? <button className="call-control end" onClick={() => call.end('canceled')}><PhoneOff /><span>Цуцлах</span></button> : connected ? <>
           <button className={`call-control ${call.audioMuted ? 'off' : ''}`} onClick={call.toggleMuteAudio}>{call.audioMuted ? <MicOff /> : <Mic />}<span>{call.audioMuted ? 'Дуу нээх' : 'Дуу хаах'}</span></button>
+          <button className={`call-control ${call.audioRoute === 'speaker' ? 'active' : ''}`} onClick={call.switchAudioRoute}>{call.audioRoute === 'speaker' ? <VolumeX /> : <Volume2 />}<span>{call.audioRoute === 'speaker' ? 'Чихэвч' : 'Чанга яригч'}</span></button>
           <button className={`call-control ${call.videoMuted ? 'off' : ''}`} onClick={call.toggleMuteVideo}>{call.videoMuted ? <CameraOff /> : <Camera />}<span>{hasLocalVideo ? 'Камер хаах' : 'Камер нээх'}</span></button>
           <button className="call-control end" onClick={() => call.end()}><PhoneOff /><span>Дуусгах</span></button>
         </> : null}

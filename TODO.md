@@ -1,7 +1,10 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add mobile call audio routing with earpiece/headset default and explicit loudspeaker selection (`frontend/src/platform/audio-route.ts`, `frontend/src/hooks/useWebRTC.ts`, `frontend/src/components/CallModal.tsx`, `frontend/ios`, `frontend/android`) — native bridge, call control, mobile permissions, 85 frontend tests, and production build pass; native compile is pending a local JDK/Xcode toolchain and physical headset/Bluetooth routing remains a device smoke test
+- [x] Use the supplied AI generating/loading animation for pending responses in the OYUNS assistant and agent chatbox (`frontend/public/animations/ai-generating-response.json`, `frontend/src/components/AiGeneratingAnimation.tsx`, `frontend/src/components/OyunsAssistant.tsx`, `frontend/src/pages/ChatWorkspacePage.tsx`)
 - [x] Fix chat audio/video calls so remote media is attached and played (`frontend/src/components/CallModal.tsx`, `frontend/src/hooks/useWebRTC.ts`) — remote audio now has an explicit autoplay sink with mobile gesture retry, video avoids duplicate audio playback, and remote track handling clones the shared stream so late video tracks trigger rendering
+- [x] Fix local camera preview after toggling the camera back on (`frontend/src/components/CallModal.tsx`) — reattach and replay the existing stream when camera mute state changes
 - [x] Add persistent, tenant-safe 1-on-1 call records and lifecycle APIs (`backend/app`, `backend/alembic/versions`)
 - [x] Add the shared typed call protocol and Redis-backed Socket.io signaling sidecar (`types/call.ts`, `server`)
 - [x] Add the WebRTC engine, synthesized tones, global call provider, and responsive call UI (`frontend/src`)

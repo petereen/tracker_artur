@@ -5,7 +5,7 @@ import type {
   SignalingAck,
 } from '../../../types/call'
 import { useAuthStore } from '../store/auth'
-import { isNativePlatform } from '../platform/runtime'
+import { setCallAudioRoute, type AudioRoute } from '../platform/audio-route'
 import { createIncomingRingtone, createOutgoingRingback, SoundEffect } from '../utils/soundEffects'
 
 export interface CallPeer { userId: string; name: string; avatar?: string | null; conversationId: string }
@@ -34,6 +34,7 @@ export function useWebRTC() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [audioMuted, setAudioMuted] = useState(false)
+  const [audioRoute, setAudioRoute] = useState<AudioRoute>('default')
   const [videoMuted, setVideoMuted] = useState(false)
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -76,7 +77,8 @@ export function useWebRTC() {
     }
     localRef.current?.getTracks().forEach((track) => track.stop())
     localRef.current = null
-    setLocalStream(null); setRemoteStream(null); setAudioMuted(false); setVideoMuted(false); setDurationSeconds(0)
+    void setCallAudioRoute('default').catch(() => undefined)
+    setLocalStream(null); setRemoteStream(null); setAudioMuted(false); setAudioRoute('default'); setVideoMuted(false); setDurationSeconds(0)
     connectedAt.current = undefined
     setState(nextState)
   }, [stopTone])
@@ -143,6 +145,7 @@ export function useWebRTC() {
 
   const acquireMedia = useCallback(async (callType: CallType) => {
     if (!navigator.mediaDevices?.getUserMedia) throw new DOMException('Media devices are unavailable', 'NotSupportedError')
+    await setCallAudioRoute('default')
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false })
     localRef.current = stream
     setLocalStream(stream)
@@ -157,7 +160,7 @@ export function useWebRTC() {
   }, [teardown])
 
   useEffect(() => {
-    if (!token || isNativePlatform()) return
+    if (!token) return
     const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io({ path: '/socket.io', auth: { token }, transports: ['websocket', 'polling'], reconnection: true })
     socketRef.current = socket
     socket.on('connect', () => {
@@ -225,7 +228,7 @@ export function useWebRTC() {
   }, [state])
 
   const initiate = useCallback(async (peer: CallPeer, callType: CallType) => {
-    if (!socketRef.current?.connected || callRef.current || isNativePlatform()) return
+    if (!socketRef.current?.connected || callRef.current) return
     setError(null)
     try {
       await acquireMedia(callType)
@@ -261,6 +264,10 @@ export function useWebRTC() {
   }, [])
 
   const toggleMuteAudio = useCallback(() => { const track = localRef.current?.getAudioTracks()[0]; if (track) { track.enabled = !track.enabled; setAudioMuted(!track.enabled) } }, [])
+  const switchAudioRoute = useCallback(async () => {
+    const nextRoute: AudioRoute = audioRoute === 'speaker' ? 'default' : 'speaker'
+    try { await setCallAudioRoute(nextRoute); setAudioRoute(nextRoute) } catch { setError('Дууны гаралтыг өөрчилж чадсангүй.') }
+  }, [audioRoute])
   const toggleMuteVideo = useCallback(async () => {
     const current = localRef.current?.getVideoTracks()[0]
     if (current) { current.enabled = !current.enabled; setVideoMuted(!current.enabled); return }
@@ -283,5 +290,5 @@ export function useWebRTC() {
   }, [])
   const watchUser = useCallback((peer: Pick<CallPeer, 'userId' | 'conversationId'>) => socketRef.current?.emit('user:watch', peer), [])
 
-  return { state, activeCall, localStream, remoteStream, audioMuted, videoMuted, devices, error, signalingConnected, onlineUsers, durationSeconds, initiate, accept, decline, end, toggleMuteAudio, toggleMuteVideo, switchMediaDevice, watchUser }
+  return { state, activeCall, localStream, remoteStream, audioMuted, audioRoute, videoMuted, devices, error, signalingConnected, onlineUsers, durationSeconds, initiate, accept, decline, end, toggleMuteAudio, switchAudioRoute, toggleMuteVideo, switchMediaDevice, watchUser }
 }
