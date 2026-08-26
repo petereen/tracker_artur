@@ -707,6 +707,7 @@ class ChatMessage(Base):
     __table_args__ = (
         UniqueConstraint("conversation_id", "sender_account_id", "client_nonce", name="uq_chat_messages_client_nonce"),
         CheckConstraint("body IS NULL OR char_length(body) BETWEEN 1 AND 4000", name="ck_chat_messages_body_length"),
+        CheckConstraint("(kind = 'text' AND call_id IS NULL) OR (kind = 'call' AND call_id IS NOT NULL AND sender_account_id IS NULL AND body IS NULL)", name="ck_chat_messages_kind_shape"),
         Index("ix_chat_messages_conversation_id", "conversation_id", "id"),
         Index("ix_chat_messages_thread_root", "thread_root_message_id", "id"),
     )
@@ -715,6 +716,8 @@ class ChatMessage(Base):
     conversation_id = Column(Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False)
     sender_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     client_nonce = Column(UUID(as_uuid=True), nullable=False)
+    kind = Column(String(12), nullable=False, server_default="text", default="text")
+    call_id = Column(UUID(as_uuid=True), ForeignKey("chat_calls.id", ondelete="CASCADE"), unique=True)
     body = Column(Text)
     # References are re-authorized by each reader; this is not a storage-key
     # cache and never grants access by itself.
@@ -727,6 +730,32 @@ class ChatMessage(Base):
     deleted_at = Column(DateTime(timezone=True))
     deleted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatCall(Base):
+    __tablename__ = "chat_calls"
+    __table_args__ = (
+        CheckConstraint("call_type IN ('audio','video')", name="ck_chat_calls_type"),
+        CheckConstraint("status IN ('ringing','accepted','connected','ended')", name="ck_chat_calls_status"),
+        CheckConstraint("outcome IS NULL OR outcome IN ('completed','missed','declined','canceled','failed')", name="ck_chat_calls_outcome"),
+        CheckConstraint("caller_account_id <> callee_account_id", name="ck_chat_calls_distinct_peers"),
+        Index("ix_chat_calls_conversation_started", "conversation_id", "initiated_at"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    conversation_id = Column(Integer, ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False)
+    caller_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    callee_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False)
+    call_type = Column(String(8), nullable=False)
+    status = Column(String(12), nullable=False, server_default="ringing", default="ringing")
+    outcome = Column(String(12))
+    end_reason = Column(Text)
+    initiated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    accepted_at = Column(DateTime(timezone=True))
+    connected_at = Column(DateTime(timezone=True))
+    ended_at = Column(DateTime(timezone=True))
+    duration_seconds = Column(Integer, nullable=False, server_default="0", default=0)
 
 
 class ChatAttachment(Base):

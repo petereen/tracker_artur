@@ -64,6 +64,7 @@ services:
       AI_REDIS_URL: ${AI_REDIS_URL:-redis://redis:6379/0}
       WORKTIME_QR_SIGNING_SECRET: ${WORKTIME_QR_SIGNING_SECRET:-}
       WORKTIME_QR_REDIS_URL: ${WORKTIME_QR_REDIS_URL:-redis://redis:6379/0}
+      CALL_SIGNALING_SECRET: ${CALL_SIGNALING_SECRET}
       AI_MODEL_REGISTRY_JSON: ${AI_MODEL_REGISTRY_JSON:-}
       ENTERPRISE_TOOLS_ENABLED: ${ENTERPRISE_TOOLS_ENABLED:-false}
       AI_MCP_ENABLED: ${AI_MCP_ENABLED:-false}
@@ -222,13 +223,19 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_TURN_URLS: ${VITE_TURN_URLS:-}
+        VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
+        VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
     restart: unless-stopped
     environment:
       APPLE_TEAM_ID: ${APPLE_TEAM_ID:-}
       ANDROID_SIGNING_CERT_SHA256: ${ANDROID_SIGNING_CERT_SHA256:-}
     depends_on:
       - backend
+      - call-signaling
     ports:
       # Dokploy should expose erp.oyuns.mn; artur.oyuns.mn remains the legacy admin host.
       - "127.0.0.1:3010:80"
@@ -238,6 +245,24 @@ services:
       web-edge:
         aliases:
           - oyuns-agent-frontend
+
+  call-signaling:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+      CALL_REDIS_URL: redis://redis:6379/1
+      CALL_SIGNALING_SECRET: ${CALL_SIGNALING_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://erp.oyuns.mn}
+    expose:
+      - "8020"
 
 volumes:
   redis_data:

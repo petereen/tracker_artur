@@ -870,7 +870,7 @@ export interface ChatIdentity {
 
 export interface ChatMessageSummary {
   id: number
-  body: string
+  body: string | null
   attachment_count: number
   sender_account_id: number | null
   sender_name: string | null
@@ -927,6 +927,8 @@ export interface ChatMessage {
   sender_account_id: number | null
   client_nonce: string
   body: string | null
+  kind: 'text' | 'call'
+  call: { call_id: string; call_type: 'audio' | 'video'; outcome: 'completed' | 'missed' | 'declined' | 'canceled' | 'failed'; duration_seconds: number; direction: 'incoming' | 'outgoing'; caller_name: string | null; callee_name: string | null; started_at: string; ended_at: string | null } | null
   attachments: ChatAttachment[]
   company_file_attachments: CompanyFileChatAttachment[]
   reply_to_message_id: number | null
@@ -1062,7 +1064,7 @@ export function useSendChatMessage(publicId?: string) {
       const actor = useAuthStore.getState().actor
       const optimistic: ChatMessage = {
         id: -Date.now(), conversation_id: 0, sender: actor ? { account_id: actor.id, employee_id: actor.employee_id, name: actor.name || actor.email, email: actor.email, avatar_url: actor.avatar_url || null, is_online: true, last_seen_at: new Date().toISOString() } : null,
-        sender_account_id: actor?.id ?? null, client_nonce: input.client_nonce, body: input.body || null, attachments: [], company_file_attachments: [], reply_to_message_id: input.reply_to_message_id || null, thread_root_message_id: null, reply_preview: null, thread_reply_count: 0, forwarded_from_message_id: null, forwarded_sender_name: null, reactions: [], is_starred: false, is_pinned: false, is_deleted: false, edited_at: null, deleted_at: null, created_at: new Date().toISOString(), is_mine: true, status: 'sending', receipts: { total: 0, delivered: 0, read: 0 }, capabilities: { can_edit: false, can_delete_everyone: false, can_delete_self: false, can_forward: false, can_react: false, can_pin: false },
+        sender_account_id: actor?.id ?? null, client_nonce: input.client_nonce, body: input.body || null, kind: 'text', call: null, attachments: [], company_file_attachments: [], reply_to_message_id: input.reply_to_message_id || null, thread_root_message_id: null, reply_preview: null, thread_reply_count: 0, forwarded_from_message_id: null, forwarded_sender_name: null, reactions: [], is_starred: false, is_pinned: false, is_deleted: false, edited_at: null, deleted_at: null, created_at: new Date().toISOString(), is_mine: true, status: 'sending', receipts: { total: 0, delivered: 0, read: 0 }, capabilities: { can_edit: false, can_delete_everyone: false, can_delete_self: false, can_forward: false, can_react: false, can_pin: false },
       }
       queryClient.setQueryData<InfiniteData<ChatMessagePage>>(key, (current) => current ? ({ ...current, pages: current.pages.map((page, index) => index === 0 ? { ...page, items: [...page.items.filter((message) => message.client_nonce !== input.client_nonce), optimistic] } : page) }) : { pages: [{ items: [optimistic], next_before_id: null }], pageParams: [undefined] })
       return { previous, nonce: input.client_nonce }

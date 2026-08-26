@@ -21,6 +21,7 @@ from app.core.enterprise_deps import ActorContext, get_actor
 from app.core.security import hash_account_password
 from app.models.models import (
     ChatAttachment,
+    ChatCall,
     ChatConversation,
     ChatMessage,
     ChatMessageHidden,
@@ -372,6 +373,8 @@ async def _message_for_actor(
         raise HTTPException(status_code=404, detail="Message not found")
     if not include_hidden and await db.scalar(select(ChatMessageHidden.id).where(ChatMessageHidden.message_id == message.id, ChatMessageHidden.account_id == actor.account_id)):
         raise HTTPException(status_code=404, detail="Message not found")
+    if message.kind == "call":
+        raise HTTPException(status_code=409, detail="Call history entries are immutable")
     return conversation, participant, message
 
 
@@ -448,6 +451,23 @@ async def _message_out(db: AsyncSession, message: ChatMessage, actor: ActorConte
             }
     within_window = message.created_at >= _now() - MESSAGE_ACTION_WINDOW
     can_change = message.sender_account_id == actor.account_id and message.deleted_at is None and within_window
+    call_out = None
+    if message.kind == "call" and message.call_id:
+        call = await db.get(ChatCall, message.call_id)
+        if call:
+            peers = await _identity_map(db, [call.caller_account_id, call.callee_account_id])
+            call_out = {
+                "call_id": str(call.id),
+                "call_type": call.call_type,
+                "outcome": call.outcome,
+                "duration_seconds": call.duration_seconds,
+                "direction": "outgoing" if actor.account_id == call.caller_account_id else "incoming",
+                "caller_name": (peers.get(call.caller_account_id) or {}).get("name"),
+                "callee_name": (peers.get(call.callee_account_id) or {}).get("name"),
+                "started_at": call.initiated_at,
+                "ended_at": call.ended_at,
+            }
+    immutable = message.kind == "call"
     return {
         "id": message.id,
         "conversation_id": message.conversation_id,
@@ -455,6 +475,8 @@ async def _message_out(db: AsyncSession, message: ChatMessage, actor: ActorConte
         "sender_account_id": message.sender_account_id,
         "client_nonce": str(message.client_nonce),
         "body": None if message.deleted_at else message.body,
+        "kind": message.kind,
+        "call": call_out,
         "attachments": attachments,
         "company_file_attachments": company_file_attachments,
         "reply_to_message_id": message.reply_to_message_id,
@@ -474,12 +496,12 @@ async def _message_out(db: AsyncSession, message: ChatMessage, actor: ActorConte
         "status": status,
         "receipts": receipts,
         "capabilities": {
-            "can_edit": can_change and bool(message.body),
-            "can_delete_everyone": can_change,
-            "can_delete_self": message.deleted_at is None,
-            "can_forward": message.deleted_at is None,
-            "can_react": message.deleted_at is None,
-            "can_pin": message.deleted_at is None,
+            "can_edit": not immutable and can_change and bool(message.body),
+            "can_delete_everyone": not immutable and can_change,
+            "can_delete_self": not immutable and message.deleted_at is None,
+            "can_forward": not immutable and message.deleted_at is None,
+            "can_react": not immutable and message.deleted_at is None,
+            "can_pin": not immutable and message.deleted_at is None,
         },
     }
 
@@ -535,7 +557,7 @@ async def _conversation_summary(db: AsyncSession, conversation: ChatConversation
         "can_manage": bool(own_membership and own_membership.role == "owner" and conversation.kind == "group"),
         "last_message": ({
             "id": last_message.id,
-            "body": "Message deleted" if last_message.deleted_at else (last_message.body or ("Attachment" if last_attachment_count else "")),
+            "body": "Message deleted" if last_message.deleted_at else ("📞 Call ended" if last_message.kind == "call" else (last_message.body or ("Attachment" if last_attachment_count else ""))),
             "attachment_count": last_attachment_count,
             "sender_account_id": last_message.sender_account_id,
             "sender_name": sender_identity["name"] if sender_identity else None,

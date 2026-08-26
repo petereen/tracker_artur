@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 // Vite runs on the host during local development, while Compose publishes
 // the backend on localhost:8010. Containerized callers can override this.
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8010'
+const callProxyTarget = process.env.VITE_CALL_PROXY_TARGET || 'http://localhost:8020'
 
 export default defineConfig({
   plugins: [react()],
@@ -12,6 +13,11 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      '/socket.io': {
+        target: callProxyTarget,
+        changeOrigin: true,
+        ws: true,
+      },
       '/api': {
         target: apiProxyTarget,
         changeOrigin: true,

@@ -9,6 +9,7 @@ import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordResetPage
 import { InitialWorkspaceSkeleton } from './components/Loading'
 import { notificationService } from './platform/notifications'
 import { isNativePlatform } from './platform/runtime'
+import { CallProvider } from './components/CallProvider'
 
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
 const WorktimePage = lazy(() => import('./pages/WorktimePage').then((module) => ({ default: module.WorktimePage })))
@@ -71,7 +72,7 @@ function AuthenticatedApp() {
   if (!token) return <LoginPage />
 
   return (
-    <>
+    <CallProvider>
       <NativeNotificationBridge />
       <Routes>
       <Route element={<EnterpriseShell />}>
@@ -110,7 +111,7 @@ function AuthenticatedApp() {
       <Route path="contracts/:publicId/print" element={<ContractPrintPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </>
+    </CallProvider>
   )
 }
 

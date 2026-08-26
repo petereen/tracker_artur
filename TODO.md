@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add persistent, tenant-safe 1-on-1 call records and lifecycle APIs (`backend/app`, `backend/alembic/versions`)
+- [x] Add the shared typed call protocol and Redis-backed Socket.io signaling sidecar (`types/call.ts`, `server`)
+- [x] Add the WebRTC engine, synthesized tones, global call provider, and responsive call UI (`frontend/src`)
+- [x] Integrate immutable call history into direct-chat timelines and realtime invalidation (`backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`)
+- [x] Add signaling/backend/frontend regression coverage and run production builds (`server`, `backend/tests`, `frontend/src`) — signaling tests/build, 85 frontend tests/build, 10 focused backend/chat tests in the dependency-complete Docker image, Python compilation, single Alembic-head validation, Compose validation, and production Docker builds pass; live two-browser TURN testing remains a deployment smoke check
 - [x] Add account-persisted Manager/Member workspace mode, header switch, global state, and scoped workspace views (`backend/app/routers/enterprise_auth.py`, `frontend/src`)
 - [x] Add workspace-mode regression coverage and run focused frontend/backend validation (`backend/tests`, `frontend/src`) — frontend Vitest 84 tests and production build pass; backend syntax compilation passes; backend pytest is unavailable because the `pytest` module is not installed
 - [x] Fix Telegram AI response handoff ordering and add a regression test for linked-account replies (`backend/app/bot/assistant_handlers.py`, `backend/tests/test_assistant_handlers.py`)

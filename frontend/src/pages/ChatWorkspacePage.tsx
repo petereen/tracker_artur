@@ -12,6 +12,7 @@ import {
   useDeleteChatMessage, useEditChatMessage, useForwardChatMessage, useLeaveChatGroup, useOpenDirectConversation, usePinChatMessage, useReactChatMessage, useRemoveChatMember, useRenameChatGroup, useSendChatMessage, useStarChatMessage, useChatSearch, useChatThread, useUpdateChatConversationPreferences,
 } from '../api/enterprise'
 import { resolvePublicAssetUrl, safeLocalStorage } from '../platform/runtime'
+import { ChatCallHeader } from '../components/ChatCallHeader'
 
 
 function useMobileLayout() {
@@ -82,6 +83,18 @@ function ReceiptLabel({ message }: { message: ChatMessage }) {
   if (message.status === 'read') return <span className="read"><CheckCheck size={12} /> Уншсан</span>
   if (message.status === 'delivered') return <span><CheckCheck size={12} /> Хүрсэн</span>
   return <span><Check size={12} /> Илгээсэн</span>
+}
+
+function CallHistoryMessage({ message }: { message: ChatMessage }) {
+  const call = message.call
+  if (!call) return null
+  let label = '📞 Дуудлага дууссан'
+  if (call.outcome === 'completed') label += ` • ${formatDuration(call.duration_seconds)}`
+  else if (call.outcome === 'missed') label = call.direction === 'incoming' ? '📞 Аваагүй дуудлага' : '📞 Хариу өгөөгүй'
+  else if (call.outcome === 'declined') label = call.direction === 'incoming' ? '📞 Татгалзсан дуудлага' : '📞 Дуудлагаас татгалзлаа'
+  else if (call.outcome === 'canceled') label = '📞 Цуцалсан дуудлага'
+  else label = '📞 Холболт тасарсан'
+  return <article id={`chat-message-${message.id}`} className="chat-call-history"><span>{label}</span><time>{formatTimestamp(message.created_at)}</time></article>
 }
 
 function ConversationList({
@@ -521,7 +534,7 @@ export function ChatWorkspacePage() {
     if (!orderedMessages.length) return
     if (highlightId) document.getElementById(`chat-message-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     else logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
-    const latest = [...orderedMessages].reverse().find((message) => message.id > 0 && !message.is_mine)
+    const latest = [...orderedMessages].reverse().find((message) => message.kind !== 'call' && message.id > 0 && !message.is_mine)
     if (!latest || !conversationId || document.visibilityState !== 'visible') return
     const key = `${conversationId}:${latest.id}:read`
     if (lastAckRef.current === key) return
@@ -640,6 +653,7 @@ export function ChatWorkspacePage() {
           <button ref={drawerTriggerRef} className="chat-icon-button" onClick={() => mobile ? setDrawerOpen(true) : setCollapsed((value) => !value)} aria-label={sidebarVisible ? 'Чатын жагсаалт нуух' : 'Чатын жагсаалт нээх'}>{mobile || collapsed ? <Menu /> : <ChevronLeft />}</button>
           <Avatar conversation={conversation.data} />
           <div><strong>{conversation.data.title}</strong><small>{conversation.data.kind === 'direct' ? (conversation.data.presence === 'online' ? 'Онлайн' : 'Идэвхгүй') : `${conversation.data.member_count} гишүүн`}</small></div>
+          <ChatCallHeader conversation={conversation.data} />
           <button className="chat-icon-button" onClick={() => setSearchOpen(true)} aria-label="Мессеж хайх"><Search /></button>
           <div className="chat-header-menu-wrap"><button className="chat-icon-button" onClick={() => setConversationMenuOpen((value) => !value)} aria-label="Чатын тохиргоо"><MoreHorizontal /></button>{conversationMenuOpen && <div className="chat-popover-menu">
             <button onClick={() => preferences.mutate({ pinned: !conversation.data!.is_pinned }, { onSuccess: () => setConversationMenuOpen(false) })}><Pin />{conversation.data.is_pinned ? 'Чат салгах' : 'Чат тогтоох'}</button>
@@ -651,7 +665,7 @@ export function ChatWorkspacePage() {
         <div ref={logRef} className="chat-message-log" role="log" aria-live="polite" aria-label={`${conversation.data.title} мессежүүд`}>
           {messages.hasNextPage && <button className="chat-load-older" onClick={() => messages.fetchNextPage()} disabled={messages.isFetchingNextPage}>{messages.isFetchingNextPage ? 'Ачаалж байна…' : 'Өмнөх мессежүүд'}</button>}
           {!orderedMessages.length && !messages.isLoading && <div className="chat-thread-empty"><MessageCircle /><strong>Чат бичиж харилцан яриагаа эхлүүлээрэй</strong><span>Энд илгээсэн мессежүүд зөвхөн оролцогчдод харагдана.</span></div>}
-          {orderedMessages.map((message) => <article id={message.id > 0 ? `chat-message-${message.id}` : undefined} key={`${message.id}-${message.client_nonce}`} className={`chat-message ${message.is_mine ? 'mine' : 'theirs'} ${message.status === 'failed' ? 'send-failed' : ''} ${highlightId === message.id ? 'highlighted' : ''}`} onContextMenu={(event) => { if (message.id > 0 && !message.is_deleted) { event.preventDefault(); setActionMessageId(message.id) } }}>
+          {orderedMessages.map((message) => message.kind === 'call' ? <CallHistoryMessage key={`${message.id}-${message.client_nonce}`} message={message} /> : <article id={message.id > 0 ? `chat-message-${message.id}` : undefined} key={`${message.id}-${message.client_nonce}`} className={`chat-message ${message.is_mine ? 'mine' : 'theirs'} ${message.status === 'failed' ? 'send-failed' : ''} ${highlightId === message.id ? 'highlighted' : ''}`} onContextMenu={(event) => { if (message.id > 0 && !message.is_deleted) { event.preventDefault(); setActionMessageId(message.id) } }}>
             {!message.is_mine && <Avatar identity={message.sender} />}
             <div className="chat-message-content"><div className="chat-bubble">{!message.is_mine && conversation.data.kind === 'group' && <strong>{message.sender?.name}</strong>}{message.forwarded_sender_name && <small className="chat-forwarded"><Forward /> {message.forwarded_sender_name}-с дамжуулсан</small>}{message.reply_preview && <button className="chat-reply-preview" onClick={() => setThreadRootId(message.thread_root_message_id || message.reply_preview!.id)}><strong>{message.reply_preview.sender_name}</strong><span>{message.reply_preview.is_deleted ? 'Устгасан мессеж' : message.reply_preview.body || 'Хавсралт'}</span></button>}{message.is_deleted ? <p className="chat-deleted-message">Энэ мессеж устгагдсан</p> : <>{message.body && <p>{message.body}</p>}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((attachment) => <ChatAttachmentView key={attachment.public_id} conversationId={conversationId} attachment={attachment} />)}</div> : null}{message.company_file_attachments?.length ? <div className="chat-attachments">{message.company_file_attachments.map((attachment) => <CompanyFileAttachmentView key={attachment.item_id} attachment={attachment} />)}</div> : null}</>} </div>
               {!!message.reactions?.length && <div className="chat-reaction-row">{message.reactions.map((reaction) => <button key={reaction.emoji} className={reaction.reacted ? 'active' : ''} onClick={() => react.mutate({ messageId: message.id, emoji: reaction.emoji, remove: reaction.reacted })}>{reaction.emoji} <span>{reaction.count}</span></button>)}</div>}

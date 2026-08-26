@@ -1,0 +1,15 @@
+*
+!frontend/
+!frontend/**
+!server/
+!server/**
+!types/
+!types/**
+frontend/node_modules/
+frontend/dist/
+frontend/android/
+frontend/ios/
+frontend/playwright-report/
+frontend/test-results/
+server/node_modules/
+server/dist/
