@@ -47,7 +47,7 @@ ERP_MODULES = {
     "assets_maintenance": "Assets & maintenance",
 }
 MODULE_SETTINGS_KEY = "erp_modules"
-VALID_ACTIONS = frozenset({"view", "create", "edit", "approve", "submit", "cancel", "archive", "export", "administer"})
+VALID_ACTIONS = frozenset({"view", "create", "edit", "calculate", "review", "approve", "post", "submit", "cancel", "archive", "export", "administer"})
 DOCUMENT_MODULES = {
     "journal_entry": "accounting", "payment_entry": "accounting", "budget": "accounting", "fiscal_period": "accounting",
     "quotation": "selling", "sales_order": "selling", "delivery": "selling", "sales_invoice": "selling",
@@ -518,6 +518,10 @@ async def apply_payment_allocations(db: AsyncSession, document: ERPDocument) -> 
 
 async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorContext) -> None:
     """Create append-only financial and stock movements in the same transaction."""
+    if document.document_type in {"salary_structure", "payroll_run", "salary_slip"}:
+        # Legacy payroll documents remain readable for migration/audit purposes,
+        # but all new calculation and posting is owned by app.payroll.
+        raise HTTPException(status_code=410, detail={"code": "payroll_use_dedicated_api", "path": "/v1/erp/payroll"})
     await assert_open_posting_period(db, document.organization_id, document.posting_date)
     lines = (await db.execute(select(ERPDocumentLine).where(ERPDocumentLine.document_id == document.id))).scalars().all()
     await assert_stock_policy(db, document, lines)

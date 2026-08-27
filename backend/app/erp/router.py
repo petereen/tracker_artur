@@ -24,6 +24,7 @@ from app.erp.service import (
     DOCUMENT_MODULES, DOCUMENT_TYPES, ERP_MODULES, MASTER_OPERATION_MODULES, MASTER_OPERATIONS, MODULE_SETTINGS_KEY, VALID_ACTIONS, as_money, calculate_lines,
     approval_required, bootstrap_organization, cancel_document, capability_scopes, default_workflow, document_out, ensure_definition, module_settings, next_number, operation_catalog, post_document, published_definition, record_workflow_transition, require_capability, scope_allows, validate_custom_fields, validate_definition_fields, validate_form_values, validate_workflow,
 )
+from app.payroll.router import router as payroll_router
 
 
 router = APIRouter()
@@ -1057,6 +1058,8 @@ async def list_documents(
 async def create_document(document_type: str, data: DocumentInput, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if document_type not in DOCUMENT_TYPES:
         raise HTTPException(status_code=404, detail="Unknown ERP document type")
+    if document_type in {"salary_structure", "payroll_run", "salary_slip"}:
+        raise HTTPException(status_code=410, detail={"code": "payroll_use_dedicated_api", "path": "/v1/erp/payroll"})
     await require_capability(db, actor, document_type, "create")
     await _assert_document_scope(db, actor, document_type, "create", project_id=data.project_id, branch_code=data.payload.get("branch_code"), warehouse_ids=[line.warehouse_id for line in data.lines])
     prior = await _idempotent_response(db, actor, f"erp.document.{document_type}.create", idempotency_key, data.model_dump(mode="json"))
@@ -1391,3 +1394,9 @@ async def outstanding_invoices(kind: Literal["receivable", "payable"], db: Async
     today = date.today()
     return [{"document_id": row.id, "number": row.number, "party_id": row.party_id, "due_date": row.due_date.isoformat() if row.due_date else None,
         "outstanding_amount": str(row.outstanding_amount), "currency": row.currency, "days_overdue": max((today - row.due_date).days, 0) if row.due_date else 0} for row in rows]
+
+
+# Dedicated payroll routes own calculation, approval, posting, and exports.
+# The generic document workbench remains available for legacy payroll rows but
+# cannot create new payroll documents.
+router.include_router(payroll_router, prefix="/payroll")

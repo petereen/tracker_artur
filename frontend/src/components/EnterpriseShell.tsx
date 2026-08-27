@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 import { api } from '../api/client'
 import {
-  BarChart3, BriefcaseBusiness, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine,
+  BarChart3, BriefcaseBusiness, Calculator, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine,
   FolderArchive, LayoutDashboard, LogOut, Menu, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { acknowledgeChatReceipt, useActor, useBrandingSettings, useChatUnreadCount, useEnterpriseLogout, useERPMetadata, useOpenDirectConversation, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
@@ -42,6 +42,7 @@ const TITLES: Record<string, string> = {
   '/chat': 'Чат',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
   '/erp': 'ERP үйл ажиллагаа',
+  '/erp/payroll': 'Монгол цалингийн тооцоо',
   '/administration/workspace': 'Logo оруулах',
   '/administration/collaboration': 'Чек ин тохиргоо',
   '/administration/access': 'Хандалтын удирдлага',
@@ -184,7 +185,9 @@ export function EnterpriseShell() {
   const nav = useMemo(() => {
     const base = NAV.filter((item) => !item.roles.length || item.roles.some((role) => roles.includes(role)))
     const canAccessERP = roles.includes('admin') || Object.values(erp.data?.modules ?? {}).some(Boolean)
-    return canAccessERP ? [...base.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, base[base.length - 1]] : base
+    if (!canAccessERP) return base
+    const withErp = [...base.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, base[base.length - 1]]
+    return erp.data?.modules.payroll ? [...withErp.slice(0, -1), { to: '/erp/payroll', label: 'Payroll', icon: Calculator, roles: [] }, withErp[withErp.length - 1]] : withErp
   }, [erp.data, roles])
   const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const workerPerformance = useWorkerPerformance(selectedWorker, periodFromPreset('week'), canReviewWorkers)

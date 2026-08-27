@@ -2124,6 +2124,7 @@ class ERPGeneralLedgerEntry(Base):
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
     account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="RESTRICT"), nullable=False)
+    cost_center_id = Column(Integer, ForeignKey("erp_cost_centers.id", ondelete="SET NULL"))
     party_id = Column(Integer, ForeignKey("erp_parties.id", ondelete="SET NULL"))
     posting_date = Column(Date, nullable=False)
     debit = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
@@ -2321,3 +2322,357 @@ class MobileUpdateChannel(Base):
     active_bundle_id = Column(Integer, ForeignKey("mobile_update_bundles.id", ondelete="SET NULL"))
     previous_bundle_id = Column(Integer, ForeignKey("mobile_update_bundles.id", ondelete="SET NULL"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+# ─── Configurable Mongolia payroll ─────────────────────────────────────────
+
+
+class StatutoryConfigProfile(Base):
+    __tablename__ = "statutory_config_profiles"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "code", "version", name="uq_payroll_statutory_profile_version"),
+        Index("ix_payroll_statutory_profile_effective", "organization_id", "effective_from", "effective_to"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(80), nullable=False)
+    jurisdiction = Column(String(8), nullable=False, server_default="MN", default="MN")
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    status = Column(String(16), nullable=False, server_default="draft", default="draft")
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date)
+    tax_point_basis = Column(String(24), nullable=False, server_default="payment_date", default="payment_date")
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    minimum_wage = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    shi_ceiling_multiplier = Column(Numeric(12, 6), nullable=False, server_default="0", default=0)
+    pit_withholding_method = Column(String(24), nullable=False, server_default="ytd_cumulative", default="ytd_cumulative")
+    rounding_policy = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    leave_policy = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    source_references = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    is_example = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    checksum = Column(String(64), nullable=False)
+    approved_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    approved_at = Column(DateTime(timezone=True))
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SHIRateTier(Base):
+    __tablename__ = "shi_rate_tiers"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "payer", "insurance_fund", "insured_category", "hazard_class", name="uq_payroll_shi_rate_tier"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    profile_id = Column(Integer, ForeignKey("statutory_config_profiles.id", ondelete="CASCADE"), nullable=False)
+    payer = Column(String(12), nullable=False)
+    insurance_fund = Column(String(32), nullable=False)
+    insured_category = Column(String(32), nullable=False, server_default="employee", default="employee")
+    hazard_class = Column(String(16), nullable=False, server_default="standard", default="standard")
+    rate = Column(Numeric(12, 8), nullable=False, server_default="0", default=0)
+    base_floor = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    base_ceiling_policy = Column(String(24), nullable=False, server_default="profile", default="profile")
+    exemption_code = Column(String(64))
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+
+
+class PITBracketTier(Base):
+    __tablename__ = "pit_bracket_tiers"
+    __table_args__ = (UniqueConstraint("profile_id", "period_basis", "position", name="uq_payroll_pit_bracket_position"),)
+
+    id = Column(Integer, primary_key=True)
+    profile_id = Column(Integer, ForeignKey("statutory_config_profiles.id", ondelete="CASCADE"), nullable=False)
+    period_basis = Column(String(16), nullable=False, server_default="annual", default="annual")
+    lower_bound = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    upper_bound = Column(Numeric(20, 4))
+    marginal_rate = Column(Numeric(12, 8), nullable=False, server_default="0", default=0)
+    base_tax = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+
+
+class TaxReliefTier(Base):
+    __tablename__ = "tax_relief_tiers"
+    __table_args__ = (UniqueConstraint("profile_id", "eligibility_code", "position", name="uq_payroll_relief_position"),)
+
+    id = Column(Integer, primary_key=True)
+    profile_id = Column(Integer, ForeignKey("statutory_config_profiles.id", ondelete="CASCADE"), nullable=False)
+    eligibility_code = Column(String(64), nullable=False)
+    lower_bound = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    upper_bound = Column(Numeric(20, 4))
+    fixed_amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    amount_basis = Column(String(16), nullable=False, server_default="annual", default="annual")
+    formula = Column(Text)
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+
+
+class SalaryStructure(Base):
+    __tablename__ = "salary_structures"
+    __table_args__ = (UniqueConstraint("organization_id", "code", "version", name="uq_payroll_salary_structure_version"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(80), nullable=False)
+    name = Column(Text, nullable=False)
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    status = Column(String(16), nullable=False, server_default="draft", default="draft")
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date)
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    checksum = Column(String(64), nullable=False)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    published_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    published_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SalaryStructureVersion(Base):
+    """Immutable published structure snapshot used by payroll calculations."""
+
+    __tablename__ = "salary_structure_versions"
+    __table_args__ = (
+        UniqueConstraint("salary_structure_id", "version", name="uq_payroll_salary_structure_version_snapshot"),
+        Index("ix_payroll_salary_structure_version_effective", "salary_structure_id", "effective_from", "effective_to"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    salary_structure_id = Column(Integer, ForeignKey("salary_structures.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, server_default="draft", default="draft")
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date)
+    component_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    checksum = Column(String(64), nullable=False)
+    published_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    published_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SalaryComponent(Base):
+    __tablename__ = "salary_components"
+    __table_args__ = (
+        UniqueConstraint("salary_structure_id", "code", name="uq_payroll_salary_component_code"),
+        Index("ix_payroll_salary_component_order", "salary_structure_id", "position"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    salary_structure_id = Column(Integer, ForeignKey("salary_structures.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(80), nullable=False)
+    name = Column(Text, nullable=False)
+    component_kind = Column(String(24), nullable=False)
+    formula = Column(Text, nullable=False)
+    proration_basis = Column(String(24), nullable=False, server_default="none", default="none")
+    is_taxable = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    is_shi_subject = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    is_non_taxable_allowance = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    is_leave_average_eligible = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    payer = Column(String(12), nullable=False, server_default="employee", default="employee")
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+    account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+    cost_center_id = Column(Integer, ForeignKey("erp_cost_centers.id", ondelete="SET NULL"))
+    metadata_json = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+
+
+class EmployeePayrollProfile(Base):
+    __tablename__ = "employee_payroll_profiles"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "effective_from", name="uq_payroll_employee_profile_start"),
+        Index("ix_payroll_employee_profile_effective", "employee_id", "effective_from", "effective_to"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    salary_structure_id = Column(Integer, ForeignKey("salary_structures.id", ondelete="RESTRICT"), nullable=False)
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date)
+    base_salary = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    insured_category = Column(String(32), nullable=False, server_default="employee", default="employee")
+    hazard_class = Column(String(16), nullable=False, server_default="standard", default="standard")
+    residency_status = Column(String(24), nullable=False, server_default="resident", default="resident")
+    tax_relief_eligibility = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    exemption_flags = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    taxpayer_number_ciphertext = Column(Text)
+    social_insurance_number_ciphertext = Column(Text)
+    payment_method = Column(String(16), nullable=False, server_default="bank", default="bank")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class EmployeeBankAccount(Base):
+    __tablename__ = "employee_bank_accounts"
+    __table_args__ = (UniqueConstraint("employee_payroll_profile_id", "account_fingerprint", name="uq_payroll_bank_account_fingerprint"),)
+
+    id = Column(Integer, primary_key=True)
+    employee_payroll_profile_id = Column(Integer, ForeignKey("employee_payroll_profiles.id", ondelete="CASCADE"), nullable=False)
+    bank_code = Column(String(32), nullable=False)
+    account_number_ciphertext = Column(Text, nullable=False)
+    account_fingerprint = Column(String(64), nullable=False)
+    account_last4 = Column(String(4), nullable=False)
+    account_holder_ciphertext = Column(Text)
+    is_primary = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    valid_from = Column(Date, nullable=False)
+    valid_to = Column(Date)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollRun(Base):
+    __tablename__ = "payroll_runs"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "run_number", name="uq_payroll_run_number"),
+        Index("ix_payroll_run_period_status", "organization_id", "period_start", "period_end", "status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    run_number = Column(String(80), nullable=False)
+    run_type = Column(String(16), nullable=False)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    settlement_key = Column(String(32), nullable=False)
+    tax_point_date = Column(Date, nullable=False)
+    status = Column(String(20), nullable=False, server_default="draft", default="draft")
+    reversal_of_run_id = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"))
+    replacement_of_run_id = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"))
+    statutory_profile_id = Column(Integer, ForeignKey("statutory_config_profiles.id", ondelete="RESTRICT"), nullable=False)
+    input_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    config_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    engine_version = Column(String(32), nullable=False, server_default="1", default="1")
+    snapshot_checksum = Column(String(64), nullable=False)
+    total_gross = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    total_employee_shi = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    total_employer_shi = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    total_pit = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    total_net = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    posting_profile_id = Column(Integer, ForeignKey("payroll_posting_profiles.id", ondelete="RESTRICT"))
+    erp_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="SET NULL"))
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    approved_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    posted_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class Payslip(Base):
+    __tablename__ = "payslips"
+    __table_args__ = (UniqueConstraint("payroll_run_id", "employee_id", name="uq_payroll_payslip_employee"),)
+
+    id = Column(Integer, primary_key=True)
+    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="RESTRICT"), nullable=False)
+    employee_profile_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    input_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    calculation_trace = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    ytd_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    gross = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    taxable_income = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    shi_subject_gross = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    shi_base = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    employee_shi = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    employer_shi = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    pit = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    pit_relief = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    advance_offset = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    net_pay = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    snapshot_checksum = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayslipLineItem(Base):
+    __tablename__ = "payslip_line_items"
+    __table_args__ = (Index("ix_payroll_payslip_lines_payslip", "payslip_id", "position"),)
+
+    id = Column(Integer, primary_key=True)
+    payslip_id = Column(Integer, ForeignKey("payslips.id", ondelete="CASCADE"), nullable=False)
+    component_code = Column(String(80), nullable=False)
+    label = Column(Text, nullable=False)
+    component_kind = Column(String(24), nullable=False)
+    amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    taxable = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    shi_subject = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    payer = Column(String(12), nullable=False, server_default="employee", default="employee")
+    formula_snapshot = Column(Text, nullable=False)
+    trace = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+    cost_center_id = Column(Integer, ForeignKey("erp_cost_centers.id", ondelete="SET NULL"))
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+
+
+class PayrollEmployeeAccumulator(Base):
+    __tablename__ = "payroll_employee_accumulators"
+    __table_args__ = (UniqueConstraint("employee_id", "tax_year", "sequence_no", name="uq_payroll_accumulator_sequence"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="RESTRICT"), nullable=False)
+    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False)
+    tax_year = Column(Integer, nullable=False)
+    sequence_no = Column(Integer, nullable=False)
+    gross_delta = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    taxable_delta = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    shi_base_delta = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    pit_withheld_delta = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    reversal_of_id = Column(Integer, ForeignKey("payroll_employee_accumulators.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollAdvance(Base):
+    __tablename__ = "payroll_advances"
+    __table_args__ = (Index("ix_payroll_advance_employee_settlement", "employee_id", "settlement_key", "status"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="RESTRICT"), nullable=False)
+    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False)
+    settlement_key = Column(String(32), nullable=False)
+    amount = Column(Numeric(20, 4), nullable=False)
+    applied_amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    status = Column(String(16), nullable=False, server_default="approved", default="approved")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollPostingProfile(Base):
+    __tablename__ = "payroll_posting_profiles"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_payroll_posting_profile_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(80), nullable=False)
+    account_roles = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollBankExportProfile(Base):
+    __tablename__ = "payroll_bank_export_profiles"
+    __table_args__ = (UniqueConstraint("organization_id", "bank_code", "version", name="uq_payroll_bank_export_version"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    bank_code = Column(String(32), nullable=False)
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    status = Column(String(16), nullable=False, server_default="draft", default="draft")
+    format = Column(String(8), nullable=False, server_default="csv", default="csv")
+    template = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    is_provisional = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollExportArtifact(Base):
+    __tablename__ = "payroll_export_artifacts"
+    __table_args__ = (Index("ix_payroll_export_artifact_run", "payroll_run_id", "kind", "created_at"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False)
+    kind = Column(String(24), nullable=False)
+    format = Column(String(8), nullable=False)
+    template_version = Column(String(80))
+    storage_key = Column(String(512), nullable=False)
+    filename = Column(String(255), nullable=False, server_default="payroll-export")
+    content_ciphertext = Column(Text, nullable=False)
+    checksum = Column(String(64), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    downloaded_at = Column(DateTime(timezone=True))
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
