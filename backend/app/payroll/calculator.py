@@ -43,6 +43,7 @@ class ComponentDefinition:
     shi_subject: bool = True
     non_taxable_allowance: bool = False
     leave_average_eligible: bool = True
+    only_tax_impact: bool = False
     payer: str = "employee"
     position: int = 0
 
@@ -106,6 +107,7 @@ class CalculationInput:
     prior_month_shi_base: Decimal = ZERO
     current_advance: Decimal = ZERO
     other_tax_deductible: Decimal = ZERO
+    other_tax_credit: Decimal = ZERO
     other_deductions: Decimal = ZERO
     relief_eligibilities: frozenset[str] = frozenset()
     leave_months: tuple[LeaveMonth, ...] = ()
@@ -299,7 +301,7 @@ def evaluate_components(components: Iterable[ComponentDefinition], variables: Ma
         return value
 
     for item in definitions: resolve(item.code)
-    return tuple({"code": item.code, "label": item.label, "component_kind": item.component_kind, "amount": state[item.code], "taxable": item.taxable, "shi_subject": item.shi_subject, "non_taxable_allowance": item.non_taxable_allowance, "leave_average_eligible": item.leave_average_eligible, "payer": item.payer, "formula": item.formula, "position": item.position} for item in definitions)
+    return tuple({"code": item.code, "label": item.label, "component_kind": item.component_kind, "amount": state[item.code], "taxable": item.taxable, "shi_subject": item.shi_subject, "non_taxable_allowance": item.non_taxable_allowance, "leave_average_eligible": item.leave_average_eligible, "only_tax_impact": item.only_tax_impact, "payer": item.payer, "formula": item.formula, "position": item.position} for item in definitions)
 
 
 def compute_shi(subject_gross: Decimal, rules: StatutoryRules, *, prior_month_base: Decimal = ZERO, exemption_codes: frozenset[str] = frozenset()) -> tuple[Decimal, Decimal, Decimal, dict[str, Decimal]]:
@@ -372,9 +374,9 @@ def calculate_payslip(data: CalculationInput, rules: StatutoryRules) -> Calculat
     if data.leave_days > 0:
         leave_amount = compute_leave_pay(data.leave_months, data.leave_days, rules.leave_policy)
         lines.append({"code": "vacation_pay", "label": "Vacation pay", "component_kind": "earning", "amount": leave_amount, "taxable": True, "shi_subject": True, "non_taxable_allowance": False, "leave_average_eligible": False, "payer": "employee", "formula": "12_month_average * leave_days", "position": max((line["position"] for line in lines), default=0) + 1})
-    gross = money(sum((line["amount"] for line in lines if line["component_kind"] == "earning" and line["payer"] == "employee"), ZERO), quantum)
+    gross = money(sum((line["amount"] for line in lines if line["component_kind"] == "earning" and line["payer"] == "employee" and not line.get("only_tax_impact", False)), ZERO), quantum)
     employee_deduction_components = money(sum((line["amount"] for line in lines if line["component_kind"] == "deduction" and line["payer"] == "employee"), ZERO), quantum)
-    shi_subject_gross = money(sum((line["amount"] for line in lines if line["component_kind"] == "earning" and line["payer"] == "employee" and line["shi_subject"]), ZERO), quantum)
+    shi_subject_gross = money(sum((line["amount"] for line in lines if line["component_kind"] == "earning" and line["payer"] == "employee" and line["shi_subject"] and not line.get("only_tax_impact", False)), ZERO), quantum)
     if data.withhold_statutory:
         shi_base, employee_shi, employer_shi, shi_by_fund = compute_shi(shi_subject_gross, rules, prior_month_base=data.prior_month_shi_base, exemption_codes=data.exemption_codes)
     else:
@@ -390,14 +392,14 @@ def calculate_payslip(data: CalculationInput, rules: StatutoryRules) -> Calculat
     if data.withhold_statutory:
         pit_basis = money(prior_taxable + taxable_income, quantum) if rules.pit_withholding_method == "ytd_cumulative" else taxable_income
         pit_before_relief_cumulative = compute_progressive_pit(pit_basis, rules.pit_brackets)
-        relief_cumulative = min(pit_before_relief_cumulative, _relief_for_income(pit_basis, data.relief_eligibilities, rules))
+        relief_cumulative = min(pit_before_relief_cumulative, _relief_for_income(pit_basis, data.relief_eligibilities, rules) + max(ZERO, data.other_tax_credit))
         pit_cumulative = max(ZERO, pit_before_relief_cumulative - relief_cumulative)
         if rules.pit_withholding_method == "ytd_cumulative":
             pit = max(ZERO, money(pit_cumulative - prior_pit, quantum))
             relief = max(ZERO, money(relief_cumulative - data.prior_ytd_relief, quantum))
         else:
             pit_before_relief_cumulative = compute_progressive_pit(taxable_income, rules.pit_brackets)
-            relief = min(pit_before_relief_cumulative, _relief_for_income(taxable_income, data.relief_eligibilities, rules))
+            relief = min(pit_before_relief_cumulative, _relief_for_income(taxable_income, data.relief_eligibilities, rules) + max(ZERO, data.other_tax_credit))
             pit = max(ZERO, money(pit_before_relief_cumulative - relief, quantum))
     else:
         pit_basis = ZERO
@@ -409,7 +411,7 @@ def calculate_payslip(data: CalculationInput, rules: StatutoryRules) -> Calculat
     unapplied_advance = max(ZERO, requested_advance - advance_offset)
     net_pay = money(net_before_advance - advance_offset, quantum)
     ytd = {"gross": money(data.prior_ytd_gross + (gross if data.withhold_statutory else ZERO), quantum), "taxable": money(prior_taxable + taxable_income, quantum), "pit": money(prior_pit + pit, quantum), "relief": money(data.prior_ytd_relief + relief, quantum), "shi_base": money(data.prior_month_shi_base + shi_base, quantum)}
-    trace = {"formula_context": {key: str(value) for key, value in context.items() if isinstance(value, (Decimal, int, float, str, bool))}, "shi": {"cap": str(money(rules.minimum_wage * rules.shi_ceiling_multiplier, quantum)), "remaining_cap": str(max(ZERO, money(rules.minimum_wage * rules.shi_ceiling_multiplier, quantum) - data.prior_month_shi_base)), "by_fund": {key: str(value) for key, value in shi_by_fund.items()}}, "pit": {"method": rules.pit_withholding_method, "basis": str(pit_basis), "before_relief": str(pit_before_relief_cumulative), "relief": str(relief), "prior_withheld": str(prior_pit)}, "advance": {"requested": str(requested_advance), "offset": str(advance_offset), "unapplied": str(unapplied_advance)}}
+    trace = {"formula_context": {key: str(value) for key, value in context.items() if isinstance(value, (Decimal, int, float, str, bool))}, "shi": {"cap": str(money(rules.minimum_wage * rules.shi_ceiling_multiplier, quantum)), "remaining_cap": str(max(ZERO, money(rules.minimum_wage * rules.shi_ceiling_multiplier, quantum) - data.prior_month_shi_base)), "by_fund": {key: str(value) for key, value in shi_by_fund.items()}}, "pit": {"method": rules.pit_withholding_method, "basis": str(pit_basis), "before_relief": str(pit_before_relief_cumulative), "relief": str(relief), "declared_deduction": str(data.other_tax_deductible), "declared_credit": str(data.other_tax_credit), "prior_withheld": str(prior_pit)}, "advance": {"requested": str(requested_advance), "offset": str(advance_offset), "unapplied": str(unapplied_advance)}}
     return CalculationResult(tuple(lines), gross, taxable_income, shi_subject_gross, shi_base, employee_shi, employer_shi, pit_before_relief_cumulative, relief, pit, advance_offset, unapplied_advance, other_deductions, net_pay, ytd, trace)
 
 

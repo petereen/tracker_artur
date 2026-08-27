@@ -2466,6 +2466,10 @@ class SalaryComponent(Base):
     is_shi_subject = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     is_non_taxable_allowance = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     is_leave_average_eligible = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    is_flexible_benefit = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    max_benefit_amount_yearly = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    pay_against_benefit_claim = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    only_tax_impact = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     payer = Column(String(12), nullable=False, server_default="employee", default="employee")
     position = Column(Integer, nullable=False, server_default="0", default=0)
     account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
@@ -2512,6 +2516,103 @@ class EmployeeBankAccount(Base):
     is_primary = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     valid_from = Column(Date, nullable=False)
     valid_to = Column(Date)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollTaxExemptionCategory(Base):
+    """Effective tax treatment available to employee declarations."""
+
+    __tablename__ = "payroll_tax_exemption_categories"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_payroll_tax_exemption_category_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(80), nullable=False)
+    name = Column(Text, nullable=False)
+    treatment = Column(String(24), nullable=False, server_default="tax_deduction", default="tax_deduction")
+    annual_limit = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    requires_proof = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class EmployeeTaxExemptionDeclaration(Base):
+    __tablename__ = "employee_tax_exemption_declarations"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "tax_year", "category_id", name="uq_payroll_employee_tax_declaration"),
+        Index("ix_payroll_tax_declaration_org_year", "organization_id", "tax_year", "status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    category_id = Column(Integer, ForeignKey("payroll_tax_exemption_categories.id", ondelete="RESTRICT"), nullable=False)
+    tax_year = Column(Integer, nullable=False)
+    declared_amount = Column(Numeric(20, 4), nullable=False)
+    status = Column(String(20), nullable=False, server_default="draft", default="draft")
+    note = Column(Text)
+    submitted_at = Column(DateTime(timezone=True))
+    reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    reviewed_at = Column(DateTime(timezone=True))
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class EmployeeTaxExemptionProof(Base):
+    __tablename__ = "employee_tax_exemption_proofs"
+    __table_args__ = (Index("ix_payroll_tax_proof_declaration_status", "declaration_id", "status"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    declaration_id = Column(Integer, ForeignKey("employee_tax_exemption_declarations.id", ondelete="CASCADE"), nullable=False)
+    amount = Column(Numeric(20, 4), nullable=False)
+    reference = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, server_default="submitted", default="submitted")
+    reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    reviewed_at = Column(DateTime(timezone=True))
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class EmployeeBenefitApplication(Base):
+    __tablename__ = "employee_benefit_applications"
+    __table_args__ = (
+        UniqueConstraint("employee_id", "tax_year", "salary_component_id", name="uq_payroll_employee_benefit_application"),
+        Index("ix_payroll_benefit_application_org_year", "organization_id", "tax_year", "status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    salary_component_id = Column(Integer, ForeignKey("salary_components.id", ondelete="RESTRICT"), nullable=False)
+    tax_year = Column(Integer, nullable=False)
+    requested_amount = Column(Numeric(20, 4), nullable=False)
+    approved_amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    status = Column(String(20), nullable=False, server_default="draft", default="draft")
+    note = Column(Text)
+    submitted_at = Column(DateTime(timezone=True))
+    reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    reviewed_at = Column(DateTime(timezone=True))
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class EmployeeBenefitClaim(Base):
+    __tablename__ = "employee_benefit_claims"
+    __table_args__ = (Index("ix_payroll_benefit_claim_application_status", "application_id", "status"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    application_id = Column(Integer, ForeignKey("employee_benefit_applications.id", ondelete="RESTRICT"), nullable=False)
+    claim_date = Column(Date, nullable=False)
+    amount = Column(Numeric(20, 4), nullable=False)
+    reference = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, server_default="submitted", default="submitted")
+    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"))
+    reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    reviewed_at = Column(DateTime(timezone=True))
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

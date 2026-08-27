@@ -4,18 +4,21 @@ import base64
 import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor
 from app.erp.service import require_capability
 from app.models.models import (
-    Employee, EmployeeBankAccount, EmployeePayrollProfile, PayrollBankExportProfile,
+    Employee, EmployeeBankAccount, EmployeePayrollProfile, EmployeeBenefitApplication, EmployeeBenefitClaim,
+    EmployeeTaxExemptionDeclaration, EmployeeTaxExemptionProof, PayrollBankExportProfile,
     PayrollExportArtifact, PayrollPostingProfile, PayrollRun, Payslip, PayslipLineItem, IdempotencyRecord,
+    PayrollTaxExemptionCategory,
     SalaryComponent, SalaryStructure, SalaryStructureVersion, SHIRateTier, PITBracketTier, TaxReliefTier,
     StatutoryConfigProfile,
 )
@@ -26,11 +29,15 @@ from .schemas import (
     BankAccountInput, BankExportProfileInput, BankExportRequest, CalculateRunInput,
     EmployeePayrollInput, PayrollRunInput, PITBracketInput, PostingProfileInput,
     PublishProfileInput, ReliefTierInput, SalaryStructureInput, StatutoryProfileInput,
+    BenefitApplicationInput, BenefitApplicationReviewInput, BenefitClaimInput,
+    ReviewDecisionInput, TaxDeclarationInput, TaxExemptionCategoryInput, TaxProofInput,
 )
+from .tax_benefits import approved_tax_adjustments, validate_claim_balance
 from .service import (
     calculate_run, canonical_payout_rows, create_bank_account, create_employee_profile,
     create_replacement_run, create_run, create_salary_structure, create_statutory_profile,
-    load_rules, post_run, profile_out, publish_profile, reverse_run,
+    delete_salary_structure, delete_statutory_profile, load_rules, post_run, profile_out, publish_profile, reverse_run,
+    update_salary_structure, update_statutory_profile,
 )
 
 
@@ -39,6 +46,31 @@ router = APIRouter()
 
 async def payroll_capability(db: AsyncSession, actor: ActorContext, action: str) -> None:
     await require_capability(db, actor, "payroll", action)
+
+
+def _is_payroll_admin(actor: ActorContext) -> bool:
+    return bool({"admin", "manager", "hr"}.intersection(actor.roles))
+
+
+async def _employee_scope(db: AsyncSession, actor: ActorContext, requested: int | None) -> int | None:
+    if _is_payroll_admin(actor):
+        await payroll_capability(db, actor, "view")
+        return requested
+    if actor.employee_id is None or (requested is not None and requested != actor.employee_id):
+        raise HTTPException(status_code=403, detail={"code": "payroll_employee_scope_required"})
+    return actor.employee_id
+
+
+def _declaration_out(row: EmployeeTaxExemptionDeclaration) -> dict[str, Any]:
+    return {"id": row.id, "employee_id": row.employee_id, "category_id": row.category_id, "tax_year": row.tax_year, "declared_amount": str(row.declared_amount), "status": row.status, "note": row.note, "submitted_at": row.submitted_at.isoformat() if row.submitted_at else None}
+
+
+def _benefit_application_out(row: EmployeeBenefitApplication) -> dict[str, Any]:
+    return {"id": row.id, "employee_id": row.employee_id, "salary_component_id": row.salary_component_id, "tax_year": row.tax_year, "requested_amount": str(row.requested_amount), "approved_amount": str(row.approved_amount), "status": row.status, "note": row.note}
+
+
+def _benefit_claim_out(row: EmployeeBenefitClaim) -> dict[str, Any]:
+    return {"id": row.id, "application_id": row.application_id, "claim_date": row.claim_date.isoformat(), "amount": str(row.amount), "reference": row.reference, "status": row.status, "payroll_run_id": row.payroll_run_id}
 
 
 def _run_out(run: PayrollRun) -> dict[str, Any]:
@@ -84,6 +116,28 @@ async def publish_profile_route(profile_id: int, data: PublishProfileInput = Pub
     return profile_out(profile)
 
 
+@router.put("/profiles/{profile_id}")
+async def update_profile_route(profile_id: int, data: StatutoryProfileInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
+    if not profile: raise HTTPException(status_code=404, detail="Profile not found")
+    await update_statutory_profile(db, actor, profile, data)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="statutory_config_profile", aggregate_id=profile.id, operation="updated", after={"code": profile.code, "version": profile.version, "status": profile.status})
+    await db.commit(); await db.refresh(profile)
+    return profile_out(profile, rates=data.shi_rates, brackets=data.pit_brackets, reliefs=data.relief_tiers)
+
+
+@router.delete("/profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_profile_route(profile_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
+    if not profile: raise HTTPException(status_code=404, detail="Profile not found")
+    await delete_statutory_profile(db, actor, profile)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="statutory_config_profile", aggregate_id=profile_id, operation="deleted", after={"profile_id": profile_id})
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/salary-structures")
 async def list_salary_structures(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "view")
@@ -91,7 +145,7 @@ async def list_salary_structures(db: AsyncSession = Depends(get_db), actor: Acto
     result = []
     for structure in structures:
         components = (await db.execute(select(SalaryComponent).where(SalaryComponent.salary_structure_id == structure.id).order_by(SalaryComponent.position))).scalars().all()
-        result.append({"id": structure.id, "code": structure.code, "name": structure.name, "version": structure.version, "status": structure.status, "effective_from": structure.effective_from.isoformat(), "effective_to": structure.effective_to.isoformat() if structure.effective_to else None, "currency": structure.currency, "checksum": structure.checksum, "components": [{"code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components]})
+        result.append({"id": structure.id, "code": structure.code, "name": structure.name, "version": structure.version, "status": structure.status, "effective_from": structure.effective_from.isoformat(), "effective_to": structure.effective_to.isoformat() if structure.effective_to else None, "currency": structure.currency, "checksum": structure.checksum, "components": [{"id": row.id, "code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly), "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components]})
     return result
 
 
@@ -124,6 +178,35 @@ async def publish_structure(structure_id: int, db: AsyncSession = Depends(get_db
     await record_change(db, actor=actor, topic="payroll", aggregate_type="salary_structure", aggregate_id=structure.id, operation="published", after={"code": structure.code, "version": structure.version})
     await db.commit(); await db.refresh(structure)
     return {"id": structure.id, "code": structure.code, "version": structure.version, "status": structure.status, "checksum": structure.checksum}
+
+
+@router.put("/salary-structures/{structure_id}")
+async def update_structure_route(structure_id: int, data: SalaryStructureInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    structure = await db.scalar(select(SalaryStructure).where(SalaryStructure.id == structure_id, SalaryStructure.organization_id == actor.organization_id))
+    if not structure: raise HTTPException(status_code=404, detail="Salary structure not found")
+    await update_salary_structure(db, actor, structure, data)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="salary_structure", aggregate_id=structure.id, operation="updated", after={"code": structure.code, "version": structure.version, "status": structure.status})
+    await db.commit(); await db.refresh(structure)
+    return {"id": structure.id, "code": structure.code, "name": structure.name, "version": structure.version, "status": structure.status, "effective_from": structure.effective_from.isoformat(), "effective_to": structure.effective_to.isoformat() if structure.effective_to else None, "currency": structure.currency, "checksum": structure.checksum, "components": [{"code": item.code, "name": item.name, "component_kind": item.component_kind, "formula": item.formula, "proration_basis": item.proration_basis, "is_taxable": item.is_taxable, "is_shi_subject": item.is_shi_subject, "is_non_taxable_allowance": item.is_non_taxable_allowance, "is_flexible_benefit": item.is_flexible_benefit, "max_benefit_amount_yearly": str(item.max_benefit_amount_yearly), "pay_against_benefit_claim": item.pay_against_benefit_claim, "only_tax_impact": item.only_tax_impact, "account_id": item.account_id, "cost_center_id": item.cost_center_id} for item in data.components]}
+
+
+@router.delete("/salary-structures/{structure_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_structure_route(structure_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    structure = await db.scalar(select(SalaryStructure).where(SalaryStructure.id == structure_id, SalaryStructure.organization_id == actor.organization_id))
+    if not structure: raise HTTPException(status_code=404, detail="Salary structure not found")
+    await delete_salary_structure(db, actor, structure)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="salary_structure", aggregate_id=structure_id, operation="deleted", after={"structure_id": structure_id})
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/employee-profiles")
+async def list_employee_payroll_profiles(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    profiles = (await db.execute(select(EmployeePayrollProfile).where(EmployeePayrollProfile.organization_id == actor.organization_id).order_by(EmployeePayrollProfile.employee_id, EmployeePayrollProfile.effective_from.desc()))).scalars().all()
+    return [{"id": profile.id, "employee_id": profile.employee_id, "salary_structure_id": profile.salary_structure_id, "effective_from": profile.effective_from.isoformat(), "effective_to": profile.effective_to.isoformat() if profile.effective_to else None, "base_salary": str(profile.base_salary), "insured_category": profile.insured_category, "hazard_class": profile.hazard_class, "payment_method": profile.payment_method} for profile in profiles]
 
 
 @router.post("/employees/{employee_id}/profile", status_code=status.HTTP_201_CREATED)
@@ -160,6 +243,212 @@ async def list_employee_bank_accounts(employee_id: int, db: AsyncSession = Depen
     if not profile: raise HTTPException(status_code=404, detail="Employee payroll profile not found")
     accounts = (await db.execute(select(EmployeeBankAccount).where(EmployeeBankAccount.employee_payroll_profile_id == profile.id).order_by(EmployeeBankAccount.is_primary.desc(), EmployeeBankAccount.valid_from.desc()))).scalars().all()
     return [{"id": account.id, "bank_code": account.bank_code, "account_last4": account.account_last4, "is_primary": account.is_primary, "valid_from": account.valid_from.isoformat(), "valid_to": account.valid_to.isoformat() if account.valid_to else None} for account in accounts]
+
+
+@router.get("/tax-benefits/exemption-categories")
+async def list_tax_exemption_categories(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    rows = (await db.execute(select(PayrollTaxExemptionCategory).where(PayrollTaxExemptionCategory.organization_id == actor.organization_id).order_by(PayrollTaxExemptionCategory.code))).scalars().all()
+    return [{"id": row.id, "code": row.code, "name": row.name, "treatment": row.treatment, "annual_limit": str(row.annual_limit), "requires_proof": row.requires_proof, "is_active": row.is_active} for row in rows]
+
+
+@router.get("/tax-benefits/flexible-components")
+async def list_flexible_benefit_components(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    rows = (await db.execute(select(SalaryComponent, SalaryStructure).join(SalaryStructure, SalaryStructure.id == SalaryComponent.salary_structure_id).where(SalaryStructure.organization_id == actor.organization_id, SalaryStructure.status.in_(("published", "active")), SalaryComponent.is_flexible_benefit.is_(True)).order_by(SalaryStructure.name, SalaryComponent.name))).all()
+    return [{"id": component.id, "name": component.name, "code": component.code, "structure": structure.name, "max_benefit_amount_yearly": str(component.max_benefit_amount_yearly), "pay_against_benefit_claim": component.pay_against_benefit_claim, "only_tax_impact": component.only_tax_impact} for component, structure in rows]
+
+
+@router.post("/tax-benefits/exemption-categories", status_code=status.HTTP_201_CREATED)
+async def create_tax_exemption_category(data: TaxExemptionCategoryInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    row = PayrollTaxExemptionCategory(organization_id=actor.organization_id, **data.model_dump(), created_by_account_id=actor.account_id)
+    db.add(row); await db.flush()
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="tax_exemption_category", aggregate_id=row.id, operation="created", after={"code": row.code, "treatment": row.treatment})
+    await db.commit(); await db.refresh(row)
+    return {"id": row.id, "code": row.code, "name": row.name, "treatment": row.treatment, "annual_limit": str(row.annual_limit), "requires_proof": row.requires_proof, "is_active": row.is_active}
+
+
+@router.get("/tax-benefits/declarations")
+async def list_tax_declarations(tax_year: int | None = None, employee_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    scoped_employee = await _employee_scope(db, actor, employee_id)
+    query = select(EmployeeTaxExemptionDeclaration).where(EmployeeTaxExemptionDeclaration.organization_id == actor.organization_id)
+    if scoped_employee is not None: query = query.where(EmployeeTaxExemptionDeclaration.employee_id == scoped_employee)
+    if tax_year is not None: query = query.where(EmployeeTaxExemptionDeclaration.tax_year == tax_year)
+    rows = (await db.execute(query.order_by(EmployeeTaxExemptionDeclaration.tax_year.desc(), EmployeeTaxExemptionDeclaration.id.desc()))).scalars().all()
+    return [_declaration_out(row) for row in rows]
+
+
+@router.post("/tax-benefits/declarations", status_code=status.HTTP_201_CREATED)
+async def create_tax_declaration(data: TaxDeclarationInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    employee_id = await _employee_scope(db, actor, data.employee_id)
+    if employee_id is None: raise HTTPException(status_code=422, detail={"code": "payroll_employee_required"})
+    category = await db.scalar(select(PayrollTaxExemptionCategory).where(PayrollTaxExemptionCategory.id == data.category_id, PayrollTaxExemptionCategory.organization_id == actor.organization_id, PayrollTaxExemptionCategory.is_active.is_(True)))
+    if not category: raise HTTPException(status_code=404, detail="Tax exemption category not found")
+    if Decimal(str(category.annual_limit)) > 0 and data.declared_amount > Decimal(str(category.annual_limit)):
+        raise HTTPException(status_code=422, detail={"code": "payroll_tax_declaration_exceeds_limit", "annual_limit": str(category.annual_limit)})
+    profile = await db.scalar(select(EmployeePayrollProfile.id).where(EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.employee_id == employee_id).limit(1))
+    if not profile: raise HTTPException(status_code=404, detail="Employee payroll profile not found")
+    row = EmployeeTaxExemptionDeclaration(organization_id=actor.organization_id, employee_id=employee_id, category_id=data.category_id, tax_year=data.tax_year, declared_amount=data.declared_amount, note=data.note, created_by_account_id=actor.account_id)
+    db.add(row); await db.flush(); await db.commit(); await db.refresh(row)
+    return _declaration_out(row)
+
+
+@router.post("/tax-benefits/declarations/{declaration_id}/submit")
+async def submit_tax_declaration(declaration_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    row = await db.scalar(select(EmployeeTaxExemptionDeclaration).where(EmployeeTaxExemptionDeclaration.id == declaration_id, EmployeeTaxExemptionDeclaration.organization_id == actor.organization_id).with_for_update())
+    if not row: raise HTTPException(status_code=404, detail="Tax declaration not found")
+    await _employee_scope(db, actor, row.employee_id)
+    if row.status != "draft": raise HTTPException(status_code=409, detail={"code": "payroll_tax_declaration_not_draft"})
+    row.status = "submitted"; row.submitted_at = datetime.now(timezone.utc)
+    await db.commit(); await db.refresh(row); return _declaration_out(row)
+
+
+@router.post("/tax-benefits/declarations/{declaration_id}/review")
+async def review_tax_declaration(declaration_id: int, data: ReviewDecisionInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "approve")
+    row = await db.scalar(select(EmployeeTaxExemptionDeclaration).where(EmployeeTaxExemptionDeclaration.id == declaration_id, EmployeeTaxExemptionDeclaration.organization_id == actor.organization_id).with_for_update())
+    if not row: raise HTTPException(status_code=404, detail="Tax declaration not found")
+    if row.status != "submitted": raise HTTPException(status_code=409, detail={"code": "payroll_tax_declaration_not_submitted"})
+    row.status = "approved" if data.approve else "rejected"; row.reviewed_by_account_id = actor.account_id; row.reviewed_at = datetime.now(timezone.utc)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="tax_exemption_declaration", aggregate_id=row.id, operation=row.status, after={"employee_id": row.employee_id, "tax_year": row.tax_year})
+    await db.commit(); await db.refresh(row); return _declaration_out(row)
+
+
+@router.get("/tax-benefits/proofs")
+async def list_tax_proofs(declaration_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    query = select(EmployeeTaxExemptionProof, EmployeeTaxExemptionDeclaration).join(EmployeeTaxExemptionDeclaration, EmployeeTaxExemptionDeclaration.id == EmployeeTaxExemptionProof.declaration_id).where(EmployeeTaxExemptionProof.organization_id == actor.organization_id)
+    if declaration_id is not None: query = query.where(EmployeeTaxExemptionProof.declaration_id == declaration_id)
+    rows = (await db.execute(query.order_by(EmployeeTaxExemptionProof.id.desc()))).all()
+    if not _is_payroll_admin(actor):
+        if actor.employee_id is None: return []
+        rows = [(proof, declaration) for proof, declaration in rows if declaration.employee_id == actor.employee_id]
+    else:
+        await payroll_capability(db, actor, "view")
+    return [{"id": proof.id, "declaration_id": proof.declaration_id, "amount": str(proof.amount), "reference": proof.reference, "status": proof.status} for proof, _ in rows]
+
+
+@router.post("/tax-benefits/declarations/{declaration_id}/proofs", status_code=status.HTTP_201_CREATED)
+async def create_tax_proof(declaration_id: int, data: TaxProofInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    declaration = await db.scalar(select(EmployeeTaxExemptionDeclaration).where(EmployeeTaxExemptionDeclaration.id == declaration_id, EmployeeTaxExemptionDeclaration.organization_id == actor.organization_id))
+    if not declaration: raise HTTPException(status_code=404, detail="Tax declaration not found")
+    await _employee_scope(db, actor, declaration.employee_id)
+    if declaration.status not in {"submitted", "approved"}: raise HTTPException(status_code=409, detail={"code": "payroll_tax_declaration_not_submitted"})
+    existing = await db.scalar(select(func.coalesce(func.sum(EmployeeTaxExemptionProof.amount), 0)).where(EmployeeTaxExemptionProof.declaration_id == declaration.id, EmployeeTaxExemptionProof.status.in_(("submitted", "approved"))))
+    if Decimal(str(existing or 0)) + data.amount > Decimal(str(declaration.declared_amount)):
+        raise HTTPException(status_code=422, detail={"code": "payroll_tax_proof_exceeds_declaration"})
+    proof = EmployeeTaxExemptionProof(organization_id=actor.organization_id, declaration_id=declaration.id, **data.model_dump(), created_by_account_id=actor.account_id)
+    db.add(proof); await db.flush(); await db.commit(); await db.refresh(proof)
+    return {"id": proof.id, "declaration_id": proof.declaration_id, "amount": str(proof.amount), "reference": proof.reference, "status": proof.status}
+
+
+@router.post("/tax-benefits/proofs/{proof_id}/review")
+async def review_tax_proof(proof_id: int, data: ReviewDecisionInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "approve")
+    proof = await db.scalar(select(EmployeeTaxExemptionProof).where(EmployeeTaxExemptionProof.id == proof_id, EmployeeTaxExemptionProof.organization_id == actor.organization_id).with_for_update())
+    if not proof: raise HTTPException(status_code=404, detail="Tax proof not found")
+    if proof.status != "submitted": raise HTTPException(status_code=409, detail={"code": "payroll_tax_proof_not_submitted"})
+    proof.status = "approved" if data.approve else "rejected"; proof.reviewed_by_account_id = actor.account_id; proof.reviewed_at = datetime.now(timezone.utc)
+    await db.commit(); await db.refresh(proof)
+    return {"id": proof.id, "declaration_id": proof.declaration_id, "amount": str(proof.amount), "reference": proof.reference, "status": proof.status}
+
+
+@router.get("/tax-benefits/benefit-applications")
+async def list_benefit_applications(tax_year: int | None = None, employee_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    scoped_employee = await _employee_scope(db, actor, employee_id)
+    query = select(EmployeeBenefitApplication).where(EmployeeBenefitApplication.organization_id == actor.organization_id)
+    if scoped_employee is not None: query = query.where(EmployeeBenefitApplication.employee_id == scoped_employee)
+    if tax_year is not None: query = query.where(EmployeeBenefitApplication.tax_year == tax_year)
+    rows = (await db.execute(query.order_by(EmployeeBenefitApplication.tax_year.desc(), EmployeeBenefitApplication.id.desc()))).scalars().all()
+    return [_benefit_application_out(row) for row in rows]
+
+
+@router.post("/tax-benefits/benefit-applications", status_code=status.HTTP_201_CREATED)
+async def create_benefit_application(data: BenefitApplicationInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    employee_id = await _employee_scope(db, actor, data.employee_id)
+    if employee_id is None: raise HTTPException(status_code=422, detail={"code": "payroll_employee_required"})
+    component = await db.scalar(select(SalaryComponent).join(SalaryStructure, SalaryStructure.id == SalaryComponent.salary_structure_id).where(SalaryComponent.id == data.salary_component_id, SalaryStructure.organization_id == actor.organization_id, SalaryComponent.is_flexible_benefit.is_(True)))
+    if not component: raise HTTPException(status_code=404, detail="Flexible benefit component not found")
+    assigned = await db.scalar(select(EmployeePayrollProfile.id).where(EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.employee_id == employee_id, EmployeePayrollProfile.salary_structure_id == component.salary_structure_id, EmployeePayrollProfile.effective_from <= date(data.tax_year, 12, 31), (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= date(data.tax_year, 1, 1)))).limit(1))
+    if not assigned: raise HTTPException(status_code=422, detail={"code": "payroll_benefit_component_not_assigned"})
+    if Decimal(str(component.max_benefit_amount_yearly)) > 0 and data.requested_amount > Decimal(str(component.max_benefit_amount_yearly)):
+        raise HTTPException(status_code=422, detail={"code": "payroll_benefit_application_exceeds_limit", "annual_limit": str(component.max_benefit_amount_yearly)})
+    row = EmployeeBenefitApplication(organization_id=actor.organization_id, employee_id=employee_id, salary_component_id=component.id, tax_year=data.tax_year, requested_amount=data.requested_amount, note=data.note, created_by_account_id=actor.account_id)
+    db.add(row); await db.flush(); await db.commit(); await db.refresh(row); return _benefit_application_out(row)
+
+
+@router.post("/tax-benefits/benefit-applications/{application_id}/submit")
+async def submit_benefit_application(application_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    row = await db.scalar(select(EmployeeBenefitApplication).where(EmployeeBenefitApplication.id == application_id, EmployeeBenefitApplication.organization_id == actor.organization_id).with_for_update())
+    if not row: raise HTTPException(status_code=404, detail="Benefit application not found")
+    await _employee_scope(db, actor, row.employee_id)
+    if row.status != "draft": raise HTTPException(status_code=409, detail={"code": "payroll_benefit_application_not_draft"})
+    row.status = "submitted"; row.submitted_at = datetime.now(timezone.utc)
+    await db.commit(); await db.refresh(row); return _benefit_application_out(row)
+
+
+@router.post("/tax-benefits/benefit-applications/{application_id}/review")
+async def review_benefit_application(application_id: int, data: BenefitApplicationReviewInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "approve")
+    row = await db.scalar(select(EmployeeBenefitApplication).where(EmployeeBenefitApplication.id == application_id, EmployeeBenefitApplication.organization_id == actor.organization_id).with_for_update())
+    if not row: raise HTTPException(status_code=404, detail="Benefit application not found")
+    if row.status != "submitted": raise HTTPException(status_code=409, detail={"code": "payroll_benefit_application_not_submitted"})
+    if data.approve and data.approved_amount > row.requested_amount: raise HTTPException(status_code=422, detail={"code": "payroll_benefit_approval_exceeds_request"})
+    row.status = "approved" if data.approve else "rejected"; row.approved_amount = data.approved_amount if data.approve else Decimal("0"); row.reviewed_by_account_id = actor.account_id; row.reviewed_at = datetime.now(timezone.utc)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="employee_benefit_application", aggregate_id=row.id, operation=row.status, after={"employee_id": row.employee_id, "approved_amount": str(row.approved_amount)})
+    await db.commit(); await db.refresh(row); return _benefit_application_out(row)
+
+
+@router.get("/tax-benefits/benefit-claims")
+async def list_benefit_claims(employee_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    scoped_employee = await _employee_scope(db, actor, employee_id)
+    query = select(EmployeeBenefitClaim).join(EmployeeBenefitApplication, EmployeeBenefitApplication.id == EmployeeBenefitClaim.application_id).where(EmployeeBenefitClaim.organization_id == actor.organization_id)
+    if scoped_employee is not None: query = query.where(EmployeeBenefitApplication.employee_id == scoped_employee)
+    rows = (await db.execute(query.order_by(EmployeeBenefitClaim.claim_date.desc(), EmployeeBenefitClaim.id.desc()))).scalars().all()
+    return [_benefit_claim_out(row) for row in rows]
+
+
+@router.post("/tax-benefits/benefit-claims", status_code=status.HTTP_201_CREATED)
+async def create_benefit_claim(data: BenefitClaimInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    application = await db.scalar(select(EmployeeBenefitApplication).where(EmployeeBenefitApplication.id == data.application_id, EmployeeBenefitApplication.organization_id == actor.organization_id).with_for_update())
+    if not application: raise HTTPException(status_code=404, detail="Benefit application not found")
+    await _employee_scope(db, actor, application.employee_id)
+    if application.status != "approved": raise HTTPException(status_code=409, detail={"code": "payroll_benefit_application_not_approved"})
+    component = await db.get(SalaryComponent, application.salary_component_id)
+    if not component or not component.pay_against_benefit_claim:
+        raise HTTPException(status_code=409, detail={"code": "payroll_benefit_not_claim_based"})
+    if data.claim_date.year != application.tax_year: raise HTTPException(status_code=422, detail={"code": "payroll_benefit_claim_year_mismatch"})
+    await validate_claim_balance(db, application, data.amount)
+    claim = EmployeeBenefitClaim(organization_id=actor.organization_id, application_id=application.id, **data.model_dump(exclude={"application_id"}), created_by_account_id=actor.account_id)
+    db.add(claim); await db.flush(); await db.commit(); await db.refresh(claim); return _benefit_claim_out(claim)
+
+
+@router.post("/tax-benefits/benefit-claims/{claim_id}/review")
+async def review_benefit_claim(claim_id: int, data: ReviewDecisionInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "approve")
+    claim = await db.scalar(select(EmployeeBenefitClaim).where(EmployeeBenefitClaim.id == claim_id, EmployeeBenefitClaim.organization_id == actor.organization_id).with_for_update())
+    if not claim: raise HTTPException(status_code=404, detail="Benefit claim not found")
+    if claim.status != "submitted": raise HTTPException(status_code=409, detail={"code": "payroll_benefit_claim_not_submitted"})
+    application = await db.get(EmployeeBenefitApplication, claim.application_id)
+    if data.approve: await validate_claim_balance(db, application, Decimal(str(claim.amount)))
+    claim.status = "approved" if data.approve else "rejected"; claim.reviewed_by_account_id = actor.account_id; claim.reviewed_at = datetime.now(timezone.utc)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="employee_benefit_claim", aggregate_id=claim.id, operation=claim.status, after={"application_id": claim.application_id, "amount": str(claim.amount)})
+    await db.commit(); await db.refresh(claim); return _benefit_claim_out(claim)
+
+
+@router.get("/tax-benefits/reports/income-tax-computation")
+async def income_tax_computation(tax_year: int, employee_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    scoped_employee = await _employee_scope(db, actor, employee_id)
+    query = select(Payslip).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, PayrollRun.tax_point_date >= date(tax_year, 1, 1), PayrollRun.tax_point_date < date(tax_year + 1, 1, 1), PayrollRun.status.in_(("calculated", "in_review", "approved", "posted", "paid")), PayrollRun.run_type != "advance")
+    if scoped_employee is not None: query = query.where(Payslip.employee_id == scoped_employee)
+    slips = (await db.execute(query.order_by(Payslip.employee_id, PayrollRun.tax_point_date))).scalars().all()
+    totals: dict[int, dict[str, Decimal]] = {}
+    for slip in slips:
+        row = totals.setdefault(slip.employee_id, {"gross": Decimal("0"), "taxable_income": Decimal("0"), "employee_shi": Decimal("0"), "pit_relief": Decimal("0"), "pit": Decimal("0")})
+        for key in row: row[key] += Decimal(str(getattr(slip, key)))
+    result = []
+    for item_employee_id, values in totals.items():
+        adjustments = await approved_tax_adjustments(db, organization_id=actor.organization_id, employee_id=item_employee_id, tax_year=tax_year)
+        result.append({"employee_id": item_employee_id, **{key: str(value) for key, value in values.items()}, "approved_tax_deduction": str(adjustments["deduction"]), "approved_tax_credit": str(adjustments["credit"])})
+    return {"tax_year": tax_year, "rows": result}
 
 
 @router.put("/posting-profiles/default")

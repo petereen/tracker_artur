@@ -67,6 +67,10 @@ class SalaryComponentInput(BaseModel):
     is_shi_subject: bool = True
     is_non_taxable_allowance: bool = False
     is_leave_average_eligible: bool = True
+    is_flexible_benefit: bool = False
+    max_benefit_amount_yearly: Decimal = Field(default=Decimal("0"), ge=0)
+    pay_against_benefit_claim: bool = False
+    only_tax_impact: bool = False
     payer: Literal["employee", "employer"] = "employee"
     position: int = Field(default=0, ge=0)
     account_id: int | None = None
@@ -145,3 +149,48 @@ class ReplacementRunInput(PayrollRunInput):
     """Inputs for a replacement run linked to a finalized run."""
 
     acknowledge_example: bool = False
+
+
+class TaxExemptionCategoryInput(BaseModel):
+    code: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=160)
+    treatment: Literal["tax_deduction", "tax_credit"] = "tax_deduction"
+    annual_limit: Decimal = Field(default=Decimal("0"), ge=0)
+    requires_proof: bool = True
+
+
+class TaxDeclarationInput(BaseModel):
+    employee_id: int | None = None
+    category_id: int
+    tax_year: int = Field(ge=2000, le=2200)
+    declared_amount: Decimal = Field(gt=0)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class TaxProofInput(BaseModel):
+    amount: Decimal = Field(gt=0)
+    reference: str = Field(min_length=1, max_length=500)
+
+
+class BenefitApplicationInput(BaseModel):
+    employee_id: int | None = None
+    salary_component_id: int
+    tax_year: int = Field(ge=2000, le=2200)
+    requested_amount: Decimal = Field(gt=0)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class BenefitApplicationReviewInput(BaseModel):
+    approved_amount: Decimal = Field(ge=0)
+    approve: bool = True
+
+
+class BenefitClaimInput(BaseModel):
+    application_id: int
+    claim_date: date
+    amount: Decimal = Field(gt=0)
+    reference: str = Field(min_length=1, max_length=500)
+
+
+class ReviewDecisionInput(BaseModel):
+    approve: bool = True

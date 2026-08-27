@@ -26,6 +26,7 @@ from .schemas import (
     BankAccountInput, EmployeePayrollInput, PayrollRunInput, PostingProfileInput,
     SalaryStructureInput, StatutoryProfileInput,
 )
+from .tax_benefits import approved_tax_adjustments, grouped_benefit_claims, mark_run_benefits_paid, reserve_benefit_claims
 
 
 def _hash(value: Any) -> str:
@@ -138,6 +139,67 @@ async def create_statutory_profile(db: AsyncSession, actor: ActorContext, data: 
     return profile
 
 
+async def update_statutory_profile(db: AsyncSession, actor: ActorContext, profile: StatutoryConfigProfile, data: StatutoryProfileInput) -> StatutoryConfigProfile:
+    if profile.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if profile.status in {"published", "active"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_profile_immutable"})
+    # Keep draft editing on the same validation path as profile creation.
+    _validate_date_range(data.effective_from, data.effective_to)
+    if data.currency.upper() != "MNT":
+        raise HTTPException(status_code=422, detail={"code": "payroll_currency_not_supported", "currency": data.currency})
+    try:
+        quantum = Decimal(str(data.rounding_policy.get("quantum", "0.01")))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_rounding_quantum"}) from exc
+    if quantum <= 0:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_rounding_quantum"})
+    for bracket in data.pit_brackets:
+        if bracket.upper_bound is not None and bracket.upper_bound <= bracket.lower_bound:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_pit_bracket"})
+    for relief in data.relief_tiers:
+        if relief.upper_bound is not None and relief.upper_bound <= relief.lower_bound:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_relief_tier"})
+        if relief.formula:
+            try:
+                _SafeFormula(relief.formula)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail={"code": "payroll_invalid_relief_formula", "message": str(exc)}) from exc
+    for basis in {bracket.period_basis for bracket in data.pit_brackets}:
+        ordered = sorted((bracket for bracket in data.pit_brackets if bracket.period_basis == basis), key=lambda row: row.lower_bound)
+        previous_upper: Decimal | None = None
+        for index, bracket in enumerate(ordered):
+            if previous_upper is None and index > 0:
+                raise HTTPException(status_code=422, detail={"code": "payroll_bracket_after_unbounded_tier", "period_basis": basis})
+            if previous_upper is not None and bracket.lower_bound < previous_upper:
+                raise HTTPException(status_code=422, detail={"code": "payroll_overlapping_pit_bracket", "period_basis": basis})
+            previous_upper = bracket.upper_bound
+    for key, value in _profile_payload(data).items():
+        setattr(profile, key, value)
+    profile.currency = data.currency.upper()
+    profile.checksum = _hash(data.model_dump(mode="json"))
+    await db.execute(delete(SHIRateTier).where(SHIRateTier.profile_id == profile.id))
+    await db.execute(delete(PITBracketTier).where(PITBracketTier.profile_id == profile.id))
+    await db.execute(delete(TaxReliefTier).where(TaxReliefTier.profile_id == profile.id))
+    db.add_all([SHIRateTier(profile_id=profile.id, **row.model_dump()) for row in data.shi_rates])
+    db.add_all([PITBracketTier(profile_id=profile.id, **row.model_dump()) for row in data.pit_brackets])
+    db.add_all([TaxReliefTier(profile_id=profile.id, **row.model_dump()) for row in data.relief_tiers])
+    await db.flush()
+    return profile
+
+
+async def delete_statutory_profile(db: AsyncSession, actor: ActorContext, profile: StatutoryConfigProfile) -> None:
+    if profile.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if profile.status in {"published", "active"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_profile_immutable"})
+    referenced_run = await db.scalar(select(PayrollRun.id).where(PayrollRun.statutory_profile_id == profile.id).limit(1))
+    if referenced_run:
+        raise HTTPException(status_code=409, detail={"code": "payroll_profile_referenced_by_run"})
+    await db.delete(profile)
+    await db.flush()
+
+
 async def publish_profile(db: AsyncSession, actor: ActorContext, profile: StatutoryConfigProfile, acknowledge_example: bool) -> None:
     if profile.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -185,6 +247,8 @@ async def create_salary_structure(db: AsyncSession, actor: ActorContext, data: S
         raise HTTPException(status_code=422, detail={"code": "payroll_currency_not_supported", "currency": data.currency})
     codes = [item.code for item in data.components]
     if len(codes) != len(set(codes)): raise HTTPException(status_code=422, detail={"code": "payroll_duplicate_component"})
+    if any(item.pay_against_benefit_claim and (not item.is_flexible_benefit or item.component_kind != "earning") for item in data.components):
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_flexible_benefit_component"})
     account_ids = {item.account_id for item in data.components if item.account_id is not None}
     if account_ids:
         known_accounts = set((await db.execute(select(ERPAccount.id).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.id.in_(account_ids)))).scalars().all())
@@ -212,6 +276,54 @@ async def create_salary_structure(db: AsyncSession, actor: ActorContext, data: S
         checksum=structure.checksum,
     ))
     return structure
+
+
+async def update_salary_structure(db: AsyncSession, actor: ActorContext, structure: SalaryStructure, data: SalaryStructureInput) -> SalaryStructure:
+    if structure.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Salary structure not found")
+    if structure.status in {"published", "active"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_immutable"})
+    _validate_date_range(data.effective_from, data.effective_to)
+    if data.currency.upper() != "MNT":
+        raise HTTPException(status_code=422, detail={"code": "payroll_currency_not_supported", "currency": data.currency})
+    codes = [item.code for item in data.components]
+    if len(codes) != len(set(codes)):
+        raise HTTPException(status_code=422, detail={"code": "payroll_duplicate_component"})
+    if any(item.pay_against_benefit_claim and (not item.is_flexible_benefit or item.component_kind != "earning") for item in data.components):
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_flexible_benefit_component"})
+    try:
+        for item in data.components:
+            _SafeFormula(item.formula)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_formula", "message": str(exc)}) from exc
+    structure.code = data.code
+    structure.name = data.name
+    structure.effective_from = data.effective_from
+    structure.effective_to = data.effective_to
+    structure.currency = data.currency.upper()
+    structure.checksum = _hash(data.model_dump(mode="json"))
+    await db.execute(delete(SalaryComponent).where(SalaryComponent.salary_structure_id == structure.id))
+    db.add_all([SalaryComponent(salary_structure_id=structure.id, **item.model_dump()) for item in data.components])
+    version_snapshot = await db.scalar(select(SalaryStructureVersion).where(SalaryStructureVersion.salary_structure_id == structure.id, SalaryStructureVersion.version == structure.version))
+    if version_snapshot:
+        version_snapshot.effective_from = structure.effective_from
+        version_snapshot.effective_to = structure.effective_to
+        version_snapshot.component_snapshot = [item.model_dump(mode="json") for item in data.components]
+        version_snapshot.checksum = structure.checksum
+    await db.flush()
+    return structure
+
+
+async def delete_salary_structure(db: AsyncSession, actor: ActorContext, structure: SalaryStructure) -> None:
+    if structure.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Salary structure not found")
+    if structure.status in {"published", "active"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_immutable"})
+    referenced_profile = await db.scalar(select(EmployeePayrollProfile.id).where(EmployeePayrollProfile.salary_structure_id == structure.id).limit(1))
+    if referenced_profile:
+        raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_referenced_by_employee"})
+    await db.delete(structure)
+    await db.flush()
 
 
 async def create_employee_profile(db: AsyncSession, actor: ActorContext, employee_id: int, data: EmployeePayrollInput) -> EmployeePayrollProfile:
@@ -358,13 +470,25 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
                 history_units = history_input.get("resolved_units") or {}
                 leave_month_payload.append({"earnings": str(eligible_earnings), "worked_days": str(history_override.get("payable_workdays", history_units.get("payable_workdays", 0))), "eligible": True})
         leave_months = tuple(LeaveMonth(Decimal(str(item.get("earnings", 0))), Decimal(str(item.get("worked_days", 0))), bool(item.get("eligible", True))) for item in (leave_month_payload or []) if isinstance(item, dict))
-        defs = tuple(ComponentDefinition(code=row.code, label=row.name, component_kind=row.component_kind, formula=row.formula, proration_basis=row.proration_basis, taxable=row.is_taxable, shi_subject=row.is_shi_subject, non_taxable_allowance=row.is_non_taxable_allowance, leave_average_eligible=row.is_leave_average_eligible, payer=row.payer, position=row.position) for row in components)
-        calc = calculate_payslip(CalculationInput(base_salary=Decimal(str(override.get("base_salary", employee_profile.base_salary))), payable_workdays=payable_workdays, scheduled_workdays=scheduled_workdays_value, payable_calendar_days=Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1))), scheduled_calendar_days=Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1))), payable_hours=payable_hours, scheduled_hours=scheduled_hours, context=context, components=defs, prior_ytd_gross=Decimal(str(prior_gross or 0)), prior_ytd_taxable=Decimal(str(prior_taxable or 0)), prior_ytd_pit=Decimal(str(prior_pit or 0)), prior_ytd_relief=Decimal(str(prior_relief or 0)), prior_month_shi_base=Decimal(str(prior_month_base or 0)), current_advance=current_advance if run.run_type != "advance" else Decimal("0"), other_tax_deductible=Decimal(str(override.get("other_tax_deductible", 0))), other_deductions=Decimal(str(override.get("other_deductions", 0))), relief_eligibilities=frozenset(employee_profile.tax_relief_eligibility or []), leave_months=leave_months, leave_days=Decimal(str(override.get("leave_days", 0))), exemption_codes=frozenset((employee_profile.exemption_flags or {}).get("shi", [])), withhold_statutory=run.run_type != "advance"))
-        profile_snapshot = {"employee_id": employee_id, "base_salary": str(employee_profile.base_salary), "salary_structure_id": structure.id, "salary_structure_version": structure.version, "salary_structure_checksum": structure.checksum, "components": [{"code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components], "insured_category": employee_profile.insured_category, "hazard_class": employee_profile.hazard_class, "residency_status": employee_profile.residency_status, "tax_relief_eligibility": employee_profile.tax_relief_eligibility, "exemption_flags": employee_profile.exemption_flags, "insured_code": employee_profile.insured_category}
-        input_snapshot = {"override": override, "profile_id": employee_profile.id, "advance_ids": [row.id for row in advance_rows], "unapplied_advance": str(unapplied_advance), "current_advance": str(current_advance), "resolved_units": {"payable_workdays": str(payable_workdays), "scheduled_workdays": str(scheduled_workdays_value), "payable_calendar_days": str(Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1)))), "scheduled_calendar_days": str(Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1)))), "payable_hours": str(payable_hours), "scheduled_hours": str(scheduled_hours)}}
+        tax_adjustments = await approved_tax_adjustments(db, organization_id=actor.organization_id, employee_id=employee_id, tax_year=run.tax_point_date.year)
+        prior_traces = list((await db.execute(select(Payslip.calculation_trace).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.tax_point_date >= date(run.tax_point_date.year, 1, 1), PayrollRun.tax_point_date < run.tax_point_date, PayrollRun.status.in_(("calculated", "in_review", "approved", "posted", "paid")), PayrollRun.run_type != "advance", PayrollRun.id != run.id))).scalars().all())
+        prior_declared_deduction = sum((Decimal(str(((trace or {}).get("pit") or {}).get("declared_deduction", 0))) for trace in prior_traces), Decimal("0"))
+        prior_declared_credit = sum((Decimal(str(((trace or {}).get("pit") or {}).get("declared_credit", 0))) for trace in prior_traces), Decimal("0"))
+        declared_deduction = max(Decimal("0"), Decimal(str(tax_adjustments["deduction"])) - prior_declared_deduction)
+        declared_credit = Decimal(str(tax_adjustments["credit"])) if rules.pit_withholding_method == "ytd_cumulative" else max(Decimal("0"), Decimal(str(tax_adjustments["credit"])) - prior_declared_credit)
+        benefit_claims = await reserve_benefit_claims(db, run=run, employee_id=employee_id)
+        grouped_claims = grouped_benefit_claims(benefit_claims)
+        benefit_context = {f"benefit_claim_amount_{item['component_id']}": item["amount"] for item in grouped_claims}
+        base_defs = [ComponentDefinition(code=row.code, label=row.name, component_kind=row.component_kind, formula=row.formula, proration_basis=row.proration_basis, taxable=row.is_taxable, shi_subject=row.is_shi_subject, non_taxable_allowance=row.is_non_taxable_allowance, leave_average_eligible=row.is_leave_average_eligible, only_tax_impact=row.only_tax_impact, payer=row.payer, position=row.position) for row in components if not (row.is_flexible_benefit and row.pay_against_benefit_claim)]
+        benefit_defs = [ComponentDefinition(code=f"benefit_claim_{item['component_id']}", label=item["component_name"], component_kind="earning", formula=f"benefit_claim_amount_{item['component_id']}", taxable=item["taxable"], shi_subject=item["shi_subject"], non_taxable_allowance=item["non_taxable_allowance"], leave_average_eligible=False, only_tax_impact=item["only_tax_impact"], payer="employee", position=len(components) + index) for index, item in enumerate(grouped_claims)]
+        defs = tuple(base_defs + benefit_defs)
+        calc = calculate_payslip(CalculationInput(base_salary=Decimal(str(override.get("base_salary", employee_profile.base_salary))), payable_workdays=payable_workdays, scheduled_workdays=scheduled_workdays_value, payable_calendar_days=Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1))), scheduled_calendar_days=Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1))), payable_hours=payable_hours, scheduled_hours=scheduled_hours, context={**context, **benefit_context}, components=defs, prior_ytd_gross=Decimal(str(prior_gross or 0)), prior_ytd_taxable=Decimal(str(prior_taxable or 0)), prior_ytd_pit=Decimal(str(prior_pit or 0)), prior_ytd_relief=Decimal(str(prior_relief or 0)), prior_month_shi_base=Decimal(str(prior_month_base or 0)), current_advance=current_advance if run.run_type != "advance" else Decimal("0"), other_tax_deductible=Decimal(str(override.get("other_tax_deductible", 0))) + declared_deduction, other_tax_credit=declared_credit, other_deductions=Decimal(str(override.get("other_deductions", 0))), relief_eligibilities=frozenset(employee_profile.tax_relief_eligibility or []), leave_months=leave_months, leave_days=Decimal(str(override.get("leave_days", 0))), exemption_codes=frozenset((employee_profile.exemption_flags or {}).get("shi", [])), withhold_statutory=run.run_type != "advance"))
+        profile_snapshot = {"employee_id": employee_id, "base_salary": str(employee_profile.base_salary), "salary_structure_id": structure.id, "salary_structure_version": structure.version, "salary_structure_checksum": structure.checksum, "components": [{"code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly), "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components], "insured_category": employee_profile.insured_category, "hazard_class": employee_profile.hazard_class, "residency_status": employee_profile.residency_status, "tax_relief_eligibility": employee_profile.tax_relief_eligibility, "exemption_flags": employee_profile.exemption_flags, "insured_code": employee_profile.insured_category}
+        input_snapshot = {"override": override, "profile_id": employee_profile.id, "advance_ids": [row.id for row in advance_rows], "unapplied_advance": str(unapplied_advance), "current_advance": str(current_advance), "tax_adjustments": {**tax_adjustments, "deduction": str(tax_adjustments["deduction"]), "credit": str(tax_adjustments["credit"]), "applied_deduction": str(declared_deduction), "applied_credit": str(declared_credit)}, "benefit_claims": benefit_claims, "resolved_units": {"payable_workdays": str(payable_workdays), "scheduled_workdays": str(scheduled_workdays_value), "payable_calendar_days": str(Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1)))), "scheduled_calendar_days": str(Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1)))), "payable_hours": str(payable_hours), "scheduled_hours": str(scheduled_hours)}}
         payslip = Payslip(payroll_run_id=run.id, organization_id=actor.organization_id, employee_id=employee_id, employee_profile_snapshot=profile_snapshot, input_snapshot=input_snapshot, calculation_trace=calc.trace, ytd_snapshot={key: str(value) for key, value in calc.ytd.items()}, gross=calc.gross, taxable_income=calc.taxable_income, shi_subject_gross=calc.shi_subject_gross, shi_base=calc.shi_base, employee_shi=calc.employee_shi, employer_shi=calc.employer_shi, pit=calc.pit, pit_relief=calc.relief, advance_offset=calc.advance_offset, net_pay=calc.net_pay, snapshot_checksum=snapshot_checksum({"profile": profile_snapshot, "input": input_snapshot, "result": calc.trace, "gross": str(calc.gross), "taxable_income": str(calc.taxable_income), "net": str(calc.net_pay)}))
         db.add(payslip); await db.flush()
         component_by_code = {row.code: row for row in components}
+        component_by_code.update({f"benefit_claim_{item['component_id']}": next((row for row in components if row.id == item["component_id"]), None) for item in grouped_claims})
         db.add_all([PayslipLineItem(payslip_id=payslip.id, component_code=line["code"], label=line["label"], component_kind=line["component_kind"], amount=line["amount"], taxable=line["taxable"], shi_subject=line["shi_subject"], payer=line["payer"], formula_snapshot=line["formula"], trace={"position": line["position"], "leave_average_eligible": line.get("leave_average_eligible", False)}, account_id=getattr(component_by_code.get(line["code"]), "account_id", None), cost_center_id=getattr(component_by_code.get(line["code"]), "cost_center_id", None)) for line in calc.lines])
         result_rows.append(payslip)
     run.total_gross = sum((row.gross for row in result_rows), Decimal("0")); run.total_employee_shi = sum((row.employee_shi for row in result_rows), Decimal("0")); run.total_employer_shi = sum((row.employer_shi for row in result_rows), Decimal("0")); run.total_pit = sum((row.pit for row in result_rows), Decimal("0")); run.total_net = sum((row.net_pay for row in result_rows), Decimal("0")); run.status = "calculated"
@@ -387,6 +511,7 @@ async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ER
     accounts = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.id.in_(list(roles.values()))))).scalars().all()
     if len(accounts) != len(set(roles.values())): raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_invalid"})
     run.config_snapshot = {**(run.config_snapshot or {}), "posting_profile_id": posting.id, "bank_debit_account": roles.get("bank")}
+    await mark_run_benefits_paid(db, run.id)
     document = ERPDocument(organization_id=actor.organization_id, document_type="payroll_run", number=run.run_number, status="submitted", currency="MNT", posting_date=run.period_end, net_total=run.total_net if is_advance else run.total_gross, tax_total=Decimal("0") if is_advance else run.total_employee_shi + run.total_pit + run.total_employer_shi, grand_total=run.total_net if is_advance else run.total_gross + run.total_employer_shi, outstanding_amount=Decimal("0") if is_advance else run.total_net, payload={"payroll_run_id": run.id, "run_type": run.run_type}, custom={})
     db.add(document); await db.flush()
     payslips = (await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all()

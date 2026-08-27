@@ -43,6 +43,7 @@ const TITLES: Record<string, string> = {
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
   '/erp': 'ERP үйл ажиллагаа',
   '/erp/payroll': 'Монгол цалингийн тооцоо',
+  '/erp/payroll/tax-benefits': 'Татвар ба хангамж',
   '/administration/workspace': 'Logo оруулах',
   '/administration/collaboration': 'Чек ин тохиргоо',
   '/administration/access': 'Хандалтын удирдлага',

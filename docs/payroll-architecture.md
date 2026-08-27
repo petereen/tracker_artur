@@ -191,6 +191,27 @@ SHI deduction, taxable income, relief, and PIT withheld. Canonical JSON is alway
 rendering is template-driven and never embeds statutory columns in calculator
 code.
 
+## Tax and benefits workflow
+
+The `/erp/payroll/tax-benefits` workspace adapts Frappe HR's Tax & Benefits
+separation into the Mongolia calculator instead of copying India-specific tax
+rules. Administrators define effective exemption categories as either taxable
+income deductions or PIT credits. Employees submit annual declarations and
+proof references; only reviewer-approved declarations and proofs are consumed,
+with declared and category limits enforced. Applied totals and source IDs are
+frozen into each payslip input snapshot.
+
+Flexible benefits are enabled on earning components in a draft salary
+structure. An employee applies against the assigned component's annual limit,
+then submits claims up to the approved allocation. Approved claim-based
+benefits are row-locked and reserved by the matching payroll period during
+calculation, emitted as auditable payslip lines, and marked paid in the same
+transaction as GL posting. `only_tax_impact` benefits increase taxable income
+without increasing gross or net pay. This follows the workflow boundaries in
+the [Frappe HR Tax & Benefits workspace](https://github.com/frappe/hrms/blob/develop/hrms/payroll/workspace/tax_%26_benefits/tax_%26_benefits.json)
+and [Payroll Setup documentation](https://docs.frappe.io/hr/payroll-setup),
+while statutory rates remain organization-controlled Mongolia configuration.
+
 ## API and security
 
 Routes are under `/v1/erp/payroll`: profiles, salary structures, employee

@@ -21,6 +21,7 @@ const StatsWorkspacePage = lazy(() => import('./pages/StatsWorkspacePage').then(
 const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
 const ERPWorkspacePage = lazy(() => import('./pages/ERPWorkspacePage').then((module) => ({ default: module.ERPWorkspacePage })))
 const PayrollWorkspacePage = lazy(() => import('./pages/PayrollWorkspacePage').then((module) => ({ default: module.PayrollWorkspacePage })))
+const TaxBenefitsWorkspacePage = lazy(() => import('./pages/TaxBenefitsWorkspacePage').then((module) => ({ default: module.TaxBenefitsWorkspacePage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
 const PlansPage = lazy(() => import('./pages/PlansPage').then((module) => ({ default: module.PlansPage })))
 const ContractsWorkspacePage = lazy(() => import('./pages/ContractsWorkspacePage').then((module) => ({ default: module.ContractsWorkspacePage })))
@@ -91,6 +92,7 @@ function AuthenticatedApp() {
         <Route path="analytics" element={<StatsWorkspacePage />} />
         <Route path="erp" element={<ERPWorkspacePage />} />
         <Route path="erp/payroll" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/tax-benefits" element={<TaxBenefitsWorkspacePage />} />
         <Route path="erp/payroll/runs/:runId" element={<PayrollWorkspacePage />} />
         <Route path="administration" element={<AdministrationHubPage />} />
         <Route path="administration/workspace" element={<WorkspaceIdentitySettingsPage />} />

@@ -121,3 +121,33 @@ def test_formula_conditional_selection_is_lazy():
     components = (ComponentDefinition("guarded", "Guarded", "earning", "if_else(base_salary > 0, 100, 1 / 0)"),)
     result = calculate_payslip(CalculationInput(base_salary=Decimal("1"), components=components), rules())
     assert result.gross == Decimal("100.00")
+
+
+def test_approved_tax_credit_reduces_pit_and_is_traced():
+    result = calculate_payslip(
+        CalculationInput(
+            base_salary=Decimal("1000"),
+            components=(ComponentDefinition("base", "Base", "earning", "base_salary", shi_subject=False),),
+            other_tax_credit=Decimal("25"),
+        ),
+        rules(),
+    )
+    assert result.pit == Decimal("75.00")
+    assert result.relief == Decimal("25.00")
+    assert result.trace["pit"]["declared_credit"] == "25"
+
+
+def test_tax_impact_only_benefit_is_taxable_but_not_paid_as_gross():
+    result = calculate_payslip(
+        CalculationInput(
+            base_salary=Decimal("1000"),
+            components=(
+                ComponentDefinition("base", "Base", "earning", "base_salary", shi_subject=False),
+                ComponentDefinition("car", "Company car", "earning", "200", shi_subject=False, only_tax_impact=True),
+            ),
+        ),
+        rules(),
+    )
+    assert result.gross == Decimal("1000.00")
+    assert result.taxable_income == Decimal("1200.00")
+    assert result.pit == Decimal("120.00")
