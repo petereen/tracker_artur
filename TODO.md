@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Keep the read-only exchange-rate tool visible so the answer model can classify multilingual rates requests (`backend/app/services/ai_gateway/gateway.py`)
 - [x] Make the “Компаний туслах” assistant send on Enter while preserving Shift+Enter for new lines (`frontend/src/components/OyunsAssistant.tsx`, `frontend/src/components/OyunsAssistant.test.tsx`)
 - [x] Fix OYUNS Web assistant 500 caused by reading the gateway response before it was assigned (`backend/app/routers/enterprise.py`) — initialize deliveries before the gateway call and append gateway deliveries after a successful response
 - [x] Add mobile call audio routing with earpiece/headset default and explicit loudspeaker selection (`frontend/src/platform/audio-route.ts`, `frontend/src/hooks/useWebRTC.ts`, `frontend/src/components/CallModal.tsx`, `frontend/ios`, `frontend/android`) — native bridge, call control, mobile permissions, 85 frontend tests, and production build pass; native compile is pending a local JDK/Xcode toolchain and physical headset/Bluetooth routing remains a device smoke test
@@ -323,6 +324,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Keep the read-only exchange-rate tool visible so the answer model can classify multilingual rates requests (`backend/app/services/ai_gateway/gateway.py`)
 - [x] Extend the authoritative company-file and knowledge-index models with first-class search metadata and content-availability state (`backend/app/models/models.py`)
 - [x] Add the fixed default company-tenant configuration used by accountless verified Telegram file-search principals (`backend/app/core/config.py`)
 - [x] Add the shared Unicode-aware metadata search, optional index enrichment, ACL resolution, diagnostics, and delivery service (`backend/app/services/file_search_service.py`)

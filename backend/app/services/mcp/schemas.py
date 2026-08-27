@@ -53,7 +53,7 @@ class TasksSearchInput(StrictInput):
     blockers_only: bool = False
     active_only: bool = False
     limit: int = Field(default=10, ge=1, le=50)
-    employee_reference: str | None = Field(default=None, max_length=4096)
+    employee_reference: str | None = Field(default=None, max_length=4096, description="Opaque reference of the employee whose tasks to retrieve. For the caller's own tasks, use the `employee_reference` from the grounding context's `current_employee`. Omit only to search the whole permitted scope.")
     project_reference: str | None = Field(default=None, max_length=4096)
     date_from: date | None = None
     date_to: date | None = None
