@@ -9334,6 +9334,62 @@ html.capacitor-native .native-boot-error {
 .payroll-empty strong { color: var(--color-text); font-size: 13px; }
 .payroll-empty p { font-size: 12px; line-height: 1.5; margin: 0 0 4px; max-width: 390px; }
 .payroll-loading { padding: 28px; }
+.payroll-sequence { background: var(--color-surface); border: 1px solid var(--color-border-soft); border-radius: 16px; display: grid; grid-template-columns: repeat(7, minmax(132px, 1fr)); overflow-x: auto; padding: 8px; }
+.payroll-sequence-step { align-items: center; border-radius: 11px; color: var(--color-muted-2); display: grid; gap: 7px; grid-template-columns: auto auto minmax(0, 1fr); min-width: 132px; padding: 10px 9px; position: relative; }
+.payroll-sequence-step:not(:last-child)::after { background: var(--color-border-soft); content: ''; height: 1px; position: absolute; right: -5px; top: 50%; width: 10px; }
+.payroll-sequence-step.active { background: color-mix(in srgb, var(--payroll-blue) 9%, var(--color-surface)); color: var(--payroll-blue); }
+.payroll-sequence-step.complete { color: var(--color-green); }
+.payroll-sequence-number { align-items: center; border: 1px solid currentColor; border-radius: 50%; display: inline-flex; font-size: 10px; height: 24px; justify-content: center; width: 24px; }
+.payroll-sequence-step > div { display: grid; gap: 2px; min-width: 0; }
+.payroll-sequence-step strong { color: var(--color-text); font-size: 11px; }
+.payroll-sequence-step small { font-size: 9px; line-height: 1.3; }
+.payroll-inline-success { align-items: center; background: var(--color-green-soft); border: 1px solid color-mix(in srgb, var(--color-green) 24%, var(--color-border)); border-radius: 10px; color: var(--color-green); display: flex; font-size: 12px; gap: 8px; padding: 12px 14px; }
+.payroll-reconciliation-summary { align-items: end; display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(110px, 1fr)) auto; }
+.payroll-reconciliation-summary > div, .payroll-variance-grid > div { background: var(--color-surface-2); border: 1px solid var(--color-border-soft); border-radius: 10px; display: grid; gap: 5px; padding: 11px; }
+.payroll-reconciliation-summary small, .payroll-variance-grid small { color: var(--color-muted); font-size: 9px; text-transform: uppercase; }
+.payroll-reconciliation-summary strong, .payroll-variance-grid strong { font-size: 13px; }
+.payroll-variance-grid { display: grid; gap: 9px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 12px; }
+.payroll-variance-grid span { color: var(--color-muted); font-size: 10px; }
+.payroll-issue-list { display: grid; gap: 7px; margin: 12px 0; }
+.payroll-issue-list > div { align-items: center; background: var(--color-surface-2); border: 1px solid var(--color-border-soft); border-radius: 10px; display: flex; gap: 9px; padding: 10px 12px; }
+.payroll-issue-list > div.error { background: var(--color-red-soft); color: var(--color-red); }
+.payroll-issue-list > div.warning { background: var(--color-amber-soft); color: var(--color-amber); }
+.payroll-issue-list > div.resolved { color: var(--color-green); opacity: .78; }
+.payroll-issue-list > div > div { display: grid; flex: 1; gap: 2px; }
+.payroll-issue-list strong { font-size: 11px; text-transform: capitalize; }
+.payroll-issue-list span { color: var(--color-muted); font-size: 10px; }
+.payroll-approval-stages { display: grid; gap: 9px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 14px; }
+.payroll-approval-stages > div { align-items: center; background: var(--color-surface-2); border: 1px solid var(--color-border-soft); border-radius: 11px; display: flex; gap: 10px; padding: 12px; }
+.payroll-approval-stages > div.approved { background: var(--color-green-soft); border-color: color-mix(in srgb, var(--color-green) 22%, var(--color-border)); color: var(--color-green); }
+.payroll-approval-stages > div > span { align-items: center; border: 1px solid currentColor; border-radius: 50%; display: flex; flex: 0 0 auto; font-size: 10px; height: 25px; justify-content: center; width: 25px; }
+.payroll-approval-stages > div > div { display: grid; flex: 1; gap: 3px; }
+.payroll-approval-stages strong { color: var(--color-text); font-size: 11px; }
+.payroll-approval-stages small { color: var(--color-muted); font-size: 9px; }
+.payroll-generated-files, .payroll-report-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.payroll-input-section { border-top: 1px solid var(--color-border-soft); display: grid; gap: 9px; padding-top: 15px; }
+.payroll-fieldset-heading > div { display: grid; gap: 3px; }
+.payroll-fieldset-heading > div > strong { font-size: 12px; }
+.payroll-fieldset-heading > div > small { color: var(--color-muted); font-size: 10px; }
+.payroll-input-row { align-items: center; display: grid; gap: 7px; grid-template-columns: 1.25fr repeat(3, 1fr) auto; }
+.payroll-input-row.variable { grid-template-columns: 1.15fr .9fr 1.2fr .75fr auto auto; }
+.payroll-input-row :is(input, select), .payroll-coa-grid select, .payroll-export-row select { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text); min-height: 38px; min-width: 0; padding: 8px 9px; width: 100%; }
+.payroll-coa-grid { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.payroll-coa-grid label { color: var(--color-muted); display: grid; font-size: 10px; font-weight: 600; gap: 6px; }
+.payroll-coa-grid .primary-action { align-self: end; justify-self: start; }
+.payroll-status-resolved, .payroll-status-bank_payout, .payroll-status-cash_vouchers { background: var(--color-green-soft); color: var(--color-green); }
+.payroll-status-error { background: var(--color-red-soft); color: var(--color-red); }
+.payroll-status-warning { background: var(--color-amber-soft); color: var(--color-amber); }
+.payroll-employee-form.expanded { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+@media (max-width: 900px) {
+  .payroll-reconciliation-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .payroll-variance-grid, .payroll-approval-stages, .payroll-coa-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .payroll-input-row, .payroll-input-row.variable { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .payroll-sequence { scroll-snap-type: x mandatory; }
+  .payroll-sequence-step { scroll-snap-align: start; }
+  .payroll-reconciliation-summary, .payroll-variance-grid, .payroll-approval-stages, .payroll-coa-grid, .payroll-input-row, .payroll-input-row.variable, .payroll-employee-form.expanded { grid-template-columns: 1fr; }
+}
 .tax-year-picker { color: var(--color-muted); display: grid; font-size: 10px; font-weight: 700; gap: 5px; letter-spacing: .04em; text-transform: uppercase; }
 .tax-year-picker input { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 9px; color: var(--color-text); min-height: 38px; padding: 7px 10px; width: 110px; }
 .tax-benefits-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }

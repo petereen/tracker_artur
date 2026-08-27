@@ -131,6 +131,18 @@ class BankExportRequest(BaseModel):
     version: int | None = Field(default=None, ge=1)
 
 
+class VariablePayInput(BaseModel):
+    employee_id: int
+    code: str = Field(min_length=1, max_length=80, pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(min_length=1, max_length=160)
+    amount: Decimal = Field(gt=0)
+    component_kind: Literal["earning", "deduction"]
+    taxable: bool = True
+    shi_subject: bool = True
+    source: Literal["manual", "commission", "reimbursement", "bonus", "loan", "import"] = "manual"
+    reference: str | None = Field(default=None, max_length=255)
+
+
 class PayrollRunInput(BaseModel):
     run_type: Literal["advance", "final", "single", "off_cycle"]
     period_start: date
@@ -139,10 +151,29 @@ class PayrollRunInput(BaseModel):
     statutory_profile_id: int | None = None
     employee_ids: list[int] = Field(default_factory=list)
     input_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    variable_inputs: list[VariablePayInput] = Field(default_factory=list)
 
 
 class CalculateRunInput(BaseModel):
     acknowledge_example: bool = False
+
+
+class ReconciliationResolutionInput(BaseModel):
+    issue_keys: list[str] = Field(default_factory=list)
+    note: str = Field(min_length=1, max_length=1000)
+
+
+class PayrollApprovalInput(BaseModel):
+    stage: Literal["payroll_manager", "hr_director", "finance"] | None = None
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class PayslipPublicationInput(BaseModel):
+    notify_employees: bool = True
+
+
+class ProtectedPayslipInput(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
 
 
 class ReplacementRunInput(PayrollRunInput):

@@ -2637,6 +2637,8 @@ class PayrollRun(Base):
     statutory_profile_id = Column(Integer, ForeignKey("statutory_config_profiles.id", ondelete="RESTRICT"), nullable=False)
     input_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     config_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    reconciliation_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    approval_workflow = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     engine_version = Column(String(32), nullable=False, server_default="1", default="1")
     snapshot_checksum = Column(String(64), nullable=False)
     total_gross = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
@@ -2648,7 +2650,9 @@ class PayrollRun(Base):
     erp_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="SET NULL"))
     created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     approved_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    approved_at = Column(DateTime(timezone=True))
     posted_at = Column(DateTime(timezone=True))
+    payslips_published_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

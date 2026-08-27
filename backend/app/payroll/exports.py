@@ -10,6 +10,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Iterable, Mapping
 from xml.sax.saxutils import escape
 
+from pypdf import PdfReader, PdfWriter
+
 
 DEFAULT_COLUMNS = [
     ("batch_reference", "Batch reference"), ("sequence", "Sequence"), ("execution_date", "Execution date"), ("debit_account", "Debit account"),
@@ -93,6 +95,41 @@ def render_bank_export(rows: Iterable[Mapping[str, Any]], template: Mapping[str,
     for row in projected: writer.writerow([row[column["key"]] for column in columns])
     for trailer_row in template.get("trailer_rows", []): writer.writerow(trailer_row)
     return template.get("filename", "payroll-payout.csv"), output.getvalue().encode(template.get("encoding", "utf-8"))
+
+
+def render_protected_payslip(lines: Iterable[str], password: str) -> bytes:
+    """Render a small text payslip PDF and encrypt it with the employee's chosen password."""
+    escaped_lines = []
+    for line in lines:
+        safe = str(line).encode("latin-1", "replace").decode("latin-1").replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        escaped_lines.append(f"({safe}) Tj 0 -18 Td")
+    stream = ("BT /F1 11 Tf 50 790 Td " + " ".join(escaped_lines) + " ET").encode("latin-1")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    raw = io.BytesIO()
+    raw.write(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(raw.tell())
+        raw.write(f"{index} 0 obj\n".encode() + obj + b"\nendobj\n")
+    xref = raw.tell()
+    raw.write(f"xref\n0 {len(objects) + 1}\n".encode())
+    raw.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        raw.write(f"{offset:010d} 00000 n \n".encode())
+    raw.write(f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode())
+    reader = PdfReader(io.BytesIO(raw.getvalue()))
+    writer = PdfWriter()
+    writer.append_pages_from_reader(reader)
+    writer.encrypt(password)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 def nd7_summary(payslips: Iterable[Mapping[str, Any]]) -> dict[str, Any]:

@@ -1,7 +1,9 @@
 from zipfile import ZipFile
 from io import BytesIO
 
-from app.payroll.exports import nd7_summary, nd8_rows, render_bank_export
+from pypdf import PdfReader
+
+from app.payroll.exports import nd7_summary, nd8_rows, render_bank_export, render_protected_payslip
 
 
 def test_bank_renderer_honours_date_decimal_and_trailer_configuration():
@@ -21,3 +23,11 @@ def test_xlsx_renderer_is_a_valid_zip_package_and_reports_preserve_shi_subject()
     rows = nd8_rows([{"employee_id": 1, "shi_subject_gross": "20", "shi_base": "10", "employee_shi": "1", "employer_shi": "2"}])
     assert rows[0]["insurable_earnings"] == "20"
     assert nd7_summary([{"shi_subject_gross": "20", "shi_base": "10", "employee_shi": "1", "employer_shi": "2"}])["insurable_earnings"] == "20.00"
+
+
+def test_payslip_pdf_requires_the_employee_selected_password():
+    payload = render_protected_payslip(["Payroll PR-1", "Net pay: 1000 MNT"], "strong-passphrase")
+    reader = PdfReader(BytesIO(payload))
+    assert reader.is_encrypted is True
+    assert reader.decrypt("wrong-password") == 0
+    assert reader.decrypt("strong-passphrase") != 0
