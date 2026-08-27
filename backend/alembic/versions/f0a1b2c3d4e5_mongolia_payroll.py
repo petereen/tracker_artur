@@ -350,7 +350,7 @@ def upgrade() -> None:
         INSERT INTO payroll_bank_export_profiles
           (organization_id, bank_code, version, status, format, template, is_provisional)
         SELECT 1, x.bank_code, 1, 'draft', 'csv',
-          '{"columns":[{"key":"batch_reference","header":"Batch reference"},{"key":"sequence","header":"Sequence"},{"key":"execution_date","header":"Execution date"},{"key":"debit_account","header":"Debit account"},{"key":"employee_reference","header":"Employee reference"},{"key":"recipient_name","header":"Recipient name"},{"key":"bank_code","header":"Bank code"},{"key":"bic","header":"BIC"},{"key":"account_number","header":"Account number"},{"key":"amount","header":"Amount"},{"key":"currency","header":"Currency"},{"key":"purpose","header":"Purpose"},{"key":"reference","header":"Reference"}],"include_header":true}'::jsonb,
+          '{"columns":[{"key":"batch_reference","header":"Batch reference"},{"key":"sequence","header":"Sequence"},{"key":"execution_date","header":"Execution date"},{"key":"debit_account","header":"Debit account"},{"key":"employee_reference","header":"Employee reference"},{"key":"recipient_name","header":"Recipient name"},{"key":"bank_code","header":"Bank code"},{"key":"bic","header":"BIC"},{"key":"account_number","header":"Account number"},{"key":"amount","header":"Amount"},{"key":"currency","header":"Currency"},{"key":"purpose","header":"Purpose"},{"key":"reference","header":"Reference"}],"include_header"\:true}'::jsonb,
           true
         FROM (VALUES ('KHAN'), ('GOLOMT'), ('XACBANK')) AS x(bank_code)
         WHERE EXISTS (SELECT 1 FROM organizations WHERE id = 1)
