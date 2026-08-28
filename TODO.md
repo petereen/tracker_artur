@@ -1,6 +1,20 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Redesign payroll as a Frappe-style, Mongolian-first document workflow without introducing Frappe services (`backend/app/payroll`, `backend/app/models`, `backend/alembic/versions`, `frontend/src/pages`, `frontend/src/api/enterprise.ts`, `frontend/src/i18n.ts`, `backend/tests`, `frontend/src`) — implemented document boundaries, tenant-safe migration/backfill, strict Payroll Entry → Get Employees → Create Salary Slips → Submit/Accrue → Make Bank Entry lifecycle, OYUNS Mongolian workspace, compatibility legacy routes, and regression contracts; frontend tests/build and Python compilation pass, while dependency-backed backend pytest/Alembic runtime remains environment-gated
+  - [x] Add reusable salary components, payroll periods, assignments, additional salaries, payroll entries, salary slips, bank entries, and reports
+  - [x] Add non-destructive legacy backfill and compatibility/read-only routes
+  - [x] Replace the payroll workspace with OYUNS-branded Frappe-style lists/forms and Mongolian labels
+  - [x] Add state-transition, accounting, migration, frontend, and end-to-end regression coverage
+  - [x] Fix JSONB type naming in the Frappe payroll migration so component-master backfill can execute at runtime
+  - [x] Preserve finalized snapshot backfill by restoring existing payroll immutability triggers after migration metadata links are applied
+  - [x] Link Salary Structure lines to reusable Salary Component masters while freezing line-level payroll fields
+  - [x] Extend finalized-snapshot guards for Frappe document/payment state transitions without allowing value edits
+  - [x] Restore the legacy immutability trigger body during Frappe migration downgrade
+  - [x] Preserve the immediately prior h0c1d2e3f4g5 trigger semantics on downgrade
+  - [x] Make Payroll Entry attendance validation block slip creation until approved time is present or validation is disabled
+  - [x] Make Create Salary Slips idempotent for frozen Payroll Entries
+  - [x] Make Submit Salary Slips idempotent after accrual submission
 - [x] Adapt the payroll module to the seven-stage operating sequence with master-data readiness, frozen time/leave/variable inputs, batch calculation, variance reconciliation, multi-level approval, bank/cash disbursement exports, GL posting, and protected ESS payslip publication (`backend/app/payroll`, `backend/app/models`, `backend/alembic/versions`, `frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`, `backend/tests`) — guided sequence, durable audit state, versioned bank layouts, payout-before-post gates, notification-backed ESS publication, 89 frontend tests, TypeScript/Vite build, Python compilation, diff checks, and one-head static migration validation pass; backend pytest/Alembic runtime remains unavailable because local Python lacks pytest/SQLAlchemy/Alembic/pypdf
   - [x] Add durable reconciliation, approval-workflow, approval-time, and payslip-publication state to payroll runs (`backend/app/models/models.py`, `backend/alembic/versions/h0c1d2e3f4g5_payroll_operating_sequence.py`)
   - [x] Define validated contracts for frozen variable pay, reconciliation resolution, staged approval, publication, and protected payslip downloads (`backend/app/payroll/schemas.py`)
@@ -345,6 +359,33 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Replace the payroll landing screen with an OYUNS-branded, Mongolian-first Frappe-style workspace, document lists/forms, lifecycle actions, masters, assignments, salary slips, and reports (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/index.css`)
+- [x] Render legacy staged payroll runs through an immutable read-only detail view while retaining compatibility APIs (`frontend/src/pages/PayrollWorkspacePage.tsx`)
+- [x] Add frontend contracts for Frappe-style payroll documents, lifecycle mutations, and report queries (`frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollWorkspacePage.test.tsx`)
+- [x] Add Mongolian-first payroll i18n keys with English/Russian secondary labels (`frontend/src/i18n.ts`)
+- [x] Expose Frappe document type aliases (`PayrollEntry`, `SalarySlip`, `SalaryStructureAssignment`, `AdditionalSalary`, `PayrollPeriod`, `BankEntry`) for typed clients (`frontend/src/api/enterprise.ts`, `backend/app/payroll/schemas.py`)
+- [x] Update migration-head regression coverage for the new single Alembic head (`backend/tests/test_alembic_graph.py`)
+- [x] Add backend contract coverage for Frappe payroll routes, lifecycle boundaries, and non-destructive backfill (`backend/tests/test_frappe_payroll_contract.py`)
+- [x] Add contract coverage for Salary Structure lines referencing reusable component masters (`backend/tests/test_frappe_payroll_contract.py`)
+- [x] Complete Frappe cancellation semantics with source/slip cancellation, reversal entries, and ESS exclusion (`backend/app/payroll/router.py`, `backend/app/payroll/frappe_service.py`)
+- [x] Harden Frappe document numbering against concurrent Payroll Entry and Additional Salary creates (`backend/app/payroll/frappe_service.py`)
+- [x] Keep the Frappe payroll service imports minimal and compile-safe (`backend/app/payroll/frappe_service.py`)
+- [x] Document Frappe-style payroll document boundaries, lifecycle, routes, and legacy compatibility (`docs/payroll-architecture.md`)
+- [x] Register Payroll Entry, master, assignment, salary slip, and report routes for the Frappe-style workspace (`frontend/src/App.tsx`)
+- [x] Add payroll period, salary structure, and accounting setup routes to the workspace navigation (`frontend/src/App.tsx`)
+- [x] Define Frappe-style payroll document models and reusable salary-component master fields (`backend/app/models/models.py`, `backend/app/models/__init__.py`)
+- [x] Add non-destructive Frappe-style payroll migration with periods, component masters, additional salaries, bank entries, lifecycle metadata, and legacy backfill (`backend/alembic/versions/i0j1k2l3m4n5_frappe_style_payroll.py`)
+- [x] Explicitly stamp migrated payroll runs as legacy workflow documents during backfill (`backend/alembic/versions/i0j1k2l3m4n5_frappe_style_payroll.py`)
+- [x] Index Payroll Entry workflow/status fields for responsive tenant-scoped document lists (`backend/app/models/models.py`, `backend/alembic/versions/i0j1k2l3m4n5_frappe_style_payroll.py`)
+- [x] Make Payroll Entry cancellation reason optional for simple API clients while retaining an auditable default (`backend/app/payroll/schemas.py`, `backend/app/payroll/router.py`)
+- [x] Guard Salary Component master edits against tenant-local code collisions (`backend/app/payroll/frappe_service.py`)
+- [x] Guard Payroll Period creation against duplicate tenant-local period codes (`backend/app/payroll/frappe_service.py`)
+- [x] Validate production Compose configuration after the payroll redesign (`docker compose config --quiet`)
+- [x] Add typed Frappe-style period, component, assignment, additional-salary, payroll-entry, employee-selection, bank-entry, and cancellation contracts (`backend/app/payroll/schemas.py`)
+- [x] Implement Frappe-style document services for periods, reusable components, assignments, Additional Salary, Payroll Entry employee selection/slips, accrual, and Bank Entry settlement (`backend/app/payroll/frappe_service.py`)
+- [x] Adapt calculation and accrual services to create draft/submitted Salary Slips and bypass legacy approvals only for Frappe-style entries (`backend/app/payroll/service.py`)
+- [x] Expose Frappe-style payroll REST resources, lifecycle actions, reports, cancellation/amendment, and compatibility serialization (`backend/app/payroll/router.py`)
+- [x] Resolve initial payroll service syntax validation issue and preserve testable host-side Python compilation via `PYTHONPYCACHEPREFIX` (`backend/app/payroll/frappe_service.py`)
 - [x] Keep the read-only exchange-rate tool visible so the answer model can classify multilingual rates requests (`backend/app/services/ai_gateway/gateway.py`)
 - [x] Extend the authoritative company-file and knowledge-index models with first-class search metadata and content-availability state (`backend/app/models/models.py`)
 - [x] Add the fixed default company-tenant configuration used by accountless verified Telegram file-search principals (`backend/app/core/config.py`)

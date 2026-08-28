@@ -17,7 +17,9 @@ portal or commercial bank.
 
 ## Database contract
 
-The Alembic revision `f0a1b2c3d4e5_mongolia_payroll.py` is the executable DDL.
+The Alembic revision `f0a1b2c3d4e5_mongolia_payroll.py` is the base executable
+DDL; `i0j1k2l3m4n5_frappe_style_payroll.py` adds the document workflow without
+rewriting historical rows.
 The following is the public shape (all tables also carry tenant keys where
 applicable):
 
@@ -88,6 +90,30 @@ gross-to-net amounts. `payroll_employee_accumulators` is append-only and
 sequences each employee’s tax-year deltas. Advances, posting profiles, bank
 templates, and export artifacts are separate tables. Export content is encrypted
 at rest, checksum-verified, and exposed through a short-lived download URL.
+
+## Frappe-style payroll workspace
+
+Revision `i0j1k2l3m4n5_frappe_style_payroll.py` adds the document boundaries
+used by the new OYUNS workspace without installing Frappe.  `PayrollPeriod`,
+`PayrollSalaryComponentMaster`, `AdditionalSalary`, and `PayrollBankEntry` are
+tenant-scoped masters/documents.  Existing `SalaryComponent` rows point to a
+master while retaining their frozen formula, tax/SHI flags, account, and cost
+center; conflicting legacy definitions receive deterministic legacy codes.
+
+New entries opt into `workflow_version=frappe_v1` and follow this sequence:
+
+```text
+Payroll Entry (draft)
+  -> Get Employees (filters + assignment/bank/attendance validation)
+  -> Create Salary Slips (Decimal engine + submitted Additional Salary)
+  -> Submit Salary Slips (GL accrual, YTD/benefits/advances, ESS publication)
+  -> Make Bank Entry (separate net-pay payable settlement)
+```
+
+The source run and salary slips are immutable after submission.  Cancel creates
+negative reversal entries and marks the source document/slips cancelled; Amend
+creates a linked replacement.  Legacy staged runs remain available through the
+compatibility `/runs` routes and are never recalculated by the backfill.
 
 ## Pure calculation contract
 
@@ -215,11 +241,13 @@ while statutory rates remain organization-controlled Mongolia configuration.
 ## API and security
 
 Routes are under `/v1/erp/payroll`: profiles, salary structures, employee
-profiles/bank accounts, posting and bank-template administration, run lifecycle
-(`create`, `calculate`, `approve`, `post`, `reverse`, `replace`), payslip reads,
-bank exports/downloads, and `me/payslips`. Run lifecycle exposes explicit
-`calculate`, `review`, `approve`, and `post` actions. Payroll permissions are separate from module
-visibility. Every mutating route is tenant-scoped and audited; employees can
-only read finalized payslips belonging to their linked employee record.
+profiles/bank accounts, posting and bank-template administration, Frappe-style
+period/component/assignment/additional-salary/payroll-entry/salary-slip/bank-entry
+documents, salary register and bank remittance reports, the legacy run lifecycle
+(`create`, `calculate`, `approve`, `post`, `reverse`, `replace`), bank
+exports/downloads, and `me/payslips`. Payroll permissions are separate from
+module visibility. Every mutating route is tenant-scoped and audited; employees
+can only read finalized, non-cancelled payslips belonging to their linked
+employee record.
 Export-generation and download events record only masked identifiers and
 checksums; encrypted artifacts expire after a short interval.

@@ -41,6 +41,10 @@ from app.models.models import (  # noqa: F401
     PayrollPostingProfile,
     PayrollBankExportProfile,
     PayrollExportArtifact,
+    PayrollPeriod,
+    PayrollSalaryComponentMaster,
+    AdditionalSalary,
+    PayrollBankEntry,
 )
 from app.models.contracts import (  # noqa: F401
     CONTRACT_DOCUMENT_TYPES,

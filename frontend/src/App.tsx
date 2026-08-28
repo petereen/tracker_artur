@@ -94,6 +94,18 @@ function AuthenticatedApp() {
         <Route path="erp/payroll" element={<PayrollWorkspacePage />} />
         <Route path="erp/payroll/tax-benefits" element={<TaxBenefitsWorkspacePage />} />
         <Route path="erp/payroll/runs/:runId" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/payroll-entries" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/payroll-entries/new" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/payroll-entries/:entryId" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/salary-components" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/payroll-periods" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/salary-structures" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/accounting" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/additional-salaries" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/assignments" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/salary-slips" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/reports/salary-register" element={<PayrollWorkspacePage />} />
+        <Route path="erp/payroll/reports/bank-remittance" element={<PayrollWorkspacePage />} />
         <Route path="administration" element={<AdministrationHubPage />} />
         <Route path="administration/workspace" element={<WorkspaceIdentitySettingsPage />} />
         <Route path="administration/collaboration" element={<CollaborationSettingsPage />} />

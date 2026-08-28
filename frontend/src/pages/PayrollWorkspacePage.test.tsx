@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canManagePayroll, formatPayrollMoney, runSequenceState } from './PayrollWorkspacePage'
+import { canManagePayroll, formatPayrollMoney, payrollDocumentStatusLabel, payrollEntryNextAction, runSequenceState } from './PayrollWorkspacePage'
 
 describe('payroll workspace policy helpers', () => {
   it('only grants management affordances to payroll administrators/managers', () => {
@@ -19,5 +19,13 @@ describe('payroll workspace policy helpers', () => {
     expect(runSequenceState({ status: 'approved' }).activeStep).toBe(5)
     expect(runSequenceState({ status: 'posted' }).activeStep).toBe(6)
     expect(runSequenceState({ status: 'posted', payslips_published_at: '2026-08-27T12:00:00Z' })).toEqual({ completedThrough: 7, activeStep: -1 })
+  })
+
+  it('maps Frappe document states to Mongolian labels and the next safe action', () => {
+    expect(payrollDocumentStatusLabel('submitted')).toBe('Илгээсэн')
+    expect(payrollDocumentStatusLabel('cancelled')).toBe('Цуцалсан')
+    expect(payrollEntryNextAction({ document_status: 'draft' })).toBe('get-employees')
+    expect(payrollEntryNextAction({ document_status: 'draft', salary_slips_created: true })).toBe('submit-slips')
+    expect(payrollEntryNextAction({ document_status: 'submitted', salary_slips_created: true, salary_slips_submitted: true })).toBe('make-bank-entry')
   })
 })

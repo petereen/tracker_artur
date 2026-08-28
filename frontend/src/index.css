@@ -4264,6 +4264,82 @@ a {
   }
 }
 
+/* Frappe-style payroll workspace */
+.frappe-payroll-workspace { --frappe-blue: #2d62ec; --frappe-green: #00c885; --frappe-orange: #ff833b; --frappe-purple: #7657e8; }
+.frappe-payroll-breadcrumb { align-items: center; color: var(--color-muted); display: flex; font-size: .76rem; gap: 6px; margin-bottom: 14px; }
+.frappe-payroll-breadcrumb a { color: var(--color-accent); font-weight: 700; text-decoration: none; }
+.frappe-payroll-header { align-items: flex-start; display: flex; gap: 18px; justify-content: space-between; margin-bottom: 24px; }
+.frappe-payroll-header h1 { font-size: clamp(1.45rem, 2.7vw, 2.2rem); letter-spacing: -.045em; margin: 4px 0 6px; }
+.frappe-payroll-header p { color: var(--color-muted); margin: 0; }
+.frappe-payroll-header-actions, .frappe-payroll-entry-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.frappe-payroll-kpis { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 18px; }
+.frappe-payroll-kpi { align-items: center; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 14px; box-shadow: var(--shadow-sm); display: flex; gap: 12px; min-width: 0; padding: 16px; }
+.frappe-payroll-kpi-icon, .frappe-payroll-group-icon { align-items: center; background: color-mix(in srgb, var(--frappe-blue) 11%, var(--color-surface)); border-radius: 10px; color: var(--frappe-blue); display: inline-flex; height: 36px; justify-content: center; width: 36px; }
+.frappe-payroll-kpi.orange .frappe-payroll-kpi-icon { background: color-mix(in srgb, var(--frappe-orange) 13%, var(--color-surface)); color: var(--frappe-orange); }
+.frappe-payroll-kpi.green .frappe-payroll-kpi-icon { background: color-mix(in srgb, var(--frappe-green) 13%, var(--color-surface)); color: var(--frappe-green); }
+.frappe-payroll-kpi.purple .frappe-payroll-kpi-icon { background: color-mix(in srgb, var(--frappe-purple) 13%, var(--color-surface)); color: var(--frappe-purple); }
+.frappe-payroll-kpi div { display: grid; gap: 2px; min-width: 0; }
+.frappe-payroll-kpi small, .frappe-payroll-kpi span { color: var(--color-muted); font-size: .72rem; }
+.frappe-payroll-kpi strong { font-size: 1.2rem; letter-spacing: -.03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frappe-payroll-groups { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 18px; }
+.frappe-payroll-group { padding: 16px; }
+.frappe-payroll-group-title { align-items: center; display: flex; gap: 9px; margin-bottom: 12px; }
+.frappe-payroll-group-title h2, .frappe-payroll-table-card h2 { font-size: .98rem; letter-spacing: -.02em; margin: 0; }
+.frappe-payroll-links { display: grid; gap: 5px; }
+.frappe-payroll-links a { align-items: center; border-radius: 8px; color: var(--color-text); display: flex; gap: 8px; justify-content: space-between; padding: 7px 6px; text-decoration: none; transition: background .16s ease, color .16s ease; }
+.frappe-payroll-links a:hover { background: var(--color-accent-soft); color: var(--color-accent); }
+.frappe-payroll-links a > span { display: grid; gap: 1px; }
+.frappe-payroll-links strong { font-size: .78rem; }
+.frappe-payroll-links small { color: var(--color-muted); font-size: .66rem; }
+.frappe-payroll-dashboard-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); }
+.frappe-payroll-table-card, .frappe-payroll-form { padding: 18px; }
+.frappe-payroll-document-list { display: grid; gap: 3px; }
+.frappe-payroll-document-row { align-items: center; border-bottom: 1px solid var(--color-border); color: var(--color-text); display: grid; gap: 12px; grid-template-columns: minmax(150px, 1.4fr) minmax(80px, .8fr) auto auto auto; min-width: 0; padding: 11px 4px; text-decoration: none; }
+.frappe-payroll-document-row:last-child { border-bottom: 0; }
+.frappe-payroll-document-row:hover { background: color-mix(in srgb, var(--color-accent-soft) 45%, transparent); }
+.frappe-payroll-document-id { display: grid; gap: 2px; min-width: 0; }
+.frappe-payroll-document-id strong, .frappe-payroll-document-row > strong { font-size: .79rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frappe-payroll-document-id small, .frappe-payroll-document-row > span:not(.payroll-status) { color: var(--color-muted); font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frappe-payroll-readiness { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 16px 0; }
+.frappe-payroll-readiness div { background: var(--color-surface-2); border-radius: 9px; display: grid; gap: 2px; padding: 11px; }
+.frappe-payroll-readiness span { color: var(--color-muted); font-size: .68rem; }
+.frappe-payroll-readiness strong { font-size: 1.15rem; }
+.frappe-payroll-form { display: grid; gap: 17px; }
+.frappe-payroll-form-tabs { border-bottom: 1px solid var(--color-border); display: flex; gap: 18px; margin: -2px 0 2px; }
+.frappe-payroll-form-tabs span { color: var(--color-muted); font-size: .77rem; font-weight: 700; padding: 0 0 10px; }
+.frappe-payroll-form-tabs .active { border-bottom: 2px solid var(--frappe-blue); color: var(--frappe-blue); }
+.frappe-payroll-form fieldset { border: 1px solid var(--color-border); border-radius: 10px; display: grid; gap: 12px; margin: 0; padding: 14px; }
+.frappe-payroll-form legend { color: var(--color-muted); font-size: .72rem; font-weight: 800; padding: 0 5px; }
+.frappe-payroll-form label, .frappe-payroll-report-filter label { color: var(--color-muted); display: grid; font-size: .72rem; font-weight: 700; gap: 6px; }
+.frappe-payroll-form input, .frappe-payroll-form select, .frappe-payroll-report-filter select { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text); font: inherit; min-height: 38px; padding: 8px 10px; }
+.frappe-payroll-form select[multiple] { min-height: 130px; }
+.frappe-payroll-form-footer { align-items: center; display: flex; gap: 14px; justify-content: space-between; }
+.frappe-payroll-loading { color: var(--color-muted); padding: 28px; }
+.frappe-payroll-entry-hero { align-items: flex-start; background: linear-gradient(135deg, color-mix(in srgb, var(--frappe-blue) 9%, var(--color-surface)), var(--color-surface)); border: 1px solid color-mix(in srgb, var(--frappe-blue) 18%, var(--color-border)); border-radius: 14px; display: flex; gap: 16px; justify-content: space-between; margin-bottom: 14px; padding: 18px; }
+.frappe-payroll-entry-hero h2 { font-size: 1.2rem; margin: 4px 0; }
+.frappe-payroll-entry-hero p { color: var(--color-muted); font-size: .76rem; margin: 0; }
+.frappe-payroll-stepper { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; display: grid; gap: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; overflow: hidden; }
+.frappe-payroll-stepper > div { border-right: 1px solid var(--color-border); display: grid; gap: 3px; padding: 13px; position: relative; }
+.frappe-payroll-stepper > div:last-child { border-right: 0; }
+.frappe-payroll-stepper span { align-items: center; background: var(--color-surface-2); border-radius: 999px; color: var(--color-muted); display: inline-flex; font-size: .67rem; height: 22px; justify-content: center; width: 22px; }
+.frappe-payroll-stepper strong { font-size: .73rem; }
+.frappe-payroll-stepper small { color: var(--color-muted); font-size: .65rem; }
+.frappe-payroll-stepper .active span, .frappe-payroll-stepper .done span { background: var(--frappe-blue); color: #fff; }
+.frappe-payroll-stepper .done span { background: var(--frappe-green); }
+.frappe-payroll-master-grid { display: grid; gap: 14px; grid-template-columns: minmax(250px, .7fr) minmax(0, 1.4fr); }
+.frappe-payroll-list-toolbar { align-items: center; display: flex; gap: 14px; justify-content: space-between; margin-bottom: 15px; }
+.frappe-payroll-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.frappe-payroll-tabs button { background: transparent; border: 0; border-radius: 7px; color: var(--color-muted); cursor: pointer; font: inherit; font-size: .74rem; font-weight: 700; padding: 7px 10px; }
+.frappe-payroll-tabs button.active { background: var(--color-accent-soft); color: var(--color-accent); }
+.frappe-payroll-bank-summary { align-items: center; display: flex; gap: 14px; justify-content: space-between; }
+.frappe-payroll-bank-summary strong { font-size: 1.5rem; }
+.frappe-payroll-bank-summary span { color: var(--color-muted); font-size: .75rem; }
+.frappe-payroll-report-filter { margin-bottom: 14px; padding: 14px 18px; }
+.frappe-payroll-report-json { background: var(--color-surface-2); border-radius: 9px; font: .7rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; max-height: 520px; overflow: auto; padding: 14px; white-space: pre-wrap; }
+.payroll-inline-warning { align-items: center; background: color-mix(in srgb, var(--frappe-orange) 12%, var(--color-surface)); border: 1px solid color-mix(in srgb, var(--frappe-orange) 30%, var(--color-border)); border-radius: 8px; color: var(--color-text); display: flex; font-size: .75rem; gap: 7px; margin: 8px 0; padding: 9px 11px; }
+@media (max-width: 960px) { .frappe-payroll-kpis, .frappe-payroll-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } .frappe-payroll-dashboard-grid, .frappe-payroll-master-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .frappe-payroll-header, .frappe-payroll-entry-hero, .frappe-payroll-form-footer { align-items: stretch; flex-direction: column; } .frappe-payroll-header-actions, .frappe-payroll-entry-actions { justify-content: flex-start; } .frappe-payroll-kpis, .frappe-payroll-groups { grid-template-columns: 1fr; } .frappe-payroll-stepper { grid-template-columns: repeat(2, minmax(0, 1fr)); } .frappe-payroll-stepper > div:nth-child(2) { border-right: 0; } .frappe-payroll-stepper > div:nth-child(-n+2) { border-bottom: 1px solid var(--color-border); } .frappe-payroll-document-row { gap: 7px; grid-template-columns: minmax(110px, 1fr) auto; } .frappe-payroll-document-row > :not(.frappe-payroll-document-id):not(.payroll-status):last-child { display: none; } .frappe-payroll-document-row > span:not(.frappe-payroll-document-id):not(.payroll-status), .frappe-payroll-document-row > strong { display: none; } }
+
 /* Organization workspace chat */
 .workspace-content.chat-route-content { padding: 0; }
 .chat-workspace {
