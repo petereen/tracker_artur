@@ -56,7 +56,11 @@ export function useCreateEmployee() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (d: any) => api.post('/employees', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Ажилтан нэмэгдлээ') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
+      toast.success('Ажилтан нэмэгдлээ')
+    },
     onError: () => toast.error('Нэмэхэд алдаа гарлаа'),
   })
 }
@@ -64,14 +68,22 @@ export function useUpdateEmployee() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, ...d }: any) => api.put(`/employees/${id}`, d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Хадгалагдлаа') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
+      toast.success('Хадгалагдлаа')
+    },
   })
 }
 export function useDeleteEmployee() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/employees/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Устгагдлаа') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
+      toast.success('Устгагдлаа')
+    },
   })
 }
 

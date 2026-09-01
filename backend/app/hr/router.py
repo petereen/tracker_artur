@@ -161,7 +161,7 @@ async def list_hr_employees(search: str | None = Query(default=None, max_length=
 async def create_hr_employee(data: EmployeeCreate, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
     if data.department_id: await _department(db, actor, data.department_id)
     if data.manager_id: await employee_in_scope(db, actor, data.manager_id)
-    employee = Employee(organization_id=actor.organization_id, name=data.name, first_name=data.first_name, last_name=data.last_name, timezone=data.timezone, is_active=True)
+    employee = Employee(organization_id=actor.organization_id, name=data.name, telegram_id=data.telegram_id, first_name=data.first_name, last_name=data.last_name, timezone=data.timezone, is_active=True)
     db.add(employee); await db.flush()
     details = EmployeeDetails(organization_id=actor.organization_id, employee_id=employee.id, department_id=data.department_id, manager_id=data.manager_id, job_title=data.job_title, employment_role=data.employment_role, start_date=data.start_date, employment_status="active")
     db.add(details); await db.flush()

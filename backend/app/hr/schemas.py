@@ -24,6 +24,7 @@ class DepartmentPatch(BaseModel):
 
 class EmployeeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    telegram_id: str | None = Field(default=None, max_length=80)
     first_name: str | None = Field(default=None, max_length=120)
     last_name: str | None = Field(default=None, max_length=120)
     department_id: int | None = None

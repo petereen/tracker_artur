@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add an optional Telegram ID field to the HR employee creation form and persist it on the shared employee record (`frontend/src/pages/HRWorkspacePage.tsx`, `backend/app/hr/schemas.py`, `backend/app/hr/router.py`)
+- [x] Synchronize the universal employee directory between HR and “Ажилтан ба эрхүүд” (`frontend/src/api/enterprise.ts`, `frontend/src/api/hooks.ts`, `frontend/src/pages/HRWorkspacePage.tsx`) — HR and legacy employee mutations now invalidate both directory caches backed by the shared Employee table
 - [x] Synchronize configured seeded admin credentials and clear stale temporary locks during startup (`backend/app/main.py`, `backend/tests`)
 - [x] Clear temporary admin account locks when an administrator reactivates an account or sets a new password (`backend/app/routers/enterprise_auth.py`, `backend/tests`)
 - [x] Deliver the lightweight HR module: tenant-safe worker identity/profile schema, Telegram invites, leave, hybrid attendance, compensation/payroll facade, RBAC APIs, responsive `/hr` workspace, and regression coverage (`backend/app/hr`, `backend/app/models/models.py`, `backend/app/routers/enterprise_auth.py`, `backend/alembic/versions`, `frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/App.tsx`, `backend/tests`, `frontend/src`) — implementation and frontend validation complete; backend runtime pytest/Alembic execution remains environment-gated because local Python lacks pytest/SQLAlchemy/Alembic
@@ -381,6 +383,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Move the “Хүний нөөц” navbar button below ERP when ERP navigation is available (`frontend/src/components/EnterpriseShell.tsx`)
 - [x] Repair the production payroll migration bind-parameter failure by passing `source_salary_component_id` during legacy component-master backfill and cover it with a contract assertion (`backend/alembic/versions/i0j1k2l3m4n5_frappe_style_payroll.py`, `backend/tests/test_frappe_payroll_contract.py`)
 - [x] Replace the payroll landing screen with an OYUNS-branded, Mongolian-first Frappe-style workspace, document lists/forms, lifecycle actions, masters, assignments, salary slips, and reports (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Render legacy staged payroll runs through an immutable read-only detail view while retaining compatibility APIs (`frontend/src/pages/PayrollWorkspacePage.tsx`)

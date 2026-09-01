@@ -185,10 +185,11 @@ export function EnterpriseShell() {
     if (actorQuery.data?.locale && i18n.language !== actorQuery.data.locale) i18n.changeLanguage(actorQuery.data.locale)
   }, [actorQuery.data?.locale, i18n])
   const nav = useMemo(() => {
-    const base = NAV.filter((item) => !item.roles.length || item.roles.some((role) => roles.includes(role)))
+    const hrItem = NAV.find((item) => item.to === '/hr')
+    const base = NAV.filter((item) => item.to !== '/hr' && (!item.roles.length || item.roles.some((role) => roles.includes(role))))
     const canAccessERP = roles.includes('admin') || Object.values(erp.data?.modules ?? {}).some(Boolean)
-    if (!canAccessERP) return base
-    const withErp = [...base.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, base[base.length - 1]]
+    if (!canAccessERP) return [...base.slice(0, 2), ...(hrItem ? [hrItem] : []), ...base.slice(2)]
+    const withErp = [...base.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, ...(hrItem ? [hrItem] : []), base[base.length - 1]]
     return erp.data?.modules.payroll ? [...withErp.slice(0, -1), { to: '/erp/payroll', label: 'Payroll', icon: Calculator, roles: [] }, withErp[withErp.length - 1]] : withErp
   }, [erp.data, roles])
   const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
