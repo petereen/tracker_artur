@@ -18,7 +18,7 @@ from app.main import app
 from app.models.models import Base, Task
 from app.routers import enterprise
 from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _calendar_task_visible_to_employee, _holiday_provider_rows, _task_out
-from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE, WorkspaceModePreferences, WorldClockPreferences, workspace_mode_preferences
+from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE, WorkspaceModePreferences, WorldClockPreferences, _clear_login_lock, workspace_mode_preferences
 from app.services.enterprise_events import _json_safe, _redact
 from app.services.work_report_service import summarize_work_time
 
@@ -28,6 +28,13 @@ def test_enterprise_passwords_use_argon_and_verify_without_rehash():
     assert hashed.startswith("$argon2")
     assert verify_account_password("a-reasonably-long-password", hashed) == (True, False)
     assert verify_account_password("wrong-password", hashed)[0] is False
+
+
+def test_admin_recovery_clears_temporary_login_lock_state():
+    account = SimpleNamespace(failed_login_count=5, locked_until=datetime.now(timezone.utc) + timedelta(minutes=15))
+    _clear_login_lock(account)
+    assert account.failed_login_count == 0
+    assert account.locked_until is None
 
 
 def test_enterprise_access_token_carries_account_and_organization():

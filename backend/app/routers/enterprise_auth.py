@@ -39,6 +39,12 @@ TELEGRAM_WEB_STATE_COOKIE = "oyuns_telegram_oidc_state"
 TELEGRAM_DEFAULT_ROLE = "member"
 
 
+def _clear_login_lock(account: UserAccount) -> None:
+    """Clear failed-login state after an explicit account recovery action."""
+    account.failed_login_count = 0
+    account.locked_until = None
+
+
 class LoginInput(BaseModel):
     email: str
     password: str
@@ -1026,9 +1032,15 @@ async def update_account(
     if password:
         account.password_hash = hash_account_password(password)
         account.must_change_password = False
+        # A password set by an administrator is an explicit recovery action.
+        _clear_login_lock(account)
         await db.execute(RefreshSession.__table__.update().where(RefreshSession.account_id == account.id, RefreshSession.revoked_at.is_(None)).values(revoked_at=datetime.now(timezone.utc)))
     for field, value in patch.items():
         setattr(account, field, value)
+    if patch.get("status") == "active":
+        # Reactivation must also clear a temporary lock; otherwise the account
+        # remains blocked until the old lock timestamp expires.
+        _clear_login_lock(account)
     if account.id == actor.account_id and account.status == "disabled":
         raise HTTPException(status_code=400, detail="You cannot disable your own account")
     if roles is not None:
