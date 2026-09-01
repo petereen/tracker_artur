@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Repair the production payroll migration bind-parameter failure so the API can start after `alembic upgrade head` (`backend/alembic/versions/i0j1k2l3m4n5_frappe_style_payroll.py`, `backend/tests/test_frappe_payroll_contract.py`)
 - [x] Redesign payroll as a Frappe-style, Mongolian-first document workflow without introducing Frappe services (`backend/app/payroll`, `backend/app/models`, `backend/alembic/versions`, `frontend/src/pages`, `frontend/src/api/enterprise.ts`, `frontend/src/i18n.ts`, `backend/tests`, `frontend/src`) — implemented document boundaries, tenant-safe migration/backfill, strict Payroll Entry → Get Employees → Create Salary Slips → Submit/Accrue → Make Bank Entry lifecycle, OYUNS Mongolian workspace, compatibility legacy routes, and regression contracts; frontend tests/build and Python compilation pass, while dependency-backed backend pytest/Alembic runtime remains environment-gated
   - [x] Add reusable salary components, payroll periods, assignments, additional salaries, payroll entries, salary slips, bank entries, and reports
   - [x] Add non-destructive legacy backfill and compatibility/read-only routes
@@ -359,6 +360,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Repair the production payroll migration bind-parameter failure by passing `source_salary_component_id` during legacy component-master backfill and cover it with a contract assertion (`backend/alembic/versions/i0j1k2l3m4n5_frappe_style_payroll.py`, `backend/tests/test_frappe_payroll_contract.py`)
 - [x] Replace the payroll landing screen with an OYUNS-branded, Mongolian-first Frappe-style workspace, document lists/forms, lifecycle actions, masters, assignments, salary slips, and reports (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Render legacy staged payroll runs through an immutable read-only detail view while retaining compatibility APIs (`frontend/src/pages/PayrollWorkspacePage.tsx`)
 - [x] Add frontend contracts for Frappe-style payroll documents, lifecycle mutations, and report queries (`frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollWorkspacePage.test.tsx`)

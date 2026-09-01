@@ -245,7 +245,15 @@ def upgrade() -> None:
         if master_id is None:
             existing_code = bind.execute(sa.text("SELECT code FROM payroll_salary_component_masters WHERE organization_id = :organization_id AND source_salary_component_id IS NOT NULL AND code = :code"), {"organization_id": row.organization_id, "code": row.code}).first()
             code = row.code if existing_code is None else _next_code(bind, row.organization_id, row.code, str(row.structure_id))
-            params = {**row._mapping, "code": code, "metadata_json": json.dumps(row.metadata_json or {})}
+            params = {
+                **row._mapping,
+                "code": code,
+                "metadata_json": json.dumps(row.metadata_json or {}),
+                # The new master keeps a traceable link to the legacy line.
+                # row._mapping does not contain this target column because it
+                # is selected from salary_components under its original name.
+                "source_salary_component_id": row.id,
+            }
             master_id = bind.execute(sa.text("INSERT INTO payroll_salary_component_masters (organization_id, code, name, component_kind, formula, proration_basis, is_taxable, is_shi_subject, is_non_taxable_allowance, is_leave_average_eligible, is_flexible_benefit, max_benefit_amount_yearly, pay_against_benefit_claim, only_tax_impact, payer, account_id, cost_center_id, metadata_json, source_salary_component_id) VALUES (:organization_id, :code, :name, :component_kind, :formula, :proration_basis, :is_taxable, :is_shi_subject, :is_non_taxable_allowance, :is_leave_average_eligible, :is_flexible_benefit, :max_benefit_amount_yearly, :pay_against_benefit_claim, :only_tax_impact, :payer, :account_id, :cost_center_id, CAST(:metadata_json AS jsonb), :source_salary_component_id) RETURNING id"), params).scalar_one()
             master_by_definition[definition_key] = master_id
         bind.execute(sa.text("UPDATE salary_components SET component_master_id = :master_id WHERE id = :id"), {"master_id": master_id, "id": row.id})

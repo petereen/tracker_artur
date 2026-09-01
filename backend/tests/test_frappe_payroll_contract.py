@@ -30,6 +30,7 @@ def test_new_migration_backfills_legacy_records_without_recalculation():
     source = (ROOT / "alembic/versions/i0j1k2l3m4n5_frappe_style_payroll.py").read_text()
     assert 'down_revision: Union[str, Sequence[str], None] = "h0c1d2e3f4g5"' in source
     assert "source_salary_component_id" in source
+    assert '"source_salary_component_id": row.id' in source
     assert "legacy suffix" in source
     assert "UPDATE payroll_runs SET document_status" in source
     assert "SELECT DISTINCT ON (organization_id, period_start, period_end)" in source
