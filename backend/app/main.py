@@ -14,6 +14,7 @@ from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssi
 from app.routers import assistant_learning, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, questions, realtime, schedules, tasks, work_reports, worktime_qr, worktime_reports
 from app.erp import router as erp
 from app import mcp_executor
+from app.hr import router as hr_router
 from sqlalchemy import func, or_, select
 
 
@@ -122,6 +123,7 @@ app.include_router(contracts.router, prefix="/v1", tags=["v1-contracts"])
 app.include_router(enterprise.router, prefix="/v1", tags=["v1-enterprise"])
 app.include_router(worktime_qr.router, prefix="/v1/worktime-qr", tags=["v1-worktime-qr"])
 app.include_router(erp.router, prefix="/v1/erp", tags=["v1-erp"])
+app.include_router(hr_router, prefix="/v1/hr", tags=["v1-hr"])
 app.include_router(mcp_executor.router, prefix="/v1/mcp-executor", tags=["v1-mcp-executor"])
 
 

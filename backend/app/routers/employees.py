@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.core.deps import get_current_user
 from app.models.models import Employee, Schedule, Streak, SurveySession, WorkReport, WorkReportRevision, WorkTimeEntry
 from app.services.work_report_service import summarize_work_time
@@ -30,7 +31,8 @@ class EmployeeUpdate(BaseModel):
 class EmployeeOut(BaseModel):
     id: int
     name: str
-    telegram_id: str
+    # HR pending-invite workers do not have a Telegram identity yet.
+    telegram_id: Optional[str] = None
     telegram_username: Optional[str]
     # Legacy rows (e.g. seeded manager) may have NULL timezone — the model's
     # logical default is Asia/Ulaanbaatar, so return that instead of crashing
@@ -202,7 +204,7 @@ async def employee_performance(
 
 @router.post("", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
 async def create_employee(data: EmployeeCreate, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
-    emp = Employee(**data.model_dump())
+    emp = Employee(organization_id=settings.DEFAULT_COMPANY_ORGANIZATION_ID, **data.model_dump())
     db.add(emp)
     await db.flush()
     db.add(Schedule(employee_id=emp.id))

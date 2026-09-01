@@ -57,11 +57,15 @@ router = APIRouter()
 
 
 async def payroll_capability(db: AsyncSession, actor: ActorContext, action: str) -> None:
+    # Managers can approve attendance/leave in HR, but payroll remains an
+    # Admin/HR responsibility even when a custom capability is assigned.
+    if actor.has_any_role("manager", "team_lead") and not actor.has_any_role("admin", "hr"):
+        raise HTTPException(status_code=403, detail={"code": "payroll_hr_scope_required"})
     await require_capability(db, actor, "payroll", action)
 
 
 def _is_payroll_admin(actor: ActorContext) -> bool:
-    return bool({"admin", "manager", "hr"}.intersection(actor.roles))
+    return bool({"admin", "hr"}.intersection(actor.roles))
 
 
 async def _employee_scope(db: AsyncSession, actor: ActorContext, requested: int | None) -> int | None:

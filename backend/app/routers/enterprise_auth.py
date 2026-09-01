@@ -361,9 +361,13 @@ async def _telegram_session(
     device_label: str,
     origin: str | None,
     oidc_subject: str | None = None,
+    profile: dict | None = None,
 ):
     """Link a registered Telegram identity and issue the one-year session."""
-    telegram_user = {"id": telegram_id, "username": username} if username else {"id": telegram_id}
+    telegram_user = dict(profile or {})
+    telegram_user["id"] = telegram_id
+    if username and not telegram_user.get("username"):
+        telegram_user["username"] = username
     if not telegram_user or not telegram_id.isdigit():
         raise HTTPException(status_code=401, detail="Invalid Telegram login")
 
@@ -380,7 +384,15 @@ async def _telegram_session(
         username = str(telegram_user["username"]).lstrip("@")
         employee = await db.scalar(select(Employee).where(Employee.telegram_username.ilike(username)))
         if employee and employee.telegram_id != telegram_id:
+            claimed_by = await db.scalar(select(Employee.id).where(Employee.telegram_id == telegram_id, Employee.id != employee.id))
+            if claimed_by:
+                raise HTTPException(status_code=409, detail="This Telegram identity is already linked to another employee")
             employee.telegram_id = telegram_id
+    if employee is not None:
+        employee.telegram_username = telegram_user.get("username") or employee.telegram_username
+        employee.first_name = telegram_user.get("first_name") or telegram_user.get("given_name") or employee.first_name
+        employee.last_name = telegram_user.get("last_name") or telegram_user.get("family_name") or employee.last_name
+        employee.photo_url = telegram_user.get("photo_url") or telegram_user.get("picture") or employee.photo_url
     if not employee or not employee.is_active:
         raise HTTPException(status_code=403, detail="Telegram user is not registered as an active employee")
 
@@ -393,7 +405,7 @@ async def _telegram_session(
         elif account and account.employee_id != employee.id:
             raise HTTPException(status_code=409, detail="Employee email is linked to another account")
     if account is None:
-        organization = await db.get(Organization, 1)
+        organization = await db.get(Organization, employee.organization_id)
         if not organization:
             raise HTTPException(status_code=503, detail="Organization setup is incomplete")
         account = UserAccount(
@@ -531,7 +543,7 @@ async def native_telegram_exchange(
     telegram_id = str(claims.get("id") or claims.get("sub") or "")
     oidc_subject = str(claims.get("sub") or "")
     username = claims.get("preferred_username") or claims.get("username")
-    return await _telegram_session(response, db, telegram_id, str(username) if username else None, f"telegram-oidc-{platform}", origin, oidc_subject)
+    return await _telegram_session(response, db, telegram_id, str(username) if username else None, f"telegram-oidc-{platform}", origin, oidc_subject, profile=dict(claims))
 
 
 @router.get("/telegram")
@@ -645,7 +657,7 @@ async def telegram_web_callback(
     response = RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     _clear_web_telegram_state(response)
     try:
-        await _telegram_session(response, db, telegram_id, str(username) if username else None, "telegram-oidc-web", None, oidc_subject)
+        await _telegram_session(response, db, telegram_id, str(username) if username else None, "telegram-oidc-web", None, oidc_subject, profile=dict(claims))
     except HTTPException as exc:
         return _web_telegram_error("account_unavailable" if exc.status_code in {401, 403, 409} else "login_failed")
     return response
@@ -663,7 +675,7 @@ async def telegram_login(
     telegram_id = str((telegram_user or {}).get("id") or "")
     if not telegram_user or not telegram_id.isdigit():
         raise HTTPException(status_code=401, detail="Invalid Telegram login")
-    return await _telegram_session(response, db, telegram_id, telegram_user.get("username"), "telegram-mini-app", origin)
+    return await _telegram_session(response, db, telegram_id, telegram_user.get("username"), "telegram-mini-app", origin, profile=telegram_user)
 
 
 @router.post("/refresh", response_model=AccessTokenOut, response_model_exclude_none=True)

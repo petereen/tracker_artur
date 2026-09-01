@@ -71,13 +71,13 @@ describe('enterprise sidebar', () => {
     const sidebarNav = container.querySelector('.workspace-sidebar nav')
     const links = Array.from(sidebarNav?.querySelectorAll<HTMLAnchorElement>('.nav-item') ?? [])
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
-      '/', '/worktime', '/chat', '/calendar', '/tasks', '/reports', '/projects', '/plans', '/contracts', '/analytics', '/administration',
+      '/', '/worktime', '/hr', '/chat', '/calendar', '/tasks', '/reports', '/projects', '/plans', '/contracts', '/analytics', '/administration',
     ])
     expect(links[2].parentElement).not.toHaveClass('nav-group-break')
-    expect(links[5].parentElement).toHaveClass('nav-group-break')
-    expect(links[6].parentElement).not.toHaveClass('nav-group-break')
+    expect(links[6].parentElement).toHaveClass('nav-group-break')
     expect(links[7].parentElement).not.toHaveClass('nav-group-break')
     expect(links[8].parentElement).not.toHaveClass('nav-group-break')
+    expect(links[9].parentElement).not.toHaveClass('nav-group-break')
   })
 
   it('uses a full in-app chat action and an icon-only Telegram squircle for workers', () => {

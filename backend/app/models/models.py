@@ -35,9 +35,13 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(Text, nullable=False)
-    telegram_id = Column(Text, unique=True, nullable=False)
+    telegram_id = Column(Text, unique=True, nullable=True)
     telegram_username = Column(Text)
+    first_name = Column(Text)
+    last_name = Column(Text)
+    photo_url = Column(Text)
     email = Column(Text, unique=True)
     manager_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
     job_title = Column(Text)
@@ -176,7 +180,7 @@ class CompanyKnowledge(Base):
     __tablename__ = "company_knowledge"
 
     id = Column(Integer, primary_key=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(Text, nullable=False)
     category = Column(Text)
     content = Column(Text, nullable=False)
@@ -1110,17 +1114,142 @@ class ShiftSchedule(Base):
 
 
 class TimeOff(Base):
-    __tablename__ = "time_off"
+    __tablename__ = "leave_requests"
     __table_args__ = (Index("ix_time_off_employee_dates", "employee_id", "starts_on", "ends_on"),)
 
     id = Column(Integer, primary_key=True)
     employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
     time_off_type = Column(Text, nullable=False)
     starts_on = Column(Date, nullable=False)
     ends_on = Column(Date, nullable=False)
     partial_day_minutes = Column(Integer)
+    reason = Column(Text)
+    working_days = Column(Numeric(8, 2))
     status = Column(Text, nullable=False, server_default="pending", default="pending")
     approved_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    reviewer_feedback = Column(Text)
+    reviewed_at = Column(DateTime(timezone=True))
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Department(Base):
+    __tablename__ = "departments"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "code", name="uq_departments_org_code"),
+        Index("ix_departments_org_active", "organization_id", "is_active"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(80), nullable=False)
+    name = Column(Text, nullable=False)
+    manager_employee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class EmployeeDetails(Base):
+    __tablename__ = "employee_details"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "employee_id", name="uq_employee_details_org_employee"),
+        Index("ix_employee_details_org_department", "organization_id", "department_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"))
+    manager_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    job_title = Column(Text)
+    employment_role = Column(Text)
+    start_date = Column(Date)
+    end_date = Column(Date)
+    employment_status = Column(String(20), nullable=False, server_default="active", default="active")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class WorkerInvite(Base):
+    __tablename__ = "worker_invites"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_worker_invites_token_hash"),
+        Index("ix_worker_invites_employee_active", "employee_id", "used_at", "revoked_at", "expires_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    token_hash = Column(String(64), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True))
+    revoked_at = Column(DateTime(timezone=True))
+    bound_telegram_id = Column(Text)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class LeaveBalance(Base):
+    __tablename__ = "leave_balances"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "employee_id", "year", "leave_type", name="uq_leave_balances_employee_year_type"),
+        Index("ix_leave_balances_org_year", "organization_id", "year", "leave_type"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    year = Column(Integer, nullable=False)
+    leave_type = Column(String(20), nullable=False)
+    entitled_days = Column(Numeric(8, 2), nullable=False, server_default="0", default=0)
+    carried_days = Column(Numeric(8, 2), nullable=False, server_default="0", default=0)
+    adjustment_days = Column(Numeric(8, 2), nullable=False, server_default="0", default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class AttendanceLog(Base):
+    __tablename__ = "attendance_logs"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "employee_id", "attendance_date", name="uq_attendance_logs_employee_date"),
+        Index("ix_attendance_logs_org_date", "organization_id", "attendance_date"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    attendance_date = Column(Date, nullable=False)
+    status = Column(String(16), nullable=False)
+    source = Column(String(16), nullable=False, server_default="manual", default="manual")
+    worked_minutes = Column(Integer, nullable=False, server_default="0", default=0)
+    first_started_at = Column(DateTime(timezone=True))
+    last_ended_at = Column(DateTime(timezone=True))
+    confirmed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    confirmed_at = Column(DateTime(timezone=True))
+    note = Column(Text)
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class EmployeeCompensationItem(Base):
+    __tablename__ = "employee_compensation_items"
+    __table_args__ = (
+        Index("ix_employee_compensation_org_employee_dates", "organization_id", "employee_id", "effective_from", "effective_to"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    component_master_id = Column(Integer, ForeignKey("payroll_salary_component_masters.id", ondelete="RESTRICT"), nullable=False)
+    amount = Column(Numeric(20, 4), nullable=False)
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -2632,6 +2761,7 @@ class PayrollRun(Base):
     id = Column(Integer, primary_key=True)
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     run_number = Column(String(80), nullable=False)
+    hr_generation_key = Column(String(255), unique=True)
     run_type = Column(String(16), nullable=False)
     period_start = Column(Date, nullable=False)
     period_end = Column(Date, nullable=False)

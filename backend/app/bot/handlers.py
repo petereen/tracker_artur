@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from app.bot.db import (
     complete_session, create_session, get_manager_settings,
     canonical_checkin_complete, get_questions, get_session, get_streak, get_yesterday_summary,
-    mirror_completed_session,
+    mirror_completed_session, bind_employee_invite,
     mark_employee_onboarded, save_answer,
 )
 from app.core.config import settings
@@ -72,6 +72,16 @@ async def _ask_question(message_or_cb, question, state: FSMContext, session_id: 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, employee=None):
     emp = employee
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) > 1 and parts[1].startswith("invite_"):
+        bound, error = bind_employee_invite(parts[1][7:], message.from_user)
+        if error:
+            messages = {"expired": "❌ Урилга хүчингүй болсон байна. HR-ээс шинэ холбоос авна уу.", "used": "ℹ️ Энэ урилга аль хэдийн ашиглагдсан байна.", "duplicate": "❌ Таны Telegram бүртгэл өөр ажилтантай холбогдсон байна."}
+            await message.answer(messages.get(error, "❌ Урилга олдсонгүй эсвэл хүчингүй байна."))
+            return
+        emp = bound
+        await message.answer("✅ Telegram бүртгэл амжилттай холбогдлоо. OYUNS самбарыг нээж эхлүүлнэ үү.", reply_markup=mini_app_keyboard())
+        return
     if not emp:
         await message.answer("❌ Та системд бүртгэгдээгүй байна. Удирдлагадаа хандана уу.")
         return

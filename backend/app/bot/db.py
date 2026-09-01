@@ -1,13 +1,16 @@
 """Sync DB helpers used only inside bot (runs in separate process)."""
 from datetime import date, datetime, timezone
+import hashlib
+import secrets
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.security import hash_account_password
 from app.models.models import (
     Answer, Checkin, CheckinAnswer, CheckinQuestion, CheckinTemplate, Employee, EmployeeQuestion,
-    ManagerSettings, Question, Schedule, Streak, SurveySession, UserAccount,
+    ManagerSettings, Question, Schedule, Streak, SurveySession, UserAccount, WorkerInvite, EmployeeDetails, RoleAssignment,
 )
 
 engine = create_engine(settings.SYNC_DATABASE_URL)
@@ -20,6 +23,55 @@ def get_session():
 def get_employee_by_tg(tg_id: str) -> Employee | None:
     with get_session() as s:
         return s.execute(select(Employee).where(Employee.telegram_id == tg_id)).scalar_one_or_none()
+
+
+def bind_employee_invite(raw_token: str, user) -> tuple[Employee | None, str | None]:
+    """Consume a one-time HR invite from the trusted bot update identity."""
+    telegram_id = str(getattr(user, "id", ""))
+    if not telegram_id.isdigit():
+        return None, "invalid_identity"
+    now = datetime.now(timezone.utc)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    with get_session() as s:
+        invite = s.execute(select(WorkerInvite).where(WorkerInvite.token_hash == token_hash).with_for_update()).scalar_one_or_none()
+        if not invite:
+            return None, "not_found"
+        if invite.used_at:
+            return None, "used"
+        if invite.revoked_at or invite.expires_at <= now:
+            return None, "expired"
+        duplicate = s.execute(select(Employee.id).where(Employee.telegram_id == telegram_id, Employee.id != invite.employee_id)).scalar_one_or_none()
+        if duplicate:
+            return None, "duplicate"
+        employee = s.execute(select(Employee).where(Employee.id == invite.employee_id, Employee.organization_id == invite.organization_id).with_for_update()).scalar_one_or_none()
+        if not employee:
+            return None, "not_found"
+        employee.telegram_id = telegram_id
+        employee.telegram_username = getattr(user, "username", None) or employee.telegram_username
+        employee.first_name = getattr(user, "first_name", None) or employee.first_name
+        employee.last_name = getattr(user, "last_name", None) or employee.last_name
+        employee.photo_url = getattr(user, "photo_url", None) or employee.photo_url
+        display_name = " ".join(part for part in (employee.first_name, employee.last_name) if part)
+        if display_name:
+            employee.name = display_name
+        employee.is_active = True
+        employee.onboarded_at = employee.onboarded_at or now
+        details = s.execute(select(EmployeeDetails).where(EmployeeDetails.employee_id == employee.id)).scalar_one_or_none()
+        if details:
+            details.employment_status = "active"
+        invite.used_at = now
+        invite.bound_telegram_id = telegram_id
+        account = s.execute(select(UserAccount).where(UserAccount.employee_id == employee.id).with_for_update()).scalar_one_or_none()
+        if not account:
+            account = UserAccount(organization_id=invite.organization_id, employee_id=employee.id, email=f"telegram-{telegram_id}", password_hash=hash_account_password(secrets.token_urlsafe(48)), status="active", locale=employee.primary_language or "mn", must_change_password=True)
+            s.add(account); s.flush()
+        else:
+            account.status = "active"
+        if not s.execute(select(RoleAssignment.id).where(RoleAssignment.account_id == account.id, RoleAssignment.role == "member")).scalar_one_or_none():
+            s.add(RoleAssignment(account_id=account.id, role="member"))
+        s.commit()
+        s.refresh(employee)
+        return employee, None
 
 
 def link_employee_telegram(username: str | None, tg_id: str) -> Employee | None:

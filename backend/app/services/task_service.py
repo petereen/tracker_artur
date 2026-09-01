@@ -11,6 +11,7 @@ from sqlalchemy import case, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.db import get_session
+from app.core.config import settings
 from app.models.models import (
     DEFAULT_REMINDER_INTERVALS_MIN,
     Employee,
@@ -43,7 +44,7 @@ def ensure_employee(tg_id, name: Optional[str] = None, username: Optional[str] =
                 emp.telegram_username = uname
                 s.commit()
         else:
-            emp = Employee(name=name or "Ажилтан", telegram_id=tg, telegram_username=uname, is_active=True)
+            emp = Employee(organization_id=settings.DEFAULT_COMPANY_ORGANIZATION_ID, name=name or "Ажилтан", telegram_id=tg, telegram_username=uname, is_active=True)
             s.add(emp)
             s.commit()
             s.refresh(emp)

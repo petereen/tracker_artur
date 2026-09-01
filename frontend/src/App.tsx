@@ -14,6 +14,7 @@ import { CallProvider } from './components/CallProvider'
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
 const WorktimePage = lazy(() => import('./pages/WorktimePage').then((module) => ({ default: module.WorktimePage })))
 const WorktimeQrPage = lazy(() => import('./pages/WorktimeQrPage').then((module) => ({ default: module.WorktimeQrPage })))
+const HRWorkspacePage = lazy(() => import('./pages/HRWorkspacePage'))
 const ProjectsWorkspacePage = lazy(() => import('./pages/ProjectsWorkspacePage').then((module) => ({ default: module.ProjectsWorkspacePage })))
 const EnterpriseTasksPage = lazy(() => import('./pages/EnterpriseTasksPage').then((module) => ({ default: module.EnterpriseTasksPage })))
 const CalendarWorkspacePage = lazy(() => import('./pages/CalendarWorkspacePage').then((module) => ({ default: module.CalendarWorkspacePage })))
@@ -80,6 +81,7 @@ function AuthenticatedApp() {
       <Route element={<EnterpriseShell />}>
         <Route index element={<EnterpriseDashboardPage />} />
         <Route path="worktime" element={<WorktimePage />} />
+        <Route path="hr" element={<HRWorkspacePage />} />
         <Route path="projects" element={<ProjectsWorkspacePage />} />
         <Route path="tasks" element={<EnterpriseTasksPage />} />
         <Route path="calendar" element={<CalendarWorkspacePage />} />

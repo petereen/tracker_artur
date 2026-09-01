@@ -4,6 +4,60 @@
 @tailwind components;
 @tailwind utilities;
 
+/* HR workspace */
+.hr-workspace { display: grid; gap: 18px; min-width: 0; }
+.hr-tabs { display: flex; gap: 6px; overflow-x: auto; border-bottom: 1px solid var(--color-border); }
+.hr-tabs button { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--color-muted); cursor: pointer; font: 600 12px var(--font-brand); padding: 10px 12px; white-space: nowrap; }
+.hr-tabs button.active { border-bottom-color: #2D62EC; color: #2D62EC; }
+.hr-directory-card, .hr-attendance-card { min-width: 0; overflow: hidden; }
+.hr-toolbar, .hr-panel-grid, .hr-form-grid, .hr-balance-grid { display: grid; gap: 12px; }
+.hr-toolbar { grid-template-columns: minmax(0, 1fr) 190px; margin-bottom: 14px; }
+.hr-search { align-items: center; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 10px; color: var(--color-muted); display: flex; gap: 8px; min-height: 38px; padding: 0 11px; }
+.hr-search input { background: transparent; border: 0; color: var(--color-text); font: 400 12px var(--font-brand); min-width: 0; outline: 0; width: 100%; }
+.hr-directory-table { overflow-x: auto; }
+.hr-directory-table table { border-collapse: collapse; min-width: 720px; width: 100%; }
+.hr-directory-table th, .hr-directory-table td { border-bottom: 1px solid var(--color-border-soft); padding: 12px 10px; text-align: left; font-size: 12px; }
+.hr-directory-table th { color: var(--color-muted); font-size: 11px; font-weight: 600; }
+.hr-directory-table tbody tr { cursor: pointer; transition: background .15s ease; }
+.hr-directory-table tbody tr:hover { background: color-mix(in srgb, #2D62EC 6%, var(--color-surface)); }
+.hr-person { align-items: center; display: flex; gap: 9px; }
+.hr-person span { align-items: center; background: color-mix(in srgb, #2D62EC 13%, var(--color-surface)); border-radius: 50%; color: #2D62EC; display: inline-flex; flex: 0 0 auto; font-weight: 700; height: 30px; justify-content: center; width: 30px; }
+.hr-empty, .hr-muted { color: var(--color-muted); font-size: 12px; padding: 24px; text-align: center; }
+.hr-panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hr-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 14px 0; }
+.hr-balance-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 16px 0; }
+.hr-balance-grid > div { background: var(--color-surface-2); border: 1px solid var(--color-border-soft); border-radius: 11px; display: grid; gap: 2px; padding: 11px; }
+.hr-balance-grid small, .hr-balance-grid span, .hr-request-list span, .hr-attendance-list span, .hr-component-list span { color: var(--color-muted); font-size: 10px; }
+.hr-balance-grid strong { color: #2D62EC; font-size: 20px; }
+.hr-request-list, .hr-attendance-list, .hr-component-list { display: grid; gap: 8px; max-height: 500px; overflow: auto; }
+.hr-request-list article, .hr-attendance-list article, .hr-component-list div { align-items: center; border: 1px solid var(--color-border-soft); border-radius: 10px; display: flex; gap: 10px; justify-content: space-between; padding: 10px 11px; }
+.hr-request-list article > div:first-child, .hr-attendance-list article > div:first-child, .hr-component-list div { display: grid; gap: 3px; min-width: 0; }
+.hr-request-list strong, .hr-attendance-list strong, .hr-component-list strong { font-size: 12px; }
+.hr-request-actions, .hr-status-buttons, .hr-modal-actions, .hr-invite-result > div { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; }
+.hr-request-actions button, .hr-status-buttons button { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-muted); cursor: pointer; font: 600 10px var(--font-brand); padding: 6px 7px; text-transform: capitalize; }
+.hr-inline-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+.hr-attendance-select { align-items: flex-start; cursor: pointer; display: flex; gap: 10px; }
+.hr-attendance-select input { accent-color: var(--color-primary); margin-top: 3px; }
+.hr-attendance-select { flex: 1; min-width: 0; }
+.hr-attendance-select > span { display: grid; gap: 3px; min-width: 0; }
+.hr-status-buttons button.active { background: color-mix(in srgb, #2D62EC 12%, var(--color-surface)); border-color: #2D62EC; color: #2D62EC; }
+.hr-status-buttons button:disabled { cursor: not-allowed; opacity: .45; }
+.hr-drawer-backdrop { background: color-mix(in srgb, #0B172A 45%, transparent); inset: 0; position: fixed; z-index: 80; }
+.hr-drawer { background: var(--color-surface); box-shadow: -18px 0 50px color-mix(in srgb, #0B172A 22%, transparent); height: 100%; max-width: 460px; overflow: auto; padding: 26px; position: absolute; right: 0; width: min(100%, 460px); }
+.hr-drawer > header { align-items: flex-start; display: flex; justify-content: space-between; }
+.hr-drawer > header h2 { margin: 4px 0 2px; }
+.hr-drawer > header p { color: var(--color-muted); font-size: 12px; margin: 0; }
+.hr-drawer > header button { background: transparent; border: 0; color: var(--color-muted); cursor: pointer; }
+.hr-drawer-section { border-top: 1px solid var(--color-border-soft); margin-top: 20px; padding-top: 18px; }
+.hr-drawer-section h3 { font-size: 13px; margin: 0 0 12px; }
+.hr-drawer-section dl { display: grid; gap: 9px; grid-template-columns: 1fr 1.3fr; margin: 0; }
+.hr-drawer-section dt { color: var(--color-muted); font-size: 11px; }
+.hr-drawer-section dd { font-size: 12px; margin: 0; }
+.hr-invite-result { display: grid; gap: 14px; }
+.hr-invite-result code { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 9px; display: block; font-size: 11px; overflow-wrap: anywhere; padding: 11px; }
+.hr-modal-actions { justify-content: flex-end; margin-top: 18px; }
+@media (max-width: 760px) { .hr-toolbar, .hr-panel-grid, .hr-form-grid { grid-template-columns: 1fr; } .hr-balance-grid { grid-template-columns: repeat(3, minmax(90px, 1fr)); overflow-x: auto; } .hr-drawer { padding: 20px 16px calc(20px + var(--safe-area-bottom)); } }
+
 :root {
   color-scheme: light dark;
   --color-bg: #f3f5f8;

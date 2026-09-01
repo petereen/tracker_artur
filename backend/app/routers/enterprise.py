@@ -2367,7 +2367,12 @@ async def create_time_off(data: TimeOffInput, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=403, detail="Time off is outside your scope")
     if data.ends_on < data.starts_on:
         raise HTTPException(status_code=400, detail="End date must not precede start date")
-    item = TimeOff(**data.model_dump(), status="approved" if actor.has_any_role("admin", "manager") else "pending", approved_by_account_id=actor.account_id if actor.has_any_role("admin", "manager") else None)
+    item = TimeOff(
+        organization_id=actor.organization_id,
+        **data.model_dump(),
+        status="approved" if actor.has_any_role("admin", "manager") else "pending",
+        approved_by_account_id=actor.account_id if actor.has_any_role("admin", "manager") else None,
+    )
     db.add(item)
     await db.flush()
     await record_change(db, actor=actor, topic="capacity", aggregate_type="time_off", aggregate_id=item.id, operation="created", after=data.model_dump(mode="json") | {"status": item.status})

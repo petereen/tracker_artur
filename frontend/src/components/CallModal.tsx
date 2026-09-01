@@ -68,7 +68,7 @@ export function CallModal({ call, onOpenConversation }: { call: CallController; 
         {hasLocalVideo && <video ref={localVideo} autoPlay muted playsInline className="call-local-video" />}
       </div> : <div className="call-ringing-content">
         <button className="call-avatar-pulse" onClick={onOpenConversation}><i /><CallAvatar name={active.name} avatar={active.avatar} /></button>
-        <h2>{active.name}</h2><p>{status}</p>
+        <h2>{active.name}</h2><p>{status}</p> 
       </div>}
       {call.error && <p className="call-error" role="alert">{call.error}</p>}
       <div className="call-controls">

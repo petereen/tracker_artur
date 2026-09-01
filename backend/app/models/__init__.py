@@ -45,6 +45,12 @@ from app.models.models import (  # noqa: F401
     PayrollSalaryComponentMaster,
     AdditionalSalary,
     PayrollBankEntry,
+    Department,
+    EmployeeDetails,
+    WorkerInvite,
+    LeaveBalance,
+    AttendanceLog,
+    EmployeeCompensationItem,
 )
 from app.models.contracts import (  # noqa: F401
     CONTRACT_DOCUMENT_TYPES,

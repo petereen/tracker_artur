@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     AUTH_EMAIL_VERIFICATION_ENABLED: bool = False
     PASSWORD_RESET_MINUTES: int = 30
     INVITATION_EXPIRE_HOURS: int = 168
+    HR_INVITE_EXPIRE_HOURS: int = 168
+    HR_ATTENDANCE_LATE_MINUTES: int = 15
     SMTP_HOST: str = "smtp.resend.com"
     SMTP_PORT: int = 465
     SMTP_USERNAME: str = "resend"

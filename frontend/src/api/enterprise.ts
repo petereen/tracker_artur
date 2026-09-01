@@ -412,6 +412,41 @@ export function useEnterpriseLogout() {
   })
 }
 
+// ─── HR workspace ───────────────────────────────────────────────────────────
+export interface HRDepartment { id: number; code: string; name: string; manager_employee_id: number | null; is_active: boolean }
+export interface HREmployee {
+  id: number; name: string; first_name: string | null; last_name: string | null; telegram_id: string | null;
+  telegram_username: string | null; photo_url: string | null; timezone: string; is_active: boolean;
+  department_id: number | null; department_name: string | null; manager_id: number | null; job_title: string | null;
+  employment_role: string | null; start_date: string | null; end_date: string | null; employment_status: string;
+  telegram_status: 'connected' | 'pending_invite' | 'not_invited'; account_id: number | null
+}
+export interface HRLeaveRequest { id: number; employee_id: number; employee_name: string; leave_type: 'annual' | 'sick' | 'unpaid'; starts_on: string; ends_on: string; working_days: string; reason: string | null; status: string; reviewer_feedback: string | null; version: number }
+export interface HRLeaveBalance { id: number; employee_id: number; year: number; leave_type: string; entitled_days: string; carried_days: string; adjustment_days: string; used_days: string; pending_days: string; available_days: string }
+export interface HRAttendanceItem { id: number | null; employee_id: number; employee_name: string; attendance_date: string; status: 'present' | 'remote' | 'absent' | 'late' | null; suggested_status: HRAttendanceItem['status']; on_leave: boolean; source: string; worked_minutes: number; first_started_at: string | null; last_ended_at: string | null; confirmed: boolean; version: number | null }
+export interface HRCompensationItem { id: number; component_master_id: number; component_name: string; component_kind: string; amount: string; effective_from: string; effective_to: string | null; is_active: boolean }
+
+export function useHRDepartments() { return useQuery<HRDepartment[]>({ queryKey: ['v1', 'hr', 'departments'], queryFn: () => api.get('/v1/hr/departments').then((r) => r.data) }) }
+export function useHREmployees(params: { search?: string; department_id?: number; status?: string; page?: number } = {}) { return useQuery<{ items: HREmployee[]; page: number; page_size: number; total: number }>({ queryKey: ['v1', 'hr', 'employees', params], queryFn: () => api.get('/v1/hr/employees', { params }).then((r) => r.data) }) }
+export function useCreateHREmployee() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/hr/employees', input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr'] }) }) }
+export function useUpdateHREmployee() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...input }: { id: number } & Record<string, unknown>) => api.patch(`/v1/hr/employees/${id}`, input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr'] }) }) }
+export function useRegenerateHRInvite() { return useMutation({ mutationFn: (id: number) => api.post(`/v1/hr/employees/${id}/invite`).then((r) => r.data) }) }
+export function useRevokeHRInvite() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.post(`/v1/hr/employees/${id}/invite/revoke`).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr'] }) }) }
+export function useHRLeaveRequests(params: { status?: string; employee_id?: number; year?: number } = {}) { return useQuery<HRLeaveRequest[]>({ queryKey: ['v1', 'hr', 'leave-requests', params], queryFn: () => api.get('/v1/hr/leave-requests', { params }).then((r) => r.data) }) }
+export function useSubmitHRLeave() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/hr/leave-requests', input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr', 'leave'] }) }) }
+export function useDecideHRLeave() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...input }: { id: number; approve: boolean; feedback?: string; version?: number }) => api.post(`/v1/hr/leave-requests/${id}/decision`, input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr', 'leave'] }) }) }
+export function useHRLeaveBalances(params: { employee_id?: number; year?: number } = {}) { return useQuery<HRLeaveBalance[]>({ queryKey: ['v1', 'hr', 'leave-balances', params], queryFn: () => api.get('/v1/hr/leave-balances', { params }).then((r) => r.data) }) }
+export function useHRAttendance(month: string, employee_id?: number) { return useQuery<{ month: string; items: HRAttendanceItem[] }>({ queryKey: ['v1', 'hr', 'attendance', month, employee_id], queryFn: () => api.get('/v1/hr/attendance', { params: { month, employee_id } }).then((r) => r.data) }) }
+export function useUpdateHRAttendance() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: Record<string, unknown>) => api.put('/v1/hr/attendance', input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr', 'attendance'] }) }) }
+export function useBulkUpdateHRAttendance() { const qc = useQueryClient(); return useMutation({ mutationFn: (items: Record<string, unknown>[]) => api.put('/v1/hr/attendance/bulk', { items }).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr', 'attendance'] }) }) }
+export function useAddHRCompensation() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ employeeId, ...input }: { employeeId: number } & Record<string, unknown>) => api.post(`/v1/hr/employees/${employeeId}/compensation`, input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr'] }) }) }
+export function useHRCompensation(employeeId?: number) { return useQuery<HRCompensationItem[]>({ queryKey: ['v1', 'hr', 'compensation', employeeId], queryFn: () => api.get(`/v1/hr/employees/${employeeId}/compensation`).then((r) => r.data), enabled: Boolean(employeeId) }) }
+export function useGenerateHRPayroll() { return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/hr/payroll/generate', input).then((r) => r.data) }) }
+export async function downloadHRAttendanceCsv(month?: string) {
+  const response = await api.get('/v1/hr/attendance/export.csv', { params: { month }, responseType: 'blob' })
+  saveCompanyBlob(response.data, `attendance-${month || new Date().toISOString().slice(0, 7)}.csv`)
+}
+
 export interface DateRange { date_from: string; date_to: string }
 
 function localCalendarDate(year: number, month: number, day: number) {

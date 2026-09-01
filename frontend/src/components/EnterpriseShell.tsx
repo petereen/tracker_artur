@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 import { api } from '../api/client'
 import {
-  BarChart3, BriefcaseBusiness, Calculator, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine,
+  BarChart3, BriefcaseBusiness, Calculator, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine, UserRoundCog,
   FolderArchive, LayoutDashboard, LogOut, Menu, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { acknowledgeChatReceipt, useActor, useBrandingSettings, useChatUnreadCount, useEnterpriseLogout, useERPMetadata, useOpenDirectConversation, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
@@ -23,6 +23,7 @@ import { showDesktopChatAlert } from '../platform/chat-notifications'
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
   { to: '/worktime', label: 'nav.worktime', icon: ScanLine, roles: [] },
+  { to: '/hr', label: 'nav.hr', icon: UserRoundCog, roles: [] },
   { to: '/chat', label: 'nav.chat', icon: MessageCircle, roles: [] },
   { to: '/calendar', label: 'nav.calendar', icon: CalendarDays, roles: [] },
   { to: '/tasks', label: 'nav.tasks', icon: CheckSquare2, roles: [] },
@@ -37,7 +38,7 @@ const NAV = [
 const NAV_GROUP_BREAKS = new Set(['/calendar', '/reports', '/analytics', '/administration'])
 
 const TITLES: Record<string, string> = {
-  '/': 'Өнөөдрийн ажлын орон зай', '/worktime': 'Ажлын цагийн бүртгэл', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
+  '/': 'Өнөөдрийн ажлын орон зай', '/worktime': 'Ажлын цагийн бүртгэл', '/hr': 'Хүний нөөц', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
   '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө', '/contracts': 'Гэрээ',
   '/chat': 'Чат',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
