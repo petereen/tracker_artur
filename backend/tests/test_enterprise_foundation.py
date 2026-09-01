@@ -14,7 +14,7 @@ from app.core.security import (
     verify_account_password,
 )
 from app.core.enterprise_deps import ActorContext
-from app.main import app
+from app.main import _repair_seeded_admin_account, app
 from app.models.models import Base, Task
 from app.routers import enterprise
 from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _calendar_task_visible_to_employee, _holiday_provider_rows, _task_out
@@ -33,6 +33,15 @@ def test_enterprise_passwords_use_argon_and_verify_without_rehash():
 def test_admin_recovery_clears_temporary_login_lock_state():
     account = SimpleNamespace(failed_login_count=5, locked_until=datetime.now(timezone.utc) + timedelta(minutes=15))
     _clear_login_lock(account)
+    assert account.failed_login_count == 0
+    assert account.locked_until is None
+
+
+def test_seeded_admin_recovery_restores_configured_password_and_unlocks_account():
+    account = SimpleNamespace(password_hash="old", status="locked", failed_login_count=5, locked_until=datetime.now(timezone.utc))
+    _repair_seeded_admin_account(account, "configured-hash")
+    assert account.password_hash == "configured-hash"
+    assert account.status == "active"
     assert account.failed_login_count == 0
     assert account.locked_until is None
 

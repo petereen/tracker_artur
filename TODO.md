@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Synchronize configured seeded admin credentials and clear stale temporary locks during startup (`backend/app/main.py`, `backend/tests`)
 - [x] Clear temporary admin account locks when an administrator reactivates an account or sets a new password (`backend/app/routers/enterprise_auth.py`, `backend/tests`)
 - [x] Deliver the lightweight HR module: tenant-safe worker identity/profile schema, Telegram invites, leave, hybrid attendance, compensation/payroll facade, RBAC APIs, responsive `/hr` workspace, and regression coverage (`backend/app/hr`, `backend/app/models/models.py`, `backend/app/routers/enterprise_auth.py`, `backend/alembic/versions`, `frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/App.tsx`, `backend/tests`, `frontend/src`) — implementation and frontend validation complete; backend runtime pytest/Alembic execution remains environment-gated because local Python lacks pytest/SQLAlchemy/Alembic
 - [x] Add the HR persistence model and reversible Alembic migration for tenant-aware employee identity, departments, employment details, invites, leave balances/requests, attendance logs, and recurring compensation (`backend/app/models/models.py`, `backend/app/models/__init__.py`, `backend/alembic/versions/j0k1l2m3n4o5_hr_module.py`)

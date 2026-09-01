@@ -24,6 +24,14 @@ async def lifespan(app: FastAPI):
     yield
 
 
+def _repair_seeded_admin_account(account: UserAccount, password_hash: str) -> None:
+    """Restore the configured seeded admin after stale credentials/lockouts."""
+    account.password_hash = password_hash
+    account.status = "active"
+    account.failed_login_count = 0
+    account.locked_until = None
+
+
 async def seed_admin():
     async with AsyncSessionLocal() as db:
         admin_identifier = (settings.ADMIN_USERNAME or settings.ADMIN_EMAIL).strip().lower()
@@ -34,6 +42,10 @@ async def seed_admin():
             db.add(admin)
             await db.commit()
             await db.refresh(admin)
+        else:
+            # Keep the configured seeded credentials authoritative for the
+            # legacy row as well as the enterprise account.
+            admin.password_hash = hash_password(settings.ADMIN_PASSWORD)
         organization = await db.get(Organization, 1)
         if not organization:
             organization = Organization(id=1, name="OYUNS", timezone="Asia/Ulaanbaatar", base_currency="MNT")
@@ -65,6 +77,11 @@ async def seed_admin():
         else:
             if not account.legacy_admin_id:
                 account.legacy_admin_id = admin.id
+            # The configured ADMIN_* credentials are the recovery source of
+            # truth for the seeded administrator. Existing accounts may have
+            # been created before the username/password changed, or may have
+            # been left in a temporary lockout after failed login attempts.
+            _repair_seeded_admin_account(account, admin.password_hash)
             has_admin_role = await db.scalar(
                 select(RoleAssignment.id).where(
                     RoleAssignment.account_id == account.id,
