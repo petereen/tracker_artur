@@ -27,6 +27,7 @@ def test_hr_router_exposes_identity_leave_attendance_and_payroll_contracts():
     assert "async def create_hr_employee" in router
     assert "with_for_update()" in router
     assert "leave_balance_insufficient" in router
+    assert "MANAGER_ROLES," in router
 
 
 def test_telegram_login_paths_synchronize_profile_claims():

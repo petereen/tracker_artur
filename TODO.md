@@ -15,6 +15,7 @@
 - [x] Make HR migration downgrade data-preserving for pending workers by retaining nullable Telegram identities (`backend/alembic/versions/j0k1l2m3n4o5_hr_module.py`)
 - [x] Extend HR route contracts to cover explicit invite revocation (`backend/tests/test_hr_contract.py`)
 - [x] Scope employee drawer department resolution to the actor organization (`backend/app/hr/router.py`)
+- [x] Fix backend startup crash by importing the HR manager-role tuple used by leave and attendance dependencies (`backend/app/hr/router.py`)
 - [x] Add attendance bulk selection/status actions to the responsive register (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`)
 - [x] Pass Python compilation, TypeScript, production frontend build, and diff checks for HR changes (`backend/app`, `backend/alembic`, `frontend`)
 - [x] Run frontend regression suite excluding the pre-existing date-sensitive Calendar test (27 files / 87 tests pass); full suite remains blocked by hard-coded August 2026 fixture on the current September clock (`frontend/src/pages/CalendarWorkspacePage.test.tsx`)

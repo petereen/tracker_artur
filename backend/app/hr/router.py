@@ -48,6 +48,7 @@ from .schemas import (
 from .service import (
     ATTENDANCE_STATUSES,
     HR_ROLES,
+    MANAGER_ROLES,
     LEAVE_TYPES,
     bind_invite,
     bind_invite_user,
