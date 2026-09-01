@@ -160,6 +160,7 @@ class ManagerSettings(Base):
     evening_digest_time = Column(Time, default=time(18, 0))
     overdue_escalation_days = Column(Integer, default=1)      # рабочих дней просрочки до эскалации руководителю
     notifications_enabled = Column(Boolean, default=True)     # глобальный рубильник рутинных пушей
+    daily_report_reminders_enabled = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     tts_answers_enabled = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
 
 

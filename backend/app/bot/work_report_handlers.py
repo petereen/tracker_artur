@@ -168,7 +168,7 @@ class ReportPromptReply(Filter):
         if message.reply_to_message:
             report = work_report_service.report_for_reply(
                 employee.id, str(message.chat.id), message.reply_to_message.message_id
-            )
+            ) or work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id))
         else:
             report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id))
         return {"work_report": report} if report else False
@@ -204,7 +204,7 @@ async def claim_report_text(message: Message, state: FSMContext, employee=None) 
     if message.reply_to_message:
         report = work_report_service.report_for_reply(
             employee.id, str(message.chat.id), message.reply_to_message.message_id
-        )
+        ) or work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id))
     else:
         report = work_report_service.awaiting_report_for_message(employee.id, str(message.chat.id))
     if report:

@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add an automation switch for employee daily work-report reminders and repair monthly report Telegram/platform visibility (`backend/app/models/models.py`, `backend/app/routers/manager.py`, `backend/app/bot`, `backend/app/services/monthly_report_digest_service.py`, `backend/app/routers/enterprise.py`, `frontend/src`, `backend/alembic/versions`)
+- [x] Send the same open work/remote-time reminder at 23:00 as at 19:00, including a distinct notification deduplication key (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
 - [x] Add an optional Telegram ID field to the HR employee creation form and persist it on the shared employee record (`frontend/src/pages/HRWorkspacePage.tsx`, `backend/app/hr/schemas.py`, `backend/app/hr/router.py`)
 - [x] Synchronize the universal employee directory between HR and “Ажилтан ба эрхүүд” (`frontend/src/api/enterprise.ts`, `frontend/src/api/hooks.ts`, `frontend/src/pages/HRWorkspacePage.tsx`) — HR and legacy employee mutations now invalidate both directory caches backed by the shared Employee table
 - [x] Synchronize configured seeded admin credentials and clear stale temporary locks during startup (`backend/app/main.py`, `backend/tests`)

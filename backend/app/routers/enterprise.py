@@ -2494,7 +2494,11 @@ async def list_enterprise_reports(
     if report_status:
         query = query.where(WorkReport.status == report_status)
     if date_from:
-        query = query.where(WorkReport.period_date >= date_from)
+        # Monthly reports are stored on the first day of their month. Expand
+        # the lower bound to that month so a report written near month-end is
+        # still visible in the rolling report view.
+        monthly_period_from = date_from.replace(day=1)
+        query = query.where(or_(WorkReport.report_type != "monthly", WorkReport.period_date >= monthly_period_from))
     if date_to:
         query = query.where(WorkReport.period_date <= date_to)
     rows = (await db.execute(query.order_by(WorkReport.period_date.desc(), WorkReport.id.desc()).limit(500))).all()

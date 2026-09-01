@@ -30,6 +30,7 @@ class ManagerSettingsOut(BaseModel):
     gamification_enabled: bool
     soft_mode_weeks: int
     tts_answers_enabled: bool
+    daily_report_reminders_enabled: bool
 
     model_config = {"from_attributes": True}
 
@@ -52,7 +53,7 @@ class ManagerSettingsOut(BaseModel):
     def _default_soft_mode_weeks(cls, v):
         return 1 if v is None else v
 
-    @field_validator("tts_answers_enabled", mode="before")
+    @field_validator("tts_answers_enabled", "daily_report_reminders_enabled", mode="before")
     @classmethod
     def _default_tts_answers_enabled(cls, v):
         return True if v is None else v
@@ -69,6 +70,7 @@ class ManagerSettingsUpdate(BaseModel):
     gamification_enabled: Optional[bool] = None
     soft_mode_weeks: Optional[int] = None
     tts_answers_enabled: Optional[bool] = None
+    daily_report_reminders_enabled: Optional[bool] = None
 
 
 @router.get("", response_model=ManagerSettingsOut)
@@ -108,6 +110,7 @@ def _settings_out(s: ManagerSettings) -> ManagerSettingsOut:
         gamification_enabled=s.gamification_enabled,
         soft_mode_weeks=s.soft_mode_weeks,
         tts_answers_enabled=s.tts_answers_enabled,
+        daily_report_reminders_enabled=s.daily_report_reminders_enabled if s.daily_report_reminders_enabled is not None else True,
     )
 
 

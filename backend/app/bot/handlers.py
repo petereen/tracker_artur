@@ -143,6 +143,8 @@ async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMConte
         await target.answer("❌ Та бүртгэгдээгүй байна.")
         return
 
+    daily_report_reminders_enabled = getattr(get_manager_settings(), "daily_report_reminders_enabled", True)
+
     questions = get_questions(emp.id)
     if not questions:
         from app.bot.work_report_handlers import send_report_prompt
@@ -151,11 +153,12 @@ async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMConte
         local_day = datetime.now(ZoneInfo(emp.timezone)).date()
         report_type = "daily_test" if session_type == "daily_test" else "daily"
         report = work_report_service.get_or_create_report(emp.id, report_type, local_day)
-        await send_report_prompt(
-            target.bot, report, telegram_chat_id=str(target.chat.id),
-            prompt_type="test_daily_report" if report_type == "daily_test" else "daily_report",
-            local_day=local_day,
-        )
+        if daily_report_reminders_enabled or report_type == "daily_test":
+            await send_report_prompt(
+                target.bot, report, telegram_chat_id=str(target.chat.id),
+                prompt_type="test_daily_report" if report_type == "daily_test" else "daily_report",
+                local_day=local_day,
+            )
         return
 
     local_day = datetime.now(ZoneInfo(emp.timezone)).date()
@@ -247,7 +250,7 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
                 telegram_chat_id=str(message.chat.id),
                 local_day=date.today(),
             )
-        elif session_type == "evening" and employee_id:
+        elif session_type == "evening" and employee_id and getattr(get_manager_settings(), "daily_report_reminders_enabled", True):
             from app.bot.work_report_handlers import send_report_prompt
             from app.services import work_report_service
 

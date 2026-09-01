@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytz
 
-from app.bot.scheduler import _missed_job_groups, _schedule_weekdays
+from app.bot.scheduler import _missed_job_groups, _schedule_weekdays, _work_time_reminder_dedup_key
 from app.services.digest_service import _digest_allowed_on_day, _is_task_on_day
 
 
@@ -54,3 +54,12 @@ def test_missed_checkin_jobs_group_employees_with_the_same_deadline():
 
     assert len(groups) == 2
     assert next(group for group in groups if group["deadline"] == deadline)["employee_ids"] == [1, 2]
+
+
+def test_work_time_end_reminders_have_distinct_daily_notification_slots():
+    # The Telegram text is intentionally shared, but the in-app mirror must
+    # allow both the 19:00 and 23:00 reminders through.
+    first = _work_time_reminder_dedup_key(7, date(2026, 8, 21), "end", 19)
+    second = _work_time_reminder_dedup_key(7, date(2026, 8, 21), "end", 23)
+
+    assert first != second

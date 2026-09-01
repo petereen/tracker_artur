@@ -25,6 +25,11 @@ def _schedule_weekdays(schedule) -> tuple[int, ...]:
     return tuple((schedule.weekdays if schedule else None) or _DEFAULT_SCHEDULE_WEEKDAYS)
 
 
+def _work_time_reminder_dedup_key(employee_id: int, local_day, reminder_type: str, reminder_hour: int | None = None) -> str:
+    """Keep separate mirror notifications for the two end-of-day prompts."""
+    return f"worktime-reminder:{employee_id}:{local_day}:{reminder_type}:{reminder_hour or 'default'}"
+
+
 def _missed_job_groups(employees_and_schedules):
     """Group missed-check-in jobs that share a local deadline.
 
@@ -102,7 +107,7 @@ def _rebuild_jobs_unlocked():
             scheduler.add_job(send_work_time_reminder, "cron",
                 hour=hour, minute=0, day_of_week=dow, timezone=tz,
                 id=f"work_time_end_{hour}_{emp.id}", replace_existing=True,
-                args=[emp.id, "end"])
+                args=[emp.id, "end", hour])
 
         evening: time = (sch.evening_time if sch else None) or time(17, 30)
         deadline: time = (sch.deadline_time if sch else None) or time(23, 0)
@@ -233,8 +238,11 @@ async def send_survey(employee_id: int):
                 return
             telegram_id = emp.telegram_id
             timezone_name = emp.timezone
+            daily_report_reminders_enabled = getattr(get_manager_settings(), "daily_report_reminders_enabled", True)
         local_day = _local_today(timezone_name)
         report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
+        if not daily_report_reminders_enabled:
+            return
         if not get_questions(employee_id):
             await send_report_prompt(
                 bot, report, telegram_chat_id=telegram_id,
@@ -324,7 +332,7 @@ async def send_reminder(employee_id: int, num: int):
         await bot.session.close()
 
 
-async def send_work_time_reminder(employee_id: int, reminder_type: str):
+async def send_work_time_reminder(employee_id: int, reminder_type: str, reminder_hour: int | None = None):
     """Nudge a worker only when today's work interval needs attention."""
     from app.bot.db import get_session
     from app.models.models import Employee, Schedule
@@ -369,7 +377,7 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str):
         mirror_existing_telegram_notification(
             employee_id=employee_id, kind="worktime_reminder", title="Ажлын цагийн сануулга",
             body="Ажлын цагаа эхлүүлэх эсвэл дуусгахаа мартсан эсэхээ шалгана уу.", target_url="/",
-            dedup_key=f"worktime-reminder:{employee_id}:{local_day}:{reminder_type}",
+            dedup_key=_work_time_reminder_dedup_key(employee_id, local_day, reminder_type, reminder_hour),
         )
     finally:
         await bot.session.close()
