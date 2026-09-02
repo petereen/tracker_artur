@@ -11,8 +11,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from app.bot.db import get_manager_settings
 from app.models.models import WorkReport
 from app.services import work_report_service
+from app.services.manager_recipients import manager_telegram_ids
 from app.services.monthly_report_digest_service import (
     previous_month,
     seed_dummy_monthly_test_reports,
@@ -528,6 +530,32 @@ async def cmd_test_monthly_digest(message: Message, is_manager: bool = False):
         await message.answer(
             "⚠️ Dummy тайлан олдсонгүй эсвэл бүх идэвхтэй ажилтны тайлан бэлэн биш байна. "
             "Эхлээд /seed_monthly_digest ажиллуулна уу."
+        )
+
+
+@router.message(Command("monthly_digest"))
+async def cmd_monthly_digest(message: Message):
+    """Generate and send the real previous-month digest on demand.
+
+    Authorization and delivery are both scoped to the configured management
+    Telegram recipients.  ``reserve=False`` makes this an on-demand read;
+    the scheduled once-per-period delivery guard does not prevent a manager
+    from requesting the current digest again.
+    """
+    recipients = manager_telegram_ids(get_manager_settings())
+    caller_id = str(message.chat.id)
+    if caller_id not in recipients:
+        await message.answer("❌ Энэ команд зөвхөн telegram_admin_ids-д бүртгэгдсэн удирдлагад зориулсан.")
+        return
+
+    sent = await try_send_monthly_report_digest(
+        date.today(),
+        recipients=recipients,
+        reserve=False,
+    )
+    if not sent:
+        await message.answer(
+            "⚠️ Өмнөх сарын бүх идэвхтэй ажилтны батлагдсан тайлан бэлэн болоогүй байна."
         )
 
 

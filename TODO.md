@@ -751,6 +751,7 @@ Collaboration
 - [x] Add focused backend enterprise/RBAC/compatibility tests and frontend semantics/accessibility tests
 
 ## Completed Tasks
+- [x] Add the on-demand `/monthly_digest` Telegram command restricted to configured manager recipients (`backend/app/bot/work_report_handlers.py`, `backend/app/bot/menu.py`, `backend/app/bot/handlers.py`, `backend/tests/test_work_report_handlers.py`)
 - [x] Deliver OYUNS ERP Core Operations MVP: normalized masters, contextual requests, buying/selling workbench, approval-aware KPIs, archive/restore, MN/EN/RU copy, and regression coverage (`backend/app/erp`, `backend/app/models/models.py`, `frontend/src`)
 - [x] Run available focused validation and document environment-dependent checks
 - [ ] Add database-backed migration/replay/concurrency tests and full browser acceptance coverage

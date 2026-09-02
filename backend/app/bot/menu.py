@@ -57,6 +57,7 @@ MANAGER_COMMANDS: list[BotCommand] = [
     BotCommand(command="test_monthly", description="Сарын урсгалын тест"),
     BotCommand(command="seed_monthly_digest", description="Dummy сарын тайлан үүсгэх"),
     BotCommand(command="test_monthly_digest", description="Dummy сарын хураангуй тест"),
+    BotCommand(command="monthly_digest", description="Сарын тайлангийн хураангуй авах"),
 ]
 
 

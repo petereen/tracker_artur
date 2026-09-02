@@ -368,6 +368,7 @@ async def cmd_help(message: Message, is_manager: bool = False):
             "/summary — өчигдрийн хураангуй\n"
             "/week — 7 хоногийн статистик\n"
             "/blockers — гол саад бэрхшээлүүд\n"
+            "/monthly_digest — өмнөх сарын тайлангийн хураангуй\n"
             + tasks_block
         )
     else:
