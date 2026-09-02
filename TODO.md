@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Harmonize calendar filter colors with calendar item colors across desktop, mobile, and availability markers (`frontend/src/index.css`)
 - [x] Send each worker's birthday greeting at 09:00 in their timezone through Telegram and platform notifications (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
 - [x] Restore the previous calendar palette with solid filled pills and implement Google Calendar-style spanning lanes, collision-safe row slotting, and week-wrap slicing (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`) — full frontend suite: 28 files / 93 tests pass; production build and diff checks pass
 - [x] Add collaborator availability popovers, compact calendar items, and persistent type filters with focused regression coverage (`backend/app/routers/enterprise.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`)

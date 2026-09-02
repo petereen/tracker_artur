@@ -510,27 +510,21 @@
   margin-top: 6px;
   padding: 7px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+  --calendar-kind-color: var(--color-accent);
+  --calendar-kind-fill: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+  background: var(--calendar-kind-fill);
   font-size: 11px;
 }
-.calendar-item.reminder {
-  background: var(--color-amber-soft);
-}
-.calendar-item.event {
-  background: color-mix(in srgb, var(--color-purple) 14%, var(--color-surface));
-}
-.calendar-item.holiday {
-  background: var(--color-green-soft);
-}
-.calendar-item.birthday {
-  background: color-mix(in srgb, var(--color-red) 12%, var(--color-surface));
-}
-.calendar-item.project {
-  background: color-mix(in srgb, var(--color-purple) 16%, var(--color-surface));
-}
-.calendar-item.plan {
-  background: var(--color-green-soft);
-}
+.calendar-item.reminder,
+.calendar-filter-chip.reminder { --calendar-kind-color: var(--color-amber); --calendar-kind-fill: var(--color-amber-soft); }
+.calendar-item.event,
+.calendar-filter-chip.event { --calendar-kind-color: var(--color-purple); --calendar-kind-fill: color-mix(in srgb, var(--color-purple) 14%, var(--color-surface)); }
+.calendar-item.holiday,
+.calendar-item.plan,
+.calendar-item.project,
+.calendar-filter-chip.plan { --calendar-kind-color: var(--color-green); --calendar-kind-fill: var(--color-green-soft); }
+.calendar-item.birthday { --calendar-kind-color: var(--color-red); --calendar-kind-fill: color-mix(in srgb, var(--color-red) 12%, var(--color-surface)); }
+.calendar-filter-chip.task { --calendar-kind-color: var(--color-accent); --calendar-kind-fill: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface)); }
 .calendar-item {
   cursor: pointer;
   border: 0;
@@ -4471,10 +4465,7 @@ a {
   height: 6px;
   width: 6px;
 }
-.calendar-filter-chip.active.event { background: color-mix(in srgb, var(--color-purple) 11%, var(--color-surface)); border-color: color-mix(in srgb, var(--color-purple) 42%, var(--color-border)); color: var(--color-purple); }
-.calendar-filter-chip.active.plan { background: var(--color-green-soft); border-color: color-mix(in srgb, var(--color-green) 38%, var(--color-border)); color: var(--color-green); }
-.calendar-filter-chip.active.task { background: var(--color-accent-soft); border-color: color-mix(in srgb, var(--color-accent) 38%, var(--color-border)); color: var(--color-accent); }
-.calendar-filter-chip.active.reminder { background: var(--color-amber-soft); border-color: color-mix(in srgb, var(--color-amber) 38%, var(--color-border)); color: var(--color-amber); }
+.calendar-filter-chip.active { background: var(--calendar-kind-fill); border-color: color-mix(in srgb, var(--calendar-kind-color) 38%, var(--color-border)); color: var(--calendar-kind-color); }
 .calendar-filter-chip:not(.active) i { opacity: 0.35; }
 .calendar-filter-all { color: var(--color-text); font-weight: 650; }
 
@@ -4490,7 +4481,7 @@ a {
 }
 .planning-calendar .calendar-item {
   align-items: center;
-  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+  background: var(--calendar-kind-fill);
   border: 0;
   border-radius: 8px;
   box-sizing: border-box;
@@ -4503,25 +4494,13 @@ a {
   overflow: hidden;
   padding: 0 7px;
 }
-.planning-calendar .calendar-item.reminder { background: var(--color-amber-soft); }
-.planning-calendar .calendar-item.event { background: color-mix(in srgb, var(--color-purple) 14%, var(--color-surface)); }
-.planning-calendar .calendar-item.holiday { background: var(--color-green-soft); }
-.planning-calendar .calendar-item.birthday { background: color-mix(in srgb, var(--color-red) 12%, var(--color-surface)); }
-.planning-calendar .calendar-item.project { background: color-mix(in srgb, var(--color-purple) 16%, var(--color-surface)); }
-.planning-calendar .calendar-item.plan { background: var(--color-green-soft); }
 .planning-calendar .calendar-item-dot {
-  background: var(--color-accent);
+  background: var(--calendar-kind-color);
   border-radius: 50%;
   flex: 0 0 5px;
   height: 5px;
   width: 5px;
 }
-.planning-calendar .calendar-item.event .calendar-item-dot,
-.planning-calendar .calendar-item.project .calendar-item-dot { background: var(--color-purple); }
-.planning-calendar .calendar-item.reminder .calendar-item-dot { background: var(--color-amber); }
-.planning-calendar .calendar-item.plan .calendar-item-dot,
-.planning-calendar .calendar-item.holiday .calendar-item-dot { background: var(--color-green); }
-.planning-calendar .calendar-item.birthday .calendar-item-dot { background: var(--color-red); }
 .planning-calendar .calendar-item strong {
   display: block;
   font-size: 0.68rem;
@@ -10702,10 +10681,14 @@ html.capacitor-native .native-boot-error {
   .mobile-calendar-agenda-item.event .mobile-calendar-agenda-marker { background: var(--color-purple); }
   .mobile-calendar-grid button > i b.reminder,
   .mobile-calendar-agenda-item.reminder .mobile-calendar-agenda-marker { background: var(--color-amber); }
+  .mobile-calendar-grid button > i b.plan,
+  .mobile-calendar-grid button > i b.project,
+  .mobile-calendar-agenda-item.plan .mobile-calendar-agenda-marker,
+  .mobile-calendar-agenda-item.project .mobile-calendar-agenda-marker,
   .mobile-calendar-grid button > i b.holiday,
-  .mobile-calendar-agenda-item.holiday .mobile-calendar-agenda-marker { background: var(--color-red); }
+  .mobile-calendar-agenda-item.holiday .mobile-calendar-agenda-marker { background: var(--color-green); }
   .mobile-calendar-grid button > i b.birthday,
-  .mobile-calendar-agenda-item.birthday .mobile-calendar-agenda-marker { background: var(--color-green); }
+  .mobile-calendar-agenda-item.birthday .mobile-calendar-agenda-marker { background: var(--color-red); }
 
   .mobile-calendar-agenda {
     border-top: 1px solid var(--color-border-soft);
