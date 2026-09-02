@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytz
 
-from app.bot.scheduler import _missed_job_groups, _schedule_weekdays, _work_time_reminder_dedup_key
+from app.bot.scheduler import BIRTHDAY_MESSAGE, _birthday_occurs_on_day, _birthday_schedule_days, _missed_job_groups, _schedule_weekdays, _work_time_reminder_dedup_key
 from app.services.digest_service import _digest_allowed_on_day, _is_task_on_day
 
 
@@ -63,3 +63,59 @@ def test_work_time_end_reminders_have_distinct_daily_notification_slots():
     second = _work_time_reminder_dedup_key(7, date(2026, 8, 21), "end", 23)
 
     assert first != second
+
+
+def test_birthday_greeting_matches_calendar_february_29_fallback():
+    assert _birthday_occurs_on_day(date(1992, 2, 29), date(2026, 2, 28)) is True
+    assert _birthday_occurs_on_day(date(1992, 2, 29), date(2028, 2, 28)) is False
+    assert _birthday_occurs_on_day(date(1992, 2, 29), date(2028, 2, 29)) is True
+
+
+def test_birthday_cron_days_include_leap_day_fallback():
+    assert _birthday_schedule_days(date(1990, 1, 10)) == (10,)
+    assert _birthday_schedule_days(date(1992, 2, 29)) == (28, 29)
+
+
+def test_birthday_greeting_sends_exact_text_and_mirrors_platform(monkeypatch):
+    from app.bot import scheduler
+
+    employee = SimpleNamespace(
+        id=7, name="Бат", birthday=date(1990, 1, 10), timezone="Asia/Ulaanbaatar",
+        telegram_id="123", is_active=True,
+    )
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, _model, _employee_id):
+            return employee
+
+    class FakeBot:
+        def __init__(self):
+            self.messages = []
+            self.session = self
+
+        async def send_message(self, recipient, message):
+            self.messages.append((recipient, message))
+
+        async def close(self):
+            pass
+
+    bot = FakeBot()
+    mirrored = []
+    monkeypatch.setattr("app.bot.db.get_session", lambda: FakeSession())
+    monkeypatch.setattr(scheduler, "_make_bot", lambda: bot)
+    monkeypatch.setattr(scheduler, "_local_today", lambda _timezone: date(2026, 1, 10))
+    monkeypatch.setattr("app.services.user_notifications.mirror_existing_telegram_notification", lambda **kwargs: mirrored.append(kwargs))
+
+    import asyncio
+    asyncio.run(scheduler.send_birthday_greeting(employee.id))
+
+    assert bot.messages == [("123", BIRTHDAY_MESSAGE)]
+    assert mirrored[0]["kind"] == "birthday"
+    assert mirrored[0]["body"] == BIRTHDAY_MESSAGE
+    assert mirrored[0]["telegram_status"] == "sent"

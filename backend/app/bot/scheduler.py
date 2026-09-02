@@ -1,6 +1,6 @@
 """APScheduler — джобы для каждого сотрудника."""
 import logging
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from hashlib import sha256
 
 import pytz
@@ -18,11 +18,17 @@ scheduler = AsyncIOScheduler(jobstores=jobstores, timezone=DEFAULT_TIMEZONE)
 _last_schedule_fingerprint: str | None = None
 _REBUILD_LOCK_KEY = 67129841
 _DEFAULT_SCHEDULE_WEEKDAYS = (1, 2, 3, 4, 5)
+BIRTHDAY_MESSAGE = "🎂 Танд төрсөн өдрийн мэнд хүргэе! 🎉 Ажлын амжилтаар дүүрэн, эрүүл энх, гэр бүл нь аз жаргалаар элбэг байж, сайн сайхан бүхнийг хүсье! 😊"
 
 
 def _schedule_weekdays(schedule) -> tuple[int, ...]:
     """Return configured ISO weekdays, defaulting to the normal workweek."""
     return tuple((schedule.weekdays if schedule else None) or _DEFAULT_SCHEDULE_WEEKDAYS)
+
+
+def _birthday_schedule_days(birthday: date) -> tuple[int, ...]:
+    """Return cron days for a birthday, including leap-day fallback."""
+    return (28, 29) if (birthday.month, birthday.day) == (2, 29) else (birthday.day,)
 
 
 def _work_time_reminder_dedup_key(employee_id: int, local_day, reminder_type: str, reminder_hour: int | None = None) -> str:
@@ -61,7 +67,7 @@ def _rebuild_jobs_unlocked():
     global _last_schedule_fingerprint
     for job in scheduler.get_jobs():
         if any(job.id.startswith(p) for p in
-               ("survey_", "reminder1_", "reminder2_", "missed_", "monthly_report_", "task_morning_", "task_evening_", "work_time_")):
+               ("survey_", "reminder1_", "reminder2_", "missed_", "monthly_report_", "birthday_", "task_morning_", "task_evening_", "work_time_")):
             job.remove()
 
     from app.services.digest_service import send_employee_morning_digest, send_employee_evening_digest
@@ -93,6 +99,17 @@ def _rebuild_jobs_unlocked():
         scheduler.add_job(send_monthly_report_prompt, "cron",
             hour=morning.hour, minute=morning.minute, timezone=tz,
             id=f"monthly_report_{emp.id}", replace_existing=True, args=[emp.id])
+
+        if emp.birthday:
+            # APScheduler omits an invalid day-of-month in non-leap years. A
+            # second job lets February 29 birthdays use February 29 in leap
+            # years while the birthday function maps them to February 28 in
+            # other years, matching the calendar's recurring birthday rule.
+            for birthday_day in _birthday_schedule_days(emp.birthday):
+                scheduler.add_job(send_birthday_greeting, "cron",
+                    month=emp.birthday.month, day=birthday_day, hour=9, minute=0,
+                    timezone=tz, id=f"birthday_{emp.id}_{birthday_day}",
+                    replace_existing=True, args=[emp.id])
 
         weekdays = employee_weekdays
         dow = employee_dow
@@ -476,6 +493,57 @@ async def send_monthly_report_prompt(employee_id: int):
         await bot.session.close()
 
 
+def _birthday_occurs_on_day(birthday: date, local_day: date) -> bool:
+    """Match the calendar's February 29 fallback behavior."""
+    try:
+        return birthday.replace(year=local_day.year) == local_day
+    except ValueError:
+        return local_day.month == 2 and local_day.day == 28
+
+
+async def send_birthday_greeting(employee_id: int):
+    """Send the worker's birthday greeting at 09:00 in their local timezone."""
+    from app.bot.db import get_session
+    from app.models.models import Employee
+
+    with get_session() as s:
+        emp = s.get(Employee, employee_id)
+        if not emp or not emp.is_active or not emp.birthday:
+            return
+        birthday = emp.birthday
+        telegram_id = emp.telegram_id
+        timezone_name = emp.timezone
+        employee_name = emp.name
+
+    local_day = _local_today(timezone_name)
+    if not _birthday_occurs_on_day(birthday, local_day):
+        return
+
+    telegram_status = "unavailable"
+    if telegram_id:
+        bot = _make_bot()
+        try:
+            await bot.send_message(str(telegram_id), BIRTHDAY_MESSAGE)
+            telegram_status = "sent"
+        except Exception:  # noqa: BLE001
+            telegram_status = "failed"
+            log.exception("Birthday greeting Telegram delivery failed employee=%s", employee_id)
+        finally:
+            await bot.session.close()
+
+    from app.services.user_notifications import mirror_existing_telegram_notification
+    mirror_existing_telegram_notification(
+        employee_id=employee_id,
+        kind="birthday",
+        title="Төрсөн өдрийн мэндчилгээ",
+        body=BIRTHDAY_MESSAGE,
+        target_url="/profile",
+        dedup_key=f"birthday:{employee_id}:{local_day.year}",
+        telegram_status=telegram_status,
+    )
+    log.info("Birthday greeting delivered employee=%s name=%s day=%s", employee_id, employee_name, local_day)
+
+
 def _schedule_fingerprint() -> str:
     """Hash only the values that determine employee-specific scheduler jobs."""
     from app.bot.db import get_all_active_employees, get_schedule
@@ -485,6 +553,7 @@ def _schedule_fingerprint() -> str:
         sch = get_schedule(emp.id)
         values.append(repr((
             emp.id, emp.timezone, emp.is_active,
+            emp.birthday,
             sch.evening_time if sch else None,
             sch.morning_time if sch else None,
             tuple(sch.weekdays or []) if sch else (),
