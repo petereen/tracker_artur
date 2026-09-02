@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Notify calendar collaborators on both Telegram and the platform when an item is created (`backend/app/routers/enterprise.py`, `backend/app/services/reminder_service.py`, `backend/tests`)
 - [x] Harmonize calendar filter colors with calendar item colors across desktop, mobile, and availability markers (`frontend/src/index.css`)
 - [x] Send each worker's birthday greeting at 09:00 in their timezone through Telegram and platform notifications (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
 - [x] Restore the previous calendar palette with solid filled pills and implement Google Calendar-style spanning lanes, collision-safe row slotting, and week-wrap slicing (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`) — full frontend suite: 28 files / 93 tests pass; production build and diff checks pass

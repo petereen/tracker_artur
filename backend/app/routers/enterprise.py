@@ -1378,6 +1378,7 @@ async def create_task(data: EnterpriseTaskInput, idempotency_key: str | None = H
         body=f"Танд “{task.title}” даалгавар оноолоо.", target_url=f"/tasks?task={task.id}",
         payload={"task_id": task.id, "title": task.title, "deadline_iso": task.deadline_at.isoformat() if task.deadline_at else None, "creator_name": creator.name if creator else None, "task_url": task_url},
         source_event_id=source_event.id, task_id=task.id, dedup_key=f"task-created:{task.id}",
+        deliver_telegram=True,
     )
     if task.workflow_status == "review" and reviewer_ids:
         assignee = await db.get(Employee, task.assignee_id) if task.assignee_id else None
@@ -1488,6 +1489,7 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
             body=f"Танд “{task.title}” даалгавар оноолоо.", target_url=f"/tasks?task={task.id}",
             payload={"task_id": task.id, "title": task.title, "deadline_iso": task.deadline_at.isoformat() if task.deadline_at else None, "creator_name": creator.name if creator else None, "task_url": task_url},
             source_event_id=source_event.id, task_id=task.id, dedup_key=f"task-assigned:{task.id}:v{task.version}",
+            deliver_telegram=True,
         )
     if next_workflow == "review" and before["workflow_status"] != "review" and current_reviewers:
         assignee = await db.get(Employee, task.assignee_id) if task.assignee_id else None
@@ -1602,6 +1604,40 @@ async def _calendar_collaborator_ids(db: AsyncSession, entry_id: int) -> list[in
     return list((await db.execute(select(CalendarEntryCollaborator.employee_id).where(
         CalendarEntryCollaborator.calendar_entry_id == entry_id,
     ).order_by(CalendarEntryCollaborator.employee_id))).scalars().all())
+
+
+async def _notify_calendar_collaborators(
+    db: AsyncSession,
+    *,
+    actor: ActorContext,
+    entry: CalendarEntry,
+    collaborator_ids: list[int],
+    source_event_id: int,
+) -> None:
+    """Create the platform notification and Telegram delivery for each collaborator."""
+    if not collaborator_ids:
+        return
+    notification_kind = "calendar_reminder" if entry.kind == "reminder" else "event"
+    await create_notifications(
+        db,
+        organization_id=actor.organization_id,
+        employee_ids=collaborator_ids,
+        exclude_employee_id=actor.employee_id,
+        kind=notification_kind,
+        title="Календарт нэмэгдлээ",
+        body=f"Таныг “{entry.title}”-д оролцогчоор нэмлээ.",
+        target_url="/calendar",
+        payload={
+            "calendar_entry_id": entry.id,
+            "title": entry.title,
+            "starts_at": entry.starts_at.isoformat(),
+            "location": entry.location,
+        },
+        source_event_id=source_event_id,
+        dedup_key=f"calendar-entry-assigned:{entry.id}:v{entry.version}",
+        immediate=True,
+        deliver_telegram=True,
+    )
 
 
 def _holiday_provider_rows(payload: object) -> list[tuple[date, str, str | None]]:
@@ -1766,22 +1802,13 @@ async def create_calendar_entry(data: CalendarEntryInput, db: AsyncSession = Dep
         db.add(CalendarEntryCollaborator(organization_id=actor.organization_id, calendar_entry_id=entry.id, employee_id=employee_id))
     await db.flush()
     source_event = await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="created", after=_calendar_entry_out(entry, collaborator_ids))
-    if collaborator_ids:
-        notification_kind = "calendar_reminder" if entry.kind == "reminder" else "event"
-        await create_notifications(
-            db,
-            organization_id=actor.organization_id,
-            employee_ids=collaborator_ids,
-            exclude_employee_id=actor.employee_id,
-            kind=notification_kind,
-            title="Календарт нэмэгдлээ",
-            body=f"Таныг “{entry.title}”-д оролцогчоор нэмлээ.",
-            target_url="/calendar",
-            payload={"calendar_entry_id": entry.id, "title": entry.title, "starts_at": entry.starts_at.isoformat(), "location": entry.location},
-            source_event_id=source_event.id,
-            dedup_key=f"calendar-entry-assigned:{entry.id}:v{entry.version}",
-            immediate=True,
-        )
+    await _notify_calendar_collaborators(
+        db,
+        actor=actor,
+        entry=entry,
+        collaborator_ids=collaborator_ids,
+        source_event_id=source_event.id,
+    )
     if entry.visibility == "private" and entry.account_id:
         await google_queue_entity_sync(db, entry.account_id, "calendar_entry", entry.id, entry.version)
     await db.commit()
@@ -1826,22 +1853,13 @@ async def update_calendar_entry(entry_id: int, data: CalendarEntryPatch, if_matc
     await db.flush()
     source_event = await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="updated", version=entry.version, after=_calendar_entry_out(entry, collaborator_ids))
     newly_assigned = sorted(set(collaborator_ids) - set(previous_collaborator_ids))
-    if newly_assigned:
-        notification_kind = "calendar_reminder" if entry.kind == "reminder" else "event"
-        await create_notifications(
-            db,
-            organization_id=actor.organization_id,
-            employee_ids=newly_assigned,
-            exclude_employee_id=actor.employee_id,
-            kind=notification_kind,
-            title="Календарт нэмэгдлээ",
-            body=f"Таныг “{entry.title}”-д оролцогчоор нэмлээ.",
-            target_url="/calendar",
-            payload={"calendar_entry_id": entry.id, "title": entry.title, "starts_at": entry.starts_at.isoformat(), "location": entry.location},
-            source_event_id=source_event.id,
-            dedup_key=f"calendar-entry-assigned:{entry.id}:v{entry.version}",
-            immediate=True,
-        )
+    await _notify_calendar_collaborators(
+        db,
+        actor=actor,
+        entry=entry,
+        collaborator_ids=newly_assigned,
+        source_event_id=source_event.id,
+    )
     if entry.visibility == "private" and entry.account_id:
         await google_queue_entity_sync(db, entry.account_id, "calendar_entry", entry.id, entry.version)
     if previous_sync_account_id and (entry.visibility != "private" or entry.account_id != previous_sync_account_id):

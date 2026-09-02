@@ -241,4 +241,16 @@ def _render_outbox(item: dict):
     if item["kind"] == "task_deadline":
         text = f"⏰ <b>Даалгаврын сануулга</b>\n\n#{tid} {title}\nХугацаа: <b>{dl_h}</b> ({p.get('when', 'удахгүй')})"
         return text, (task_actions_kb(tid) if tid else None)
+    if item["kind"] in {"calendar_reminder", "event"}:
+        starts_at = p.get("starts_at")
+        starts_at_dt = datetime.fromisoformat(starts_at) if starts_at else None
+        entry_url = p.get("target_url") or f"{settings.PUBLIC_APP_URL.rstrip('/')}/calendar"
+        text = (
+            f"{'⏰' if item['kind'] == 'calendar_reminder' else '📅'} <b>{title}</b>\n\n"
+            f"{p.get('body', '')}\n"
+            f"Эхлэх: <b>{_fmt_deadline(starts_at_dt) if starts_at_dt else 'Тодорхойгүй'}</b>"
+        )
+        if p.get("location"):
+            text += f"\nБайршил: {p['location']}"
+        return f"{text}\n🔗 <b>Календарь нээх:</b> {entry_url}", None
     return p.get("text") or f"🔔 <b>{p.get('title', 'Мэдэгдэл')}</b>\n\n{p.get('body', '')}", None
