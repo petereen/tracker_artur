@@ -801,6 +801,22 @@ export interface AnalyticsDrilldown { metric: AnalyticsMetric; scope: string; da
 export function useAnalyticsDrilldown(metric: AnalyticsMetric | undefined, period: DateRange, employeeId?: number) { return useQuery<AnalyticsDrilldown>({ queryKey: ['v1', 'analytics', 'drilldown', metric, period, employeeId], queryFn: () => api.get('/v1/analytics/drilldown', { params: { metric, ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((r) => r.data), enabled: Boolean(metric) }) }
 
 export interface PersonalTimeBlock { id: number; title: string; starts_at: string; ends_at: string; task_id: number | null; version: number }
+export interface CalendarEntry {
+  id: number
+  kind: 'reminder' | 'event'
+  visibility: 'private' | 'company'
+  title: string
+  description: string | null
+  location: string | null
+  starts_at: string
+  ends_at: string
+  is_all_day: boolean
+  recurrence_rule: string | null
+  remind_at: string | null
+  collaborator_ids: number[]
+  version: number
+  can_edit: boolean
+}
 
 export function useCalendarEvents(scope: 'private' | 'corporate', anchor: Date) {
   const months = [-1, 0, 1].map((offset) => {
@@ -842,6 +858,24 @@ export function useSetHolidayCountry() {
 export function useCreateCalendarEntry() {
   const queryClient = useQueryClient()
   return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/entries', input).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success('Календарийн item хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Календарийн item хадгалагдсангүй') })
+}
+
+export function useUpdateCalendarEntry() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, version, ...input }: { id: number; version: number } & Record<string, unknown>) => api.patch(`/v1/calendar/entries/${id}`, input, { headers: { 'If-Match': String(version) } }).then((response) => response.data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success('Календарийн item шинэчлэгдлээ') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Календарийн item шинэчлэгдсэнгүй'),
+  })
+}
+
+export function useDeleteCalendarEntry() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id }: { id: number; version?: number }) => api.delete(`/v1/calendar/entries/${id}`),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success('Календарийн item устгагдлаа') },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Календарийн item устгагдсангүй'),
+  })
 }
 
 export function useTodayAgenda() {

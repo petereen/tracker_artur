@@ -51,6 +51,7 @@ from app.models.models import (  # noqa: F401
     LeaveBalance,
     AttendanceLog,
     EmployeeCompensationItem,
+    CalendarEntryCollaborator,
 )
 from app.models.contracts import (  # noqa: F401
     CONTRACT_DOCUMENT_TYPES,

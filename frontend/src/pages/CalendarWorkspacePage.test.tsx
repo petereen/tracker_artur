@@ -22,6 +22,11 @@ vi.mock('../api/enterprise', () => ({
   useCalendarEvents: () => ({ data: state.events, isLoading: false, isFetching: false, isError: false }),
   useCreateCalendarEntry: () => ({ isPending: false, mutateAsync: vi.fn() }),
   useCreateEnterpriseTask: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useUpdateCalendarEntry: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useDeleteCalendarEntry: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useUpdateEnterpriseTask: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useDeleteEnterpriseTask: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useWorkerDirectory: () => ({ data: [] }),
   useHolidaySettings: () => ({ data: { country: 'MN', countries: [] } }),
   useSetHolidayCountry: () => ({ isPending: false, mutate: vi.fn() }),
 }))
@@ -57,8 +62,10 @@ describe('GoogleCalendarSyncControl', () => {
   })
 
   it('renders a compact mobile month and selected-day agenda for multi-day items', () => {
-    state.events.tasks = [{ id: 44, title: 'Олон өдрийн ажил', start_at: '2026-08-17', deadline_at: '2026-08-19', primary_owner_name: 'Test' }]
-    state.events.entries = [{ id: 45, kind: 'event', title: 'Уулзалт', starts_at: '2026-08-18', ends_at: '2026-08-18' }]
+    const now = new Date()
+    const day = (value: number) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(value).padStart(2, '0')}`
+    state.events.tasks = [{ id: 44, title: 'Олон өдрийн ажил', start_at: day(17), deadline_at: day(19), primary_owner_name: 'Test' }]
+    state.events.entries = [{ id: 45, kind: 'event', title: 'Уулзалт', starts_at: day(18), ends_at: day(18) }]
     const { container } = render(<CalendarWorkspacePage />)
     expect(container.querySelector('.mobile-calendar')).toBeInTheDocument()
     expect(container.querySelectorAll('.mobile-calendar-grid button')).toHaveLength(42)

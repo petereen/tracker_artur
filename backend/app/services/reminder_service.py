@@ -44,6 +44,9 @@ def schedule_task_reminders(task: dict) -> None:
     """Создаёт date-джобы напоминаний и эскалации для задачи с дедлайном."""
     from app.bot.scheduler import scheduler
 
+    if task.get("workflow_status") == "review":
+        cancel_task_jobs(task["id"])
+        return
     deadline = task.get("deadline_at")
     if not deadline:
         return
@@ -89,7 +92,7 @@ def reconcile_task_reminders() -> None:
     from app.bot.scheduler import scheduler
 
     for task in task_service.list_active_with_deadline():
-        if task["status"] == "overdue":
+        if task["status"] == "overdue" or task.get("workflow_status") == "review":
             continue  # уже просрочена и обработана — не пересоздаём джобы
         if scheduler.get_job(f"{_job_prefix(task['id'])}escalate"):
             continue
@@ -116,7 +119,7 @@ def _fmt_deadline(dt: datetime | None) -> str:
 
 async def send_task_reminder(task_id: int, minutes_before: int) -> None:
     task = task_service.get_task(task_id)
-    if not task or task["status"] in ("done", "cancelled"):
+    if not task or task["status"] in ("done", "cancelled") or task.get("workflow_status") == "review":
         return
     recipients = task.get("assignees") or ([{"id": task["assignee_id"], "telegram_id": task["assignee_tg"], "timezone": task["assignee_tz"]}] if task.get("assignee_id") else [])
     if not recipients:
@@ -151,7 +154,7 @@ def escalate_overdue(task_id: int) -> None:
     (с учётом тихих часов). Руководителю — НЕ здесь, а в утреннем дайджесте
     после `overdue_escalation_days` рабочих дней. Sync (date-job в threadpool)."""
     task = task_service.get_task(task_id)
-    if not task or task["status"] in ("done", "cancelled"):
+    if not task or task["status"] in ("done", "cancelled") or task.get("workflow_status") == "review":
         return
 
     task_service.set_status(task_id, "overdue")
@@ -189,7 +192,7 @@ async def drain_notification_outbox() -> None:
         for item in due:
             try:
                 # Для задач, которые уже закрыты — не слать (но пометить отправленным).
-                if item["task_id"] and item["task_status"] in ("done", "cancelled"):
+                if item["task_id"] and (item["task_status"] in ("done", "cancelled") or item.get("task_workflow_status") == "review"):
                     task_service.mark_outbox(item["id"], "sent")
                     continue
                 text, kb = _render_outbox(item)

@@ -72,7 +72,7 @@ def _fmt_ub_deadline(dt: datetime | None) -> str:
 def _fmt_task_line(t: dict, *, with_assignee: bool = False) -> str:
     em = _PRIORITY_EMOJI.get(t["priority"], "🟡")
     who = f" → {t['assignee_name']}" if with_assignee and t.get("assignee_name") else ""
-    overdue = " ⚠️хугацаа хэтэрсэн" if t["status"] == "overdue" else ""
+    overdue = " ⚠️хугацаа хэтэрсэн" if t["status"] == "overdue" and t.get("workflow_status") != "review" else ""
     return f"{em} #{t['id']} {t['title']}{who} — {_fmt_deadline(t['deadline_at'])}{overdue}"
 
 
@@ -841,7 +841,7 @@ async def cmd_dashboard(message: Message, employee=None, is_manager: bool = Fals
             await message.answer("✨ Идэвхтэй даалгавар алга.")
             return
         total = sum(len(v) for v in groups.values())
-        overdue = sum(1 for v in groups.values() for t in v if t["status"] == "overdue")
+        overdue = sum(1 for v in groups.values() for t in v if t["status"] == "overdue" and t.get("workflow_status") != "review")
         lines = [f"👔 <b>Идэвхтэй даалгаврууд ({total})</b>\n"]
         for name, items in groups.items():
             lines.append(f"\n👤 <b>{name}</b> ({len(items)}):")

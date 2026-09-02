@@ -189,9 +189,9 @@ def _iso(value: datetime) -> str:
 
 def _fingerprint(entity_type: str, entity: Task | CalendarEntry) -> str:
     if entity_type == "task":
-        values = {"type": "task", "title": entity.title, "description": entity.description or "", "start": entity.start_at.isoformat() if entity.start_at else None, "end": entity.deadline_at.isoformat() if entity.deadline_at else None, "all_day": bool(entity.is_all_day), "status": entity.workflow_status}
+        values = {"type": "task", "title": entity.title, "description": entity.description or "", "location": entity.work_location or "", "start": entity.start_at.isoformat() if entity.start_at else None, "end": entity.deadline_at.isoformat() if entity.deadline_at else None, "all_day": bool(entity.is_all_day), "status": entity.workflow_status}
     else:
-        values = {"type": "calendar_entry", "title": entity.title, "description": entity.description or "", "start": entity.starts_at.isoformat(), "end": entity.ends_at.isoformat(), "all_day": bool(entity.is_all_day), "recurrence": entity.recurrence_rule}
+        values = {"type": "calendar_entry", "title": entity.title, "description": entity.description or "", "location": entity.location or "", "start": entity.starts_at.isoformat(), "end": entity.ends_at.isoformat(), "all_day": bool(entity.is_all_day), "recurrence": entity.recurrence_rule}
     return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
 
 
@@ -214,7 +214,7 @@ def _event_body(entity_type: str, entity: Task | CalendarEntry, tz: ZoneInfo, fi
         start_payload, end_payload = {"date": local_start.isoformat()}, {"date": local_end.isoformat()}
     else:
         start_payload, end_payload = {"dateTime": _iso(start), "timeZone": str(tz)}, {"dateTime": _iso(end), "timeZone": str(tz)}
-    body: dict[str, Any] = {"summary": entity.title, "description": entity.description or "", "start": start_payload, "end": end_payload, "extendedProperties": {"private": {"oyunsEntityType": entity_type, "oyunsEntityId": str(entity.id), "oyunsPlatformFingerprint": fingerprint, "oyunsSource": "platform"}}}
+    body: dict[str, Any] = {"summary": entity.title, "description": entity.description or "", "location": getattr(entity, "work_location", None) or getattr(entity, "location", None) or "", "start": start_payload, "end": end_payload, "extendedProperties": {"private": {"oyunsEntityType": entity_type, "oyunsEntityId": str(entity.id), "oyunsPlatformFingerprint": fingerprint, "oyunsSource": "platform"}}}
     if recurrence:
         body["recurrence"] = [recurrence] if isinstance(recurrence, str) else recurrence
     return body
@@ -487,7 +487,7 @@ async def incremental_sync(db: AsyncSession, connection_id: int) -> None:
             if ends_at <= starts_at:
                 continue
             recurrence = (event.get("recurrence") or [None])[0]
-            entry = CalendarEntry(organization_id=account.organization_id, account_id=account.id, created_by_account_id=account.id, kind="event", visibility="private", title=event.get("summary") or "Google Calendar event", description=event.get("description"), starts_at=starts_at, ends_at=ends_at, is_all_day=is_all_day, recurrence_rule=recurrence, recurrence_exceptions=[], version=1)
+            entry = CalendarEntry(organization_id=account.organization_id, account_id=account.id, created_by_account_id=account.id, kind="event", visibility="private", title=event.get("summary") or "Google Calendar event", description=event.get("description"), location=event.get("location"), starts_at=starts_at, ends_at=ends_at, is_all_day=is_all_day, recurrence_rule=recurrence, recurrence_exceptions=[], version=1)
             db.add(entry)
             await db.flush()
             db.add(CalendarEventLink(connection_id=connection.id, calendar_entry_id=entry.id, external_event_id=external_id, external_recurring_event_id=recurring_id or (external_id if event.get("recurrence") else None), external_etag=event.get("etag"), source="google", platform_version=entry.version, sync_state="synced", platform_fingerprint=_fingerprint("calendar_entry", entry)))

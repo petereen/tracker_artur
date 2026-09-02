@@ -29,6 +29,7 @@ function formatDeadline(dt: string | null): string {
 }
 
 function isOverdue(task: TaskOut): boolean {
+  if ((task as TaskOut & { workflow_status?: string }).workflow_status === 'review') return false
   if (!task.deadline_at) return false
   if (task.status === 'done' || task.status === 'cancelled') return false
   return new Date(task.deadline_at) < new Date()

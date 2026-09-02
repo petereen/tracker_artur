@@ -147,7 +147,7 @@ def list_assigned_to(employee_id: int, *, only_active: bool = True) -> list[dict
     with get_session() as s:
         q = select(Task).where(Task.assignee_id == employee_id)
         if only_active:
-            q = q.where(Task.status.in_(ACTIVE_STATUSES))
+            q = q.where(Task.status.in_(ACTIVE_STATUSES), Task.workflow_status != "review")
         q = q.order_by(Task.deadline_at.asc().nullslast(), Task.priority.asc())
         return [_to_dict(s, t) for t in s.execute(q).scalars()]
 
@@ -163,7 +163,7 @@ def list_created_by(*, employee_id: Optional[int], tg_id: Optional[str], only_ac
             return []
         q = select(Task).where(or_(*conds))
         if only_active:
-            q = q.where(Task.status.in_(ACTIVE_STATUSES))
+            q = q.where(Task.status.in_(ACTIVE_STATUSES), Task.workflow_status != "review")
         q = q.order_by(Task.deadline_at.asc().nullslast(), Task.priority.asc())
         return [_to_dict(s, t) for t in s.execute(q).scalars()]
 
@@ -241,7 +241,7 @@ def list_for_actor(
         statuses = list(ACTIVE_STATUSES)
         if include_completed:
             statuses.append("done")
-        q = q.where(Task.status.in_(statuses))
+        q = q.where(Task.status.in_(statuses), Task.workflow_status != "review")
 
         if start_at is not None and end_at is not None:
             in_range = (
@@ -263,7 +263,7 @@ def list_for_actor(
         q = q.order_by(
             case(
                 (
-                    (Task.status == "overdue")
+                    ((Task.status == "overdue") & (Task.workflow_status != "review"))
                     | (
                         Task.deadline_at.isnot(None)
                         & (Task.deadline_at < now_utc)
@@ -283,7 +283,7 @@ def list_for_actor(
 def list_active_with_deadline() -> list[dict]:
     """Активные задачи с дедлайном — для реконсайла напоминаний из процесса бота."""
     with get_session() as s:
-        q = select(Task).where(Task.status.in_(ACTIVE_STATUSES), Task.deadline_at.isnot(None))
+        q = select(Task).where(Task.status.in_(ACTIVE_STATUSES), Task.workflow_status != "review", Task.deadline_at.isnot(None))
         return [_to_dict(s, t) for t in s.execute(q).scalars()]
 
 
@@ -292,7 +292,7 @@ def all_active_grouped_by_assignee() -> dict[str, list[dict]]:
     with get_session() as s:
         q = (
             select(Task)
-            .where(Task.status.in_(ACTIVE_STATUSES))
+            .where(Task.status.in_(ACTIVE_STATUSES), Task.workflow_status != "review")
             .order_by(Task.assignee_id, Task.deadline_at.asc().nullslast())
         )
         groups: dict[str, list[dict]] = {}
@@ -328,6 +328,15 @@ def submit_for_review(task_id: int, *, by_employee_id: Optional[int] = None) -> 
         task.workflow_status = "review"
         task.completed_at = None
         task.completed_by_id = None
+        notifications = s.execute(select(UserNotification).where(
+            UserNotification.organization_id == task.organization_id,
+            UserNotification.kind.in_(("task_deadline", "task_overdue")),
+            UserNotification.read_at.is_(None),
+        )).scalars().all()
+        now = datetime.now(timezone.utc)
+        for notification in notifications:
+            if isinstance(notification.payload, dict) and notification.payload.get("task_id") == task.id:
+                notification.read_at = now
         task.version = (task.version or 1) + 1
         s.commit()
         s.refresh(task)
@@ -381,11 +390,13 @@ def mark_overdue_pinged(task_id: int) -> None:
 def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, task_id=None) -> None:
     if not recipient_tg:
         return
+    payload = payload or {}
     with get_session() as s:
         employee = s.execute(select(Employee).where(Employee.telegram_id == str(recipient_tg))).scalar_one_or_none()
         account = s.execute(select(UserAccount).where(UserAccount.employee_id == employee.id, UserAccount.status == "active")).scalar_one_or_none() if employee else None
         user_notification_id = None
         if account:
+            notification_payload = {**(payload or {}), "task_id": task_id} if task_id else payload
             web_key = f"legacy:{dedup_key}:account:{account.id}"
             notification = s.execute(select(UserNotification).where(UserNotification.dedup_key == web_key)).scalar_one_or_none()
             if not notification:
@@ -394,7 +405,7 @@ def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, 
                 notification = UserNotification(
                     organization_id=account.organization_id, recipient_account_id=account.id,
                     recipient_employee_id=employee.id, kind=kind, title=title, body=body,
-                    target_url=f"/tasks?task={task_id}" if task_id else "/tasks", payload=payload,
+                    target_url=f"/tasks?task={task_id}" if task_id else "/tasks", payload=notification_payload or {},
                     telegram_status="queued", dedup_key=web_key,
                     is_priority=kind in {"task_assigned", "task_review_requested", "task_deadline", "task_overdue"},
                 )
@@ -461,6 +472,7 @@ def fetch_due_outbox(limit: int = 25) -> list[dict]:
                 "task_description": task.description if task else None,
                 "task_deadline_at": task.deadline_at if task else None,
                 "task_status": task.status if task else None,
+                "task_workflow_status": task.workflow_status if task else None,
             })
         return out
 

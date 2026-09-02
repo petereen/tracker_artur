@@ -1546,6 +1546,7 @@ class CalendarEntry(Base):
     visibility = Column(Text, nullable=False, server_default="private", default="private")
     title = Column(Text, nullable=False)
     description = Column(Text)
+    location = Column(Text)
     starts_at = Column(DateTime(timezone=True), nullable=False)
     ends_at = Column(DateTime(timezone=True), nullable=False)
     is_all_day = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
@@ -1555,6 +1556,17 @@ class CalendarEntry(Base):
     version = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class CalendarEntryCollaborator(Base):
+    __tablename__ = "calendar_entry_collaborators"
+    __table_args__ = (UniqueConstraint("calendar_entry_id", "employee_id", name="uq_calendar_entry_collaborators"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    calendar_entry_id = Column(Integer, ForeignKey("calendar_entries.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    assigned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class HolidayRecord(Base):

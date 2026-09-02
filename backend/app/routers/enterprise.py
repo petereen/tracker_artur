@@ -28,6 +28,7 @@ from app.core.enterprise_deps import ActorContext, get_actor, require_roles
 from app.models.models import (
     CalendarConnection,
     CalendarEntry,
+    CalendarEntryCollaborator,
     HolidayRecord,
     AssistantConversation,
     AssistantMessage,
@@ -317,8 +318,21 @@ def _task_out(item: Task) -> dict:
         "version": item.version, "is_archived": item.is_archived,
         "created_by_id": item.created_by_id,
         "created_at": item.created_at, "completed_at": item.completed_at,
-        "is_overdue": bool(item.deadline_at and item.deadline_at < datetime.now(timezone.utc) and item.workflow_status not in {"done", "cancelled"}),
+        "is_overdue": bool(item.deadline_at and item.deadline_at < datetime.now(timezone.utc) and item.workflow_status not in {"done", "cancelled", "review"}),
     }
+
+
+async def _suppress_task_deadline_notifications(db: AsyncSession, *, task: Task) -> None:
+    """Clear unread deadline/overdue alerts when work moves into review."""
+    rows = (await db.execute(select(UserNotification).where(
+        UserNotification.organization_id == task.organization_id,
+        UserNotification.kind.in_(("task_deadline", "task_overdue")),
+        UserNotification.read_at.is_(None),
+    ))).scalars().all()
+    now = datetime.now(timezone.utc)
+    for notification in rows:
+        if isinstance(notification.payload, dict) and notification.payload.get("task_id") == task.id:
+            notification.read_at = now
 
 
 def _employee_avatar_url(employee: Employee | None) -> str | None:
@@ -698,6 +712,8 @@ class CalendarEntryInput(BaseModel):
     visibility: Literal["private", "company"] = "private"
     title: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=6000)
+    location: str | None = Field(default=None, max_length=1000)
+    collaborator_ids: list[int] = Field(default_factory=list, max_length=100)
     starts_at: datetime
     ends_at: datetime
     is_all_day: bool = False
@@ -710,6 +726,8 @@ class CalendarEntryPatch(BaseModel):
     visibility: Literal["private", "company"] | None = None
     title: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=6000)
+    location: str | None = Field(default=None, max_length=1000)
+    collaborator_ids: list[int] | None = Field(default=None, max_length=100)
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     is_all_day: bool | None = None
@@ -1211,7 +1229,7 @@ async def list_tasks(
     elif kind == "subtask":
         query = query.where(Task.parent_task_id.isnot(None))
     if overdue:
-        query = query.where(Task.deadline_at < datetime.now(timezone.utc), Task.workflow_status.notin_({"done", "cancelled"}))
+        query = query.where(Task.deadline_at < datetime.now(timezone.utc), Task.workflow_status.notin_({"done", "cancelled", "review"}))
     if date_from:
         query = query.where(or_(Task.deadline_at.is_(None), Task.deadline_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)))
     if date_to:
@@ -1446,6 +1464,8 @@ async def update_task(task_id: int, data: EnterpriseTaskPatch, if_match: str | N
     if data.workflow_status:
         task.status = LEGACY_STATUS[data.workflow_status]
         task.completed_at = datetime.now(timezone.utc) if data.workflow_status == "done" else None
+        if data.workflow_status == "review":
+            await _suppress_task_deadline_notifications(db, task=task)
     task.version += 1
     await db.flush()
     current_assignees = (await db.execute(select(TaskAssignee.employee_id).where(TaskAssignee.task_id == task.id))).scalars().all()
@@ -1528,7 +1548,7 @@ async def list_deadlines(db: AsyncSession = Depends(get_db), actor: ActorContext
             item["bucket"] = "none"
             continue
         due = datetime.fromisoformat(item["due_date"].replace("Z", "+00:00")) if "T" in item["due_date"] else datetime.combine(date.fromisoformat(item["due_date"]), datetime.max.time(), tzinfo=timezone.utc)
-        item["bucket"] = "overdue" if due < now else "soon" if due <= now + timedelta(days=7) else "later"
+        item["bucket"] = "overdue" if due < now and not (item["type"] in {"task", "subtask"} and item["status"] == "review") else "soon" if due <= now + timedelta(days=7) else "later"
     order = {"overdue": 0, "soon": 1, "later": 2, "none": 3}
     return sorted(items, key=lambda item: (order[item["bucket"]], item["due_date"] or "9999", item["title"]))
 
@@ -1553,8 +1573,32 @@ def _time_block_out(item: PersonalTimeBlock) -> dict:
     return {"id": item.id, "title": item.title, "starts_at": item.starts_at, "ends_at": item.ends_at, "task_id": item.task_id, "version": item.version}
 
 
-def _calendar_entry_out(item: CalendarEntry) -> dict:
-    return {"id": item.id, "kind": item.kind, "visibility": item.visibility, "title": item.title, "description": item.description, "starts_at": item.starts_at, "ends_at": item.ends_at, "is_all_day": item.is_all_day, "recurrence_rule": item.recurrence_rule, "remind_at": item.remind_at, "version": item.version, "can_edit": item.created_by_account_id is None or item.created_by_account_id == item.account_id}
+def _calendar_entry_out(item: CalendarEntry, collaborator_ids: list[int] | None = None) -> dict:
+    return {"id": item.id, "kind": item.kind, "visibility": item.visibility, "title": item.title, "description": item.description, "location": item.location, "starts_at": item.starts_at, "ends_at": item.ends_at, "is_all_day": item.is_all_day, "recurrence_rule": item.recurrence_rule, "remind_at": item.remind_at, "version": item.version, "collaborator_ids": collaborator_ids or [], "can_edit": item.created_by_account_id is None or item.created_by_account_id == item.account_id}
+
+
+async def _calendar_collaborators(db: AsyncSession, *, actor: ActorContext, employee_ids: list[int]) -> list[int]:
+    requested = set(employee_ids)
+    if any(employee_id != actor.employee_id for employee_id in requested) and not await actor_can_assign_tasks(
+        db, organization_id=actor.organization_id, employee_id=actor.employee_id, roles=actor.roles,
+    ):
+        raise HTTPException(status_code=403, detail="Your role cannot assign collaborators")
+    if not requested:
+        return []
+    valid = set((await db.execute(select(Employee.id).where(
+        Employee.organization_id == actor.organization_id,
+        Employee.id.in_(requested),
+        Employee.is_active.is_(True),
+    ))).scalars().all())
+    if valid != requested:
+        raise HTTPException(status_code=400, detail="Calendar collaborator is invalid")
+    return sorted(requested)
+
+
+async def _calendar_collaborator_ids(db: AsyncSession, entry_id: int) -> list[int]:
+    return list((await db.execute(select(CalendarEntryCollaborator.employee_id).where(
+        CalendarEntryCollaborator.calendar_entry_id == entry_id,
+    ).order_by(CalendarEntryCollaborator.employee_id))).scalars().all())
 
 
 def _holiday_provider_rows(payload: object) -> list[tuple[date, str, str | None]]:
@@ -1651,11 +1695,19 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
         blocks = [{"kind": "time_block", **_time_block_out(row)} for row in rows]
     entry_query = select(CalendarEntry).where(CalendarEntry.organization_id == actor.organization_id, CalendarEntry.starts_at < end, CalendarEntry.ends_at > start)
     if scope == "private":
-        entry_query = entry_query.where(CalendarEntry.account_id == actor.account_id)
+        collaborator_entry_ids = select(CalendarEntryCollaborator.calendar_entry_id).where(CalendarEntryCollaborator.employee_id == actor.employee_id) if actor.employee_id else select(CalendarEntryCollaborator.calendar_entry_id).where(CalendarEntryCollaborator.id == -1)
+        entry_query = entry_query.where(or_(CalendarEntry.account_id == actor.account_id, CalendarEntry.id.in_(collaborator_entry_ids)))
     else:
         entry_query = entry_query.where(CalendarEntry.visibility == "company")
     entry_rows = (await db.execute(entry_query.order_by(CalendarEntry.starts_at))).scalars().all()
-    entries = [{**_calendar_entry_out(row), "can_edit": row.created_by_account_id == actor.account_id or (row.visibility == "company" and actor.has_any_role(*MANAGEMENT_ROLES))} for row in entry_rows]
+    entry_ids = [row.id for row in entry_rows]
+    collaborator_rows = (await db.execute(select(CalendarEntryCollaborator).where(
+        CalendarEntryCollaborator.calendar_entry_id.in_(entry_ids),
+    ))).scalars().all() if entry_ids else []
+    collaborators_by_entry: dict[int, list[int]] = {}
+    for collaborator in collaborator_rows:
+        collaborators_by_entry.setdefault(collaborator.calendar_entry_id, []).append(collaborator.employee_id)
+    entries = [{**_calendar_entry_out(row, sorted(collaborators_by_entry.get(row.id, []))), "can_edit": row.created_by_account_id == actor.account_id or (row.visibility == "company" and actor.has_any_role(*MANAGEMENT_ROLES))} for row in entry_rows]
     organization = await db.get(Organization, actor.organization_id)
     country = str((organization.settings or {}).get("holiday_country", "MN")).upper()
     # A fresh organization used to show an empty calendar until an administrator
@@ -1685,14 +1737,39 @@ async def create_calendar_entry(data: CalendarEntryInput, db: AsyncSession = Dep
         raise HTTPException(status_code=400, detail="Calendar entry must end after it starts")
     if data.visibility == "company" and not actor.has_any_role(*MANAGEMENT_ROLES):
         raise HTTPException(status_code=403, detail="Only supervisors can publish company events")
-    entry = CalendarEntry(organization_id=actor.organization_id, account_id=None if data.visibility == "company" else actor.account_id, created_by_account_id=actor.account_id, **data.model_dump())
+    collaborator_ids = await _calendar_collaborators(db, actor=actor, employee_ids=data.collaborator_ids)
+    entry = CalendarEntry(
+        organization_id=actor.organization_id,
+        account_id=None if data.visibility == "company" else actor.account_id,
+        created_by_account_id=actor.account_id,
+        **data.model_dump(exclude={"collaborator_ids"}),
+    )
     db.add(entry)
     await db.flush()
-    await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="created", after=_calendar_entry_out(entry))
+    for employee_id in collaborator_ids:
+        db.add(CalendarEntryCollaborator(organization_id=actor.organization_id, calendar_entry_id=entry.id, employee_id=employee_id))
+    await db.flush()
+    source_event = await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="created", after=_calendar_entry_out(entry, collaborator_ids))
+    if collaborator_ids:
+        notification_kind = "calendar_reminder" if entry.kind == "reminder" else "event"
+        await create_notifications(
+            db,
+            organization_id=actor.organization_id,
+            employee_ids=collaborator_ids,
+            exclude_employee_id=actor.employee_id,
+            kind=notification_kind,
+            title="Календарийн зүйлд нэмэгдлээ",
+            body=f"Таныг “{entry.title}” зүйлд хамтрагчаар нэмлээ.",
+            target_url="/calendar",
+            payload={"calendar_entry_id": entry.id, "title": entry.title, "starts_at": entry.starts_at.isoformat(), "location": entry.location},
+            source_event_id=source_event.id,
+            dedup_key=f"calendar-entry-assigned:{entry.id}:v{entry.version}",
+            immediate=True,
+        )
     if entry.visibility == "private" and entry.account_id:
         await google_queue_entity_sync(db, entry.account_id, "calendar_entry", entry.id, entry.version)
     await db.commit()
-    return _calendar_entry_out(entry)
+    return _calendar_entry_out(entry, collaborator_ids)
 
 
 @router.patch("/calendar/entries/{entry_id}")
@@ -1711,6 +1788,10 @@ async def update_calendar_entry(entry_id: int, data: CalendarEntryPatch, if_matc
             raise HTTPException(status_code=409, detail="Calendar entry changed")
     previous_sync_account_id = entry.account_id if entry.visibility == "private" else None
     patch = data.model_dump(exclude_unset=True)
+    previous_collaborator_ids = await _calendar_collaborator_ids(db, entry.id)
+    collaborator_ids = previous_collaborator_ids
+    if "collaborator_ids" in patch:
+        collaborator_ids = await _calendar_collaborators(db, actor=actor, employee_ids=patch.pop("collaborator_ids") or [])
     starts_at = patch.get("starts_at", entry.starts_at)
     ends_at = patch.get("ends_at", entry.ends_at)
     if ends_at <= starts_at:
@@ -1719,15 +1800,38 @@ async def update_calendar_entry(entry_id: int, data: CalendarEntryPatch, if_matc
         raise HTTPException(status_code=403, detail="Only supervisors can publish company events")
     for field, value in patch.items():
         setattr(entry, field, value)
+    if "visibility" in patch:
+        entry.account_id = None if patch["visibility"] == "company" else actor.account_id
+    if collaborator_ids != previous_collaborator_ids:
+        await db.execute(CalendarEntryCollaborator.__table__.delete().where(CalendarEntryCollaborator.calendar_entry_id == entry.id))
+        for employee_id in collaborator_ids:
+            db.add(CalendarEntryCollaborator(organization_id=actor.organization_id, calendar_entry_id=entry.id, employee_id=employee_id))
     entry.version += 1
     await db.flush()
-    await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="updated", version=entry.version, after=_calendar_entry_out(entry))
+    source_event = await record_change(db, actor=actor, topic="calendar", aggregate_type="calendar_entry", aggregate_id=entry.id, operation="updated", version=entry.version, after=_calendar_entry_out(entry, collaborator_ids))
+    newly_assigned = sorted(set(collaborator_ids) - set(previous_collaborator_ids))
+    if newly_assigned:
+        notification_kind = "calendar_reminder" if entry.kind == "reminder" else "event"
+        await create_notifications(
+            db,
+            organization_id=actor.organization_id,
+            employee_ids=newly_assigned,
+            exclude_employee_id=actor.employee_id,
+            kind=notification_kind,
+            title="Календарийн зүйлд нэмэгдлээ",
+            body=f"Таныг “{entry.title}” зүйлд хамтрагчаар нэмлээ.",
+            target_url="/calendar",
+            payload={"calendar_entry_id": entry.id, "title": entry.title, "starts_at": entry.starts_at.isoformat(), "location": entry.location},
+            source_event_id=source_event.id,
+            dedup_key=f"calendar-entry-assigned:{entry.id}:v{entry.version}",
+            immediate=True,
+        )
     if entry.visibility == "private" and entry.account_id:
         await google_queue_entity_sync(db, entry.account_id, "calendar_entry", entry.id, entry.version)
     if previous_sync_account_id and (entry.visibility != "private" or entry.account_id != previous_sync_account_id):
         await google_queue_entity_sync(db, previous_sync_account_id, "calendar_entry", entry.id, entry.version, "delete")
     await db.commit()
-    return _calendar_entry_out(entry)
+    return _calendar_entry_out(entry, collaborator_ids)
 
 
 @router.delete("/calendar/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -3086,7 +3190,7 @@ async def analytics_drilldown(
             task_total = await db.scalar(select(func.count()).select_from(Task).where(*task_scope, Task.created_at < datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))) or 0
             completed = await db.scalar(select(func.count()).select_from(Task).where(*task_scope, Task.workflow_status == "done", Task.completed_at >= datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc), Task.completed_at < datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))) or 0
             due_total = await db.scalar(select(func.count()).select_from(Task).where(*task_scope, Task.deadline_at >= datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc), Task.deadline_at < datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))) or 0
-            overdue = await db.scalar(select(func.count()).select_from(Task).where(*task_scope, Task.deadline_at < datetime.now(timezone.utc), Task.workflow_status.notin_(("done", "cancelled")), Task.deadline_at >= datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc))) or 0
+            overdue = await db.scalar(select(func.count()).select_from(Task).where(*task_scope, Task.deadline_at < datetime.now(timezone.utc), Task.workflow_status.notin_(("done", "cancelled", "review")), Task.deadline_at >= datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc))) or 0
             report_total = await db.scalar(select(func.count()).select_from(WorkReport).where(WorkReport.employee_id == target_id, WorkReport.period_date >= period_start, WorkReport.period_date <= period_end)) or 0
             submitted = await db.scalar(select(func.count()).select_from(WorkReport).where(WorkReport.employee_id == target_id, WorkReport.period_date >= period_start, WorkReport.period_date <= period_end, WorkReport.status.in_(("submitted", "approved")))) or 0
             capacity = round((employee.weekly_capacity_minutes or 2400) * weekdays / 5)
@@ -3099,7 +3203,7 @@ async def analytics_drilldown(
 
 @router.get("/workers")
 async def worker_directory(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    employees = (await db.execute(select(Employee).where(Employee.is_active.is_(True)).order_by(Employee.name))).scalars().all()
+    employees = (await db.execute(select(Employee).where(Employee.organization_id == actor.organization_id, Employee.is_active.is_(True)).order_by(Employee.name))).scalars().all()
     open_entries = (await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.ended_at.is_(None)))).scalars().all()
     by_employee = {entry.employee_id: entry for entry in open_entries}
     return [

@@ -15,7 +15,7 @@ from app.core.security import (
 )
 from app.core.enterprise_deps import ActorContext
 from app.main import _repair_seeded_admin_account, app
-from app.models.models import Base, Task
+from app.models.models import Base, CalendarEntry, CalendarEntryCollaborator, Task
 from app.routers import enterprise
 from app.routers.enterprise import LEGACY_STATUS, WORKFLOW_STATUSES, _birthday_occurrences, _calendar_task_visible_to_employee, _holiday_provider_rows, _task_out
 from app.routers.enterprise_auth import TELEGRAM_DEFAULT_ROLE, WorkspaceModePreferences, WorldClockPreferences, _clear_login_lock, workspace_mode_preferences
@@ -301,7 +301,7 @@ def test_workflow_statuses_have_legacy_compatibility_mapping():
     assert LEGACY_STATUS["done"] == "done"
 
 
-def test_task_serialization_computes_overdue_without_mutating_workflow():
+def test_task_serialization_exempts_review_tasks_from_overdue_state():
     task = SimpleNamespace(
         id=1,
         public_id="public",
@@ -325,7 +325,7 @@ def test_task_serialization_computes_overdue_without_mutating_workflow():
     )
     output = _task_out(task)
     assert output["workflow_status"] == "review"
-    assert output["is_overdue"] is True
+    assert output["is_overdue"] is False
     assert output["version"] == 3
     assert output["work_location_type"] == "office"
     assert output["work_location"] == "HQ"
@@ -335,6 +335,23 @@ def test_tasks_expose_an_optional_reviewer_for_the_review_workflow():
     assert "reviewer_id" in Base.metadata.tables["tasks"].c
     task = Task(title="Review", reviewer_id=9)
     assert _task_out(task)["reviewer_id"] == 9
+
+
+def test_calendar_items_support_locations_and_normalized_collaborators():
+    assert "location" in Base.metadata.tables["calendar_entries"].c
+    collaborators = Base.metadata.tables["calendar_entry_collaborators"]
+    assert {"organization_id", "calendar_entry_id", "employee_id"}.issubset(collaborators.c)
+    assert CalendarEntry.__tablename__ == "calendar_entries"
+    assert CalendarEntryCollaborator.__tablename__ == "calendar_entry_collaborators"
+
+
+def test_calendar_collaboration_migration_follows_daily_reminder_head():
+    migration_path = Path(__file__).parents[1] / "alembic/versions/l2m3n4o5p6q7_calendar_item_collaboration.py"
+    migration_spec = spec_from_file_location("calendar_collaboration_migration", migration_path)
+    assert migration_spec and migration_spec.loader
+    migration = module_from_spec(migration_spec)
+    migration_spec.loader.exec_module(migration)
+    assert migration.down_revision == "k1l2m3n4o5p6"
 
 
 def test_planning_migration_follows_current_head_and_models_nullable_location():

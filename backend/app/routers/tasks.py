@@ -63,6 +63,7 @@ class TaskOut(BaseModel):
     description: Optional[str]
     status: str
     priority: int
+    workflow_status: str
     deadline_at: Optional[datetime]
     created_at: Optional[datetime]
     completed_at: Optional[datetime]
@@ -81,7 +82,7 @@ async def _serialize(db: AsyncSession, task: Task) -> TaskOut:
     creator = await db.get(Employee, task.created_by_id) if task.created_by_id else None
     return TaskOut(
         id=task.id, title=task.title, description=task.description, status=task.status,
-        priority=task.priority if task.priority is not None else 2,
+        priority=task.priority if task.priority is not None else 2, workflow_status=task.workflow_status,
         deadline_at=task.deadline_at, created_at=task.created_at,
         completed_at=task.completed_at, assignee_id=task.assignee_id,
         assignee_name=assignee.name if assignee else None,

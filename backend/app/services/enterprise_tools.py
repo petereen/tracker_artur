@@ -651,7 +651,7 @@ async def stats(db: AsyncSession, actor: ActorContext, data: StatsInput) -> dict
     if data.project_id: task_conditions.append(Task.project_id == data.project_id)
     total = await db.scalar(select(func.count()).select_from(Task).where(*task_conditions)) or 0
     completed = await db.scalar(select(func.count()).select_from(Task).where(*task_conditions, Task.workflow_status == "done")) or 0
-    overdue = await db.scalar(select(func.count()).select_from(Task).where(*task_conditions, Task.deadline_at < datetime.now(timezone.utc), Task.workflow_status.notin_(("done", "cancelled")))) or 0
+    overdue = await db.scalar(select(func.count()).select_from(Task).where(*task_conditions, Task.deadline_at < datetime.now(timezone.utc), Task.workflow_status.notin_(("done", "cancelled", "review")))) or 0
     work_conditions = [WorkTimeEntry.local_work_date >= start, WorkTimeEntry.local_work_date <= end, WorkTimeEntry.entry_type == "work"]
     if data.employee_id: work_conditions.append(WorkTimeEntry.employee_id == data.employee_id)
     worked = await db.scalar(select(func.coalesce(func.sum(func.extract("epoch", func.coalesce(WorkTimeEntry.ended_at, datetime.now(timezone.utc)) - WorkTimeEntry.started_at) / 60), 0)).where(*work_conditions)) or 0
@@ -713,7 +713,7 @@ async def project_query(db: AsyncSession, actor: ActorContext, data: ProjectQuer
     if data.workflow_status: query = query.where(Task.workflow_status == data.workflow_status)
     if data.blockers_only: query = query.where(Task.workflow_status == "review")
     rows = list((await db.execute(query.order_by(Task.deadline_at.nulls_last()).limit(data.limit))).scalars().all())
-    return _result("ok" if rows else "empty", {"tasks": [{"id": str(row.public_id), "title": row.title, "status": row.workflow_status, "priority": row.priority, "deadline_at": row.deadline_at, "project_id": row.project_id, "is_overdue": bool(row.deadline_at and row.deadline_at < datetime.now(timezone.utc) and row.workflow_status not in {"done", "cancelled"})} for row in rows]})
+    return _result("ok" if rows else "empty", {"tasks": [{"id": str(row.public_id), "title": row.title, "status": row.workflow_status, "priority": row.priority, "deadline_at": row.deadline_at, "project_id": row.project_id, "is_overdue": bool(row.deadline_at and row.deadline_at < datetime.now(timezone.utc) and row.workflow_status not in {"done", "cancelled", "review"})} for row in rows]})
 
 
 async def calendar(db: AsyncSession, actor: ActorContext, data: CalendarInput) -> dict:

@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Deliver unified calendar item management for events, reminders, and tasks: collaborators, locations, smart date defaults, day-click creation, and review/no-due-date rules (`backend/app/models/models.py`, `backend/app/routers/enterprise.py`, `backend/app/services`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`, `backend/alembic/versions`, `backend/tests`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`)
+  - [x] Add calendar-entry location/collaborator persistence and notification contracts
+  - [x] Exempt Under Review tasks from overdue serialization, filters, reminders, and analytics
+  - [x] Add calendar UI CRUD, searchable collaborator picker, day-click creation, and smart time defaults
+  - [x] Add focused regression coverage and run frontend/backend static validation — 28 frontend files / 90 tests pass; touched Python files compile; backend pytest/Alembic runtime remains unavailable because local Python lacks pytest/Alembic
 - [x] Add an automation switch for employee daily work-report reminders and repair monthly report Telegram/platform visibility (`backend/app/models/models.py`, `backend/app/routers/manager.py`, `backend/app/bot`, `backend/app/services/monthly_report_digest_service.py`, `backend/app/routers/enterprise.py`, `frontend/src`, `backend/alembic/versions`)
 - [x] Send the same open work/remote-time reminder at 23:00 as at 19:00, including a distinct notification deduplication key (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
 - [x] Add an optional Telegram ID field to the HR employee creation form and persist it on the shared employee record (`frontend/src/pages/HRWorkspacePage.tsx`, `backend/app/hr/schemas.py`, `backend/app/hr/router.py`)
@@ -385,6 +390,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Deliver unified calendar item management for events, reminders, and tasks with collaborator notifications, location support, day-click creation, smart two-hour defaults, optional task timestamps, stale-alert suppression, and Under Review overdue exemption (`backend/app/models/models.py`, `backend/app/routers/enterprise.py`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/alembic/versions/l2m3n4o5p6q7_calendar_item_collaboration.py`)
 - [x] Move the “Хүний нөөц” navbar button below ERP when ERP navigation is available (`frontend/src/components/EnterpriseShell.tsx`)
 - [x] Repair the production payroll migration bind-parameter failure by passing `source_salary_component_id` during legacy component-master backfill and cover it with a contract assertion (`backend/alembic/versions/i0j1k2l3m4n5_frappe_style_payroll.py`, `backend/tests/test_frappe_payroll_contract.py`)
 - [x] Replace the payroll landing screen with an OYUNS-branded, Mongolian-first Frappe-style workspace, document lists/forms, lifecycle actions, masters, assignments, salary slips, and reports (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/index.css`)

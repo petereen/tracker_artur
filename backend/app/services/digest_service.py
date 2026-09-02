@@ -44,6 +44,8 @@ def _deadline(t: dict) -> datetime | None:
 
 
 def _is_overdue(t: dict, now: datetime) -> bool:
+    if t.get("workflow_status") == "review":
+        return False
     if t["status"] in ("done", "cancelled"):
         return False
     if t["status"] == "overdue":
