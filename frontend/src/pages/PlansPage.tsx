@@ -257,7 +257,7 @@ export function PlansPage() {
                         variant="danger"
                         onClick={() =>
                           window.confirm(
-                            "Төлөвлөгөөний зүйлийг архивлах уу?",
+                            "Төлөвлөгөөг архивлах уу?",
                           ) && deleteItem.mutate(item.id)
                         }
                       >

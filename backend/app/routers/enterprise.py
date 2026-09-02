@@ -1650,15 +1650,23 @@ def _calendar_task_visible_to_employee(task: dict, employee_id: int | None) -> b
 
 
 @router.get("/calendar/events")
-async def calendar_events(scope: Literal["private", "corporate"] = "private", date_from: date | None = None, date_to: date | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def calendar_events(scope: Literal["private", "corporate"] = "private", date_from: date | None = None, date_to: date | None = None, employee_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     period_start = date_from or date.today() - timedelta(days=14)
     period_end = date_to or period_start + timedelta(days=41)
-    task_scope = "organization" if scope == "corporate" and actor.has_any_role(*MANAGEMENT_ROLES) else "mine"
+    if employee_id is not None:
+        target_employee = await db.scalar(select(Employee.id).where(Employee.id == employee_id, Employee.organization_id == actor.organization_id, Employee.is_active.is_(True)))
+        if not target_employee:
+            raise HTTPException(status_code=404, detail="Worker not found")
+        if employee_id != actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
+            raise HTTPException(status_code=403, detail="Worker availability requires management access")
+    task_scope = "organization" if (scope == "corporate" or employee_id is not None) and actor.has_any_role(*MANAGEMENT_ROLES) else "mine"
     # ``list_tasks`` is also a FastAPI endpoint, whose priority default is a
     # Query marker until FastAPI resolves an HTTP request.  This internal call
     # must provide the concrete value rather than passing that marker to SQL.
     task_rows = await list_tasks(scope=task_scope, priority=None, date_from=period_start, date_to=period_end, db=db, actor=actor)
-    if scope == "private":
+    if employee_id is not None:
+        task_rows = [row for row in task_rows if _calendar_task_visible_to_employee(row, employee_id)]
+    elif scope == "private":
         task_rows = [row for row in task_rows if _calendar_task_visible_to_employee(row, actor.employee_id)]
     task_events = [{"kind": "task", "visibility": "company" if scope == "corporate" else "private", "can_edit": actor.has_any_role(*MANAGEMENT_ROLES) or _calendar_task_visible_to_employee(row, actor.employee_id), **row} for row in task_rows if row.get("start_at") or row.get("deadline_at")]
     project_query = select(Project).where(
@@ -1690,11 +1698,18 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
     holidays: list[dict] = []
     start = datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc)
     end = datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
-    if scope == "private":
-        rows = (await db.execute(select(PersonalTimeBlock).where(PersonalTimeBlock.account_id == actor.account_id, PersonalTimeBlock.starts_at < end, PersonalTimeBlock.ends_at > start).order_by(PersonalTimeBlock.starts_at))).scalars().all()
+    if scope == "private" or employee_id is not None:
+        block_account_ids = select(UserAccount.id).where(UserAccount.organization_id == actor.organization_id, UserAccount.status == "active", UserAccount.employee_id == (employee_id if employee_id is not None else actor.employee_id)) if employee_id is not None else None
+        block_query = select(PersonalTimeBlock).where(PersonalTimeBlock.starts_at < end, PersonalTimeBlock.ends_at > start)
+        block_query = block_query.where(PersonalTimeBlock.account_id.in_(block_account_ids)) if block_account_ids is not None else block_query.where(PersonalTimeBlock.account_id == actor.account_id)
+        rows = (await db.execute(block_query.order_by(PersonalTimeBlock.starts_at))).scalars().all()
         blocks = [{"kind": "time_block", **_time_block_out(row)} for row in rows]
     entry_query = select(CalendarEntry).where(CalendarEntry.organization_id == actor.organization_id, CalendarEntry.starts_at < end, CalendarEntry.ends_at > start)
-    if scope == "private":
+    if employee_id is not None:
+        target_account_ids = select(UserAccount.id).where(UserAccount.organization_id == actor.organization_id, UserAccount.status == "active", UserAccount.employee_id == employee_id)
+        collaborator_entry_ids = select(CalendarEntryCollaborator.calendar_entry_id).where(CalendarEntryCollaborator.employee_id == employee_id)
+        entry_query = entry_query.where(or_(CalendarEntry.visibility == "company", CalendarEntry.account_id.in_(target_account_ids), CalendarEntry.id.in_(collaborator_entry_ids)))
+    elif scope == "private":
         collaborator_entry_ids = select(CalendarEntryCollaborator.calendar_entry_id).where(CalendarEntryCollaborator.employee_id == actor.employee_id) if actor.employee_id else select(CalendarEntryCollaborator.calendar_entry_id).where(CalendarEntryCollaborator.id == -1)
         entry_query = entry_query.where(or_(CalendarEntry.account_id == actor.account_id, CalendarEntry.id.in_(collaborator_entry_ids)))
     else:
@@ -1758,8 +1773,8 @@ async def create_calendar_entry(data: CalendarEntryInput, db: AsyncSession = Dep
             employee_ids=collaborator_ids,
             exclude_employee_id=actor.employee_id,
             kind=notification_kind,
-            title="Календарийн зүйлд нэмэгдлээ",
-            body=f"Таныг “{entry.title}” зүйлд хамтрагчаар нэмлээ.",
+            title="Календарт нэмэгдлээ",
+            body=f"Таныг “{entry.title}”-д оролцогчоор нэмлээ.",
             target_url="/calendar",
             payload={"calendar_entry_id": entry.id, "title": entry.title, "starts_at": entry.starts_at.isoformat(), "location": entry.location},
             source_event_id=source_event.id,
@@ -1818,8 +1833,8 @@ async def update_calendar_entry(entry_id: int, data: CalendarEntryPatch, if_matc
             employee_ids=newly_assigned,
             exclude_employee_id=actor.employee_id,
             kind=notification_kind,
-            title="Календарийн зүйлд нэмэгдлээ",
-            body=f"Таныг “{entry.title}” зүйлд хамтрагчаар нэмлээ.",
+            title="Календарт нэмэгдлээ",
+            body=f"Таныг “{entry.title}”-д оролцогчоор нэмлээ.",
             target_url="/calendar",
             payload={"calendar_entry_id": entry.id, "title": entry.title, "starts_at": entry.starts_at.isoformat(), "location": entry.location},
             source_event_id=source_event.id,

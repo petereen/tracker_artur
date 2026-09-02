@@ -818,15 +818,15 @@ export interface CalendarEntry {
   can_edit: boolean
 }
 
-export function useCalendarEvents(scope: 'private' | 'corporate', anchor: Date) {
+export function useCalendarEvents(scope: 'private' | 'corporate', anchor: Date, employeeId?: number) {
   const months = [-1, 0, 1].map((offset) => {
     const month = new Date(anchor.getFullYear(), anchor.getMonth() + offset, 1)
     return { month, period: calendarMonthPeriod(anchor, offset) }
   })
   const queries = useQueries({
     queries: months.map(({ month, period }) => ({
-      queryKey: ['v1', 'calendar', scope, 'month', month.getFullYear(), month.getMonth()],
-      queryFn: () => api.get('/v1/calendar/events', { params: { scope, ...period } }).then((response) => response.data),
+      queryKey: ['v1', 'calendar', scope, employeeId, 'month', month.getFullYear(), month.getMonth()],
+      queryFn: () => api.get('/v1/calendar/events', { params: { scope, ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data),
       staleTime: 5 * 60 * 1000,
     })),
   })

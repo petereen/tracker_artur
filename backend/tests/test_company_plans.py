@@ -12,13 +12,13 @@ def test_company_plan_month_is_normalized_to_first_day():
 
 def test_company_plan_item_accepts_all_horizons():
     for horizon in ("long_term", "mid_term", "short_term"):
-        item = CompanyPlanItemCreate(source_report_id=7, title="Шинэ зүйл", horizon=horizon)
+        item = CompanyPlanItemCreate(source_report_id=7, title="Шинэ item", horizon=horizon)
         assert item.horizon == horizon
 
 
 def test_company_plan_item_rejects_unknown_horizon():
     with pytest.raises(ValidationError):
-        CompanyPlanItemCreate(source_report_id=7, title="Шинэ зүйл", horizon="urgent")
+        CompanyPlanItemCreate(source_report_id=7, title="Шинэ item", horizon="urgent")
 
 
 def test_reorder_requires_each_horizon_and_unique_item_ids():

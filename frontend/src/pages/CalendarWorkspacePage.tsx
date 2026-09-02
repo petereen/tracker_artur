@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { CalendarDays, ChevronDown, ExternalLink, LoaderCircle, MapPin, Plus, RefreshCw, Trash2, Unplug, UserRound, Users, X } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, LoaderCircle, MapPin, Plus, RefreshCw, Trash2, Unplug, UserRound, Users, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { isNativePlatform } from '../platform/runtime'
 import { useCalendarEvents, useCreateCalendarEntry, useCreateEnterpriseTask, useDeleteCalendarEntry, useDeleteEnterpriseTask, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarList, useGoogleCalendarSelect, useGoogleCalendarStatus, useGoogleCalendarSync, useHolidaySettings, useSetHolidayCountry, useUpdateCalendarEntry, useUpdateEnterpriseTask, useWorkerDirectory } from '../api/enterprise'
@@ -53,6 +53,89 @@ function uniqueCalendarItems(items: any[]) {
 }
 function calendarItemSubtitle(item: any) {
   return item.kind === 'task' ? item.primary_owner_name || 'Даалгавар' : item.kind === 'project' ? `Төсөл · ${item.code || ''}` : item.kind === 'plan' ? `Төлөвлөгөө · ${item.horizon || ''}` : item.kind === 'holiday' ? 'Нийтийн амралт' : item.kind === 'birthday' ? 'Төрсөн өдөр' : item.visibility === 'company' ? 'Компаний үйл явдал' : item.kind === 'reminder' ? 'Сануулга' : 'Хувийн үйл явдал'
+}
+type CalendarFilterKey = 'event' | 'plan' | 'task' | 'reminder'
+const CALENDAR_FILTERS: Array<{ key: CalendarFilterKey; label: string }> = [
+  { key: 'event', label: 'Үйл явдал' },
+  { key: 'plan', label: 'Төлөвлөгөө' },
+  { key: 'task', label: 'Даалгавар' },
+  { key: 'reminder', label: 'Сануулга' },
+]
+const CALENDAR_FILTER_STORAGE_KEY = 'oyuns-calendar-type-filters'
+
+function calendarFilterKey(item: any): CalendarFilterKey | null {
+  if (item.kind === 'project' || item.kind === 'plan') return 'plan'
+  if (item.kind === 'task' || item.kind === 'event' || item.kind === 'reminder') return item.kind
+  return null
+}
+function monthGridDays(anchor: Date) {
+  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
+  first.setDate(first.getDate() - ((first.getDay() + 6) % 7))
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(first)
+    day.setDate(day.getDate() + index)
+    return day
+  })
+}
+function availabilityItemTime(item: any) {
+  const value = item.start_at || item.starts_at || item.starts_on || item.plan_month || item.deadline_at || item.due_date
+  if (typeof value !== 'string' || /^\d{4}-\d{2}-\d{2}$/.test(value)) return 'Өдөржин'
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? 'Өдөржин' : parsed.toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' })
+}
+function availabilityTypeLabel(item: any) {
+  return item.kind === 'task' ? 'Даалгавар' : item.kind === 'plan' ? 'Төлөвлөгөө' : item.kind === 'reminder' ? 'Сануулга' : 'Үйл явдал'
+}
+
+function WorkerAvailabilityPopover({ worker, scope, onClose }: { worker: { id: number; name: string; job_title?: string | null }; scope: 'private' | 'corporate'; onClose: () => void }) {
+  const [anchor, setAnchor] = useState(() => new Date())
+  const [previewDate, setPreviewDate] = useState(() => localDate(new Date()))
+  const [closing, setClosing] = useState(false)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const closePopover = () => {
+    if (closing) return
+    setClosing(true)
+    window.setTimeout(onClose, 160)
+  }
+  const events = useCalendarEvents(scope, anchor, worker.id)
+  const days = useMemo(() => monthGridDays(anchor), [anchor])
+  const items = useMemo(() => uniqueCalendarItems([
+    ...(events.data?.tasks ?? []),
+    ...(events.data?.plans ?? []),
+    ...(events.data?.entries ?? []),
+  ]).filter((item: any) => ['task', 'plan', 'event', 'reminder'].includes(item.kind)), [events.data])
+  const itemsByDate = useMemo(() => {
+    const result = new Map<string, any[]>()
+    items.forEach((item) => itemDates(item).forEach((date) => result.set(date, [...(result.get(date) ?? []), item])))
+    return result
+  }, [items])
+  const previewItems = itemsByDate.get(previewDate) ?? []
+  useEffect(() => {
+    const handleOutsidePointer = (event: PointerEvent) => {
+      if (!popoverRef.current?.contains(event.target as Node)) closePopover()
+    }
+    document.addEventListener('pointerdown', handleOutsidePointer)
+    return () => document.removeEventListener('pointerdown', handleOutsidePointer)
+  }, [closing, onClose])
+  useEffect(() => {
+    const inMonth = days.some((day) => localDate(day) === previewDate && day.getMonth() === anchor.getMonth())
+    if (inMonth && itemsByDate.has(previewDate)) return
+    const firstBusy = days.map(localDate).find((date) => itemsByDate.has(date))
+    setPreviewDate(firstBusy ?? localDate(new Date(anchor.getFullYear(), anchor.getMonth(), 1)))
+  }, [anchor, days, itemsByDate, previewDate])
+  const monthTitle = anchor.toLocaleDateString('mn-MN', { month: 'long', year: 'numeric' })
+  return <motion.div ref={popoverRef} className="calendar-availability-popover" role="dialog" aria-label={`${worker.name}-ийн хуваарь`} onPointerDown={(event) => event.stopPropagation()} initial={{ opacity: 0, y: -4, scale: .97 }} animate={closing ? { opacity: 0, y: -4, scale: .97 } : { opacity: 1, y: 0, scale: 1 }} transition={{ duration: .16, ease: [0.22, 1, 0.36, 1] }}>
+    <header className="calendar-availability-header"><div><strong>{worker.name}</strong><small>{worker.job_title || 'Ажилтан'} · {items.length} хуваарь</small></div><button type="button" className="calendar-availability-close" onClick={closePopover} aria-label="Хуваарь хаах"><X size={14} /></button></header>
+    <div className="calendar-availability-month"><button type="button" onClick={() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1))} aria-label="Өмнөх сар"><ChevronLeft size={15} /></button><strong>{monthTitle}</strong><button type="button" onClick={() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1))} aria-label="Дараагийн сар"><ChevronRight size={15} /></button></div>
+    <div className="calendar-availability-weekdays">{['Д', 'М', 'Л', 'П', 'Б', 'Б', 'Н'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
+    <div className="calendar-availability-grid">{days.map((day) => {
+      const key = localDate(day)
+      const dayItems = itemsByDate.get(key) ?? []
+      const selected = key === previewDate
+      return <button type="button" key={key} className={`calendar-availability-day ${day.getMonth() !== anchor.getMonth() ? 'outside' : ''} ${selected ? 'selected' : ''} ${dayItems.length ? 'busy' : ''}`} onMouseEnter={() => setPreviewDate(key)} onFocus={() => setPreviewDate(key)} onClick={() => setPreviewDate(key)} title={dayItems.length ? dayItems.map((item) => item.title).join(', ') : undefined} aria-label={`${key}, ${dayItems.length} ажил`}><span>{day.getDate()}</span>{dayItems.length > 0 && <i aria-hidden>{dayItems.slice(0, 3).map((item, index) => <b className={item.kind} key={`${item.kind}-${index}`} />)}</i>}</button>
+    })}</div>
+    <div className="calendar-availability-preview"><small>{new Date(`${previewDate}T12:00:00`).toLocaleDateString('mn-MN', { month: 'long', day: 'numeric', weekday: 'long' })}</small>{events.isLoading ? <p>Ачаалж байна…</p> : previewItems.length ? <ul>{previewItems.slice(0, 4).map((item) => <li key={`${item.kind}-${item.id || item.plan_id}`}><span className={`availability-dot ${item.kind}`} /><span><strong>{item.title}</strong><small>{availabilityTypeLabel(item)} · {availabilityItemTime(item)}</small></span></li>)}{previewItems.length > 4 && <li className="availability-more">+{previewItems.length - 4} өөр хуваарь</li>}</ul> : <p>Энэ өдөрт хуваарь алга.</p>}</div>
+  </motion.div>
 }
 function calendarRangeSegments(items: any[], days: Date[]) {
   const dayIndexes = new Map(days.map((day, index) => [localDate(day), index]))
@@ -149,6 +232,17 @@ export function CalendarWorkspacePage() {
   const [kind, setKind] = useState<'task' | 'reminder' | 'event'>('reminder')
   const [editing, setEditing] = useState(false)
   const [collaboratorQuery, setCollaboratorQuery] = useState('')
+  const [availabilityWorker, setAvailabilityWorker] = useState<{ id: number; name: string; job_title?: string | null } | null>(null)
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(() => new Set())
+  const [filters, setFilters] = useState<Record<CalendarFilterKey, boolean>>(() => {
+    const defaults = { event: true, plan: true, task: true, reminder: true }
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(CALENDAR_FILTER_STORAGE_KEY) || '{}')
+      return CALENDAR_FILTERS.reduce((result, filter) => ({ ...result, [filter.key]: saved[filter.key] !== false }), defaults)
+    } catch {
+      return defaults
+    }
+  })
   const [form, setForm] = useState({ title: '', description: '', starts_at: '', ends_at: '', visibility: 'private', location: '', collaborator_ids: [] as number[] })
   const [, startTransition] = useTransition()
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
@@ -156,7 +250,7 @@ export function CalendarWorkspacePage() {
   const scope: 'private' | 'corporate' = isManagerMode ? 'corporate' : 'private'
   const canPublish = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const isAdmin = roles.includes('admin')
-  const days = useMemo(() => { const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1); first.setDate(first.getDate() - ((first.getDay() + 6) % 7)); return Array.from({ length: 42 }, (_, index) => { const day = new Date(first); day.setDate(day.getDate() + index); return day }) }, [anchor])
+  const days = useMemo(() => monthGridDays(anchor), [anchor])
   const events = useCalendarEvents(scope, anchor)
   const holidaySettings = useHolidaySettings(); const setCountry = useSetHolidayCountry()
   const createEntry = useCreateCalendarEntry(); const updateEntry = useUpdateCalendarEntry(); const deleteEntry = useDeleteCalendarEntry()
@@ -174,12 +268,12 @@ export function CalendarWorkspacePage() {
     const now = new Date()
     start.setHours(now.getHours(), 0, 0, 0)
     const end = new Date(start); end.setHours(end.getHours() + 2)
-    setSelected(null); setEditingItem(null); setEditing(false); setKind('reminder'); setCollaboratorQuery('')
+    setSelected(null); setEditingItem(null); setEditing(false); setKind('reminder'); setCollaboratorQuery(''); setAvailabilityWorker(null)
     setForm({ ...blankForm(), starts_at: dateTimeInput(start), ends_at: dateTimeInput(end) }); setCreating(true)
   }
   const openEdit = (item: any) => {
     if (!['task', 'reminder', 'event'].includes(item.kind)) return
-    setSelected(null); setEditingItem(item); setEditing(true); setKind(item.kind); setCollaboratorQuery('')
+    setSelected(null); setEditingItem(item); setEditing(true); setKind(item.kind); setCollaboratorQuery(''); setAvailabilityWorker(null)
     setForm({
       title: item.title || '', description: item.description || '',
       starts_at: dateOnlyTimeInput(item.kind === 'task' ? item.start_at : item.starts_at),
@@ -214,14 +308,15 @@ export function CalendarWorkspacePage() {
     setSelected(null)
   }
   const all = useMemo(() => uniqueCalendarItems([...(events.data?.tasks ?? []), ...(events.data?.projects ?? []), ...(events.data?.plans ?? []), ...(events.data?.entries ?? []), ...(events.data?.holidays ?? []), ...(events.data?.time_blocks ?? [])]), [events.data])
-  const rangeSegments = useMemo(() => calendarRangeSegments(all, days), [all, days])
+  const visibleAll = useMemo(() => all.filter((item) => { const filter = calendarFilterKey(item); return !filter || filters[filter] }), [all, filters])
+  const rangeSegments = useMemo(() => calendarRangeSegments(visibleAll, days), [visibleAll, days])
   const mobileDays = days
   const mobileMonthDays = useMemo(() => days.filter((day) => day.getMonth() === anchor.getMonth()), [anchor, days])
   const mobileItemsByDate = useMemo(() => {
     const result = new Map<string, any[]>()
-    all.forEach((item) => itemDates(item).forEach((date) => result.set(date, [...(result.get(date) ?? []), item])))
+    visibleAll.forEach((item) => itemDates(item).forEach((date) => result.set(date, [...(result.get(date) ?? []), item])))
     return result
-  }, [all])
+  }, [visibleAll])
   const mobileSelectedItems = mobileItemsByDate.get(selectedMobileDate) ?? []
   useEffect(() => {
     const today = new Date()
@@ -239,14 +334,33 @@ export function CalendarWorkspacePage() {
   const formatDateTime = (value: unknown) => { const date = calendarDate(value); if (!date) return '—'; const parsed = new Date(String(value)); return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleString('mn-MN', { dateStyle: 'medium', timeStyle: 'short' }) }
   const canEditSelected = selected && ['task', 'reminder', 'event'].includes(selected.kind) && selected.can_edit !== false
   const isSaving = createEntry.isPending || updateEntry.isPending || createTask.isPending || updateTask.isPending
+  useEffect(() => {
+    window.localStorage.setItem(CALENDAR_FILTER_STORAGE_KEY, JSON.stringify(filters))
+  }, [filters])
+  const toggleFilter = (key: CalendarFilterKey) => setFilters((current) => ({ ...current, [key]: !current[key] }))
+  const allFiltersSelected = CALENDAR_FILTERS.every((filter) => filters[filter.key])
+  const setAllFilters = () => setFilters((current) => CALENDAR_FILTERS.reduce((result, filter) => ({ ...result, [filter.key]: !allFiltersSelected }), current))
   return <div className="calendar-workspace"><div className="workspace-toolbar calendar-toolbar"><div className="toolbar-start"><GoogleCalendarSyncControl /><span className="calendar-scope-badge">{isManagerMode ? 'Компаний харагдац' : 'Хувийн харагдац'}</span></div><button className="primary-action compact" onClick={() => openCreate()}><Plus size={16} />Үүсгэх</button></div>
     <div className="calendar-month-nav"><strong>{anchor.toLocaleDateString('mn-MN', { year: 'numeric', month: 'long' })}</strong><div className="calendar-holiday-setting"><span className="holiday-country">Амралт: {holidaySettings.data?.country || 'MN'}</span>{isAdmin && <select aria-label="Амралтын өдрийн улс" value={holidaySettings.data?.country || 'MN'} onChange={(event) => setCountry.mutate(event.target.value)} disabled={setCountry.isPending}>{holidaySettings.data?.countries.map((country) => <option key={country.countryCode} value={country.countryCode}>{country.name}</option>)}</select>}</div><div className="calendar-nav-actions"><button onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1)))} aria-label="Өмнөх сар">←</button><button className="calendar-today-button" onClick={() => startTransition(() => { const today = new Date(); setAnchor(new Date(today.getFullYear(), today.getMonth(), 1)) })}>Өнөөдөр</button><button onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1)))} aria-label="Дараагийн сар">→</button></div></div>
+    <div className="calendar-filter-toolbar" role="toolbar" aria-label="Календарийн төрлийн шүүлтүүр"><div className="calendar-filter-chips"><span className="calendar-filter-label">Харах</span>{CALENDAR_FILTERS.map((filter) => <button type="button" key={filter.key} className={`calendar-filter-chip ${filter.key} ${filters[filter.key] ? 'active' : ''}`} aria-pressed={filters[filter.key]} onClick={() => toggleFilter(filter.key)}><i aria-hidden />{filter.label}</button>)}</div><button type="button" className="calendar-filter-all" onClick={setAllFilters}>{allFiltersSelected ? 'Бүгдийг цуцлах' : 'Бүгдийг сонгох'}</button></div>
     {events.isError && <div className="panel calendar-status error">Календарийн мэдээлэл ачаалагдсангүй. Дахин оролдоно уу.</div>}
     <QueryRegion pending={events.isLoading || events.isFetching} skeleton={<CalendarSkeleton />}><>
-      <div className="planning-calendar panel">{days.map((day) => { const key = localDate(day); const items = all.filter((item: any) => itemDates(item).includes(key) && (!['task', 'project', 'plan'].includes(item.kind) || itemDates(item).length === 1)); const redDay = day.getDay() === 0 || day.getDay() === 6 || holidayKeys.has(key); return <section key={key} role="button" tabIndex={0} aria-label={`${key} өдөрт зүйл үүсгэх`} onClick={() => openCreate(day)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openCreate(day) }} className={`${day.getMonth() === anchor.getMonth() ? '' : 'outside'} ${redDay ? 'red-day' : ''} ${key === todayKey ? 'today' : ''}`}><header><strong>{day.getDate()}</strong><span>{day.toLocaleDateString('mn-MN', { weekday: 'short' })}</span></header>{items.map((item: any) => <button className={`calendar-item ${item.kind}`} key={`${item.kind}-${item.id || item.project_id || item.plan_id}`} onClick={(event) => { event.stopPropagation(); setSelected(item) }}><strong>{item.title}</strong><small>{calendarItemSubtitle(item)}</small></button>)}</section> })}<div className="calendar-range-layer" aria-label="Олон өдрийн ажлууд">{rangeSegments.map((segment) => <button className={`calendar-item calendar-range ${segment.item.kind} ${segment.first ? 'range-start' : ''} ${segment.last ? 'range-end' : ''}`} key={`${segment.item.kind}-${segment.item.id || segment.item.project_id || segment.item.plan_id}-${segment.week}`} style={{ gridColumn: `${segment.start + 1} / ${segment.end + 2}`, gridRow: `${segment.week + 1}`, '--range-lane': segment.lane } as React.CSSProperties} onClick={(event) => { event.stopPropagation(); setSelected(segment.item) }}><strong>{segment.item.title}</strong><small>{calendarItemSubtitle(segment.item)}</small></button>)}</div></div>
+      <div className="planning-calendar panel">{days.map((day) => {
+        const key = localDate(day)
+        const items = visibleAll.filter((item: any) => itemDates(item).includes(key) && (!['task', 'project', 'plan'].includes(item.kind) || itemDates(item).length === 1))
+        const expanded = expandedDays.has(key)
+        const visibleItems = expanded ? items : items.slice(0, 3)
+        const hiddenCount = items.length - visibleItems.length
+        const redDay = day.getDay() === 0 || day.getDay() === 6 || holidayKeys.has(key)
+        return <section key={key} role="button" tabIndex={0} aria-label={`${key} өдөрт зүйл үүсгэх`} onClick={() => openCreate(day)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openCreate(day) }} className={`${day.getMonth() === anchor.getMonth() ? '' : 'outside'} ${redDay ? 'red-day' : ''} ${key === todayKey ? 'today' : ''}`}>
+          <header><strong>{day.getDate()}</strong><span>{day.toLocaleDateString('mn-MN', { weekday: 'short' })}</span></header>
+          {visibleItems.map((item: any, index) => <button className={`calendar-item ${item.kind}`} title={item.title} key={`${item.kind}-${item.id || item.project_id || item.plan_id || index}`} onClick={(event) => { event.stopPropagation(); setSelected(item) }}><i className="calendar-item-dot" aria-hidden /><strong>{item.title}</strong><small>{calendarItemSubtitle(item)}</small></button>)}
+          {hiddenCount > 0 && <button type="button" className="calendar-overflow" onClick={(event) => { event.stopPropagation(); setExpandedDays((current) => { const next = new Set(current); next.add(key); return next }) }}>+{hiddenCount} өөр</button>}
+        </section>
+      })}<div className="calendar-range-layer" aria-label="Олон өдрийн ажлууд">{rangeSegments.map((segment) => <button className={`calendar-item calendar-range ${segment.item.kind} ${segment.first ? 'range-start' : ''} ${segment.last ? 'range-end' : ''}`} key={`${segment.item.kind}-${segment.item.id || segment.item.project_id || segment.item.plan_id}-${segment.week}`} style={{ gridColumn: `${segment.start + 1} / ${segment.end + 2}`, gridRow: `${segment.week + 1}`, '--range-lane': segment.lane } as React.CSSProperties} onClick={(event) => { event.stopPropagation(); setSelected(segment.item) }}><i className="calendar-item-dot" aria-hidden /><strong>{segment.item.title}</strong><small>{calendarItemSubtitle(segment.item)}</small></button>)}</div></div>
       <section className="mobile-calendar panel" aria-label="Гар утасны календарь"><div className="mobile-calendar-weekdays">{['Дав', 'Мяг', 'Лха', 'Пүр', 'Баа', 'Бям', 'Ням'].map((day) => <span key={day}>{day}</span>)}</div><div className="mobile-calendar-grid">{mobileDays.map((day) => { const key = localDate(day); const items = mobileItemsByDate.get(key) ?? []; const markerKinds = [...new Set(items.map((item) => item.kind))].slice(0, 3); return <button type="button" key={key} className={`${day.getMonth() !== anchor.getMonth() ? 'outside' : ''} ${key === selectedMobileDate ? 'selected' : ''} ${key === todayKey ? 'today' : ''} ${day.getDay() === 0 || day.getDay() === 6 || holidayKeys.has(key) ? 'red-day' : ''}`} aria-label={`${day.toLocaleDateString('mn-MN', { month: 'long', day: 'numeric', weekday: 'long' })}, ${items.length} зүйл`} aria-pressed={key === selectedMobileDate} onClick={() => { setSelectedMobileDate(key); openCreate(day) }}><strong>{day.getDate()}</strong>{items.length > 0 && <span className="mobile-calendar-count">{items.length}</span>}<i aria-hidden>{markerKinds.map((kind, index) => <b className={kind} key={`${kind}-${index}`} />)}</i></button> })}</div><div className="mobile-calendar-agenda"><header><div><span className="eyebrow">Сонгосон өдөр</span><h2>{new Date(`${selectedMobileDate}T12:00:00`).toLocaleDateString('mn-MN', { month: 'long', day: 'numeric', weekday: 'long' })}</h2></div><span>{mobileSelectedItems.length} зүйл</span></header>{mobileSelectedItems.length ? mobileSelectedItems.map((item: any) => <button type="button" className={`mobile-calendar-agenda-item ${item.kind}`} key={`${item.kind}-${item.id || item.project_id || item.plan_id}`} onClick={() => setSelected(item)}><span className="mobile-calendar-agenda-marker" aria-hidden /><span><strong>{item.title}</strong><small>{calendarItemSubtitle(item)}</small></span></button>) : <p>Энэ өдөр танд төлөвлөсөн ажил байхгүй байна.</p>}</div></section>
     </></QueryRegion>
-    <AnimatePresence>{selected && <motion.div className="sheet-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setSelected(null)}><motion.aside className="detail-sheet" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', bounce: 0, duration: .4 }} onMouseDown={(event) => event.stopPropagation()}><div className="sheet-header"><div><span className="eyebrow">Calendar item</span><h2>{selected.title}</h2></div><div className="sheet-header-actions"><button className="sheet-close" onClick={() => setSelected(null)} aria-label="Хаах"><X size={17} /></button></div></div><div className="calendar-detail"><p className="calendar-detail-type">{itemTypeLabel(selected)}</p>{selected.description && <p>{selected.description}</p>}<dl><div><dt>Эхлэх</dt><dd>{formatDateTime(selected.start_at || selected.starts_at || selected.starts_on || selected.plan_month || selected.holiday_date)}</dd></div><div><dt>Дуусах</dt><dd>{selected.kind === 'task' && !selected.deadline_at ? 'Хугацаагүй' : formatDateTime(selected.deadline_at || selected.ends_at || selected.ends_on || selected.due_date)}</dd></div>{(selected.location || selected.work_location) && <div><dt><MapPin size={13} />Байршил</dt><dd><a href={/^https?:\/\//i.test(selected.location || selected.work_location) ? selected.location || selected.work_location : undefined} target="_blank" rel="noreferrer">{selected.location || selected.work_location}</a></dd></div>}{(selected.collaborator_ids?.length || selected.assignee_ids?.length) > 0 && <div><dt><Users size={13} />Хамтрагчид</dt><dd>{collaboratorNames(selected.collaborator_ids || selected.assignee_ids || []) || '—'}</dd></div>}{selected.kind === 'task' && <><div><dt>Төлөв</dt><dd>{selected.workflow_status || '—'}</dd></div><div><dt>Хариуцагч</dt><dd>{selected.primary_owner_name || 'Даалгавар'}</dd></div>{selected.project_name && <div><dt>Төсөл</dt><dd>{selected.project_name}</dd></div>}</>}</dl>{canEditSelected && <div className="calendar-detail-actions"><button className="secondary-action" onClick={() => openEdit(selected)}><UserRound size={15} />Засах</button><button className="danger-action" onClick={() => void removeSelected()} disabled={deleteEntry.isPending || deleteTask.isPending}><Trash2 size={15} />Устгах</button></div>}</div></motion.aside></motion.div>}</AnimatePresence>
-    <AnimatePresence>{creating && <motion.div className="sheet-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setCreating(false)}><motion.aside className="detail-sheet" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', bounce: 0, duration: .4 }} onMouseDown={(event) => event.stopPropagation()}><div className="sheet-header"><div><span className="eyebrow">Calendar item</span><h2>{editing ? 'Засах' : 'Шинэ зүйл үүсгэх'}</h2></div><button className="sheet-close" onClick={() => setCreating(false)} aria-label="Хаах"><X size={17} /></button></div><form className="sheet-form" onSubmit={submit}><label>Төрөл<select value={kind} disabled={editing} onChange={(event) => setKind(event.target.value as typeof kind)}><option value="task">Даалгавар</option><option value="reminder">Сануулга</option><option value="event">Үйл явдал</option></select></label>{kind !== 'task' && canPublish && <label>Харагдац<select value={form.visibility} onChange={(event) => setForm({ ...form, visibility: event.target.value })}><option value="private">Хувийн</option><option value="company">Компаний</option></select></label>}<label>Гарчиг<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label><label>Тайлбар<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label><label>Байршил эсвэл уулзалтын холбоос<span className="field-help">Google Meet, Zoom, оффисын хаяг</span><input type="text" value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} placeholder="https://meet.google.com/..." /></label><div className="calendar-collaborator-picker"><div className="calendar-picker-heading"><span>Хамтрагчид</span><small>{form.collaborator_ids.length} сонгосон</small></div><div className="calendar-picker-search"><Users size={15} /><input type="search" value={collaboratorQuery} onChange={(event) => setCollaboratorQuery(event.target.value)} placeholder="Нэрээр хайх…" aria-label="Хамтрагч хайх" /></div><div className="calendar-picker-options">{filteredWorkers.slice(0, 8).map((worker) => <button type="button" className={form.collaborator_ids.includes(worker.id) ? 'selected' : ''} key={worker.id} onClick={() => toggleCollaborator(worker.id)}><span><strong>{worker.name}</strong><small>{worker.job_title || 'Ажилтан'}</small></span>{form.collaborator_ids.includes(worker.id) && <X size={14} />}</button>)}{filteredWorkers.length === 0 && <small className="calendar-picker-empty">Ажилтан олдсонгүй.</small>}</div></div><div className="form-row"><label>Эхлэх {kind === 'task' && <span className="field-help">сонголттой</span>}<input required={kind !== 'task'} type="datetime-local" value={form.starts_at} onChange={(event) => updateStart(event.target.value)} /></label><label>Дуусах {kind === 'task' && <span className="field-help">сонголттой</span>}<input required={kind !== 'task'} type="datetime-local" value={form.ends_at} onChange={(event) => setForm({ ...form, ends_at: event.target.value })} /></label></div><button className="primary-action" disabled={isSaving}><Plus size={16} />Үүсгэх</button></form></motion.aside></motion.div>}</AnimatePresence>
+    <AnimatePresence>{selected && <motion.div className="sheet-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setSelected(null)}><motion.aside className="detail-sheet" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', bounce: 0, duration: .4 }} onMouseDown={(event) => event.stopPropagation()}><div className="sheet-header"><div><span className="eyebrow">Calendar item</span><h2>{selected.title}</h2></div><div className="sheet-header-actions"><button className="sheet-close" onClick={() => setSelected(null)} aria-label="Хаах"><X size={17} /></button></div></div><div className="calendar-detail"><p className="calendar-detail-type">{itemTypeLabel(selected)}</p>{selected.description && <p>{selected.description}</p>}<dl><div><dt>Эхлэх</dt><dd>{formatDateTime(selected.start_at || selected.starts_at || selected.starts_on || selected.plan_month || selected.holiday_date)}</dd></div><div><dt>Дуусах</dt><dd>{selected.kind === 'task' && !selected.deadline_at ? 'Хугацаагүй' : formatDateTime(selected.deadline_at || selected.ends_at || selected.ends_on || selected.due_date)}</dd></div>{(selected.location || selected.work_location) && <div><dt><MapPin size={13} />Байршил</dt><dd><a href={/^https?:\/\//i.test(selected.location || selected.work_location) ? selected.location || selected.work_location : undefined} target="_blank" rel="noreferrer">{selected.location || selected.work_location}</a></dd></div>}{(selected.collaborator_ids?.length || selected.assignee_ids?.length) > 0 && <div><dt><Users size={13} />Оролцогчид</dt><dd>{collaboratorNames(selected.collaborator_ids || selected.assignee_ids || []) || '—'}</dd></div>}{selected.kind === 'task' && <><div><dt>Төлөв</dt><dd>{selected.workflow_status || '—'}</dd></div><div><dt>Хариуцагч</dt><dd>{selected.primary_owner_name || 'Даалгавар'}</dd></div>{selected.project_name && <div><dt>Төсөл</dt><dd>{selected.project_name}</dd></div>}</>}</dl>{canEditSelected && <div className="calendar-detail-actions"><button className="secondary-action" onClick={() => openEdit(selected)}><UserRound size={15} />Засах</button><button className="danger-action" onClick={() => void removeSelected()} disabled={deleteEntry.isPending || deleteTask.isPending}><Trash2 size={15} />Устгах</button></div>}</div></motion.aside></motion.div>}</AnimatePresence>
+    <AnimatePresence>{creating && <motion.div className="sheet-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setCreating(false)}><motion.aside className="detail-sheet" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', bounce: 0, duration: .4 }} onMouseDown={(event) => event.stopPropagation()}><div className="sheet-header"><div><span className="eyebrow">Calendar item</span><h2>{editing ? 'Засах' : 'Шинээр үүсгэх'}</h2></div><button className="sheet-close" onClick={() => setCreating(false)} aria-label="Хаах"><X size={17} /></button></div><form className="sheet-form" onSubmit={submit}><label>Төрөл<select value={kind} disabled={editing} onChange={(event) => setKind(event.target.value as typeof kind)}><option value="task">Даалгавар</option><option value="reminder">Сануулга</option><option value="event">Үйл явдал</option></select></label>{kind !== 'task' && canPublish && <label>Харагдац<select value={form.visibility} onChange={(event) => setForm({ ...form, visibility: event.target.value })}><option value="private">Хувийн</option><option value="company">Компаний</option></select></label>}<label>Гарчиг<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label><label>Тайлбар<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label><label>Байршил эсвэл уулзалтын холбоос<span className="field-help">Google Meet, Zoom, оффисын хаяг</span><input type="text" value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} placeholder="https://meet.google.com/..." /></label><div className="calendar-collaborator-picker"><div className="calendar-picker-heading"><span>Оролцогчид</span><small>{form.collaborator_ids.length} сонгосон</small></div><div className="calendar-picker-search"><Users size={15} /><input type="search" value={collaboratorQuery} onChange={(event) => setCollaboratorQuery(event.target.value)} placeholder="Нэрээр хайх…" aria-label="Оролцогч хайх" /></div><div className="calendar-picker-options">{filteredWorkers.slice(0, 8).map((worker) => <div className="calendar-picker-option" key={worker.id}><button type="button" className={form.collaborator_ids.includes(worker.id) ? 'selected' : ''} onClick={() => toggleCollaborator(worker.id)}><span><strong>{worker.name}</strong><small>{worker.job_title || 'Ажилтан'}</small></span>{form.collaborator_ids.includes(worker.id) && <X size={14} />}</button><button type="button" className="calendar-availability-trigger" aria-label={`${worker.name}-ийн хуваарь`} title="Хуваарь харах" aria-expanded={availabilityWorker?.id === worker.id} onClick={(event) => { event.stopPropagation(); setAvailabilityWorker((current) => current?.id === worker.id ? null : worker) }}><CalendarDays size={15} /></button></div>)}{filteredWorkers.length === 0 && <small className="calendar-picker-empty">Ажилтан олдсонгүй.</small>}</div>{availabilityWorker && <WorkerAvailabilityPopover worker={availabilityWorker} scope={scope} onClose={() => setAvailabilityWorker(null)} />}</div><div className="form-row"><label>Эхлэх {kind === 'task' && <span className="field-help">сонголттой</span>}<input required={kind !== 'task'} type="datetime-local" value={form.starts_at} onChange={(event) => updateStart(event.target.value)} /></label><label>Дуусах {kind === 'task' && <span className="field-help">сонголттой</span>}<input required={kind !== 'task'} type="datetime-local" value={form.ends_at} onChange={(event) => setForm({ ...form, ends_at: event.target.value })} /></label></div><button className="primary-action" disabled={isSaving}><Plus size={16} />Үүсгэх</button></form></motion.aside></motion.div>}</AnimatePresence>
   </div>
 }

@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add collaborator availability popovers, compact calendar items, and persistent type filters with focused regression coverage (`backend/app/routers/enterprise.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`)
 - [x] Deliver unified calendar item management for events, reminders, and tasks: collaborators, locations, smart date defaults, day-click creation, and review/no-due-date rules (`backend/app/models/models.py`, `backend/app/routers/enterprise.py`, `backend/app/services`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`, `backend/alembic/versions`, `backend/tests`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`)
   - [x] Add calendar-entry location/collaborator persistence and notification contracts
   - [x] Exempt Under Review tasks from overdue serialization, filters, reminders, and analytics

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CalendarWorkspacePage, GoogleCalendarSyncControl } from './CalendarWorkspacePage'
 
@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   calendars: { data: { items: [], selected_id: '' } as any, isLoading: false },
   select: { isPending: false, mutate: vi.fn() },
   events: { tasks: [] as any[], projects: [] as any[], plans: [] as any[], entries: [] as any[], holidays: [] as any[], time_blocks: [] as any[] },
+  workers: [] as any[],
 }))
 
 vi.mock('../api/enterprise', () => ({
@@ -26,7 +27,7 @@ vi.mock('../api/enterprise', () => ({
   useDeleteCalendarEntry: () => ({ isPending: false, mutateAsync: vi.fn() }),
   useUpdateEnterpriseTask: () => ({ isPending: false, mutateAsync: vi.fn() }),
   useDeleteEnterpriseTask: () => ({ isPending: false, mutateAsync: vi.fn() }),
-  useWorkerDirectory: () => ({ data: [] }),
+  useWorkerDirectory: () => ({ data: [{ id: 7, name: 'Батаа', job_title: 'Дизайнер' }] }),
   useHolidaySettings: () => ({ data: { country: 'MN', countries: [] } }),
   useSetHolidayCountry: () => ({ isPending: false, mutate: vi.fn() }),
 }))
@@ -39,6 +40,8 @@ describe('GoogleCalendarSyncControl', () => {
     state.sync.mutate.mockReset()
     state.disconnect.mutate.mockReset()
     state.events = { tasks: [], projects: [], plans: [], entries: [], holidays: [], time_blocks: [] }
+    state.workers.length = 0
+    window.localStorage.clear()
     vi.restoreAllMocks()
   })
 
@@ -81,5 +84,37 @@ describe('GoogleCalendarSyncControl', () => {
     fireEvent.click(targetDay as HTMLButtonElement)
     expect(targetDay).toHaveAttribute('aria-pressed', 'true')
     expect(container.querySelector('.mobile-calendar-agenda')?.textContent).toContain('Олон өдрийн ажил')
+  })
+
+  it('opens a worker availability popover from the creation sheet', () => {
+    const now = new Date()
+    const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-18`
+    state.workers.push({ id: 7, name: 'Батаа', job_title: 'Дизайнер' })
+    state.events.entries = [{ id: 70, kind: 'event', title: 'Батаагийн уулзалт', starts_at: `${day}T10:00:00Z`, ends_at: `${day}T11:00:00Z` }]
+    const { container } = render(<CalendarWorkspacePage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Үүсгэх' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Батаа-ийн хуваарь' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Батаа-ийн хуваарь' })
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Дараагийн сар' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Шинээр үүсгэх' })).toBeInTheDocument()
+    expect(within(dialog).getByText('Батаагийн уулзалт')).toBeInTheDocument()
+  })
+
+  it('filters calendar types and persists the selected view', () => {
+    const now = new Date()
+    const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-18`
+    state.events.tasks = [{ id: 80, kind: 'task', title: 'Шүүлтүүрийн даалгавар', start_at: day, deadline_at: day }]
+    state.events.entries = [{ id: 81, kind: 'event', title: 'Шүүлтүүрийн уулзалт', starts_at: day, ends_at: day }]
+    const { container } = render(<CalendarWorkspacePage />)
+
+    expect(container.querySelector('.calendar-item.task')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Даалгавар' }))
+
+    expect(container.querySelector('.calendar-item.task')).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('oyuns-calendar-type-filters')).toContain('"task":false')
+    expect(screen.getByRole('button', { name: 'Даалгавар' })).toHaveAttribute('aria-pressed', 'false')
   })
 })
