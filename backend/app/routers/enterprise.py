@@ -1212,6 +1212,7 @@ async def list_tasks(
     overdue: bool = False,
     date_from: date | None = None,
     date_to: date | None = None,
+    calendar_employee_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ):
@@ -1245,6 +1246,8 @@ async def list_tasks(
         )
         client_projects = select(Project.id).where(Project.client_id.in_(scoped_clients))
         query = query.where(or_(Task.project_id.in_(scoped_projects), Task.project_id.in_(client_projects)))
+    elif calendar_employee_id is not None:
+        query = query.where(_task_employee_scope(calendar_employee_id))
     elif scope == "delegated":
         if not actor.employee_id:
             return []
@@ -1657,13 +1660,11 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
         target_employee = await db.scalar(select(Employee.id).where(Employee.id == employee_id, Employee.organization_id == actor.organization_id, Employee.is_active.is_(True)))
         if not target_employee:
             raise HTTPException(status_code=404, detail="Worker not found")
-        if employee_id != actor.employee_id and not actor.has_any_role(*MANAGEMENT_ROLES):
-            raise HTTPException(status_code=403, detail="Worker availability requires management access")
-    task_scope = "organization" if (scope == "corporate" or employee_id is not None) and actor.has_any_role(*MANAGEMENT_ROLES) else "mine"
+    task_scope = "organization" if (scope == "corporate" or employee_id is not None) else "mine"
     # ``list_tasks`` is also a FastAPI endpoint, whose priority default is a
     # Query marker until FastAPI resolves an HTTP request.  This internal call
     # must provide the concrete value rather than passing that marker to SQL.
-    task_rows = await list_tasks(scope=task_scope, priority=None, date_from=period_start, date_to=period_end, db=db, actor=actor)
+    task_rows = await list_tasks(scope=task_scope, priority=None, date_from=period_start, date_to=period_end, calendar_employee_id=employee_id, db=db, actor=actor)
     if employee_id is not None:
         task_rows = [row for row in task_rows if _calendar_task_visible_to_employee(row, employee_id)]
     elif scope == "private":
@@ -1677,13 +1678,13 @@ async def calendar_events(scope: Literal["private", "corporate"] = "private", da
         Project.starts_on <= period_end,
         Project.ends_on >= period_start,
     )
-    if scope == "private" and not actor.has_any_role(*MANAGEMENT_ROLES):
+    if scope == "private" and employee_id is None and not actor.has_any_role(*MANAGEMENT_ROLES):
         member_projects = select(ProjectMember.project_id).where(ProjectMember.employee_id == actor.employee_id) if actor.employee_id else select(ProjectMember.project_id).where(ProjectMember.id == -1)
         project_query = project_query.where(or_(Project.manager_id == actor.employee_id, Project.id.in_(member_projects)))
     projects = (await db.execute(project_query.order_by(Project.starts_on, Project.ends_on, Project.id))).scalars().all()
     project_events = [{"kind": "project", "visibility": "company" if scope == "corporate" else "private", "title": project.name, "description": project.description, "starts_on": project.starts_on, "ends_on": project.ends_on, "project_id": project.id, "code": project.code, "status": project.status, "can_edit": actor.has_any_role(*MANAGEMENT_ROLES)} for project in projects]
     plan_events: list[dict] = []
-    if scope == "corporate":
+    if scope == "corporate" or employee_id is not None:
         plan_query = select(CompanyPlanItem).where(
             CompanyPlanItem.organization_id == actor.organization_id,
             CompanyPlanItem.status == "approved",

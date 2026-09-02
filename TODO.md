@@ -1,7 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Restore the previous calendar palette with solid filled pills and implement Google Calendar-style spanning lanes, collision-safe row slotting, and week-wrap slicing (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`) — full frontend suite: 28 files / 93 tests pass; production build and diff checks pass
 - [x] Add collaborator availability popovers, compact calendar items, and persistent type filters with focused regression coverage (`backend/app/routers/enterprise.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`)
+- [x] Allow regular organization members to load other active workers' availability schedules in the calendar popover (`backend/app/routers/enterprise.py`, `backend/tests/test_enterprise_foundation.py`)
 - [x] Deliver unified calendar item management for events, reminders, and tasks: collaborators, locations, smart date defaults, day-click creation, and review/no-due-date rules (`backend/app/models/models.py`, `backend/app/routers/enterprise.py`, `backend/app/services`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`, `backend/alembic/versions`, `backend/tests`, `frontend/src/pages/CalendarWorkspacePage.test.tsx`)
   - [x] Add calendar-entry location/collaborator persistence and notification contracts
   - [x] Exempt Under Review tasks from overdue serialization, filters, reminders, and analytics

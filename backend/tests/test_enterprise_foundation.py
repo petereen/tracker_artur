@@ -102,6 +102,35 @@ def test_calendar_internal_task_query_uses_a_concrete_empty_priority():
     assert captured["priority"] is None
 
 
+def test_member_calendar_can_query_another_worker_availability():
+    captured: dict[str, object] = {}
+
+    async def fake_list_tasks(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    class EmptyRows:
+        def scalars(self): return self
+        def all(self): return []
+
+    class CalendarDb:
+        async def execute(self, *_args): return EmptyRows()
+        async def get(self, *_args): return SimpleNamespace(settings={})
+        async def scalar(self, *_args): return 7
+
+    original = enterprise.list_tasks
+    enterprise.list_tasks = fake_list_tasks
+    try:
+        import asyncio
+        asyncio.run(enterprise.calendar_events(
+            scope="private", employee_id=7, date_from=date(2026, 7, 27), date_to=date(2026, 9, 6), db=CalendarDb(),
+            actor=ActorContext(account_id=1, organization_id=1, employee_id=2, email="member@example.com", locale="mn", roles=frozenset({"member"})),
+        ))
+    finally:
+        enterprise.list_tasks = original
+    assert captured["calendar_employee_id"] == 7
+
+
 def test_private_calendar_keeps_primary_owner_tasks_without_assignee_link_rows():
     assert _calendar_task_visible_to_employee({"primary_owner_id": 7, "assignee_ids": []}, 7)
     assert _calendar_task_visible_to_employee({"primary_owner_id": None, "assignee_ids": [7]}, 7)

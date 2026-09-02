@@ -137,18 +137,23 @@ function WorkerAvailabilityPopover({ worker, scope, onClose }: { worker: { id: n
     <div className="calendar-availability-preview"><small>{new Date(`${previewDate}T12:00:00`).toLocaleDateString('mn-MN', { month: 'long', day: 'numeric', weekday: 'long' })}</small>{events.isLoading ? <p>Ачаалж байна…</p> : previewItems.length ? <ul>{previewItems.slice(0, 4).map((item) => <li key={`${item.kind}-${item.id || item.plan_id}`}><span className={`availability-dot ${item.kind}`} /><span><strong>{item.title}</strong><small>{availabilityTypeLabel(item)} · {availabilityItemTime(item)}</small></span></li>)}{previewItems.length > 4 && <li className="availability-more">+{previewItems.length - 4} өөр хуваарь</li>}</ul> : <p>Энэ өдөрт хуваарь алга.</p>}</div>
   </motion.div>
 }
-function calendarRangeSegments(items: any[], days: Date[]) {
+type CalendarRangeSegment = { item: any; key: string; start: number; end: number; first: boolean; last: boolean; lane: number; week: number }
+type CalendarRangeLayout = { segments: CalendarRangeSegment[]; weekLanes: number[] }
+
+function calendarRangeSegments(items: any[], days: Date[]): CalendarRangeLayout {
   const dayIndexes = new Map(days.map((day, index) => [localDate(day), index]))
-  const byWeek = Array.from({ length: 6 }, () => [] as Array<{ item: any; start: number; end: number; first: boolean; last: boolean; lane: number }>)
-  items.filter((item) => ['task', 'project', 'plan'].includes(item.kind)).forEach((item) => {
+  const byWeek = Array.from({ length: 6 }, () => [] as Array<Omit<CalendarRangeSegment, 'week'>>)
+  items.forEach((item) => {
     const dates = itemDates(item)
-    const visibleIndexes = dates.map((date) => dayIndexes.get(date)).filter((index): index is number => index !== undefined)
-    if (visibleIndexes.length < 2) return
+    const visibleIndexes = [...new Set(dates.map((date) => dayIndexes.get(date)).filter((index): index is number => index !== undefined))].sort((left, right) => left - right)
+    if (!visibleIndexes.length) return
+    const key = [item.kind || 'item', item.id || item.project_id || item.plan_id || item.title, dates[0], dates[dates.length - 1]].join('|')
     let segmentStart = visibleIndexes[0]
     let previous = visibleIndexes[0]
     const addSegment = (start: number, end: number) => {
       const week = Math.floor(start / 7)
-      byWeek[week].push({ item, start: start % 7, end: end % 7, first: dates[0] === localDate(days[start]), last: dates[dates.length - 1] === localDate(days[end]), lane: 0 })
+      if (!byWeek[week]) return
+      byWeek[week].push({ item, key, start: start % 7, end: end % 7, first: dates[0] === localDate(days[start]), last: dates[dates.length - 1] === localDate(days[end]), lane: 0 })
     }
     visibleIndexes.slice(1).forEach((index) => {
       if (index % 7 === 0 || index !== previous + 1) { addSegment(segmentStart, previous); segmentStart = index }
@@ -156,15 +161,26 @@ function calendarRangeSegments(items: any[], days: Date[]) {
     })
     addSegment(segmentStart, previous)
   })
-  return byWeek.flatMap((segments, week) => {
+
+  const weekLanes = Array.from({ length: 6 }, () => 0)
+  let previousWeekLanes = new Map<string, number>()
+  const segments = byWeek.flatMap((weekSegments, week) => {
     const laneEnds: number[] = []
-    return segments.sort((left, right) => left.start - right.start || right.end - left.end).map((segment) => {
-      const lane = laneEnds.findIndex((end) => end < segment.start)
-      segment.lane = lane === -1 ? laneEnds.length : lane
-      laneEnds[segment.lane] = segment.end
+    const nextWeekLanes = new Map<string, number>()
+    const placed = weekSegments.sort((left, right) => left.start - right.start || right.end - left.end || left.key.localeCompare(right.key)).map((segment) => {
+      const preferredLane = previousWeekLanes.get(segment.key)
+      let lane = preferredLane !== undefined && (laneEnds[preferredLane] ?? -1) < segment.start ? preferredLane : laneEnds.findIndex((end) => (end ?? -1) < segment.start)
+      if (lane === -1) lane = laneEnds.length
+      segment.lane = lane
+      laneEnds[lane] = segment.end
+      nextWeekLanes.set(segment.key, lane)
       return { ...segment, week }
     })
+    weekLanes[week] = laneEnds.length
+    previousWeekLanes = nextWeekLanes
+    return placed
   })
+  return { segments, weekLanes }
 }
 
 function formatLastSynced(value?: string | null) {
@@ -233,7 +249,6 @@ export function CalendarWorkspacePage() {
   const [editing, setEditing] = useState(false)
   const [collaboratorQuery, setCollaboratorQuery] = useState('')
   const [availabilityWorker, setAvailabilityWorker] = useState<{ id: number; name: string; job_title?: string | null } | null>(null)
-  const [expandedDays, setExpandedDays] = useState<Set<string>>(() => new Set())
   const [filters, setFilters] = useState<Record<CalendarFilterKey, boolean>>(() => {
     const defaults = { event: true, plan: true, task: true, reminder: true }
     try {
@@ -309,7 +324,8 @@ export function CalendarWorkspacePage() {
   }
   const all = useMemo(() => uniqueCalendarItems([...(events.data?.tasks ?? []), ...(events.data?.projects ?? []), ...(events.data?.plans ?? []), ...(events.data?.entries ?? []), ...(events.data?.holidays ?? []), ...(events.data?.time_blocks ?? [])]), [events.data])
   const visibleAll = useMemo(() => all.filter((item) => { const filter = calendarFilterKey(item); return !filter || filters[filter] }), [all, filters])
-  const rangeSegments = useMemo(() => calendarRangeSegments(visibleAll, days), [visibleAll, days])
+  const rangeLayout = useMemo(() => calendarRangeSegments(visibleAll, days), [visibleAll, days])
+  const calendarGridRows = useMemo(() => rangeLayout.weekLanes.map((laneCount) => `${Math.max(150, 35 + laneCount * 26 + 12)}px`).join(' '), [rangeLayout.weekLanes])
   const mobileDays = days
   const mobileMonthDays = useMemo(() => days.filter((day) => day.getMonth() === anchor.getMonth()), [anchor, days])
   const mobileItemsByDate = useMemo(() => {
@@ -345,19 +361,13 @@ export function CalendarWorkspacePage() {
     <div className="calendar-filter-toolbar" role="toolbar" aria-label="Календарийн төрлийн шүүлтүүр"><div className="calendar-filter-chips"><span className="calendar-filter-label">Харах</span>{CALENDAR_FILTERS.map((filter) => <button type="button" key={filter.key} className={`calendar-filter-chip ${filter.key} ${filters[filter.key] ? 'active' : ''}`} aria-pressed={filters[filter.key]} onClick={() => toggleFilter(filter.key)}><i aria-hidden />{filter.label}</button>)}</div><button type="button" className="calendar-filter-all" onClick={setAllFilters}>{allFiltersSelected ? 'Бүгдийг цуцлах' : 'Бүгдийг сонгох'}</button></div>
     {events.isError && <div className="panel calendar-status error">Календарийн мэдээлэл ачаалагдсангүй. Дахин оролдоно уу.</div>}
     <QueryRegion pending={events.isLoading || events.isFetching} skeleton={<CalendarSkeleton />}><>
-      <div className="planning-calendar panel">{days.map((day) => {
+      <div className="planning-calendar panel" style={{ gridTemplateRows: calendarGridRows }}>{days.map((day) => {
         const key = localDate(day)
-        const items = visibleAll.filter((item: any) => itemDates(item).includes(key) && (!['task', 'project', 'plan'].includes(item.kind) || itemDates(item).length === 1))
-        const expanded = expandedDays.has(key)
-        const visibleItems = expanded ? items : items.slice(0, 3)
-        const hiddenCount = items.length - visibleItems.length
         const redDay = day.getDay() === 0 || day.getDay() === 6 || holidayKeys.has(key)
         return <section key={key} role="button" tabIndex={0} aria-label={`${key} өдөрт зүйл үүсгэх`} onClick={() => openCreate(day)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openCreate(day) }} className={`${day.getMonth() === anchor.getMonth() ? '' : 'outside'} ${redDay ? 'red-day' : ''} ${key === todayKey ? 'today' : ''}`}>
           <header><strong>{day.getDate()}</strong><span>{day.toLocaleDateString('mn-MN', { weekday: 'short' })}</span></header>
-          {visibleItems.map((item: any, index) => <button className={`calendar-item ${item.kind}`} title={item.title} key={`${item.kind}-${item.id || item.project_id || item.plan_id || index}`} onClick={(event) => { event.stopPropagation(); setSelected(item) }}><i className="calendar-item-dot" aria-hidden /><strong>{item.title}</strong><small>{calendarItemSubtitle(item)}</small></button>)}
-          {hiddenCount > 0 && <button type="button" className="calendar-overflow" onClick={(event) => { event.stopPropagation(); setExpandedDays((current) => { const next = new Set(current); next.add(key); return next }) }}>+{hiddenCount} өөр</button>}
         </section>
-      })}<div className="calendar-range-layer" aria-label="Олон өдрийн ажлууд">{rangeSegments.map((segment) => <button className={`calendar-item calendar-range ${segment.item.kind} ${segment.first ? 'range-start' : ''} ${segment.last ? 'range-end' : ''}`} key={`${segment.item.kind}-${segment.item.id || segment.item.project_id || segment.item.plan_id}-${segment.week}`} style={{ gridColumn: `${segment.start + 1} / ${segment.end + 2}`, gridRow: `${segment.week + 1}`, '--range-lane': segment.lane } as React.CSSProperties} onClick={(event) => { event.stopPropagation(); setSelected(segment.item) }}><i className="calendar-item-dot" aria-hidden /><strong>{segment.item.title}</strong><small>{calendarItemSubtitle(segment.item)}</small></button>)}</div></div>
+      })}<div className="calendar-range-layer" aria-label="Календарийн хуваарь" style={{ gridTemplateRows: calendarGridRows }}>{rangeLayout.segments.map((segment) => <button className={`calendar-item calendar-range ${segment.item.kind || 'item'} ${segment.first ? 'range-start' : ''} ${segment.last ? 'range-end' : ''}`} title={segment.item.title} key={`${segment.key}-${segment.week}`} style={{ gridColumn: `${segment.start + 1} / ${segment.end + 2}`, gridRow: `${segment.week + 1}`, '--range-lane': segment.lane } as React.CSSProperties} onClick={(event) => { event.stopPropagation(); setSelected(segment.item) }}><i className="calendar-item-dot" aria-hidden /><strong>{segment.item.title}</strong><small>{calendarItemSubtitle(segment.item)}</small></button>)}</div></div>
       <section className="mobile-calendar panel" aria-label="Гар утасны календарь"><div className="mobile-calendar-weekdays">{['Дав', 'Мяг', 'Лха', 'Пүр', 'Баа', 'Бям', 'Ням'].map((day) => <span key={day}>{day}</span>)}</div><div className="mobile-calendar-grid">{mobileDays.map((day) => { const key = localDate(day); const items = mobileItemsByDate.get(key) ?? []; const markerKinds = [...new Set(items.map((item) => item.kind))].slice(0, 3); return <button type="button" key={key} className={`${day.getMonth() !== anchor.getMonth() ? 'outside' : ''} ${key === selectedMobileDate ? 'selected' : ''} ${key === todayKey ? 'today' : ''} ${day.getDay() === 0 || day.getDay() === 6 || holidayKeys.has(key) ? 'red-day' : ''}`} aria-label={`${day.toLocaleDateString('mn-MN', { month: 'long', day: 'numeric', weekday: 'long' })}, ${items.length} зүйл`} aria-pressed={key === selectedMobileDate} onClick={() => { setSelectedMobileDate(key); openCreate(day) }}><strong>{day.getDate()}</strong>{items.length > 0 && <span className="mobile-calendar-count">{items.length}</span>}<i aria-hidden>{markerKinds.map((kind, index) => <b className={kind} key={`${kind}-${index}`} />)}</i></button> })}</div><div className="mobile-calendar-agenda"><header><div><span className="eyebrow">Сонгосон өдөр</span><h2>{new Date(`${selectedMobileDate}T12:00:00`).toLocaleDateString('mn-MN', { month: 'long', day: 'numeric', weekday: 'long' })}</h2></div><span>{mobileSelectedItems.length} зүйл</span></header>{mobileSelectedItems.length ? mobileSelectedItems.map((item: any) => <button type="button" className={`mobile-calendar-agenda-item ${item.kind}`} key={`${item.kind}-${item.id || item.project_id || item.plan_id}`} onClick={() => setSelected(item)}><span className="mobile-calendar-agenda-marker" aria-hidden /><span><strong>{item.title}</strong><small>{calendarItemSubtitle(item)}</small></span></button>) : <p>Энэ өдөр танд төлөвлөсөн ажил байхгүй байна.</p>}</div></section>
     </></QueryRegion>
     <AnimatePresence>{selected && <motion.div className="sheet-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={() => setSelected(null)}><motion.aside className="detail-sheet" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', bounce: 0, duration: .4 }} onMouseDown={(event) => event.stopPropagation()}><div className="sheet-header"><div><span className="eyebrow">Calendar item</span><h2>{selected.title}</h2></div><div className="sheet-header-actions"><button className="sheet-close" onClick={() => setSelected(null)} aria-label="Хаах"><X size={17} /></button></div></div><div className="calendar-detail"><p className="calendar-detail-type">{itemTypeLabel(selected)}</p>{selected.description && <p>{selected.description}</p>}<dl><div><dt>Эхлэх</dt><dd>{formatDateTime(selected.start_at || selected.starts_at || selected.starts_on || selected.plan_month || selected.holiday_date)}</dd></div><div><dt>Дуусах</dt><dd>{selected.kind === 'task' && !selected.deadline_at ? 'Хугацаагүй' : formatDateTime(selected.deadline_at || selected.ends_at || selected.ends_on || selected.due_date)}</dd></div>{(selected.location || selected.work_location) && <div><dt><MapPin size={13} />Байршил</dt><dd><a href={/^https?:\/\//i.test(selected.location || selected.work_location) ? selected.location || selected.work_location : undefined} target="_blank" rel="noreferrer">{selected.location || selected.work_location}</a></dd></div>}{(selected.collaborator_ids?.length || selected.assignee_ids?.length) > 0 && <div><dt><Users size={13} />Оролцогчид</dt><dd>{collaboratorNames(selected.collaborator_ids || selected.assignee_ids || []) || '—'}</dd></div>}{selected.kind === 'task' && <><div><dt>Төлөв</dt><dd>{selected.workflow_status || '—'}</dd></div><div><dt>Хариуцагч</dt><dd>{selected.primary_owner_name || 'Даалгавар'}</dd></div>{selected.project_name && <div><dt>Төсөл</dt><dd>{selected.project_name}</dd></div>}</>}</dl>{canEditSelected && <div className="calendar-detail-actions"><button className="secondary-action" onClick={() => openEdit(selected)}><UserRound size={15} />Засах</button><button className="danger-action" onClick={() => void removeSelected()} disabled={deleteEntry.isPending || deleteTask.isPending}><Trash2 size={15} />Устгах</button></div>}</div></motion.aside></motion.div>}</AnimatePresence>

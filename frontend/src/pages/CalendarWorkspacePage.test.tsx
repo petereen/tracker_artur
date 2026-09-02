@@ -86,6 +86,37 @@ describe('GoogleCalendarSyncControl', () => {
     expect(container.querySelector('.mobile-calendar-agenda')?.textContent).toContain('Олон өдрийн ажил')
   })
 
+  it('renders every calendar type in collision-free spanning lanes and slices week wraps', () => {
+    const now = new Date()
+    const day = (value: number) => {
+      const date = new Date(now.getFullYear(), now.getMonth(), value)
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    }
+    const saturday = Array.from({ length: 14 }, (_, index) => index + 15).find((value) => new Date(now.getFullYear(), now.getMonth(), value).getDay() === 6) as number
+    state.events.tasks = [{ id: 50, kind: 'task', title: 'Замын ажил', start_at: day(17), deadline_at: day(19) }]
+    state.events.entries = [
+      { id: 51, kind: 'event', title: 'Олон өдрийн үйл явдал', starts_at: day(17), ends_at: day(19) },
+      { id: 52, kind: 'reminder', title: 'Давхцсан сануулга', starts_at: day(18), ends_at: day(18) },
+      { id: 53, kind: 'event', title: 'Долоо хоног дамнасан үйл явдал', starts_at: day(saturday), ends_at: day(saturday + 2) },
+    ]
+    state.events.holidays = [{ id: 54, kind: 'holiday', title: 'Нийтийн амралт', holiday_date: day(18) }]
+
+    const { container } = render(<CalendarWorkspacePage />)
+    const calendar = container.querySelector('.planning-calendar')
+    const bars = [...(calendar?.querySelectorAll('.calendar-range') ?? [])]
+    expect(bars.map((bar) => bar.querySelector('strong')?.textContent)).toEqual(expect.arrayContaining(['Замын ажил', 'Олон өдрийн үйл явдал', 'Давхцсан сануулга', 'Нийтийн амралт']))
+
+    const reminder = calendar?.querySelector<HTMLElement>('.calendar-item.reminder')
+    expect(Number(reminder?.style.getPropertyValue('--range-lane'))).toBeGreaterThan(0)
+
+    const wrapped = bars.filter((bar) => bar.querySelector('strong')?.textContent === 'Долоо хоног дамнасан үйл явдал')
+    expect(wrapped).toHaveLength(2)
+    expect(wrapped[0]).toHaveClass('range-start')
+    expect(wrapped[1]).toHaveClass('range-end')
+    expect(wrapped[0].getAttribute('style')).toContain('grid-column: 6 / 8')
+    expect(wrapped[1].getAttribute('style')).toContain('grid-column: 1 / 2')
+  })
+
   it('opens a worker availability popover from the creation sheet', () => {
     const now = new Date()
     const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-18`
