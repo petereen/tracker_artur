@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Make approved leave requests editable with conflict, balance, and version checks (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`) — approved and pending requests now have an edit form; backend checks scope, status, overlaps, annual balance, and optimistic version conflicts; Python compilation, TypeScript/build, focused frontend test, and diff checks pass; backend pytest remains unavailable because pytest is not installed
+- [x] Add HR UI controls for annual leave entitlement and leave-balance adjustments (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/tests`) — annual leave can be set while creating an employee or edited later by HR/admin; frontend build, 28-file/93-test suite, Python compilation, and contract checks pass
 - [x] Fix HR annual-leave error rendering, live leave-query refresh, and requester/HR notifications (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`, `backend/app/hr/router.py`, `backend/tests`, `frontend/src`) — frontend suite 28 files / 93 tests, production build, Python compilation, and diff checks pass; backend pytest runtime remains unavailable because pytest is not installed
 - [x] Automatically persist HR attendance as present/remote when workers start office, remote, web, Telegram, or QR worktime while preserving manager-confirmed manual status (`backend/app/services/attendance_service.py`, `backend/app/hr/service.py`, `backend/app/services/work_report_service.py`, `backend/app/routers/enterprise.py`, `backend/app/routers/worktime_qr.py`, `backend/tests`)
 - [x] Notify calendar collaborators on both Telegram and the platform when an item is created (`backend/app/routers/enterprise.py`, `backend/app/services/reminder_service.py`, `backend/tests`)
@@ -398,6 +400,8 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Make approved leave requests editable with conflict, balance, and version checks (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`)
+- [x] Add HR UI controls for annual leave entitlement and leave-balance adjustments (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/tests`)
 - [x] Fix HR annual-leave error rendering, live leave-query refresh, and requester/HR notifications (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`, `backend/app/hr/router.py`, `backend/tests`, `frontend/src`)
 - [x] Deliver unified calendar item management for events, reminders, and tasks with collaborator notifications, location support, day-click creation, smart two-hour defaults, optional task timestamps, stale-alert suppression, and Under Review overdue exemption (`backend/app/models/models.py`, `backend/app/routers/enterprise.py`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/alembic/versions/l2m3n4o5p6q7_calendar_item_collaboration.py`)
 - [x] Move the “Хүний нөөц” navbar button below ERP when ERP navigation is available (`frontend/src/components/EnterpriseShell.tsx`)

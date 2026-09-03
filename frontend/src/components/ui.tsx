@@ -54,14 +54,14 @@ export function Card({ children, className = '' }: { children: React.ReactNode; 
 }
 
 // --- Input ---
-export function Input({ label, value, onChange, type = 'text', placeholder = '', fullWidth }: {
+export function Input({ label, value, onChange, type = 'text', placeholder = '', fullWidth, min, max }: {
   label?: string; value: string; onChange: (v: string) => void;
-  type?: string; placeholder?: string; fullWidth?: boolean
+  type?: string; placeholder?: string; fullWidth?: boolean; min?: string | number; max?: string | number
 }) {
   return (
     <div className={`flex flex-col gap-1.5 ${fullWidth ? 'w-full' : ''}`}>
       {label && <label className="text-xs text-muted font-medium">{label}</label>}
-      <input value={value} onChange={(e) => onChange(e.target.value)} type={type} placeholder={placeholder}
+      <input value={value} onChange={(e) => onChange(e.target.value)} type={type} min={min} max={max} placeholder={placeholder}
         className={`bg-surface2 border border-border rounded-lg px-3 py-2 text-text outline-none focus:border-accent transition-colors ${fullWidth ? 'w-full' : ''}`} />
     </div>
   )

@@ -64,6 +64,20 @@ class LeaveRequestInput(BaseModel):
         return self
 
 
+class LeaveRequestPatch(BaseModel):
+    leave_type: LeaveType | None = None
+    starts_on: date | None = None
+    ends_on: date | None = None
+    reason: str | None = Field(default=None, min_length=1, max_length=2000)
+    version: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def valid_range(self):
+        if self.starts_on and self.ends_on and self.ends_on < self.starts_on:
+            raise ValueError("End date must not precede start date")
+        return self
+
+
 class LeaveDecisionInput(BaseModel):
     approve: bool
     feedback: str | None = Field(default=None, max_length=2000)

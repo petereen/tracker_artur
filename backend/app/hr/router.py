@@ -43,6 +43,7 @@ from .schemas import (
     LeaveBalancePatch,
     LeaveDecisionInput,
     LeaveRequestInput,
+    LeaveRequestPatch,
     PayrollGenerateInput,
 )
 from .service import (
@@ -291,6 +292,73 @@ async def submit_leave_request(data: LeaveRequestInput, db: AsyncSession = Depen
     return {"id": row.id, "status": row.status, "working_days": days, "employee_id": employee.id}
 
 
+@router.patch("/leave-requests/{request_id}")
+async def update_leave_request(request_id: int, data: LeaveRequestPatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    row = await db.scalar(select(TimeOff).where(TimeOff.id == request_id, TimeOff.organization_id == actor.organization_id).with_for_update())
+    if not row:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+    await employee_in_scope(db, actor, row.employee_id, write=True)
+    if row.status not in {"pending", "approved"}:
+        raise HTTPException(status_code=409, detail="Only pending or approved leave requests can be edited")
+    if data.version is not None and row.version != data.version:
+        raise HTTPException(status_code=409, detail="Leave request changed")
+
+    starts_on = data.starts_on or row.starts_on
+    ends_on = data.ends_on or row.ends_on
+    leave_type = data.leave_type or row.time_off_type
+    reason = data.reason if data.reason is not None else row.reason
+    if ends_on < starts_on:
+        raise HTTPException(status_code=422, detail="End date must not precede start date")
+
+    overlap = await db.scalar(select(TimeOff.id).where(
+        TimeOff.organization_id == actor.organization_id,
+        TimeOff.employee_id == row.employee_id,
+        TimeOff.id != row.id,
+        TimeOff.status.in_(
+            ("pending", "approved")
+        ),
+        TimeOff.starts_on <= ends_on,
+        TimeOff.ends_on >= starts_on,
+    ))
+    if overlap:
+        raise HTTPException(status_code=409, detail="Leave dates overlap an existing request")
+
+    days = await leave_days(db, actor.organization_id, starts_on, ends_on)
+    if leave_type == "annual":
+        balance = await leave_balance(db, actor.organization_id, row.employee_id, starts_on.year, "annual")
+        available = Decimal(balance["available_days"])
+        if row.time_off_type == "annual" and row.starts_on.year == starts_on.year:
+            available += Decimal(str(row.working_days or 0))
+        if available < Decimal(days):
+            raise HTTPException(status_code=409, detail={"code": "leave_balance_insufficient", "available_days": str(available)})
+
+    before = {"leave_type": row.time_off_type, "starts_on": row.starts_on.isoformat(), "ends_on": row.ends_on.isoformat(), "working_days": str(row.working_days or 0), "reason": row.reason, "status": row.status}
+    row.time_off_type = leave_type
+    row.starts_on = starts_on
+    row.ends_on = ends_on
+    row.working_days = days
+    row.reason = reason
+    row.version += 1
+    after = {"leave_type": row.time_off_type, "starts_on": row.starts_on.isoformat(), "ends_on": row.ends_on.isoformat(), "working_days": str(row.working_days or 0), "reason": row.reason, "status": row.status}
+    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation="updated", version=row.version, before=before, after=after)
+    await create_notifications(
+        db,
+        organization_id=actor.organization_id,
+        employee_ids={row.employee_id},
+        account_ids=await _hr_account_ids(db, actor.organization_id),
+        kind="hr_leave_updated",
+        title="Чөлөөний хүсэлт засагдлаа",
+        body=f"Таны чөлөөний хүсэлт {starts_on}–{ends_on} болж шинэчлэгдлээ.",
+        target_url="/hr?tab=leave",
+        payload={"leave_request_id": row.id, "status": row.status, "version": row.version},
+        source_event_id=source_event.id,
+        dedup_key=f"hr-leave-updated:{row.id}:v{row.version}",
+        immediate=True,
+    )
+    await db.commit()
+    return {"id": row.id, "status": row.status, "leave_type": row.time_off_type, "starts_on": starts_on.isoformat(), "ends_on": ends_on.isoformat(), "working_days": str(days), "reason": row.reason, "version": row.version}
+
+
 @router.post("/leave-requests/{request_id}/decision")
 async def decide_leave_request(request_id: int, data: LeaveDecisionInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGER_ROLES))):
     row = await db.scalar(select(TimeOff).where(TimeOff.id == request_id, TimeOff.organization_id == actor.organization_id).with_for_update())
@@ -312,7 +380,7 @@ async def decide_leave_request(request_id: int, data: LeaveDecisionInput, db: As
         account_ids=await _hr_account_ids(db, actor.organization_id),
         kind=f"hr_leave_{row.status}",
         title="Чөлөөний хүсэлтийн төлөв шинэчлэгдлээ",
-        body=f"{employee.name if employee else 'Ажилтан'}-ны чөлөөний хүсэлт {status_label}.{feedback}",
+        body=f"Таны чөлөөний хүсэлтийг {status_label}.{feedback}",
         target_url="/hr?tab=leave",
         payload={"leave_request_id": row.id, "status": row.status, "feedback": data.feedback},
         source_event_id=source_event.id,

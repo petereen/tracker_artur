@@ -28,6 +28,8 @@ def test_hr_router_exposes_identity_leave_attendance_and_payroll_contracts():
     assert "with_for_update()" in router
     assert "leave_balance_insufficient" in router
     assert "MANAGER_ROLES," in router
+    assert '@router.patch("/leave-requests/{request_id}")' in router
+    assert "Only pending or approved leave requests can be edited" in router
 
 
 def test_telegram_login_paths_synchronize_profile_claims():
@@ -66,3 +68,18 @@ def test_leave_lifecycle_notifies_requester_and_hr_and_emits_hr_events():
     assert "['v1', 'hr']" in frontend_api
     assert "hr: 'hr'" in realtime
     assert "detail.code === 'leave_balance_insufficient'" in page
+    assert "useUpdateHRLeave" in frontend_api
+    assert "Edit leave request" in page
+
+
+def test_hr_ui_can_set_annual_leave_days_for_new_and_existing_workers():
+    api = (ROOT.parent / "frontend/src/api/enterprise.ts").read_text()
+    page = (ROOT.parent / "frontend/src/pages/HRWorkspacePage.tsx").read_text()
+    ui = (ROOT.parent / "frontend/src/components/ui.tsx").read_text()
+
+    assert "useSetHRLeaveBalance" in api
+    assert "/leave-balance" in api
+    assert "annual_leave_days" in page
+    assert "Баланс тохируулах" in page
+    assert "entitled_days" in page
+    assert "min?: string | number" in ui
