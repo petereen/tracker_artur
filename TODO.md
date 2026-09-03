@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Automatically persist HR attendance as present/remote when workers start office, remote, web, Telegram, or QR worktime while preserving manager-confirmed manual status (`backend/app/services/attendance_service.py`, `backend/app/hr/service.py`, `backend/app/services/work_report_service.py`, `backend/app/routers/enterprise.py`, `backend/app/routers/worktime_qr.py`, `backend/tests`)
 - [x] Notify calendar collaborators on both Telegram and the platform when an item is created (`backend/app/routers/enterprise.py`, `backend/app/services/reminder_service.py`, `backend/tests`)
 - [x] Harmonize calendar filter colors with calendar item colors across desktop, mobile, and availability markers (`frontend/src/index.css`)
 - [x] Send each worker's birthday greeting at 09:00 in their timezone through Telegram and platform notifications (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)

@@ -8,11 +8,35 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.bot.db import get_session
-from app.models.models import Employee, PlanIdea, UserAccount, WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
+from app.models.models import AttendanceLog, Employee, PlanIdea, UserAccount, WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
+from app.services.attendance_service import apply_worktime_attendance
 
 
 TEST_REPORT_TYPES = frozenset({"daily_test", "monthly_test", "next_month_plan_test"})
 WORK_TIME_MODES = frozenset({"in_person", "remote"})
+
+
+def _sync_worktime_attendance(s, employee: Employee, local_day: date, at: datetime) -> None:
+    entries = s.execute(
+        select(WorkTimeEntry)
+        .where(
+            WorkTimeEntry.employee_id == employee.id,
+            WorkTimeEntry.local_work_date == local_day,
+        )
+        .order_by(WorkTimeEntry.started_at, WorkTimeEntry.id)
+    ).scalars().all()
+    log = s.execute(
+        select(AttendanceLog)
+        .where(
+            AttendanceLog.organization_id == employee.organization_id,
+            AttendanceLog.employee_id == employee.id,
+            AttendanceLog.attendance_date == local_day,
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
+    updated = apply_worktime_attendance(log, employee, local_day, entries, at=at)
+    if log is None and updated is not None:
+        s.add(updated)
 
 
 def month_period(day: date) -> date:
@@ -419,12 +443,14 @@ def start_work_time(
     started_at = at or datetime.now(timezone.utc)
     with get_session() as s:
         active = _active_time_entry(s, report.id, employee_id=employee_id)
+        employee = s.get(Employee, employee_id)
         if active and active.entry_type == "work":
+            _sync_worktime_attendance(s, employee, local_day, started_at)
+            s.commit()
             return ("already_active" if active.mode == mode else "other_active", active)
         if active and active.entry_type == "break":
             active.ended_at = started_at
             s.flush()
-        employee = s.get(Employee, employee_id)
         entry = WorkTimeEntry(
             report_id=report.id,
             employee_id=employee_id,
@@ -436,6 +462,8 @@ def start_work_time(
             started_at=started_at,
         )
         s.add(entry)
+        s.flush()
+        _sync_worktime_attendance(s, employee, local_day, started_at)
         s.commit()
         s.refresh(entry)
         s.expunge(entry)
@@ -455,6 +483,8 @@ def end_work_time(
         if not active:
             return "not_started", None
         active.ended_at = ended_at
+        employee = s.get(Employee, employee_id)
+        _sync_worktime_attendance(s, employee, local_day, ended_at)
         s.commit()
         s.refresh(active)
         s.expunge(active)
@@ -475,6 +505,8 @@ def pause_work_time(employee_id: int, local_day: date, at: datetime | None = Non
         employee = s.get(Employee, employee_id)
         pause = WorkTimeEntry(report_id=report.id, employee_id=employee_id, local_work_date=local_day, timezone=employee.timezone if employee else "Asia/Ulaanbaatar", entry_type="break", mode=None, started_at=paused_at, source_channel="telegram")
         s.add(pause)
+        s.flush()
+        _sync_worktime_attendance(s, employee, local_day, paused_at)
         s.commit()
         s.refresh(pause)
         s.expunge(pause)

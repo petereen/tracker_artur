@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
 from app.models.models import Employee, IdempotencyRecord, WorkReport, WorkTimeEntry, WorktimeQrKiosk
+from app.services.attendance_service import sync_worktime_attendance
 from app.services.enterprise_events import record_change
 
 try:
@@ -322,6 +323,7 @@ async def qr_clock(data: ClockInput, db: AsyncSession = Depends(get_db), actor: 
     await db.flush()
     entries = (await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.employee_id == employee.id, WorkTimeEntry.local_work_date == local_day).order_by(WorkTimeEntry.started_at, WorkTimeEntry.id))).scalars().all()
     response_body = {"action": action, "replayed": False, "location_id": kiosk.location_id, "server_time": now, "timezone": employee.timezone, "affected_entries": affected, "shift_summary": _summary(entries, now)}
+    await sync_worktime_attendance(db, employee, local_day, at=now)
     db.add(IdempotencyRecord(account_id=actor.account_id, operation=QR_OPERATION, key=payload["nonce"], request_hash=_digest(data.token), response_status=200, response_body=jsonable_encoder(response_body), expires_at=datetime.fromtimestamp(expires + grace + 60, tz=timezone.utc)))
     await record_change(db, actor=actor, topic="clocks", aggregate_type="time_entry", aggregate_id=affected[-1]["id"], operation=action, after=affected[-1])
     try:

@@ -99,6 +99,7 @@ from app.services.google_calendar import (
 )
 from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services import assistant_ai, exchange_rate_service
+from app.services.attendance_service import sync_worktime_attendance
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
@@ -2357,6 +2358,8 @@ async def clock_start(data: ClockStartInput, db: AsyncSession = Depends(get_db),
     local_day = now.astimezone(ZoneInfo(employee.timezone)).date()
     existing = await _active_entry(db, employee.id)
     if existing and existing.entry_type == "work" and existing.mode == data.mode:
+        await sync_worktime_attendance(db, employee, local_day, at=now)
+        await db.commit()
         return _entry_out(existing)
     if existing:
         existing.ended_at = now
@@ -2371,6 +2374,7 @@ async def clock_start(data: ClockStartInput, db: AsyncSession = Depends(get_db),
     entry = WorkTimeEntry(report_id=report.id, employee_id=employee.id, local_work_date=local_day, timezone=employee.timezone, entry_type="work", mode=data.mode, started_at=now, source_channel="web", project_id=data.project_id, task_id=data.task_id, is_billable=data.is_billable, notes=data.notes, hourly_rate_snapshot=hourly_rate, rate_currency=rate_currency, exchange_rate_snapshot_id=data.exchange_rate_snapshot_id)
     db.add(entry)
     await db.flush()
+    await sync_worktime_attendance(db, employee, local_day, at=now)
     output = _entry_out(entry)
     await record_change(db, actor=actor, topic="clocks", aggregate_type="time_entry", aggregate_id=entry.id, operation="started", after=output)
     await db.commit()
@@ -2395,6 +2399,7 @@ async def clock_break(db: AsyncSession = Depends(get_db), actor: ActorContext = 
     entry = WorkTimeEntry(report_id=report.id, employee_id=employee.id, local_work_date=report.period_date, timezone=employee.timezone, entry_type="break", mode=None, started_at=now, source_channel="web")
     db.add(entry)
     await db.flush()
+    await sync_worktime_attendance(db, employee, active.local_work_date, at=now)
     output = _entry_out(entry)
     await record_change(db, actor=actor, topic="clocks", aggregate_type="time_entry", aggregate_id=entry.id, operation="break_started", after=output)
     await db.commit()
@@ -2419,6 +2424,7 @@ async def clock_resume(db: AsyncSession = Depends(get_db), actor: ActorContext =
     entry = WorkTimeEntry(report_id=active.report_id, employee_id=employee.id, local_work_date=active.local_work_date, timezone=employee.timezone, entry_type="work", mode=previous.mode if previous else "in_person", started_at=now, source_channel="web", project_id=previous.project_id if previous else None, task_id=previous.task_id if previous else None, is_billable=previous.is_billable if previous else False, hourly_rate_snapshot=previous.hourly_rate_snapshot if previous else None, rate_currency=previous.rate_currency if previous else None, exchange_rate_snapshot_id=previous.exchange_rate_snapshot_id if previous else None)
     db.add(entry)
     await db.flush()
+    await sync_worktime_attendance(db, employee, active.local_work_date, at=now)
     output = _entry_out(entry)
     await record_change(db, actor=actor, topic="clocks", aggregate_type="time_entry", aggregate_id=entry.id, operation="resumed", after=output)
     await db.commit()
@@ -2432,8 +2438,11 @@ async def clock_stop(db: AsyncSession = Depends(get_db), actor: ActorContext = D
     active = await _active_entry(db, actor.employee_id)
     if not active:
         return {"active": None}
-    active.ended_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    active.ended_at = now
     active.version += 1
+    employee = await db.get(Employee, actor.employee_id)
+    await sync_worktime_attendance(db, employee, active.local_work_date, at=now)
     output = _entry_out(active)
     await record_change(db, actor=actor, topic="clocks", aggregate_type="time_entry", aggregate_id=active.id, operation="stopped", version=active.version, after=output)
     await db.commit()

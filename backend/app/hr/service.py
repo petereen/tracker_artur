@@ -16,7 +16,6 @@ from app.core.enterprise_deps import ActorContext
 from app.core.security import hash_account_password
 from app.core.telegram_auth import verify_init_data
 from app.models.models import (
-    AttendanceLog,
     Department,
     Employee,
     EmployeeCompensationItem,
