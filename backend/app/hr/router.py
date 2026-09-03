@@ -300,6 +300,8 @@ async def update_leave_request(request_id: int, data: LeaveRequestPatch, db: Asy
     await employee_in_scope(db, actor, row.employee_id, write=True)
     if row.status not in {"pending", "approved"}:
         raise HTTPException(status_code=409, detail="Only pending or approved leave requests can be edited")
+    if row.status == "approved" and not can_manage_hr(actor):
+        raise HTTPException(status_code=403, detail="Only HR can edit approved leave requests")
     if data.version is not None and row.version != data.version:
         raise HTTPException(status_code=409, detail="Leave request changed")
 
@@ -307,24 +309,30 @@ async def update_leave_request(request_id: int, data: LeaveRequestPatch, db: Asy
     ends_on = data.ends_on or row.ends_on
     leave_type = data.leave_type or row.time_off_type
     reason = data.reason if data.reason is not None else row.reason
+    new_status = data.status or row.status
+    if data.status is not None and not can_manage_hr(actor):
+        raise HTTPException(status_code=403, detail="Only HR can change leave request status")
+    if data.status is not None and row.status != "approved":
+        raise HTTPException(status_code=409, detail="Only approved leave requests can change status here")
     if ends_on < starts_on:
         raise HTTPException(status_code=422, detail="End date must not precede start date")
 
-    overlap = await db.scalar(select(TimeOff.id).where(
-        TimeOff.organization_id == actor.organization_id,
-        TimeOff.employee_id == row.employee_id,
-        TimeOff.id != row.id,
-        TimeOff.status.in_(
-            ("pending", "approved")
-        ),
-        TimeOff.starts_on <= ends_on,
-        TimeOff.ends_on >= starts_on,
-    ))
-    if overlap:
-        raise HTTPException(status_code=409, detail="Leave dates overlap an existing request")
+    if new_status in {"pending", "approved"}:
+        overlap = await db.scalar(select(TimeOff.id).where(
+            TimeOff.organization_id == actor.organization_id,
+            TimeOff.employee_id == row.employee_id,
+            TimeOff.id != row.id,
+            TimeOff.status.in_(
+                ("pending", "approved")
+            ),
+            TimeOff.starts_on <= ends_on,
+            TimeOff.ends_on >= starts_on,
+        ))
+        if overlap:
+            raise HTTPException(status_code=409, detail="Leave dates overlap an existing request")
 
     days = await leave_days(db, actor.organization_id, starts_on, ends_on)
-    if leave_type == "annual":
+    if new_status in {"pending", "approved"} and leave_type == "annual":
         balance = await leave_balance(db, actor.organization_id, row.employee_id, starts_on.year, "annual")
         available = Decimal(balance["available_days"])
         if row.time_off_type == "annual" and row.starts_on.year == starts_on.year:
@@ -338,21 +346,27 @@ async def update_leave_request(request_id: int, data: LeaveRequestPatch, db: Asy
     row.ends_on = ends_on
     row.working_days = days
     row.reason = reason
+    row.status = new_status
+    if new_status == "rejected":
+        row.approved_by_account_id = None
+        row.reviewed_by_account_id = actor.account_id
+        row.reviewed_at = datetime.now(timezone.utc)
     row.version += 1
     after = {"leave_type": row.time_off_type, "starts_on": row.starts_on.isoformat(), "ends_on": row.ends_on.isoformat(), "working_days": str(row.working_days or 0), "reason": row.reason, "status": row.status}
-    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation="updated", version=row.version, before=before, after=after)
+    operation = "rejected" if new_status == "rejected" else "updated"
+    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=operation, version=row.version, before=before, after=after)
     await create_notifications(
         db,
         organization_id=actor.organization_id,
         employee_ids={row.employee_id},
         account_ids=await _hr_account_ids(db, actor.organization_id),
-        kind="hr_leave_updated",
-        title="Чөлөөний хүсэлт засагдлаа",
-        body=f"Таны чөлөөний хүсэлт {starts_on}–{ends_on} болж шинэчлэгдлээ.",
+        kind=f"hr_leave_{operation}",
+        title="Чөлөөний хүсэлт татгалзагдлаа" if new_status == "rejected" else "Чөлөөний хүсэлт засагдлаа",
+        body="Таны чөлөөний хүсэлт татгалзагдлаа." if new_status == "rejected" else f"Таны чөлөөний хүсэлт {starts_on}–{ends_on} болж шинэчлэгдлээ.",
         target_url="/hr?tab=leave",
         payload={"leave_request_id": row.id, "status": row.status, "version": row.version},
         source_event_id=source_event.id,
-        dedup_key=f"hr-leave-updated:{row.id}:v{row.version}",
+        dedup_key=f"hr-leave-{operation}:{row.id}:v{row.version}",
         immediate=True,
     )
     await db.commit()

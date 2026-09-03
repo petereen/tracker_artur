@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Restrict approved-leave edits to HR/admin and add HR status control for rejection (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`) — approved edits and status changes are HR/admin-only; members can edit pending requests only; build, Python compilation, static HR contracts, focused frontend test, and diff checks pass
 - [x] Make approved leave requests editable with conflict, balance, and version checks (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`) — approved and pending requests now have an edit form; backend checks scope, status, overlaps, annual balance, and optimistic version conflicts; Python compilation, TypeScript/build, focused frontend test, and diff checks pass; backend pytest remains unavailable because pytest is not installed
 - [x] Add HR UI controls for annual leave entitlement and leave-balance adjustments (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/tests`) — annual leave can be set while creating an employee or edited later by HR/admin; frontend build, 28-file/93-test suite, Python compilation, and contract checks pass
 - [x] Fix HR annual-leave error rendering, live leave-query refresh, and requester/HR notifications (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`, `backend/app/hr/router.py`, `backend/tests`, `frontend/src`) — frontend suite 28 files / 93 tests, production build, Python compilation, and diff checks pass; backend pytest runtime remains unavailable because pytest is not installed
@@ -400,6 +401,8 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Restrict approved-leave edits to HR/admin and add HR status control for rejection (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`)
+- [x] Make approved leave requests editable with conflict, balance, and version checks (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`)
 - [x] Make approved leave requests editable with conflict, balance, and version checks (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`)
 - [x] Add HR UI controls for annual leave entitlement and leave-balance adjustments (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/tests`)
 - [x] Fix HR annual-leave error rendering, live leave-query refresh, and requester/HR notifications (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`, `backend/app/hr/router.py`, `backend/tests`, `frontend/src`)

@@ -30,6 +30,9 @@ def test_hr_router_exposes_identity_leave_attendance_and_payroll_contracts():
     assert "MANAGER_ROLES," in router
     assert '@router.patch("/leave-requests/{request_id}")' in router
     assert "Only pending or approved leave requests can be edited" in router
+    assert "Only HR can edit approved leave requests" in router
+    assert "Only HR can change leave request status" in router
+    assert 'status: Literal["approved", "rejected"] | None' in (ROOT / "app/hr/schemas.py").read_text()
 
 
 def test_telegram_login_paths_synchronize_profile_claims():
@@ -70,6 +73,8 @@ def test_leave_lifecycle_notifies_requester_and_hr_and_emits_hr_events():
     assert "detail.code === 'leave_balance_insufficient'" in page
     assert "useUpdateHRLeave" in frontend_api
     assert "Edit leave request" in page
+    assert "isHR && editing.status === 'approved'" in page
+    assert "value: 'rejected', label: 'Татгалзсан'" in page
 
 
 def test_hr_ui_can_set_annual_leave_days_for_new_and_existing_workers():

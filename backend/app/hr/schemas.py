@@ -69,6 +69,7 @@ class LeaveRequestPatch(BaseModel):
     starts_on: date | None = None
     ends_on: date | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=2000)
+    status: Literal["approved", "rejected"] | None = None
     version: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
