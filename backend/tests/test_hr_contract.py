@@ -50,3 +50,19 @@ def test_worktime_start_paths_persist_hr_attendance_without_overwriting_manual_s
     assert "await sync_worktime_attendance(db, employee, local_day, at=now)" in qr
     assert "_sync_worktime_attendance(s, employee, local_day, ended_at)" in work_report
     assert "_sync_worktime_attendance(s, employee, local_day, paused_at)" in work_report
+
+
+def test_leave_lifecycle_notifies_requester_and_hr_and_emits_hr_events():
+    router = (ROOT / "app/hr/router.py").read_text()
+    frontend_api = (ROOT.parent / "frontend/src/api/enterprise.ts").read_text()
+    realtime = (ROOT.parent / "frontend/src/components/EnterpriseShell.tsx").read_text()
+    page = (ROOT.parent / "frontend/src/pages/HRWorkspacePage.tsx").read_text()
+
+    assert "async def _hr_account_ids" in router
+    assert 'kind="hr_leave_requested"' in router
+    assert 'kind=f"hr_leave_{row.status}"' in router
+    assert 'target_url="/hr?tab=leave"' in router
+    assert "immediate=True" in router
+    assert "['v1', 'hr']" in frontend_api
+    assert "hr: 'hr'" in realtime
+    assert "detail.code === 'leave_balance_insufficient'" in page

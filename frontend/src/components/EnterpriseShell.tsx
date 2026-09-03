@@ -85,7 +85,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         const event = JSON.parse(message.data)
         cursor = event.id
         cursorStorage.set(cursorKey, String(cursor))
-        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', contracts: 'contracts', okrs: 'objectives', notifications: 'notifications', company_files: 'company-files', erp: 'erp', chat: 'chat', chat_presence: 'chat' }
+        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', contracts: 'contracts', okrs: 'objectives', notifications: 'notifications', hr: 'hr', company_files: 'company-files', erp: 'erp', chat: 'chat', chat_presence: 'chat' }
         const key = topicMap[event.topic]
         if (key) queryClient.invalidateQueries({ queryKey: ['v1', key] })
         if (event.topic === 'chat' && event.operation === 'message_sent' && event.payload?.sender_account_id !== accountId) {

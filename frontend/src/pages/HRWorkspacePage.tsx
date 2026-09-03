@@ -7,7 +7,15 @@ import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../component
 
 type Tab = 'directory' | 'leave' | 'attendance' | 'payroll'
 const monthNow = () => new Date().toISOString().slice(0, 7)
-const errorText = (error: any) => error?.response?.data?.detail?.message || error?.response?.data?.detail || 'Үйлдэл амжилтгүй боллоо'
+const errorText = (error: any) => {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object') {
+    if (typeof detail.message === 'string') return detail.message
+    if (detail.code === 'leave_balance_insufficient') return `Үлдэгдэл хүрэлцэхгүй байна. Боломжит өдөр: ${detail.available_days ?? 0}`
+  }
+  return 'Үйлдэл амжилтгүй боллоо'
+}
 
 export function HRWorkspacePage() {
   const actor = useActor()

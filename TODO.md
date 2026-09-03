@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Fix HR annual-leave error rendering, live leave-query refresh, and requester/HR notifications (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`, `backend/app/hr/router.py`, `backend/tests`, `frontend/src`) — frontend suite 28 files / 93 tests, production build, Python compilation, and diff checks pass; backend pytest runtime remains unavailable because pytest is not installed
 - [x] Automatically persist HR attendance as present/remote when workers start office, remote, web, Telegram, or QR worktime while preserving manager-confirmed manual status (`backend/app/services/attendance_service.py`, `backend/app/hr/service.py`, `backend/app/services/work_report_service.py`, `backend/app/routers/enterprise.py`, `backend/app/routers/worktime_qr.py`, `backend/tests`)
 - [x] Notify calendar collaborators on both Telegram and the platform when an item is created (`backend/app/routers/enterprise.py`, `backend/app/services/reminder_service.py`, `backend/tests`)
 - [x] Harmonize calendar filter colors with calendar item colors across desktop, mobile, and availability markers (`frontend/src/index.css`)
@@ -397,6 +398,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Fix HR annual-leave error rendering, live leave-query refresh, and requester/HR notifications (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/components/EnterpriseShell.tsx`, `backend/app/hr/router.py`, `backend/tests`, `frontend/src`)
 - [x] Deliver unified calendar item management for events, reminders, and tasks with collaborator notifications, location support, day-click creation, smart two-hour defaults, optional task timestamps, stale-alert suppression, and Under Review overdue exemption (`backend/app/models/models.py`, `backend/app/routers/enterprise.py`, `frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/alembic/versions/l2m3n4o5p6q7_calendar_item_collaboration.py`)
 - [x] Move the “Хүний нөөц” navbar button below ERP when ERP navigation is available (`frontend/src/components/EnterpriseShell.tsx`)
 - [x] Repair the production payroll migration bind-parameter failure by passing `source_salary_component_id` during legacy component-master backfill and cover it with a contract assertion (`backend/alembic/versions/i0j1k2l3m4n5_frappe_style_payroll.py`, `backend/tests/test_frappe_payroll_contract.py`)

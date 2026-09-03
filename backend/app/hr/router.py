@@ -85,6 +85,16 @@ async def _department(db: AsyncSession, actor: ActorContext, department_id: int)
     return row
 
 
+async def _hr_account_ids(db: AsyncSession, organization_id: int) -> set[int]:
+    return set((await db.execute(
+        select(RoleAssignment.account_id).join(UserAccount, UserAccount.id == RoleAssignment.account_id).where(
+            UserAccount.organization_id == organization_id,
+            UserAccount.status == "active",
+            RoleAssignment.role.in_(HR_ROLES),
+        )
+    )).scalars().all())
+
+
 async def _employee_out(db: AsyncSession, actor: ActorContext, employee: Employee, details: EmployeeDetails | None = None) -> dict:
     details = details or await db.scalar(select(EmployeeDetails).where(EmployeeDetails.employee_id == employee.id))
     department = await db.scalar(select(Department).where(Department.id == details.department_id, Department.organization_id == actor.organization_id)) if details and details.department_id else None
@@ -262,7 +272,21 @@ async def submit_leave_request(data: LeaveRequestInput, db: AsyncSession = Depen
     approved = can_manage_hr(actor)
     row = TimeOff(organization_id=actor.organization_id, employee_id=employee.id, time_off_type=data.leave_type, starts_on=data.starts_on, ends_on=data.ends_on, working_days=days, reason=data.reason, status="approved" if approved else "pending", approved_by_account_id=actor.account_id if approved else None, reviewed_by_account_id=actor.account_id if approved else None, reviewed_at=datetime.now(timezone.utc) if approved else None)
     db.add(row); await db.flush()
-    await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=row.status, after={"employee_id": employee.id, "leave_type": row.time_off_type, "working_days": days, "status": row.status})
+    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=row.status, after={"employee_id": employee.id, "leave_type": row.time_off_type, "working_days": days, "status": row.status})
+    await create_notifications(
+        db,
+        organization_id=actor.organization_id,
+        employee_ids={employee.id},
+        account_ids=await _hr_account_ids(db, actor.organization_id),
+        kind="hr_leave_requested",
+        title="Шинэ чөлөөний хүсэлт",
+        body=f"{employee.name} {data.starts_on}–{data.ends_on}-ны чөлөө хүсэлт илгээлээ.",
+        target_url="/hr?tab=leave",
+        payload={"leave_request_id": row.id, "status": row.status},
+        source_event_id=source_event.id,
+        dedup_key=f"hr-leave-requested:{row.id}",
+        immediate=True,
+    )
     await db.commit()
     return {"id": row.id, "status": row.status, "working_days": days, "employee_id": employee.id}
 
@@ -277,7 +301,24 @@ async def decide_leave_request(request_id: int, data: LeaveDecisionInput, db: As
         if row.employee_id == actor.employee_id: raise HTTPException(status_code=403, detail="Managers cannot approve their own leave")
     if data.version is not None and row.version != data.version: raise HTTPException(status_code=409, detail="Leave request changed")
     row.status = "approved" if data.approve else "rejected"; row.reviewer_feedback = data.feedback; row.reviewed_by_account_id = actor.account_id; row.reviewed_at = datetime.now(timezone.utc); row.approved_by_account_id = actor.account_id if data.approve else None; row.version += 1
-    await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=row.status, version=row.version, after={"status": row.status, "feedback": data.feedback})
+    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=row.status, version=row.version, after={"status": row.status, "feedback": data.feedback})
+    employee = await db.get(Employee, row.employee_id)
+    status_label = "батлагдлаа" if row.status == "approved" else "татгалзлаа"
+    feedback = f" Шалтгаан: {data.feedback}" if data.feedback else ""
+    await create_notifications(
+        db,
+        organization_id=actor.organization_id,
+        employee_ids={row.employee_id},
+        account_ids=await _hr_account_ids(db, actor.organization_id),
+        kind=f"hr_leave_{row.status}",
+        title="Чөлөөний хүсэлтийн төлөв шинэчлэгдлээ",
+        body=f"{employee.name if employee else 'Ажилтан'}-ны чөлөөний хүсэлт {status_label}.{feedback}",
+        target_url="/hr?tab=leave",
+        payload={"leave_request_id": row.id, "status": row.status, "feedback": data.feedback},
+        source_event_id=source_event.id,
+        dedup_key=f"hr-leave-{row.status}:{row.id}:v{row.version}",
+        immediate=True,
+    )
     await db.commit()
     return {"id": row.id, "status": row.status, "version": row.version, "reviewer_feedback": row.reviewer_feedback}
 
@@ -289,6 +330,21 @@ async def cancel_leave_request(request_id: int, db: AsyncSession = Depends(get_d
     await employee_in_scope(db, actor, row.employee_id, write=True)
     if row.status not in {"pending", "approved"}: raise HTTPException(status_code=409, detail="Leave request cannot be cancelled")
     row.status = "cancelled"; row.version += 1
+    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=row.status, version=row.version, after={"status": row.status})
+    await create_notifications(
+        db,
+        organization_id=actor.organization_id,
+        employee_ids={row.employee_id},
+        account_ids=await _hr_account_ids(db, actor.organization_id),
+        kind="hr_leave_cancelled",
+        title="Чөлөөний хүсэлт цуцлагдлаа",
+        body="Чөлөөний хүсэлт цуцлагдлаа.",
+        target_url="/hr?tab=leave",
+        payload={"leave_request_id": row.id, "status": row.status},
+        source_event_id=source_event.id,
+        dedup_key=f"hr-leave-cancelled:{row.id}:v{row.version}",
+        immediate=True,
+    )
     await db.commit()
     return {"id": row.id, "status": row.status, "version": row.version}
 
