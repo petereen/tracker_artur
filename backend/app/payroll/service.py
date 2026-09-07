@@ -339,12 +339,7 @@ async def delete_salary_structure(db: AsyncSession, actor: ActorContext, structu
 async def create_employee_profile(db: AsyncSession, actor: ActorContext, employee_id: int, data: EmployeePayrollInput) -> EmployeePayrollProfile:
     employee = await db.get(Employee, employee_id)
     if not employee: raise HTTPException(status_code=404, detail="Employee not found")
-    linked_org = await db.scalar(select(UserAccount.organization_id).where(UserAccount.employee_id == employee_id, UserAccount.status.in_(("active", "invited"))))
-    # Employee rows predate tenant-aware ERP accounts.  Payroll setup is
-    # therefore allowed only through the employee's organization-scoped
-    # account; an unlinked legacy employee cannot be guessed or reassigned
-    # across tenants.
-    if linked_org != actor.organization_id:
+    if employee.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Employee not found")
     structure = await db.scalar(select(SalaryStructure).where(SalaryStructure.id == data.salary_structure_id, SalaryStructure.organization_id == actor.organization_id, SalaryStructure.effective_from <= data.effective_from, (SalaryStructure.effective_to.is_(None) | (SalaryStructure.effective_to >= data.effective_from))))
     if not structure or structure.status not in {"published", "active"}: raise HTTPException(status_code=404, detail="Published salary structure not found")
@@ -420,20 +415,20 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
         # Serialise all calculations for an employee.  This is the lock that
         # makes monthly SHI-cap and YTD consumption deterministic when two
         # off-cycle runs are calculated concurrently.
-        employee_profile = await db.scalar(select(EmployeePayrollProfile).where(EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.employee_id == employee_id, EmployeePayrollProfile.effective_from <= run.tax_point_date, (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= run.tax_point_date))).order_by(EmployeePayrollProfile.effective_from.desc()).limit(1).with_for_update())
+        employee_profile = await db.scalar(select(EmployeePayrollProfile).where(EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.employee_id == employee_id, EmployeePayrollProfile.effective_from <= run.period_end, (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= run.period_start))).order_by(EmployeePayrollProfile.effective_from.desc()).limit(1).with_for_update())
         if not employee_profile: raise HTTPException(status_code=422, detail={"code": "payroll_employee_profile_missing", "employee_id": employee_id})
         structure = await db.get(SalaryStructure, employee_profile.salary_structure_id)
         rules = await load_rules(db, profile, insured_category=employee_profile.insured_category, hazard_class=employee_profile.hazard_class)
         components = (await db.execute(select(SalaryComponent).where(SalaryComponent.salary_structure_id == structure.id).order_by(SalaryComponent.position, SalaryComponent.id))).scalars().all()
-        prior = await db.execute(select(func.coalesce(func.sum(Payslip.gross), 0), func.coalesce(func.sum(Payslip.taxable_income), 0), func.coalesce(func.sum(Payslip.pit), 0)).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.tax_point_date >= date(run.tax_point_date.year, 1, 1), PayrollRun.tax_point_date < date(run.tax_point_date.year + 1, 1, 1), PayrollRun.status.in_(("calculated", "in_review", "approved", "posted", "paid")), PayrollRun.run_type != "advance", PayrollRun.id != run.id))
+        prior = await db.execute(select(func.coalesce(func.sum(Payslip.gross), 0), func.coalesce(func.sum(Payslip.taxable_income), 0), func.coalesce(func.sum(Payslip.pit), 0)).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.tax_point_date >= date(run.tax_point_date.year, 1, 1), PayrollRun.tax_point_date < date(run.tax_point_date.year + 1, 1, 1), PayrollRun.status.in_(("posted", "paid")), PayrollRun.tax_point_date <= run.tax_point_date, PayrollRun.run_type != "advance", PayrollRun.id != run.id))
         prior_gross, prior_taxable, prior_pit = prior.one()
         # Keep compatibility with a migrated ledger that has accumulator
         # rows but no retained payslip rows (for example, a legacy import).
         if not any((prior_gross, prior_taxable, prior_pit)):
             legacy_prior = await db.execute(select(func.coalesce(func.sum(PayrollEmployeeAccumulator.gross_delta), 0), func.coalesce(func.sum(PayrollEmployeeAccumulator.taxable_delta), 0), func.coalesce(func.sum(PayrollEmployeeAccumulator.pit_withheld_delta), 0)).where(PayrollEmployeeAccumulator.organization_id == actor.organization_id, PayrollEmployeeAccumulator.employee_id == employee_id, PayrollEmployeeAccumulator.tax_year == run.tax_point_date.year))
             prior_gross, prior_taxable, prior_pit = legacy_prior.one()
-        prior_relief = await db.scalar(select(func.coalesce(func.sum(Payslip.pit_relief), 0)).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.tax_point_date >= date(run.tax_point_date.year, 1, 1), PayrollRun.tax_point_date < run.tax_point_date, PayrollRun.status.in_(("calculated", "in_review", "approved", "posted", "paid")), PayrollRun.run_type != "advance")) or 0
-        prior_month_base = await db.scalar(select(func.coalesce(func.sum(Payslip.shi_base), 0)).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.settlement_key == run.settlement_key, PayrollRun.status.in_(("calculated", "in_review", "approved", "posted", "paid")), PayrollRun.id != run.id)) or 0
+        prior_relief = await db.scalar(select(func.coalesce(func.sum(Payslip.pit_relief), 0)).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.tax_point_date >= date(run.tax_point_date.year, 1, 1), PayrollRun.tax_point_date < run.tax_point_date, PayrollRun.status.in_(("posted", "paid")), PayrollRun.run_type != "advance")) or 0
+        prior_month_base = await db.scalar(select(func.coalesce(func.sum(Payslip.shi_base), 0)).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.settlement_key == run.settlement_key, PayrollRun.status.in_(("posted", "paid")), PayrollRun.tax_point_date <= run.tax_point_date, PayrollRun.id != run.id)) or 0
         override = overrides.get(str(employee_id), {}) or {}
         # Advances are created when an advance run is posted.  A final (or
         # single) run consumes only the still-unapplied balance.  Keeping the
@@ -486,7 +481,7 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
                 leave_month_payload.append({"earnings": str(eligible_earnings), "worked_days": str(history_override.get("payable_workdays", history_units.get("payable_workdays", 0))), "eligible": True})
         leave_months = tuple(LeaveMonth(Decimal(str(item.get("earnings", 0))), Decimal(str(item.get("worked_days", 0))), bool(item.get("eligible", True))) for item in (leave_month_payload or []) if isinstance(item, dict))
         tax_adjustments = await approved_tax_adjustments(db, organization_id=actor.organization_id, employee_id=employee_id, tax_year=run.tax_point_date.year)
-        prior_traces = list((await db.execute(select(Payslip.calculation_trace).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.tax_point_date >= date(run.tax_point_date.year, 1, 1), PayrollRun.tax_point_date < run.tax_point_date, PayrollRun.status.in_(("calculated", "in_review", "approved", "posted", "paid")), PayrollRun.run_type != "advance", PayrollRun.id != run.id))).scalars().all())
+        prior_traces = list((await db.execute(select(Payslip.calculation_trace).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.tax_point_date >= date(run.tax_point_date.year, 1, 1), PayrollRun.tax_point_date < run.tax_point_date, PayrollRun.status.in_(("posted", "paid")), PayrollRun.tax_point_date <= run.tax_point_date, PayrollRun.run_type != "advance", PayrollRun.id != run.id))).scalars().all())
         prior_declared_deduction = sum((Decimal(str(((trace or {}).get("pit") or {}).get("declared_deduction", 0))) for trace in prior_traces), Decimal("0"))
         prior_declared_credit = sum((Decimal(str(((trace or {}).get("pit") or {}).get("declared_credit", 0))) for trace in prior_traces), Decimal("0"))
         declared_deduction = max(Decimal("0"), Decimal(str(tax_adjustments["deduction"])) - prior_declared_deduction)

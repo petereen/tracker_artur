@@ -32,7 +32,7 @@ def test_new_migration_backfills_legacy_records_without_recalculation():
     assert "source_salary_component_id" in source
     assert '"source_salary_component_id": row.id' in source
     assert "legacy suffix" in source
-    assert "UPDATE payroll_runs SET document_status" in source
+    assert "UPDATE payroll_runs SET workflow_version" in source
     assert "SELECT DISTINCT ON (organization_id, period_start, period_end)" in source
 
 
@@ -52,3 +52,18 @@ def test_salary_structure_lines_reference_reusable_component_masters():
     assert "component_master_id: int | None = None" in schemas
     assert "PayrollSalaryComponentMaster.id.in_(master_ids)" in service
     assert '"component_master_id": row.component_master_id' in router
+
+
+def test_payroll_entry_recheck_preserves_selection_and_refreshes_canonical_inputs():
+    service = (ROOT / "app/payroll/frappe_service.py").read_text()
+    router = (ROOT / "app/payroll/router.py").read_text()
+    inputs = (ROOT / "app/payroll/inputs.py").read_text()
+    hr_router = (ROOT / "app/hr/router.py").read_text()
+    assert '"employee_ids" in data.model_fields_set' in service
+    assert '"manual_overrides"' in service
+    assert '"canonical_inputs": overrides' in service
+    assert '"employee_selection": snapshot.get("employee_selection")' in router
+    assert '"payroll_entry_id": run.id' in router
+    assert '"attendance_policy"' in inputs
+    assert 'Employee.organization_id == org' in inputs
+    assert '"unpaid_leave_ids": leaves' in hr_router

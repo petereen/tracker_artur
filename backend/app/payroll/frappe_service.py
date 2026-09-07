@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enterprise_deps import ActorContext
@@ -20,6 +20,7 @@ from app.models.models import (
     AdditionalSalary,
     Employee,
     EmployeeBankAccount,
+    EmployeeDetails,
     EmployeePayrollProfile,
     ERPAccount,
     ERPDocument,
@@ -44,6 +45,7 @@ from .schemas import (
     SalaryStructureAssignmentInput,
 )
 from .service import calculate_run, create_employee_profile, ensure_profile_active, post_run
+from .inputs import build_employee_inputs, prepare_recurring_compensation
 
 
 def _decimal(value: Any) -> Decimal:
@@ -199,7 +201,10 @@ async def create_additional_salary(db: AsyncSession, actor: ActorContext, data: 
     profile = await db.scalar(select(EmployeePayrollProfile).where(EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.employee_id == data.employee_id, EmployeePayrollProfile.effective_from <= data.payroll_date, (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= data.payroll_date))).limit(1))
     if not profile:
         raise HTTPException(status_code=422, detail={"code": "payroll_employee_profile_missing", "employee_id": data.employee_id})
-    row = AdditionalSalary(organization_id=actor.organization_id, number=_run_number("ADD-SAL", data.payroll_date.year), created_by_account_id=actor.account_id, **data.model_dump())
+    if component.component_kind not in {"earning", "deduction"}:
+        raise HTTPException(status_code=422, detail={"code": "payroll_additional_component_kind_invalid"})
+    values = {**data.model_dump(), "component_kind": component.component_kind, "taxable": component.is_taxable, "shi_subject": component.is_shi_subject}
+    row = AdditionalSalary(organization_id=actor.organization_id, number=_run_number("ADD-SAL", data.payroll_date.year), created_by_account_id=actor.account_id, **values)
     db.add(row)
     await db.flush()
     return row
@@ -242,7 +247,7 @@ async def create_payroll_entry(db: AsyncSession, actor: ActorContext, data: Payr
             raise HTTPException(status_code=409, detail={"code": "payroll_period_not_open"})
         if period.start_date > data.period_start or period.end_date < data.period_end:
             raise HTTPException(status_code=422, detail={"code": "payroll_entry_outside_period"})
-    snapshot = {"employee_ids": list(dict.fromkeys(data.employee_ids)), "overrides": data.input_overrides, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": [], "approved_time_entries": [], "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
+    snapshot = {"validate_attendance": data.validate_attendance, "attendance_policy": {"basis": "confirmed_hr_attendance_and_approved_leave", "missing_attendance": "error" if data.validate_attendance else "full_day", "timezone": "Asia/Ulaanbaatar"}, "employee_ids": list(dict.fromkeys(data.employee_ids)), "manual_overrides": data.input_overrides, "overrides": data.input_overrides, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": [], "approved_time_entries": [], "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
     config = {"profile_id": profile.id, "profile_version": profile.version, "profile_checksum": profile.checksum, "source_references": profile.source_references, "currency": profile.currency, "pit_withholding_method": profile.pit_withholding_method, "rounding_policy": profile.rounding_policy, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier), "leave_policy": profile.leave_policy}
     run = PayrollRun(organization_id=actor.organization_id, run_number=_run_number("HR-PRUN", data.tax_point_date.year), run_type=data.run_type, period_start=data.period_start, period_end=data.period_end, settlement_key=data.period_end.strftime("%Y-%m"), tax_point_date=data.tax_point_date, status="draft", workflow_version="frappe_v1", document_status="draft", payroll_frequency=data.payroll_frequency, posting_date=data.posting_date, employee_filter=data.employee_filter, salary_slips_created=False, salary_slips_submitted=False, payment_status="unpaid", payment_account_id=data.payment_account_id, cost_center_id=data.cost_center_id, payroll_period_id=period.id if period else None, statutory_profile_id=profile.id, input_snapshot=snapshot, config_snapshot=config, snapshot_checksum="", created_by_account_id=actor.account_id)
     db.add(run)
@@ -255,12 +260,17 @@ async def get_employees(db: AsyncSession, actor: ActorContext, run: PayrollRun, 
         raise HTTPException(status_code=404, detail="Payroll Entry not found")
     if run.document_status != "draft" or run.salary_slips_created or run.salary_slips_submitted:
         raise HTTPException(status_code=409, detail={"code": "payroll_entry_not_editable"})
-    requested_ids = list(dict.fromkeys(data.employee_ids or []))
+    snapshot = run.input_snapshot or {}
+    requested_ids = list(dict.fromkeys(data.employee_ids if "employee_ids" in data.model_fields_set else (snapshot.get("employee_ids") or [])))
+    filters = {key: getattr(data, key) if key in data.model_fields_set else (run.employee_filter or {}).get(key) for key in ("work_branch", "work_direction", "job_title")}
+    for key, value in filters.items():
+        setattr(data, key, value)
     query = select(EmployeePayrollProfile, Employee).join(Employee, Employee.id == EmployeePayrollProfile.employee_id).where(
         EmployeePayrollProfile.organization_id == actor.organization_id,
-        EmployeePayrollProfile.effective_from <= run.tax_point_date,
-        (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= run.tax_point_date)),
-        Employee.is_active.is_(True),
+        EmployeePayrollProfile.effective_from <= run.period_end,
+        (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= run.period_start)),
+        Employee.organization_id == actor.organization_id,
+        or_(Employee.is_active.is_(True), Employee.id.in_(select(EmployeeDetails.employee_id).where(EmployeeDetails.organization_id == actor.organization_id, EmployeeDetails.end_date >= run.period_start))),
     )
     if requested_ids:
         query = query.where(EmployeePayrollProfile.employee_id.in_(requested_ids))
@@ -280,26 +290,31 @@ async def get_employees(db: AsyncSession, actor: ActorContext, run: PayrollRun, 
             raise HTTPException(status_code=422, detail={"code": "payroll_employee_profile_missing", "employee_ids": missing})
     if not selected:
         raise HTTPException(status_code=422, detail={"code": "payroll_no_employees"})
-    errors: list[dict[str, Any]] = []
-    attendance_warnings: list[dict[str, Any]] = []
-    validate_attendance = run.input_snapshot.get("validate_attendance", True) if data.validate_attendance is None else data.validate_attendance
-    for employee_id, (profile, employee) in selected.items():
+    employees = [employee for profile, employee in selected.values()]
+    selected_profiles = {employee.id: profile for profile, employee in selected.values()}
+    validate_attendance = snapshot.get("validate_attendance", True) if data.validate_attendance is None else data.validate_attendance
+    run.input_snapshot = {**snapshot, "validate_attendance": validate_attendance, "attendance_policy": {**(snapshot.get("attendance_policy") or {}), "missing_attendance": "error" if validate_attendance else "full_day"}}
+    overrides, errors = await build_employee_inputs(db, run, employees, selected_profiles)
+    for employee in employees:
+        profile = selected_profiles[employee.id]
+        detail = await db.scalar(select(EmployeeDetails).where(EmployeeDetails.employee_id == employee.id, EmployeeDetails.organization_id == actor.organization_id))
+        if detail and detail.start_date and detail.start_date > run.period_end:
+            errors.append({"employee_id": employee.id, "name": employee.name, "code": "payroll_employment_outside_period"})
+        if profile.effective_from > run.period_start and not (detail and detail.start_date and profile.effective_from == detail.start_date):
+            errors.append({"employee_id": employee.id, "name": employee.name, "code": "payroll_assignment_changed_in_period", "message": "Use separate payroll periods for different salary assignments."})
         if profile.payment_method == "bank":
             account = await db.scalar(select(EmployeeBankAccount.id).where(EmployeeBankAccount.employee_payroll_profile_id == profile.id, EmployeeBankAccount.is_primary.is_(True), EmployeeBankAccount.valid_from <= run.tax_point_date, (EmployeeBankAccount.valid_to.is_(None) | (EmployeeBankAccount.valid_to >= run.tax_point_date))))
             if not account:
-                errors.append({"employee_id": employee_id, "code": "payroll_bank_account_missing", "name": employee.name})
-        if validate_attendance:
-            attendance = await db.scalar(select(WorkTimeEntry.id).where(WorkTimeEntry.employee_id == employee_id, WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status == "approved", WorkTimeEntry.started_at >= datetime.combine(run.period_start, datetime.min.time()), WorkTimeEntry.started_at <= datetime.combine(run.period_end, datetime.max.time())).limit(1))
-            if attendance is None:
-                issue = {"employee_id": employee_id, "code": "payroll_attendance_missing", "name": employee.name}
-                errors.append(issue)
-                attendance_warnings.append(issue)
+                errors.append({"employee_id": employee.id, "name": employee.name, "code": "payroll_bank_account_missing", "message": "Add a primary employee bank account valid on the payment date."})
     employee_ids = list(selected)
-    entries = list((await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.employee_id.in_(employee_ids), WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status == "approved", WorkTimeEntry.started_at >= datetime.combine(run.period_start, datetime.min.time()), WorkTimeEntry.started_at <= datetime.combine(run.period_end, datetime.max.time())).order_by(WorkTimeEntry.started_at))).scalars().all())
-    time_snapshot = [{"id": entry.id, "employee_id": entry.employee_id, "local_work_date": entry.local_work_date.isoformat() if entry.local_work_date else None, "started_at": entry.started_at.isoformat(), "ended_at": entry.ended_at.isoformat() if entry.ended_at else None, "approval_status": entry.approval_status, "hours": str(_decimal((entry.ended_at - entry.started_at).total_seconds()) / Decimal("3600")) if entry.ended_at else "0"} for entry in entries]
-    run.employee_filter = {"work_branch": data.work_branch, "work_direction": data.work_direction, "job_title": data.job_title}
-    run.input_snapshot = {**(run.input_snapshot or {}), "employee_ids": employee_ids, "validate_attendance": validate_attendance, "employee_validation_errors": errors, "approved_time_entry_ids": [entry.id for entry in entries], "approved_time_entries": time_snapshot}
-    return {"employee_ids": employee_ids, "employees": [{"id": employee.id, "name": employee.name, "payment_method": profile.payment_method, "base_salary": str(profile.base_salary), "bank_ready": not any(item["employee_id"] == employee.id and item["code"] == "payroll_bank_account_missing" for item in errors)} for profile, employee in (selected.values())], "errors": errors, "warnings": attendance_warnings, "can_create_salary_slips": not errors}
+    manual_overrides = snapshot.get("manual_overrides")
+    if manual_overrides is None:
+        manual_overrides = snapshot.get("overrides") or {}
+    resolved_overrides = {employee_id: {**(overrides.get(employee_id) or {}), **(manual_overrides.get(employee_id) or {})} for employee_id in overrides}
+    selection = {"employee_ids": employee_ids, "employees": [{"id": employee.id, "name": employee.name, "job_title": employee.job_title, "work_branch": employee.work_branch, "payment_method": profile.payment_method, "base_salary": str(profile.base_salary), "bank_ready": not any(item["employee_id"] == employee.id and item["code"] == "payroll_bank_account_missing" for item in errors)} for profile, employee in selected.values()], "errors": errors, "warnings": [], "can_create_salary_slips": not errors}
+    run.employee_filter = filters
+    run.input_snapshot = {**(run.input_snapshot or {}), "employee_ids": employee_ids, "employee_validation_errors": errors, "employee_selection": selection, "canonical_inputs": overrides, "overrides": resolved_overrides, "input_version": 3}
+    return selection
 
 
 async def create_salary_slips(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> list[Payslip]:
@@ -311,6 +326,9 @@ async def create_salary_slips(db: AsyncSession, actor: ActorContext, run: Payrol
         existing = list((await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id).order_by(Payslip.employee_id))).scalars().all())
         if existing:
             return existing
+    # Refresh HR inputs immediately before freezing slips, under the entry lock.
+    await get_employees(db, actor, run, GetEmployeesInput())
+    await prepare_recurring_compensation(db, run)
     validation_errors = list((run.input_snapshot or {}).get("employee_validation_errors") or [])
     if validation_errors:
         raise HTTPException(status_code=409, detail={"code": "payroll_employee_validation_failed", "errors": validation_errors})

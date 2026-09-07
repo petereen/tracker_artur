@@ -1,6 +1,19 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [ ] Restore the complete Payroll setup journey: statutory profile creation/publication, editable component defaults, structure review/publication, assignment revisions, and employee bank setup (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/payroll`) — follow `docs/erp-core-configuration-fix.md`, steps 1–3
+- [ ] Unify employee organization ownership and employment-date eligibility across HR and Payroll, including workers without platform logins (`backend/app/hr`, `backend/app/payroll/service.py`, `backend/app/payroll/frappe_service.py`)
+- [ ] Unify approved HR attendance, leave, holidays, employment dates, and recurring compensation into one frozen payroll input builder for every entry point (`backend/app/hr/router.py`, `backend/app/payroll/frappe_service.py`, `backend/app/payroll/service.py`) — remove inconsistent worktime-only checks and preserve the selected attendance policy
+- [x] Persist Payroll Entry filters and detailed employee validation results; allow correction/revalidation before slip creation and use local calendar dates in forms (`backend/app/payroll/frappe_service.py`, `backend/app/payroll/router.py`, `frontend/src/pages/PayrollWorkspacePage.tsx`) — saved selection/policy survives refresh; Recheck Employees refreshes canonical HR inputs; blocking issues are actionable per employee
+- [ ] Add Payroll review and distinct approval gates, capability-aligned UI actions, explicit payslip release, and protected salary detail access (`backend/app/payroll`, `backend/app/erp/service.py`, `frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
+- [ ] Configure the minimum company/fiscal settings, seven payroll ledger mappings, cost center, opening balances, and bank export layout with finance validation (`backend/app/erp`, `backend/app/payroll`, organization configuration) — steps 6–8 of `docs/erp-core-configuration-fix.md`
+- [ ] Enforce account purpose/group/currency checks, approved posting dates, closed-period guards, immutable posting mappings, cost-center defaults, and payment allocation consistency on both Payroll GL paths (`backend/app/payroll/service.py`, `backend/app/payroll/frappe_service.py`, `backend/app/erp`)
+- [ ] Deliver a dedicated Payroll payment workflow with bank references, employee allocations, partial/rejected/retried payments, separate recorded/confirmed/reconciled states, and statement matching without duplicate GL entries (`backend/app/payroll`, `backend/app/erp`, `backend/app/models/models.py`, `frontend/src/pages`)
+- [ ] Simplify Payroll to Overview / Run payroll / Employees / Reports / Settings; move module switches and form builders to administration and preserve legacy history (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/ERPWorkspacePage.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
+- [ ] Replace the universal Accounting document editor with specialized account, cost-center, journal, payment, and bank-reconciliation forms and validations (`frontend/src/pages/ERPWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/erp`)
+- [ ] Deliver specialized Selling and Buying workflows with customer/supplier, item, invoice, and receipt/payment links after Payroll acceptance (`frontend/src/pages`, `backend/app/erp`) — module field/function matrix in `docs/erp-core-configuration-fix.md`
+- [ ] Deliver specialized Stock, CRM, Support, Manufacturing, and Assets & Maintenance workflows in dependency order when needed (`frontend/src/pages`, `backend/app/erp`) — module field/function matrix in `docs/erp-core-configuration-fix.md`
+- [ ] Complete Payroll acceptance against PostgreSQL and a migrated staging copy: setup-to-reconciliation browser journey, tax/YTD/proration fixtures, duplicate/concurrent requests, closed periods, tenant isolation, role boundaries, and reversal/replacement (`backend/tests`, `backend/alembic`, `frontend/e2e`) — focused Payroll workspace: 5 frontend tests pass; Frappe source contracts: 5 pass; migrated PostgreSQL/browser acceptance remains pending
 - [x] Restrict approved-leave edits to HR/admin and add HR status control for rejection (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`) — approved edits and status changes are HR/admin-only; members can edit pending requests only; build, Python compilation, static HR contracts, focused frontend test, and diff checks pass
 - [x] Make approved leave requests editable with conflict, balance, and version checks (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`) — approved and pending requests now have an edit form; backend checks scope, status, overlaps, annual balance, and optimistic version conflicts; Python compilation, TypeScript/build, focused frontend test, and diff checks pass; backend pytest remains unavailable because pytest is not installed
 - [x] Add HR UI controls for annual leave entitlement and leave-balance adjustments (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/tests`) — annual leave can be set while creating an employee or edited later by HR/admin; frontend build, 28-file/93-test suite, Python compilation, and contract checks pass
@@ -401,6 +414,36 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Scope canonical Payroll inputs to tenant-owned worktime, employee schedules, confirmed late attendance, and explicit missing-attendance policy metadata (`backend/app/payroll/inputs.py`)
+- [x] Preserve Payroll Entry employee filters, manual adjustments, canonical input snapshots, and validation results across refresh/recheck (`backend/app/payroll/frappe_service.py`, `backend/app/payroll/router.py`)
+- [x] Route HR-generated payroll through the same canonical input snapshot and return unpaid leave source IDs (`backend/app/hr/router.py`)
+- [x] Keep HR-generated payroll audit payloads compatible with canonical unpaid-leave ID output (`backend/app/hr/router.py`)
+- [x] Expose persisted Payroll Entry selection, validation issues, attendance policy, and recheck response types to the frontend (`frontend/src/api/enterprise.ts`)
+- [x] Restore Payroll Entry validation after refresh, add visible Recheck Employees, show per-employee fixes, and keep payroll form dates local (`frontend/src/pages/PayrollWorkspacePage.tsx`)
+- [x] Add static regression coverage for Payroll Entry recheck persistence and tenant-scoped canonical inputs (`backend/tests/test_frappe_payroll_contract.py`)
+- [x] Guard the HR-generated canonical unpaid-leave audit payload with a source contract (`backend/tests/test_frappe_payroll_contract.py`)
+- [x] Cover local-calendar Payroll form date formatting in the focused workspace test (`frontend/src/pages/PayrollWorkspacePage.test.tsx`)
+- [x] Align the Frappe migration source contract with its combined legacy-run status backfill (`backend/tests/test_frappe_payroll_contract.py`)
+- [x] Avoid double-prorating approved half-day hours (`backend/app/payroll/inputs.py`)
+- [x] Keep leave payment-day reconciliation explicit (`backend/app/payroll/inputs.py`)
+- [x] Use the same frozen HR input preparation from HR Generate Payroll and Payroll Entry (`backend/app/hr/router.py`)
+- [x] Use finalized prior runs for monthly insurance caps (`backend/app/payroll/service.py`)
+- [x] Use finalized history for payroll relief (`backend/app/payroll/service.py`)
+- [x] Exclude draft and future payroll from finalized YTD history (`backend/app/payroll/service.py`)
+- [x] Calculate from the earning-period assignment for departing employees (`backend/app/payroll/service.py`)
+- [x] Authorize Payroll assignments by Employee organization without requiring a login (`backend/app/payroll/service.py`)
+- [x] Return saved employee validation and attendance policy with Payroll Entry details (`backend/app/payroll/router.py`)
+- [x] Inherit Additional Salary tax and insurance treatment from its component master (`backend/app/payroll/frappe_service.py`)
+- [x] Revalidate HR inputs immediately before freezing Salary Slips (`backend/app/payroll/frappe_service.py`)
+- [x] Persist actionable employee validation and canonical Payroll inputs for refresh/revalidation (`backend/app/payroll/frappe_service.py`)
+- [x] Include departing employees and period-overlapping assignments (`backend/app/payroll/frappe_service.py`)
+- [x] Retain saved Payroll employee filters across rechecks (`backend/app/payroll/frappe_service.py`)
+- [x] Persist the Payroll attendance policy on draft creation (`backend/app/payroll/frappe_service.py`)
+- [x] Connect shared Payroll input preparation (`backend/app/payroll/frappe_service.py`)
+- [x] Include employment windows in Payroll employee eligibility (`backend/app/payroll/frappe_service.py`)
+- [x] Preserve Payroll selection filters and add canonical HR input integration (`backend/app/payroll/frappe_service.py`)
+- [x] Add a canonical Payroll input builder for approved HR attendance/leave, holidays, employment windows, payment-day explanations, and recurring compensation (`backend/app/payroll/inputs.py`) — integration and acceptance remain tracked above
+- [x] Audit the current ERP/Payroll source and task tracker against Frappe HR/ERPNext workflow references; deliver a Payroll-first configuration and implementation plan with minimum Accounting dependencies, specialized module fields, UX/RBAC fixes, and acceptance gates (`docs/erp-core-configuration-fix.md`, `TODO.md`) — planning/documentation only; live tenant configuration and application code unchanged
 - [x] Restrict approved-leave edits to HR/admin and add HR status control for rejection (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`)
 - [x] Make approved leave requests editable with conflict, balance, and version checks (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`)
 - [x] Make approved leave requests editable with conflict, balance, and version checks (`backend/app/hr`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/HRWorkspacePage.tsx`, `backend/tests`)

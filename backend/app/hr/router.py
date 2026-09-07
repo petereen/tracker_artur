@@ -546,27 +546,18 @@ async def generate_hr_payroll(data: PayrollGenerateInput, db: AsyncSession = Dep
     employee_ids = sorted(set(employee_ids)); key = idempotency_key or f"{data.period_start}:{data.period_end}:{','.join(map(str, employee_ids))}"
     existing = await db.scalar(select(PayrollRun).where(PayrollRun.organization_id == actor.organization_id, PayrollRun.hr_generation_key == key))
     if existing: return {"run_id": existing.id, "run_number": existing.run_number, "idempotent": True, "period_start": existing.period_start, "period_end": existing.period_end}
-    overrides: dict[str, dict] = {}
-    leaves = (await db.execute(select(TimeOff).where(TimeOff.organization_id == actor.organization_id, TimeOff.employee_id.in_(employee_ids), TimeOff.status == "approved", TimeOff.time_off_type == "unpaid", TimeOff.starts_on <= data.period_end, TimeOff.ends_on >= data.period_start))).scalars().all()
-    for leave in leaves:
-        start, end = max(leave.starts_on, data.period_start), min(leave.ends_on, data.period_end)
-        days = await leave_days(db, actor.organization_id, start, end)
-        current = overrides.setdefault(str(leave.employee_id), {"unpaid_leave_days": Decimal("0"), "unpaid_leave_request_ids": []})
-        current["unpaid_leave_days"] += Decimal(days); current["unpaid_leave_request_ids"].append(leave.id)
-    run_input = PayrollEntryInput(run_type="final", period_start=data.period_start, period_end=data.period_end, posting_date=data.period_end, tax_point_date=data.tax_point_date or data.period_end, statutory_profile_id=data.statutory_profile_id, employee_ids=employee_ids, input_overrides={key: {k: str(v) if isinstance(v, Decimal) else v for k, v in value.items()} for key, value in overrides.items()}, validate_attendance=False)
+    run_input = PayrollEntryInput(run_type="final", period_start=data.period_start, period_end=data.period_end, posting_date=data.period_end, tax_point_date=data.tax_point_date or data.period_end, statutory_profile_id=data.statutory_profile_id, employee_ids=employee_ids, validate_attendance=False)
     run = await create_payroll_entry(db, actor, run_input)
     run.hr_generation_key = key
-    run.input_snapshot = {**(run.input_snapshot or {}), "hr_generated": True, "approved_unpaid_leave_ids": [row.id for row in leaves], "hr_input_overrides": {key: {k: str(v) if isinstance(v, Decimal) else v for k, v in value.items()} for key, value in overrides.items()}}
-    masters = {row.id: row for row in (await db.execute(select(PayrollSalaryComponentMaster).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id))).scalars().all()}
-    for item in (await db.execute(select(EmployeeCompensationItem).where(EmployeeCompensationItem.organization_id == actor.organization_id, EmployeeCompensationItem.employee_id.in_(employee_ids), EmployeeCompensationItem.is_active.is_(True), EmployeeCompensationItem.effective_from <= data.period_end, or_(EmployeeCompensationItem.effective_to.is_(None), EmployeeCompensationItem.effective_to >= data.period_start)))).scalars().all():
-        master = masters.get(item.component_master_id)
-        if not master: continue
-        number = f"HR-COMP-{item.id}-{data.period_end:%Y%m}"
-        if not await db.scalar(select(AdditionalSalary.id).where(AdditionalSalary.organization_id == actor.organization_id, AdditionalSalary.number == number)):
-            db.add(AdditionalSalary(organization_id=actor.organization_id, number=number, employee_id=item.employee_id, salary_component_id=master.id, payroll_date=data.period_end, amount=item.amount, component_kind=master.component_kind if master.component_kind in {"earning", "deduction"} else "earning", taxable=master.is_taxable, shi_subject=master.is_shi_subject, source="import", reference=f"hr-recurring:{item.id}:{data.period_end:%Y-%m}", status="submitted", created_by_account_id=actor.account_id))
-    await record_change(db, actor=actor, topic="hr", aggregate_type="payroll_run", aggregate_id=run.id, operation="hr_generated", after={"run_id": run.id, "employee_count": len(employee_ids), "unpaid_leave_ids": [row.id for row in leaves]})
+    from app.payroll.frappe_service import get_employees
+    from app.payroll.schemas import GetEmployeesInput
+    selection = await get_employees(db, actor, run, GetEmployeesInput(employee_ids=employee_ids, validate_attendance=False))
+    overrides = (run.input_snapshot or {}).get("overrides", {})
+    leaves = sorted({leave_id for value in overrides.values() for leave_id in value.get("unpaid_leave_ids", [])})
+    run.input_snapshot = {**run.input_snapshot, "hr_generated": True}
+    await record_change(db, actor=actor, topic="hr", aggregate_type="payroll_run", aggregate_id=run.id, operation="hr_generated", after={"run_id": run.id, "employee_count": len(employee_ids), "unpaid_leave_ids": leaves})
     await db.commit()
-    return {"run_id": run.id, "run_number": run.run_number, "idempotent": False, "employee_ids": employee_ids, "unpaid_leave_ids": [row.id for row in leaves], "unpaid_leave_days": {key: str(value["unpaid_leave_days"]) for key, value in overrides.items()}, "next": f"/erp/payroll/payroll-entries/{run.id}"}
+    return {"run_id": run.id, "run_number": run.run_number, "idempotent": False, "employee_ids": selection["employee_ids"], "unpaid_leave_ids": leaves, "unpaid_leave_days": {key: str(value["unpaid_leave_days"]) for key, value in overrides.items()}, "next": f"/erp/payroll/payroll-entries/{run.id}"}
 
 
 @router.get("/me")

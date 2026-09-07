@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canManagePayroll, formatPayrollMoney, payrollDocumentStatusLabel, payrollEntryNextAction, runSequenceState } from './PayrollWorkspacePage'
+import { canManagePayroll, formatPayrollMoney, localDateValue, payrollDocumentStatusLabel, payrollEntryNextAction, runSequenceState } from './PayrollWorkspacePage'
 
 describe('payroll workspace policy helpers', () => {
   it('only grants management affordances to payroll administrators/managers', () => {
@@ -10,6 +10,10 @@ describe('payroll workspace policy helpers', () => {
 
   it('formats MNT amounts for review', () => {
     expect(formatPayrollMoney('1234567')).toMatch(/1,234,567/)
+  })
+
+  it('formats payroll dates from the local calendar', () => {
+    expect(localDateValue(new Date(2026, 8, 7))).toBe('2026-09-07')
   })
 
   it('keeps the seven-stage sequence aligned with the run lifecycle', () => {
