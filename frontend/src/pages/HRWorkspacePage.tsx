@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { CalendarDays, Check, Copy, Download, Link2, Pencil, Plus, Search, UserPlus, Users, X } from 'lucide-react'
-import { downloadHRAttendanceCsv, useActor, usePayrollComponentMasters, useAddHRCompensation, useBulkUpdateHRAttendance, useCreateHREmployee, useDecideHRLeave, useGenerateHRPayroll, useHRCompensation, useHRDepartments, useHRAttendance, useHREmployees, useHRLeaveBalances, useHRLeaveRequests, useRegenerateHRInvite, useRevokeHRInvite, useSetHRLeaveBalance, useSubmitHRLeave, useUpdateHRAttendance, useUpdateHRLeave } from '../api/enterprise'
+import { Link } from 'react-router-dom'
+import { downloadHRAttendanceCsv, useActor, usePayrollComponentMasters, useAddHRCompensation, useBulkUpdateHRAttendance, useCreateHREmployee, useDecideHRLeave, useHRCompensation, useHRDepartments, useHRAttendance, useHREmployees, useHRLeaveBalances, useHRLeaveRequests, useRegenerateHRInvite, useRevokeHRInvite, useSetHRLeaveBalance, useSubmitHRLeave, useUpdateHRAttendance, useUpdateHRLeave } from '../api/enterprise'
 import type { HRAttendanceItem, HREmployee, HRLeaveRequest } from '../api/enterprise'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 
@@ -87,9 +88,8 @@ function AttendancePanel({ items, enabled }: { items: HRAttendanceItem[]; enable
 }
 
 function PayrollPanel() {
-  const components = usePayrollComponentMasters(); const generate = useGenerateHRPayroll(); const [form, setForm] = useState({ period_start: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`, period_end: new Date().toISOString().slice(0, 10) })
-  const run = async () => { try { const result = await generate.mutateAsync(form); toast.success(`Payroll Entry үүслээ: ${result.run_number}`) } catch (error) { toast.error(errorText(error)) } }
-  return <div className="hr-panel-grid"><Card><div className="view-toolbar"><div><span className="eyebrow">MONTHLY PAYROLL</span><h2>Сарын цалин үүсгэх</h2><p>Батлагдсан цалингүй чөлөөг автоматаар суутгаж, existing Payroll Entry үүсгэнэ.</p></div></div><div className="hr-form-grid"><Input label="Эхлэх огноо" type="date" value={form.period_start} onChange={(value) => setForm({ ...form, period_start: value })} fullWidth /><Input label="Дуусах огноо" type="date" value={form.period_end} onChange={(value) => setForm({ ...form, period_end: value })} fullWidth /></div><Btn variant="primary" onClick={run} disabled={generate.isPending}><Plus size={14} />Payroll draft үүсгэх</Btn></Card><Card><div className="view-toolbar"><div><span className="eyebrow">COMPONENT MASTERS</span><h2>Давтамжит бүрэлдэхүүн</h2></div></div><div className="hr-component-list">{(components.data || []).map((item) => <div key={item.id}><strong>{item.name}</strong><span>{item.component_kind} · {item.code}</span></div>)}</div></Card></div>
+  const components = usePayrollComponentMasters()
+  return <div className="hr-panel-grid"><Card><div className="view-toolbar"><div><span className="eyebrow">MONTHLY PAYROLL</span><h2>Payroll Entry-ээр цалин үүсгэх</h2><p>Ажилтан сонголт, бодолт, Salary Slip, Bank Entry бүх алхмыг dedicated Payroll module-ийн нэг урсгалаар гүйцэтгэнэ.</p></div></div><Link className="primary-action" to="/erp/payroll/payroll-entries/new"><Plus size={14} />Шинэ Payroll Entry</Link></Card><Card><div className="view-toolbar"><div><span className="eyebrow">COMPONENT MASTERS</span><h2>Давтамжит бүрэлдэхүүн</h2></div></div><div className="hr-component-list">{(components.data || []).map((item) => <div key={item.id}><strong>{item.name}</strong><span>{item.component_kind} · {item.code}</span></div>)}</div></Card></div>
 }
 
 export default HRWorkspacePage

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canManagePayroll, formatPayrollMoney, localDateValue, payrollDocumentStatusLabel, payrollEntryNextAction, runSequenceState } from './PayrollWorkspacePage'
+import { canManagePayroll, formatPayrollMoney, localDateValue, payrollDocumentStatusLabel, payrollEntryNextAction } from './PayrollWorkspacePage'
 
 describe('payroll workspace policy helpers', () => {
   it('only grants management affordances to payroll administrators/managers', () => {
@@ -14,15 +14,6 @@ describe('payroll workspace policy helpers', () => {
 
   it('formats payroll dates from the local calendar', () => {
     expect(localDateValue(new Date(2026, 8, 7))).toBe('2026-09-07')
-  })
-
-  it('keeps the seven-stage sequence aligned with the run lifecycle', () => {
-    expect(runSequenceState({ status: 'draft' })).toEqual({ completedThrough: 2, activeStep: 2 })
-    expect(runSequenceState({ status: 'calculated' }).activeStep).toBe(3)
-    expect(runSequenceState({ status: 'in_review' }).activeStep).toBe(4)
-    expect(runSequenceState({ status: 'approved' }).activeStep).toBe(5)
-    expect(runSequenceState({ status: 'posted' }).activeStep).toBe(6)
-    expect(runSequenceState({ status: 'posted', payslips_published_at: '2026-08-27T12:00:00Z' })).toEqual({ completedThrough: 7, activeStep: -1 })
   })
 
   it('maps Frappe document states to Mongolian labels and the next safe action', () => {

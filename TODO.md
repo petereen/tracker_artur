@@ -414,6 +414,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Route new payroll operations through the dedicated Payroll Entry workflow; HR now links to Payroll Entry creation, employees use new self-service payslips, and legacy run URLs redirect to the new workspace (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/App.tsx`)
 - [x] Scope canonical Payroll inputs to tenant-owned worktime, employee schedules, confirmed late attendance, and explicit missing-attendance policy metadata (`backend/app/payroll/inputs.py`)
 - [x] Preserve Payroll Entry employee filters, manual adjustments, canonical input snapshots, and validation results across refresh/recheck (`backend/app/payroll/frappe_service.py`, `backend/app/payroll/router.py`)
 - [x] Route HR-generated payroll through the same canonical input snapshot and return unpaid leave source IDs (`backend/app/hr/router.py`)
