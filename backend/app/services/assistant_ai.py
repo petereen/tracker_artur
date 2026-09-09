@@ -27,6 +27,7 @@ from pydantic import (
 )
 
 from app.services.knowledge_service import tokenize_search_terms
+from app.services.task_parser import is_scheduled_task as _is_scheduled_task
 
 log = logging.getLogger(__name__)
 
@@ -926,7 +927,7 @@ def is_task_query(text: str) -> bool:
 
 def is_scheduled_task(text: str) -> bool:
     """Recognize a concrete meeting/event statement that should become a draft."""
-    return bool(_SCHEDULED_EVENT_RE.search(text or "") or _ALL_HANDS_GATHERING_RE.search(text or ""))
+    return bool(_SCHEDULED_EVENT_RE.search(text or "") or _ALL_HANDS_GATHERING_RE.search(text or "") or _is_scheduled_task(text))
 
 
 def is_task_creation_request(text: str) -> bool:

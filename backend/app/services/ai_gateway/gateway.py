@@ -14,6 +14,7 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Literal, Sequence
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import tiktoken
@@ -31,6 +32,7 @@ from app.services.mcp.references import resolve_resource_reference, resource_ref
 from app.services.mcp.results import sanitize_text
 from app.services.file_search_service import FileSearchPrincipal, KnowledgeSearchResult, is_file_search_query, search_knowledge_documents, search_tokens
 from app.services.assistant_text import detect_language
+from app.services.task_parser import is_scheduled_task, parse_task_text
 from app.models.models import Employee
 
 log = logging.getLogger(__name__)
@@ -429,14 +431,59 @@ class AIGateway:
         decision = await self._classify_model(text)
         self._last_routing_decision = decision
         category = QueryCategory.COMPLEX_REASONING if decision.model_key == "terra" else QueryCategory.SIMPLE_QA
+        scheduled_task = is_scheduled_task(text)
         return Classification(
             category=category,
             language=detect_language(text).value,
             requires_freshness=self._requires_freshness(text),
-            requires_enterprise_tools=bool(self._infer_enterprise_intents(text)),
+            requires_enterprise_tools=bool(self._infer_enterprise_intents(text) or scheduled_task),
             requested_modalities=["text"],
             cache_eligible=not bool(self._infer_enterprise_intents(text)),
-            enterprise_intents=["tasks_write"] if decision.action_intents else [],
+            enterprise_intents=["tasks_write"] if decision.action_intents or scheduled_task else [],
+        )
+
+    async def _offline_task_preview(self, db: Any, request: GatewayRequest) -> GatewayResponse | None:
+        """Prepare an implicit meeting task when the live model is unavailable."""
+        if request.actor_context is None or not is_scheduled_task(request.text):
+            return None
+        timezone_name = "Asia/Ulaanbaatar"
+        if request.actor_context.employee_id is not None:
+            employee = await db.get(Employee, request.actor_context.employee_id)
+            timezone_name = getattr(employee, "timezone", None) or timezone_name
+        try:
+            zone = ZoneInfo(timezone_name)
+        except Exception:
+            zone = ZoneInfo("Asia/Ulaanbaatar")
+        parsed = parse_task_text(request.text, now=datetime.now(zone), tz=timezone_name)
+        result = await self.tool_registry.dispatch_tool(
+            "oyuns_tasks_prepare_create",
+            {
+                "title": parsed.title,
+                "description": request.text[:6_000],
+                "assignee": "self",
+                "reviewer": None,
+                "priority": parsed.priority,
+                "deadline_at": parsed.deadline_at.isoformat() if parsed.deadline_at else None,
+                "project_ref": None,
+            },
+            request.actor_context,
+            db=db,
+            conversation_id=request.conversation_id,
+        )
+        if result.get("status") not in {"ok", "empty"}:
+            return None
+        answer = "Даалгаврын ноорог бэлэн боллоо. Баталгаажуулбал үүсгэнэ."
+        return GatewayResponse(
+            answer=answer,
+            sources=[],
+            route="offline_task_preview",
+            model="local-task-parser",
+            cache="bypass",
+            web_search_used=False,
+            usage={},
+            tool_results=[result],
+            degraded=True,
+            degraded_reason="live_ai_unavailable",
         )
 
     @staticmethod
@@ -784,6 +831,9 @@ class AIGateway:
                 await self.cache.record_model_failure(key)
                 log.warning("ai_gateway.model_failed route=%s model=%s", classification.category.value, model.id, exc_info=True)
         failure = last_error or GatewayError("No eligible live model could answer", kind="provider_5xx", retryable=True)
+        task_preview = await self._offline_task_preview(db, request)
+        if task_preview is not None:
+            return task_preview
         if (
             getattr(settings, "AI_OFFLINE_KNOWLEDGE_FALLBACK_ENABLED", True)
             and request.actor_context is not None

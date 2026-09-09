@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Restore implicit Mongolian meeting-to-task previews when live OYUNS routing is unavailable (`backend/app/services/task_parser.py`, `backend/app/services/ai_gateway/gateway.py`, `backend/tests`) — supports both “маргааш 16 цагт” and “16 цагаас маргааш” phrasing, widens gateway task-write intent, and creates a confirmation preview through the governed tool path; Python syntax and diff checks pass, while pytest remains environment-blocked by missing `pytz`, SQLAlchemy, and FastAPI
 - [x] Make company knowledge available through the Oyuns AI agent to every authenticated agent user (`backend/app/core/enterprise_deps.py`, `backend/tests/test_unified_ai_gateway.py`) — active accounts without a role assignment now receive read-only assistant access, exposing knowledge search/fetch without granting previews or administrative capabilities
 - [x] Implement OYUNS unified knowledge search, ACL-safe preflight grounding, tiered sanitization, and deterministic offline fallback (`backend/app/services/file_search_service.py`, `backend/app/services/enterprise_tools.py`, `backend/app/services/ai_gateway`, `backend/app/models/models.py`, `backend/alembic/versions`, `backend/tests`) — implementation and syntax validation complete; PostgreSQL/dependency-backed tests remain pending in this environment
 - [x] Add versioned knowledge schema/index migration and worker reindex coverage (`backend/alembic/versions/m4n5o6p7q8r9_unified_knowledge_index.py`, `backend/app/worker.py`)

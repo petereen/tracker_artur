@@ -33,6 +33,11 @@ _MONGOLIAN_RELATIVE_TIME_RE = re.compile(
     r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*цаг(?:аас|т)?\b",
     re.IGNORECASE,
 )
+_MONGOLIAN_TIME_RELATIVE_DAY_RE = re.compile(
+    r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*цаг(?:аас|т)?\b.*?"
+    r"\b(өнөөдөр(?:төө)?|маргааш|нөгөөдөр)(?:ын|ийн)?\b",
+    re.IGNORECASE,
+)
 _MONGOLIAN_NUMBER_WORDS = {
     "нэг": "1",
     "хоёр": "2",
@@ -59,12 +64,17 @@ def _explicit_mongolian_deadline(
 ) -> Optional[datetime]:
     """Parse relative Mongolian day/time without relying on dateparser heuristics."""
     match = _MONGOLIAN_RELATIVE_TIME_RE.search(text_value or "")
-    if not match:
+    reverse_match = _MONGOLIAN_TIME_RELATIVE_DAY_RE.search(text_value or "")
+    if not match and not reverse_match:
         return None
-    day_word = match.group(1).casefold()
+    if reverse_match and (not match or reverse_match.start() < match.start()):
+        hour, minute, day_word = reverse_match.group(1), reverse_match.group(2), reverse_match.group(3)
+    else:
+        day_word = match.group(1)
+        hour, minute = match.group(2), match.group(3)
     days_ahead = 0 if day_word.startswith("өнөөдөр") else 1 if day_word == "маргааш" else 2
     target_date = (now + timedelta(days=days_ahead)).date()
-    target_time = time(hour=int(match.group(2)), minute=int(match.group(3) or 0))
+    target_time = time(hour=int(hour), minute=int(minute or 0))
     try:
         zone = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError:
@@ -117,6 +127,23 @@ class ParsedTask:
     deadline_at: Optional[datetime]
     priority: int
     assignee_username: Optional[str]
+
+
+_SCHEDULED_TASK_RE = re.compile(
+    r"(?:\b(?:өнөөдөр|өнөөдөртөө|маргааш|нөгөөдөр)\b.*?"
+    r"\b(?:хурал(?:тай|д)?|уулзалт(?:тай|д)?|meeting|event)\b|"
+    r"\b(?:хурал(?:тай|д)?|уулзалт(?:тай|д)?|meeting|event)\b.*?"
+    r"\b(?:өнөөдөр|өнөөдөртөө|маргааш|нөгөөдөр)\b|"
+    r"\b\d{1,2}(?::\d{2})?\s*цаг(?:аас|т)?\b.*?"
+    r"\b(?:өнөөдөр|өнөөдөртөө|маргааш|нөгөөдөр)\b.*?"
+    r"\b(?:хурал(?:тай|д)?|уулзалт(?:тай|д)?|meeting|event)\b)",
+    re.IGNORECASE,
+)
+
+
+def is_scheduled_task(text: str) -> bool:
+    """Recognize an informal meeting statement as a self-task candidate."""
+    return bool(_SCHEDULED_TASK_RE.search(text or ""))
 
 
 def _detect_priority(text: str) -> int:
