@@ -100,6 +100,7 @@ from app.services.google_calendar import (
 from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services import assistant_ai, exchange_rate_service
 from app.services.attendance_service import sync_worktime_attendance
+from app.services.worktime_geofence import WORKTIME_GEOFENCE_KEY, WORKTIME_GEOFENCE_RADIUS_METERS, configured_worktime_location, validate_worktime_location
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
@@ -125,6 +126,11 @@ class PermissionSettingsInput(BaseModel):
     task_assignment_roles: list[Literal["admin", "manager", "team_lead", "hr", "member", "contractor", "client_auditor"]]
 
 
+class WorktimeGeofenceInput(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
 BRANDING_KEY = "branding"
 LEGACY_LOGOS = {
     "legacy-aio": "/oyuns-aio-logo.png",
@@ -138,6 +144,16 @@ BRANDING_TYPES = {"image/png", "image/jpeg", "image/webp"}
 class BrandingSelectionInput(BaseModel):
     theme: Literal["light", "dark"]
     source: Literal["legacy-aio", "legacy-icon", "default"]
+
+
+def _worktime_geofence_out(organization: Organization) -> dict:
+    location = configured_worktime_location(organization.settings)
+    return {
+        "configured": location is not None,
+        "latitude": location[0] if location else None,
+        "longitude": location[1] if location else None,
+        "radius_meters": WORKTIME_GEOFENCE_RADIUS_METERS,
+    }
 
 
 def _branding_out(organization: Organization) -> dict:
@@ -239,6 +255,36 @@ async def update_permission_settings(data: PermissionSettingsInput, db: AsyncSes
     await record_change(db, actor=actor, topic="settings", aggregate_type="organization_permissions", aggregate_id=organization.id, operation="updated", after={SETTINGS_KEY: roles})
     await db.commit()
     return {"task_assignment_roles": roles, "available_roles": sorted(ALL_EMPLOYEE_ROLES)}
+
+
+@router.get("/settings/worktime-geofence")
+async def get_worktime_geofence_settings(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    organization = await db.get(Organization, actor.organization_id)
+    return _worktime_geofence_out(organization)
+
+
+@router.put("/settings/worktime-geofence")
+async def update_worktime_geofence_settings(data: WorktimeGeofenceInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin"))):
+    organization = await db.get(Organization, actor.organization_id, with_for_update=True)
+    organization.settings = {
+        **(organization.settings or {}),
+        WORKTIME_GEOFENCE_KEY: {
+            "latitude": data.latitude,
+            "longitude": data.longitude,
+            "radius_meters": WORKTIME_GEOFENCE_RADIUS_METERS,
+        },
+    }
+    await record_change(
+        db,
+        actor=actor,
+        topic="settings",
+        aggregate_type="organization_worktime_geofence",
+        aggregate_id=organization.id,
+        operation="updated",
+        after=_worktime_geofence_out(organization),
+    )
+    await db.commit()
+    return _worktime_geofence_out(organization)
 
 
 @router.get("/settings/branding")
@@ -555,6 +601,8 @@ class SavedViewInput(BaseModel):
 
 class ClockStartInput(BaseModel):
     mode: Literal["in_person", "remote"]
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     project_id: int | None = None
     task_id: int | None = None
     is_billable: bool = False
@@ -2354,6 +2402,35 @@ async def clock_start(data: ClockStartInput, db: AsyncSession = Depends(get_db),
     if not actor.employee_id:
         raise HTTPException(status_code=409, detail="Account is not linked to an employee")
     employee = await db.get(Employee, actor.employee_id)
+    if data.mode == "in_person":
+        organization = await db.get(Organization, actor.organization_id)
+        geofence_error, distance = validate_worktime_location(organization.settings, data.latitude, data.longitude)
+        if geofence_error == "worktime_geofence_not_configured":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "worktime_geofence_not_configured",
+                    "message": "Оффисын байршлыг админ тохиргоонд хадгалсны дараа ажил эхлүүлнэ үү.",
+                },
+            )
+        if geofence_error == "worktime_location_required":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "worktime_location_required",
+                    "message": "Ажил эхлүүлэхийн тулд байршлын зөвшөөрөл шаардлагатай.",
+                },
+            )
+        if geofence_error == "outside_worktime_geofence":
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "outside_worktime_geofence",
+                    "message": f"Та оффисоос {round(distance)}м зайтай байна. Ажил эхлүүлэхийн тулд 150м дотор очно уу.",
+                    "distance_meters": round(distance, 1),
+                    "radius_meters": WORKTIME_GEOFENCE_RADIUS_METERS,
+                },
+            )
     now = datetime.now(timezone.utc)
     local_day = now.astimezone(ZoneInfo(employee.timezone)).date()
     existing = await _active_entry(db, employee.id)

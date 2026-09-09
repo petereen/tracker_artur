@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser'
-import { Camera, CheckCircle2, Clock3, Coffee, Laptop2, MapPin, RefreshCw, ScanLine, ShieldAlert } from 'lucide-react'
+import { Camera, CheckCircle2, Clock3, Coffee, Laptop2, LocateFixed, MapPin, RefreshCw, ScanLine, ShieldAlert } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useClock, useWorktimeQrClock } from '../api/enterprise'
+import { WorkdayStartButton } from '../components/WorkdayStartButton'
 
 function formatTime(value: string | null, timezone = 'Asia/Ulaanbaatar') {
   if (!value) return '—'
@@ -94,6 +95,10 @@ export function WorktimePage() {
   return <div className="worktime-page">
     <section className="worktime-status panel" aria-live="polite">
       <div className={`worktime-state ${active ? 'active' : ''}`}><Clock3 size={17} /><span>{active ? active.mode === 'remote' ? 'Remote ажиллаж байна' : active.entry_type === 'break' ? 'Завсарлага' : 'Ажиллаж байна' : 'Идэвхгүй'}</span></div>
+    </section>
+    <section className="worktime-start panel">
+      <div><span className="eyebrow">БАЙРШЛААР ЭХЛҮҮЛЭХ</span><h2>Ажлын өдрөө эхлүүлэх</h2><p>Оффисын тохируулсан байршлаас 150м дотор байхад шууд бүртгүүлнэ.</p></div>
+      <WorkdayStartButton className="primary-action" disabled={Boolean(active)}><LocateFixed size={16} />{active ? 'Ажиллаж байна' : 'Оффис эхлэх'}</WorkdayStartButton>
     </section>
     <div className="worktime-grid">
       <section className="worktime-scanner panel">

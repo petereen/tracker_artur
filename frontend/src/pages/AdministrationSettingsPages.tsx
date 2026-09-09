@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, BookOpen, Boxes, CalendarClock, CalendarDays, ClipboardList, Code2, KeyRound, Landmark, MonitorUp, Settings2, ShieldCheck, UserPlus, UserRoundCog, Users2 } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { ArrowLeft, Bot, BookOpen, Boxes, CalendarClock, CalendarDays, ClipboardList, Code2, KeyRound, Landmark, LocateFixed, MapPin, MonitorUp, Settings2, ShieldCheck, UserPlus, UserRoundCog, Users2 } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUploadBrandingLogo, useWorktimeQrKiosks } from '../api/enterprise'
+import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { EmployeesPage } from './EmployeesPage'
 import { QuestionsPage } from './QuestionsPage'
@@ -141,6 +141,50 @@ function WorktimeQrKioskPanel() {
   return <section className="settings-embedded worktime-kiosk-admin"><div className="settings-embedded-heading"><MonitorUp /><div><h3>Worktime QR дэлгэц</h3><p>TV дэлгэцийг pairing кодоор нэг удаа холбож, оффисын динамик QR үүсгэнэ.</p></div></div><form className="kiosk-create-form" onSubmit={submit}><label>Дэлгэцийн нэр<input value={label} onChange={(event) => setLabel(event.target.value)} required /></label><label>Location ID<input value={locationId} onChange={(event) => setLocationId(event.target.value)} pattern="[A-Za-z0-9_-]+" required /></label><label>Харагдах нэр<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><button className="primary-action" disabled={create.isPending}>Pairing код үүсгэх</button></form>{pairingCode && <div className="kiosk-pairing-code" role="status"><strong>{pairingCode}</strong><span>Энэ кодыг TV дээрх <a href="/worktimeqr" target="_blank" rel="noreferrer">/worktimeqr</a> дэлгэцэд 10 минутын дотор оруулна уу.</span><button className="secondary-action compact" onClick={() => navigator.clipboard?.writeText(pairingCode)}>Хуулах</button></div>}{kiosks.isError && <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />QR дэлгэцийн өгөгдлийн хүснэгт бэлэн биш байна. Backend migration-ийг ажиллуулаад дахин оролдоно уу.</div>}<div className="kiosk-list">{kiosks.isLoading ? <p>Дэлгэцүүдийг ачаалж байна…</p> : (kiosks.data ?? []).map((kiosk) => <article key={kiosk.id} className={`kiosk-row ${kiosk.status}`}><div><strong>{kiosk.display_name}</strong><span>{kiosk.label} · {kiosk.location_id} · {kiosk.status === 'active' ? 'Идэвхтэй' : 'Цуцлагдсан'}</span></div>{kiosk.status === 'active' && <div className="kiosk-row-actions"><button className="secondary-action compact" onClick={() => renewPairing(kiosk.id)} disabled={renew.isPending}>Дахин pair хийх</button><button className="danger-action compact" onClick={() => revoke.mutate(kiosk.id)} disabled={revoke.isPending}>Цуцлах</button></div>}</article>)}</div></section>
 }
 
+function WorktimeGeofencePanel() {
+  const settings = useWorktimeGeofenceSettings()
+  const update = useUpdateWorktimeGeofenceSettings()
+  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
+  const canEdit = roles.includes('admin')
+  const [latitude, setLatitude] = useState('')
+  const [longitude, setLongitude] = useState('')
+
+  useEffect(() => {
+    if (!settings.data) return
+    setLatitude(settings.data.latitude == null ? '' : String(settings.data.latitude))
+    setLongitude(settings.data.longitude == null ? '' : String(settings.data.longitude))
+  }, [settings.data])
+
+  const useCurrentLocation = () => {
+    if (!canEdit || !navigator.geolocation) {
+      toast.error('Энэ төхөөрөмж байршил тодорхойлохыг дэмжихгүй байна.')
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLatitude(position.coords.latitude.toFixed(6))
+        setLongitude(position.coords.longitude.toFixed(6))
+        toast.success('Одоогийн байршлыг бөглөсөн. Хадгалахаа бүү мартаарай.')
+      },
+      () => toast.error('Оффисын байршлыг тодорхойлж чадсангүй. Байршлын зөвшөөрлөө шалгана уу.'),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10_000 },
+    )
+  }
+
+  const save = (event: React.FormEvent) => {
+    event.preventDefault()
+    const nextLatitude = Number(latitude)
+    const nextLongitude = Number(longitude)
+    if (!Number.isFinite(nextLatitude) || !Number.isFinite(nextLongitude) || nextLatitude < -90 || nextLatitude > 90 || nextLongitude < -180 || nextLongitude > 180) {
+      toast.error('Өргөрөг -90…90, уртраг -180…180 хооронд байх ёстой.')
+      return
+    }
+    update.mutate({ latitude: nextLatitude, longitude: nextLongitude })
+  }
+
+  return <section className="settings-embedded worktime-geofence-admin"><div className="settings-embedded-heading"><MapPin /><div><h3>Оффисын байршил ба workday start</h3><p>Ажилтан оффисын цэгээс 150м дотор байхад платформоос шууд ажил эхлүүлнэ. Радиус тогтмол 150м байна.</p></div></div>{settings.isError ? <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />Оффисын байршлын тохиргоог ачаалж чадсангүй.</div> : <form className="worktime-geofence-form" onSubmit={save}><div className="form-row"><label>Өргөрөг (latitude)<input type="number" step="any" min="-90" max="90" value={latitude} onChange={(event) => setLatitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="47.9184" required /></label><label>Уртраг (longitude)<input type="number" step="any" min="-180" max="180" value={longitude} onChange={(event) => setLongitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="106.9177" required /></label></div><div className="worktime-geofence-actions"><button type="button" className="secondary-action" onClick={useCurrentLocation} disabled={!canEdit || update.isPending}><LocateFixed size={15} />Одоогийн байршил ашиглах</button><button type="submit" className="primary-action" disabled={!canEdit || update.isPending}>{update.isPending ? 'Хадгалж байна…' : 'Байршил хадгалах'}</button></div><p className="field-help">{settings.data?.configured ? `Идэвхтэй · ${settings.data.radius_meters}м радиус` : 'Байршил тохируулаагүй байна.'}{!canEdit && ' · Зөвхөн админ өөрчилнө.'}</p></form>}</section>
+}
+
 function UnlinkedAccountsPanel() {
   const accounts = useManagedAccounts()
   const createAccount = useCreateManagedAccount()
@@ -188,6 +232,7 @@ export function AutomationSettingsPage() {
   }
   return <SettingsPage title="Автоматжуулалт ба интеграци" description="Telegram мэдэгдэл, Google Calendar болон шинэ ажилтны урсгалыг тохируулна.">
     <section className="integration-grid settings-integrations"><article className="panel integration-panel"><CalendarClock /><div><strong>Google Calendar</strong><p>{calendarStatus.data?.status === 'active' ? `Холбогдсон · webhook ${calendarStatus.data.watch_active ? 'идэвхтэй' : 'шинэчлэгдэж байна'}${calendarStatus.data.last_error ? ` · ${calendarStatus.data.last_error}` : ''}` : 'Өөрийн Google Calendar-тай даалгаврын хугацааг синк хийнэ.'}</p>{calendarStatus.data?.status === 'active' && <select aria-label="Calendar sync mode" value={calendarStatus.data.sync_mode} onChange={(event) => syncMode.mutate(event.target.value as 'outbound' | 'bidirectional')}><option value="outbound">Зөвхөн OYUNS → Google</option><option value="bidirectional">Хоёр чиглэлтэй хугацааны sync</option></select>}</div>{calendarStatus.data?.status === 'active' ? <button className="secondary-action" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>Салгах</button> : <button className="secondary-action" onClick={connectCalendar} disabled={calendar.isPending}>Холбох</button>}</article></section>
+    <WorktimeGeofencePanel />
     <section className="settings-embedded"><div className="settings-embedded-heading"><UserRoundCog /><div><h3>Мэдэгдэл ба Telegram</h3><p>Удирдлагын хураангуй, мэдэгдэл болон Telegram тохиргоо.</p></div></div><ManagerSettingsPage /></section>
     <section className="settings-embedded"><div className="settings-embedded-heading"><Bot /><div><h3>Онбординг</h3><p>Шинэ ажилтны мэндчилгээ болон зөөлөн эхлэл.</p></div></div><OnboardingPage /></section>
   </SettingsPage>

@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.bot.db import get_session
-from app.models.models import AttendanceLog, Employee, PlanIdea, UserAccount, WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
+from app.models.models import AttendanceLog, Employee, Organization, PlanIdea, UserAccount, WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
 from app.services.attendance_service import apply_worktime_attendance
+from app.services.worktime_geofence import validate_worktime_location
 
 
 TEST_REPORT_TYPES = frozenset({"daily_test", "monthly_test", "next_month_plan_test"})
@@ -430,7 +431,8 @@ def _active_time_entry(
 
 
 def start_work_time(
-    employee_id: int, local_day: date, mode: str, at: datetime | None = None
+    employee_id: int, local_day: date, mode: str, at: datetime | None = None,
+    latitude: float | None = None, longitude: float | None = None,
 ) -> tuple[str, WorkTimeEntry | None]:
     """Start a mode only when no other mode is currently open.
 
@@ -444,6 +446,15 @@ def start_work_time(
     with get_session() as s:
         active = _active_time_entry(s, report.id, employee_id=employee_id)
         employee = s.get(Employee, employee_id)
+        if mode == "in_person":
+            organization = s.get(Organization, employee.organization_id) if employee else None
+            geofence_error, _distance = validate_worktime_location(
+                organization.settings if organization else None,
+                latitude,
+                longitude,
+            )
+            if geofence_error:
+                return geofence_error, None
         if active and active.entry_type == "work":
             _sync_worktime_attendance(s, employee, local_day, started_at)
             s.commit()

@@ -180,6 +180,13 @@ export interface WorktimeQrClockResult {
   shift_summary: { active: ClockEntry | null; today_entries: ClockEntry[] }
 }
 
+export interface WorktimeGeofenceSettings {
+  configured: boolean
+  latitude: number | null
+  longitude: number | null
+  radius_meters: 150
+}
+
 const worktimeQrKeys = ['v1', 'worktime-qr'] as const
 const worktimeReportKeys = ['v1', 'worktime-reports'] as const
 
@@ -248,6 +255,28 @@ export function useWorktimeQrDisplayToken(enabled = true) {
 export function useWorktimeQrClock() {
   const queryClient = useQueryClient()
   return useMutation({ mutationFn: (input: { token: string; client_timestamp: string }) => api.post('/v1/worktime-qr/clock', input).then((response) => response.data as WorktimeQrClockResult), onSuccess: (result) => { queryClient.setQueryData(clockQueryKey, { active: result.shift_summary.active, today_entries: result.shift_summary.today_entries, timezone: result.timezone, server_time: result.server_time }); queryClient.invalidateQueries({ queryKey: clockQueryKey }) } })
+}
+
+export function useWorktimeGeofenceSettings() {
+  return useQuery<WorktimeGeofenceSettings>({
+    queryKey: ['v1', 'settings', 'worktime-geofence'],
+    queryFn: () => api.get('/v1/settings/worktime-geofence').then((response) => response.data),
+  })
+}
+
+export function useUpdateWorktimeGeofenceSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { latitude: number; longitude: number }) => api.put('/v1/settings/worktime-geofence', input).then((response) => response.data as WorktimeGeofenceSettings),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['v1', 'settings', 'worktime-geofence'], data)
+      toast.success('Оффисын байршил хадгалагдлаа')
+    },
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail
+      toast.error(typeof detail === 'object' ? detail.message || 'Оффисын байршил хадгалагдсангүй' : detail || 'Оффисын байршил хадгалагдсангүй')
+    },
+  })
 }
 
 export interface TaskDependency { id: number; predecessor_task_id: number; predecessor_title: string | null; successor_task_id: number; dependency_type: 'blocks' | 'related'; relation_type: 'blocks' | 'related'; direction: 'blocked_by' | 'related'; related_task_id: number; related_task_title: string | null }
@@ -488,12 +517,12 @@ export function useClock(enabled = true) {
 }
 
 type ClockAction = 'start' | 'break' | 'resume' | 'stop'
-interface ClockActionInput { action: ClockAction; mode?: 'in_person' | 'remote' }
+interface ClockActionInput { action: ClockAction; mode?: 'in_person' | 'remote'; latitude?: number; longitude?: number }
 
 export function useClockAction() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ action, mode }: ClockActionInput) => api.post(`/v1/clock/${action}`, action === 'start' ? { mode } : {}).then((response) => response.data),
+    mutationFn: ({ action, mode, latitude, longitude }: ClockActionInput) => api.post(`/v1/clock/${action}`, action === 'start' ? { mode, ...(latitude == null ? {} : { latitude }), ...(longitude == null ? {} : { longitude }) } : {}).then((response) => response.data),
     onMutate: async ({ action, mode }: ClockActionInput) => {
       await queryClient.cancelQueries({ queryKey: clockQueryKey })
       const previous = queryClient.getQueryData<ClockStatus>(clockQueryKey)
@@ -557,7 +586,8 @@ export function useClockAction() {
     },
     onError: (error: any, _variables, context) => {
       if (context?.previous) queryClient.setQueryData(clockQueryKey, context.previous)
-      toast.error(error.response?.data?.detail || 'Цагийн төлөв өөрчлөгдсөнгүй')
+      const detail = error.response?.data?.detail
+      toast.error(typeof detail === 'object' ? detail.message || 'Цагийн төлөв өөрчлөгдсөнгүй' : detail || 'Цагийн төлөв өөрчлөгдсөнгүй')
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: clockQueryKey }),
   })

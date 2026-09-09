@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   clock: { data: undefined as any, refetch: vi.fn() },
   action: { mutate: vi.fn(), isPending: false },
   navigate: vi.fn(),
+  geolocation: { getCurrentPosition: vi.fn() },
   agenda: { data: { tasks: [] as any[], entries: [] as any[] } },
   privateCalendar: { tasks: [] as any[], entries: [] as any[], time_blocks: [] as any[] },
   companyCalendar: { tasks: [] as any[], entries: [] as any[], time_blocks: [] as any[] },
@@ -59,6 +60,8 @@ describe("Today work-hour timer", () => {
     mocks.clock.refetch.mockReset();
     mocks.action.mutate.mockReset();
     mocks.navigate.mockReset();
+    mocks.geolocation.getCurrentPosition.mockReset();
+    Object.defineProperty(navigator, "geolocation", { configurable: true, value: mocks.geolocation });
     mocks.agenda.data = { tasks: [], entries: [] };
     mocks.privateCalendar = { tasks: [], entries: [], time_blocks: [] };
     mocks.companyCalendar = { tasks: [], entries: [], time_blocks: [] };
@@ -190,7 +193,10 @@ describe("Today work-hour timer", () => {
     mocks.clock.data = { ...mocks.clock.data, active: null };
     rerender(<EnterpriseDashboardPage />);
     fireEvent.click(document.querySelector("button.clock-button.office") as HTMLButtonElement);
-    expect(mocks.navigate).toHaveBeenLastCalledWith("/worktime");
+    expect(mocks.geolocation.getCurrentPosition).toHaveBeenCalledTimes(1);
+    const onSuccess = mocks.geolocation.getCurrentPosition.mock.calls[0][0] as (position: { coords: { latitude: number; longitude: number } }) => void;
+    onSuccess({ coords: { latitude: 47.9184, longitude: 106.9177 } });
+    expect(mocks.action.mutate).toHaveBeenLastCalledWith({ action: "start", mode: "in_person", latitude: 47.9184, longitude: 106.9177 });
   });
 
   it("renders date-range tasks as split bars with rounded visible ends", () => {

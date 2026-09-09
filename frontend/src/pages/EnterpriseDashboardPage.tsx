@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { motion } from "motion/react";
-import { useNavigate } from "react-router-dom";
 import {
   Archive,
   ArrowUpRight,
@@ -41,6 +40,7 @@ import {
 import { useAuthStore } from "../store/auth";
 import { UserTagPicker } from "../components/UserTagPicker";
 import { WorldClockWidget } from "../components/WorldClockWidget";
+import { WorkdayStartButton } from "../components/WorkdayStartButton";
 import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
 
 function formatDuration(seconds: number) {
@@ -319,7 +319,6 @@ function DelegatedTaskSheet({
 }
 
 export function EnterpriseDashboardPage() {
-  const navigate = useNavigate();
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset | "custom">(
     "week",
   );
@@ -691,14 +690,10 @@ export function EnterpriseDashboardPage() {
         <div className="clock-actions">
           {!active && (
             <>
-              <button
-                type="button"
-                className="clock-button office"
-                onClick={() => navigate("/worktime")}
-              >
+              <WorkdayStartButton className="clock-button office">
                 <House />
                 Оффис эхлэх
-              </button>
+              </WorkdayStartButton>
               <button
                 className="clock-button remote"
                 onClick={() =>

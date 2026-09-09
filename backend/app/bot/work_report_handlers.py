@@ -9,7 +9,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, Filter, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 from app.bot.db import get_manager_settings
 from app.models.models import WorkReport
@@ -28,6 +28,10 @@ class TestReportFlow(StatesGroup):
     daily_report = State()
     monthly_report = State()
     next_month_plan = State()
+
+
+class DayStartFlow(StatesGroup):
+    awaiting_location = State()
 
 
 def _local_now(timezone_name: str | None) -> datetime:
@@ -54,6 +58,15 @@ def checkin_keyboard(is_test: bool = False) -> InlineKeyboardMarkup:
             callback_data="checkin:start:test" if is_test else "checkin:start",
         ),
     ]])
+
+
+def day_start_location_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📍 Байршил илгээх", request_location=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        input_field_placeholder="Оффисын байршлаа илгээнэ үү",
+    )
 
 
 def _prompt_text(report_type: str, prompt_type: str | None = None) -> str:
@@ -289,35 +302,44 @@ def _work_time_summary_text(summary: dict, tz) -> str:
     return "\n".join(lines)
 
 
-async def _change_work_time(message: Message, employee, mode: str, action: str) -> None:
+async def _change_work_time(message: Message, employee, mode: str, action: str, *, latitude: float | None = None, longitude: float | None = None, clear_location_keyboard: bool = False) -> None:
+    reply_markup = ReplyKeyboardRemove() if clear_location_keyboard else None
     if not employee:
-        await message.answer("❌ Та бүртгэгдээгүй байна.")
+        await message.answer("❌ Та бүртгэгдээгүй байна.", reply_markup=reply_markup)
         return
     local_now = _local_now(employee.timezone)
     at = local_now.astimezone(timezone.utc)
-    result, entry = (
-        work_report_service.start_work_time(employee.id, local_now.date(), mode, at)
-        if action == "start"
-        else work_report_service.end_work_time(employee.id, local_now.date(), mode, at)
-    )
+    if action == "start":
+        result, entry = work_report_service.start_work_time(employee.id, local_now.date(), mode, at, latitude=latitude, longitude=longitude)
+    else:
+        result, entry = work_report_service.end_work_time(employee.id, local_now.date(), mode, at)
     other_end = "/dayend" if mode == "remote" else "/remoteend"
     matching_start = "/daystart" if mode == "in_person" else "/remotestart"
+    if result == "worktime_geofence_not_configured":
+        await message.answer("⚠️ Оффисын байршлыг админ тохиргоонд хадгалсны дараа ажил эхлүүлнэ үү.", reply_markup=reply_markup)
+        return
+    if result == "worktime_location_required":
+        await message.answer("⚠️ Ажил эхлүүлэхийн тулд Telegram-ийн байршил илгээх товчийг ашиглана уу.", reply_markup=reply_markup)
+        return
+    if result == "outside_worktime_geofence":
+        await message.answer("⚠️ Та оффисоос 150м-ээс хол байна. Оффисын периметр дотор очоод /daystart командыг дахин ашиглана уу.", reply_markup=reply_markup)
+        return
     if result == "other_active":
         await message.answer(
             f"⚠️ {_mode_label(entry.mode).capitalize()} ажил одоо үргэлжилж байна. "
-            f"Эхлээд <b>{other_end}</b> командаар дуусгана уу.", parse_mode="HTML"
+            f"Эхлээд <b>{other_end}</b> командаар дуусгана уу.", parse_mode="HTML", reply_markup=reply_markup
         )
         return
     if result == "already_active":
         await message.answer(
             f"ℹ️ {_mode_label(mode).capitalize()} ажил аль хэдийн эхэлсэн байна. "
-            f"Дуусгахдаа <b>{other_end}</b> ашиглана уу.", parse_mode="HTML"
+            f"Дуусгахдаа <b>{other_end}</b> ашиглана уу.", parse_mode="HTML", reply_markup=reply_markup
         )
         return
     if result == "not_started":
         await message.answer(
             f"⚠️ Өнөөдөр {_mode_label(mode)} ажил эхлээгүй байна. "
-            f"Эхлээд <b>{matching_start}</b> командыг ашиглана уу.", parse_mode="HTML"
+            f"Эхлээд <b>{matching_start}</b> командыг ашиглана уу.", parse_mode="HTML", reply_markup=reply_markup
         )
         return
     summary = work_report_service.summarize_work_time(
@@ -326,13 +348,13 @@ async def _change_work_time(message: Message, employee, mode: str, action: str) 
     if action == "start":
         await message.answer(
             f"✅ {_mode_label(mode).capitalize()} ажил эхэллээ: <b>{local_now:%H:%M}</b>",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=reply_markup,
         )
     else:
         await message.answer(
             f"✅ {_mode_label(mode).capitalize()} ажил дууслаа: <b>{local_now:%H:%M}</b>\n\n"
             f"{_work_time_summary_text(summary, local_now.tzinfo)}",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=reply_markup,
         )
 
 
@@ -350,8 +372,30 @@ async def _show_work_time(message: Message, employee=None) -> None:
 
 
 @router.message(Command("daystart"))
-async def cmd_daystart(message: Message, employee=None):
-    await _change_work_time(message, employee, "in_person", "start")
+async def cmd_daystart(message: Message, state: FSMContext, employee=None):
+    if not employee:
+        await message.answer("❌ Та бүртгэгдээгүй байна.")
+        return
+    await state.set_state(DayStartFlow.awaiting_location)
+    await message.answer(
+        "📍 Оффисын ажил эхлүүлэхийн тулд доорх товчийг дарж одоогийн байршлаа илгээнэ үү.",
+        reply_markup=day_start_location_keyboard(),
+    )
+
+
+@router.message(DayStartFlow.awaiting_location, F.location)
+async def msg_daystart_location(message: Message, state: FSMContext, employee=None):
+    location = message.location
+    await state.clear()
+    await _change_work_time(
+        message,
+        employee,
+        "in_person",
+        "start",
+        latitude=location.latitude if location else None,
+        longitude=location.longitude if location else None,
+        clear_location_keyboard=True,
+    )
 
 
 @router.message(Command("dayend"))
