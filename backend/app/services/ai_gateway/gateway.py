@@ -271,7 +271,16 @@ class AIGateway:
             database=db,
             grounding_context=grounding_context,
         )
-        preflight = await self._preflight_grounding(db, actor_context, current)
+        # Knowledge retrieval is an enhancement to the live model turn.  A
+        # missing/stale retrieval migration or a transient database/index
+        # failure must not turn every ordinary assistant message into HTTP
+        # 500.  The governed knowledge tool can still report its own failure
+        # when the model explicitly asks for company knowledge.
+        try:
+            preflight = await self._preflight_grounding(db, actor_context, current)
+        except Exception:
+            log.warning("ai_gateway.preflight_failed", exc_info=True)
+            preflight = PreflightGrounding(KnowledgeSearchResult("unavailable", ()))
         request.grounding_sources = preflight.sources
         request.grounding_context = {**(grounding_context or {}), "PREFLIGHT_KNOWLEDGE": preflight.context}
         return await self.respond(db, request)
