@@ -12,6 +12,7 @@ import { KnowledgePage } from './KnowledgePage'
 import { OnboardingPage } from './OnboardingPage'
 import { DeveloperPage } from './DeveloperPage'
 import { ERPBuilderPanels } from '../components/ERPBuilderPanels'
+import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
 
 const SETTINGS = [
   { to: '/administration/workspace', title: 'Logo оруулах', text: 'Лого, light болон dark горим', icon: Settings2 },
@@ -148,11 +149,13 @@ function WorktimeGeofencePanel() {
   const canEdit = roles.includes('admin')
   const [latitude, setLatitude] = useState('')
   const [longitude, setLongitude] = useState('')
+  const [radius, setRadius] = useState('150')
 
   useEffect(() => {
     if (!settings.data) return
     setLatitude(settings.data.latitude == null ? '' : String(settings.data.latitude))
     setLongitude(settings.data.longitude == null ? '' : String(settings.data.longitude))
+    setRadius(String(settings.data.radius_meters || 150))
   }, [settings.data])
 
   const useCurrentLocation = () => {
@@ -175,14 +178,21 @@ function WorktimeGeofencePanel() {
     event.preventDefault()
     const nextLatitude = Number(latitude)
     const nextLongitude = Number(longitude)
+    const nextRadius = Number(radius)
     if (!Number.isFinite(nextLatitude) || !Number.isFinite(nextLongitude) || nextLatitude < -90 || nextLatitude > 90 || nextLongitude < -180 || nextLongitude > 180) {
       toast.error('Өргөрөг -90…90, уртраг -180…180 хооронд байх ёстой.')
       return
     }
-    update.mutate({ latitude: nextLatitude, longitude: nextLongitude })
+    if (!Number.isInteger(nextRadius) || nextRadius < 25 || nextRadius > 5000) {
+      toast.error('Радиус 25–5000м хооронд бүхэл тоо байх ёстой.')
+      return
+    }
+    update.mutate({ latitude: nextLatitude, longitude: nextLongitude, radius_meters: nextRadius })
   }
 
-  return <section className="settings-embedded worktime-geofence-admin"><div className="settings-embedded-heading"><MapPin /><div><h3>Оффисын байршил ба workday start</h3><p>Ажилтан оффисын цэгээс 150м дотор байхад платформоос шууд ажил эхлүүлнэ. Радиус тогтмол 150м байна.</p></div></div>{settings.isError ? <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />Оффисын байршлын тохиргоог ачаалж чадсангүй.</div> : <form className="worktime-geofence-form" onSubmit={save}><div className="form-row"><label>Өргөрөг (latitude)<input type="number" step="any" min="-90" max="90" value={latitude} onChange={(event) => setLatitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="47.9184" required /></label><label>Уртраг (longitude)<input type="number" step="any" min="-180" max="180" value={longitude} onChange={(event) => setLongitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="106.9177" required /></label></div><div className="worktime-geofence-actions"><button type="button" className="secondary-action" onClick={useCurrentLocation} disabled={!canEdit || update.isPending}><LocateFixed size={15} />Одоогийн байршил ашиглах</button><button type="submit" className="primary-action" disabled={!canEdit || update.isPending}>{update.isPending ? 'Хадгалж байна…' : 'Байршил хадгалах'}</button></div><p className="field-help">{settings.data?.configured ? `Идэвхтэй · ${settings.data.radius_meters}м радиус` : 'Байршил тохируулаагүй байна.'}{!canEdit && ' · Зөвхөн админ өөрчилнө.'}</p></form>}</section>
+  const mapLatitude = latitude.trim() ? Number(latitude) : null
+  const mapLongitude = longitude.trim() ? Number(longitude) : null
+  return <section className="settings-embedded worktime-geofence-admin"><div className="settings-embedded-heading"><MapPin /><div><h3>Оффисын байршил ба workday start</h3><p>Газрын зураг дээр оффисын цэгийг сонгож, ажилтан эхлүүлэх боломжтой радиусыг тохируулна.</p></div></div>{settings.isError ? <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />Оффисын байршлын тохиргоог ачаалж чадсангүй.</div> : <form className="worktime-geofence-form" onSubmit={save}><WorktimeMapPicker latitude={Number.isFinite(mapLatitude) ? mapLatitude : null} longitude={Number.isFinite(mapLongitude) ? mapLongitude : null} radiusMeters={Number(radius) || 150} disabled={!canEdit || update.isPending} onChange={({ latitude: nextLatitude, longitude: nextLongitude }) => { setLatitude(nextLatitude.toFixed(6)); setLongitude(nextLongitude.toFixed(6)) }} /><div className="form-row"><label>Өргөрөг (latitude)<input type="number" step="any" min="-90" max="90" value={latitude} onChange={(event) => setLatitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="47.9184" required /></label><label>Уртраг (longitude)<input type="number" step="any" min="-180" max="180" value={longitude} onChange={(event) => setLongitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="106.9177" required /></label><label>Радиус (метр)<input type="number" step="1" min="25" max="5000" value={radius} onChange={(event) => setRadius(event.target.value)} disabled={!canEdit || update.isPending} required /></label></div><div className="worktime-geofence-actions"><button type="button" className="secondary-action" onClick={useCurrentLocation} disabled={!canEdit || update.isPending}><LocateFixed size={15} />Одоогийн байршил ашиглах</button><button type="submit" className="primary-action" disabled={!canEdit || update.isPending}>{update.isPending ? 'Хадгалж байна…' : 'Байршил хадгалах'}</button></div><p className="field-help">{settings.data?.configured ? `Идэвхтэй · ${settings.data.radius_meters}м радиус` : 'Байршил тохируулаагүй байна.'}{!canEdit && ' · Зөвхөн админ өөрчилнө.'}</p></form>}</section>
 }
 
 function UnlinkedAccountsPanel() {

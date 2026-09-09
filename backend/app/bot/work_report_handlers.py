@@ -322,7 +322,7 @@ async def _change_work_time(message: Message, employee, mode: str, action: str, 
         await message.answer("⚠️ Ажил эхлүүлэхийн тулд Telegram-ийн байршил илгээх товчийг ашиглана уу.", reply_markup=reply_markup)
         return
     if result == "outside_worktime_geofence":
-        await message.answer("⚠️ Та оффисоос 150м-ээс хол байна. Оффисын периметр дотор очоод /daystart командыг дахин ашиглана уу.", reply_markup=reply_markup)
+        await message.answer("⚠️ Та оффисын тохируулсан периметрээс хол байна. Периметр дотор очоод /daystart командыг дахин ашиглана уу.", reply_markup=reply_markup)
         return
     if result == "other_active":
         await message.answer(

@@ -184,7 +184,7 @@ export interface WorktimeGeofenceSettings {
   configured: boolean
   latitude: number | null
   longitude: number | null
-  radius_meters: 150
+  radius_meters: number
 }
 
 const worktimeQrKeys = ['v1', 'worktime-qr'] as const
@@ -267,7 +267,7 @@ export function useWorktimeGeofenceSettings() {
 export function useUpdateWorktimeGeofenceSettings() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { latitude: number; longitude: number }) => api.put('/v1/settings/worktime-geofence', input).then((response) => response.data as WorktimeGeofenceSettings),
+    mutationFn: (input: { latitude: number; longitude: number; radius_meters: number }) => api.put('/v1/settings/worktime-geofence', input).then((response) => response.data as WorktimeGeofenceSettings),
     onSuccess: (data) => {
       queryClient.setQueryData(['v1', 'settings', 'worktime-geofence'], data)
       toast.success('Оффисын байршил хадгалагдлаа')

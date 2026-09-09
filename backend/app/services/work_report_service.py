@@ -436,8 +436,8 @@ def start_work_time(
 ) -> tuple[str, WorkTimeEntry | None]:
     """Start a mode only when no other mode is currently open.
 
-    Returns ``started``, ``already_active`` or ``other_active`` so Telegram
-    can tell the worker which matching end command is required.
+    Returns a work-time state or a geofence failure code so Telegram can tell
+    the worker which next action is required.
     """
     if mode not in WORK_TIME_MODES:
         raise ValueError("invalid work-time mode")

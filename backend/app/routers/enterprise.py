@@ -100,7 +100,7 @@ from app.services.google_calendar import (
 from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services import assistant_ai, exchange_rate_service
 from app.services.attendance_service import sync_worktime_attendance
-from app.services.worktime_geofence import WORKTIME_GEOFENCE_KEY, WORKTIME_GEOFENCE_RADIUS_METERS, configured_worktime_location, validate_worktime_location
+from app.services.worktime_geofence import WORKTIME_GEOFENCE_KEY, WORKTIME_GEOFENCE_MAX_RADIUS_METERS, WORKTIME_GEOFENCE_MIN_RADIUS_METERS, WORKTIME_GEOFENCE_RADIUS_METERS, configured_worktime_location, configured_worktime_radius, validate_worktime_location
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
@@ -129,6 +129,7 @@ class PermissionSettingsInput(BaseModel):
 class WorktimeGeofenceInput(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
+    radius_meters: int = Field(default=WORKTIME_GEOFENCE_RADIUS_METERS, ge=WORKTIME_GEOFENCE_MIN_RADIUS_METERS, le=WORKTIME_GEOFENCE_MAX_RADIUS_METERS)
 
 
 BRANDING_KEY = "branding"
@@ -152,7 +153,7 @@ def _worktime_geofence_out(organization: Organization) -> dict:
         "configured": location is not None,
         "latitude": location[0] if location else None,
         "longitude": location[1] if location else None,
-        "radius_meters": WORKTIME_GEOFENCE_RADIUS_METERS,
+        "radius_meters": configured_worktime_radius(organization.settings),
     }
 
 
@@ -271,7 +272,7 @@ async def update_worktime_geofence_settings(data: WorktimeGeofenceInput, db: Asy
         WORKTIME_GEOFENCE_KEY: {
             "latitude": data.latitude,
             "longitude": data.longitude,
-            "radius_meters": WORKTIME_GEOFENCE_RADIUS_METERS,
+            "radius_meters": data.radius_meters,
         },
     }
     await record_change(
@@ -2405,6 +2406,7 @@ async def clock_start(data: ClockStartInput, db: AsyncSession = Depends(get_db),
     if data.mode == "in_person":
         organization = await db.get(Organization, actor.organization_id)
         geofence_error, distance = validate_worktime_location(organization.settings, data.latitude, data.longitude)
+        radius_meters = configured_worktime_radius(organization.settings)
         if geofence_error == "worktime_geofence_not_configured":
             raise HTTPException(
                 status_code=409,
@@ -2426,9 +2428,9 @@ async def clock_start(data: ClockStartInput, db: AsyncSession = Depends(get_db),
                 status_code=403,
                 detail={
                     "code": "outside_worktime_geofence",
-                    "message": f"Та оффисоос {round(distance)}м зайтай байна. Ажил эхлүүлэхийн тулд 150м дотор очно уу.",
+                    "message": f"Та оффисоос {round(distance)}м зайтай байна. Ажил эхлүүлэхийн тулд {radius_meters}м дотор очно уу.",
                     "distance_meters": round(distance, 1),
-                    "radius_meters": WORKTIME_GEOFENCE_RADIUS_METERS,
+                    "radius_meters": radius_meters,
                 },
             )
     now = datetime.now(timezone.utc)

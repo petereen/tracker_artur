@@ -7,6 +7,8 @@ from typing import Any
 
 WORKTIME_GEOFENCE_KEY = "worktime_geofence"
 WORKTIME_GEOFENCE_RADIUS_METERS = 150
+WORKTIME_GEOFENCE_MIN_RADIUS_METERS = 25
+WORKTIME_GEOFENCE_MAX_RADIUS_METERS = 5_000
 
 
 def configured_worktime_location(settings: dict[str, Any] | None) -> tuple[float, float] | None:
@@ -21,6 +23,17 @@ def configured_worktime_location(settings: dict[str, Any] | None) -> tuple[float
     if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
         return None
     return latitude, longitude
+
+
+def configured_worktime_radius(settings: dict[str, Any] | None) -> int:
+    value = (settings or {}).get(WORKTIME_GEOFENCE_KEY) or {}
+    try:
+        radius = int(value.get("radius_meters", WORKTIME_GEOFENCE_RADIUS_METERS))
+    except (AttributeError, TypeError, ValueError):
+        return WORKTIME_GEOFENCE_RADIUS_METERS
+    if not WORKTIME_GEOFENCE_MIN_RADIUS_METERS <= radius <= WORKTIME_GEOFENCE_MAX_RADIUS_METERS:
+        return WORKTIME_GEOFENCE_RADIUS_METERS
+    return radius
 
 
 def distance_meters(latitude: float, longitude: float, target_latitude: float, target_longitude: float) -> float:
@@ -41,7 +54,6 @@ def validate_worktime_location(settings: dict[str, Any] | None, latitude: float 
     if latitude is None or longitude is None:
         return "worktime_location_required", None
     distance = distance_meters(latitude, longitude, *office_location)
-    if distance > WORKTIME_GEOFENCE_RADIUS_METERS:
+    if distance > configured_worktime_radius(settings):
         return "outside_worktime_geofence", distance
     return None, distance
-

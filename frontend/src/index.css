@@ -3981,6 +3981,17 @@ a {
 .worktime-geofence-admin { display: grid; gap: 16px; }
 .worktime-geofence-form { display: grid; gap: 14px; max-width: 760px; }
 .worktime-geofence-form .form-row { margin: 0; }
+.worktime-map-picker { overflow: hidden; }
+.worktime-map { background: #dbe7e8; border: 1px solid var(--color-border); border-radius: 16px; cursor: crosshair; height: min(42vw, 360px); min-height: 260px; overflow: hidden; position: relative; touch-action: none; }
+.worktime-map.disabled { cursor: not-allowed; opacity: .72; }
+.worktime-map-tile { height: 256px; max-width: none; position: absolute; user-select: none; width: 256px; }
+.worktime-geofence-circle { background: rgb(45 98 236 / 18%); border: 2px solid rgb(45 98 236 / 72%); border-radius: 50%; pointer-events: none; position: absolute; transform: translateZ(0); }
+.worktime-map-pin { align-items: center; background: var(--color-accent, #2d62ec); border: 3px solid #fff; border-radius: 50% 50% 50% 0; box-shadow: 0 5px 14px rgb(11 23 42 / 25%); cursor: grab; display: flex; height: 24px; justify-content: center; padding: 0; position: absolute; transform: translate(-50%, -100%) rotate(-45deg); transform-origin: 50% 50%; width: 24px; z-index: 2; }
+.worktime-map-pin span { background: #fff; border-radius: 50%; height: 6px; transform: rotate(45deg); width: 6px; }
+.worktime-map-pin.dragging { cursor: grabbing; }
+.worktime-map-pin:focus-visible { outline: 3px solid rgb(0 200 133 / 75%); outline-offset: 3px; }
+.worktime-map-attribution { background: rgb(255 255 255 / 84%); bottom: 5px; color: #44515a; font-size: 10px; padding: 2px 5px; position: absolute; right: 5px; z-index: 3; }
+.worktime-map-hint { background: rgb(11 23 42 / 82%); border-radius: 999px; color: #fff; font-size: 12px; left: 50%; padding: 7px 12px; pointer-events: none; position: absolute; top: 14px; transform: translateX(-50%); white-space: nowrap; z-index: 3; }
 .worktime-geofence-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
 .worktime-geofence-actions button { align-items: center; display: inline-flex; gap: 7px; }
 .worktime-geofence-form .field-help { color: var(--color-muted); font-size: 0.72rem; margin: 0; }

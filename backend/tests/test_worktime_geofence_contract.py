@@ -1,6 +1,8 @@
 import ast
 from pathlib import Path
 
+from app.services.worktime_geofence import configured_worktime_radius, validate_worktime_location
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "app" / "routers" / "enterprise.py").read_text()
@@ -37,3 +39,10 @@ def test_worktime_geofence_uses_admin_settings_and_server_distance_check():
         "radius_meters",
     ):
         assert marker in SOURCE
+
+
+def test_worktime_geofence_uses_the_saved_radius_and_preserves_150m_legacy_default():
+    office = {"worktime_geofence": {"latitude": 47.9184, "longitude": 106.9177, "radius_meters": 500}}
+    assert configured_worktime_radius(office) == 500
+    assert configured_worktime_radius({"worktime_geofence": {"latitude": 47.9184, "longitude": 106.9177}}) == 150
+    assert validate_worktime_location(office, 47.921, 106.9177)[0] is None
