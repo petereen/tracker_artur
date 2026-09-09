@@ -1,6 +1,10 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Replace assistant lookup whole-request rollback with savepoints so failed optional reads preserve conversations and messages in Web and Telegram (`backend/app/services/ai_gateway/gateway.py`)
+- [x] Add real AsyncSession regression coverage for new/existing Web/Telegram conversations and failed identity/knowledge lookups (`backend/tests/test_assistant_transaction_recovery.py`)
+- [x] Verify assistant transaction recovery in isolated Python 3.12 environment: eight real AsyncSession/SQLite cases pass; the previous implementation fails all four knowledge-failure cases. Add repeatable test dependencies (`backend/requirements-test.txt`)
+- [ ] Deploy assistant savepoint correction and verify the production request with backend traceback if it still fails (Web and Telegram)
 - [x] Make context-aware task creation populate start times, deadlines, assignees, and participants consistently in Web and Telegram (`backend/app/services/ai_gateway`, `backend/app/services/mcp`, `backend/app/services/enterprise_tools.py`, `backend/tests`) — Telegram now rolls back failed knowledge preflight transactions before deterministic task fallback; confirmed previews persist all resolved participants and supplied times
 - [x] Prevent knowledge-index preflight failures from surfacing as OYUNS assistant HTTP 500s (`backend/app/services/ai_gateway/gateway.py`) — retrieval/index errors are logged and treated as unavailable grounding so ordinary live AI turns can continue; production still requires the pending Alembic migrations for knowledge features
 - [x] Restore implicit Mongolian meeting-to-task previews when live OYUNS routing is unavailable (`backend/app/services/task_parser.py`, `backend/app/services/ai_gateway/gateway.py`, `backend/tests`) — supports both “маргааш 16 цагт” and “16 цагаас маргааш” phrasing, widens gateway task-write intent, and creates a confirmation preview through the governed tool path; Python syntax and diff checks pass, while pytest remains environment-blocked by missing `pytz`, SQLAlchemy, and FastAPI

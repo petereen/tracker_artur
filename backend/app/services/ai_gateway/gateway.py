@@ -253,8 +253,10 @@ class AIGateway:
                 "employee_reference": resource_reference(actor_context, "employee", actor_context.employee_id),
             }
             try:
-                employee = await db.get(Employee, actor_context.employee_id)
+                async with db.begin_nested():
+                    employee = await db.get(Employee, actor_context.employee_id)
             except Exception:
+                log.warning("ai_gateway.identity_lookup_failed", exc_info=True)
                 employee = None
             if employee is not None:
                 self_identity["name"] = employee.name or actor_context.email
@@ -277,15 +279,13 @@ class AIGateway:
         # 500.  The governed knowledge tool can still report its own failure
         # when the model explicitly asks for company knowledge.
         try:
-            preflight = await self._preflight_grounding(db, actor_context, current)
+            # Preserve the caller's conversation and pending user message.
+            # PostgreSQL query errors abort a transaction; rolling back only
+            # this savepoint lets the rest of the turn still be committed.
+            async with db.begin_nested():
+                preflight = await self._preflight_grounding(db, actor_context, current)
         except Exception:
             log.warning("ai_gateway.preflight_failed", exc_info=True)
-            # A failed SQLAlchemy query leaves the AsyncSession transaction in
-            # a failed state. Roll it back before the deterministic task
-            # fallback tries to resolve the caller and creates its preview.
-            # This is especially important for Telegram, where knowledge
-            # preflight and task preparation share one short-lived session.
-            await db.rollback()
             preflight = PreflightGrounding(KnowledgeSearchResult("unavailable", ()))
         request.grounding_sources = preflight.sources
         request.grounding_context = {**(grounding_context or {}), "PREFLIGHT_KNOWLEDGE": preflight.context}
