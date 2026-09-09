@@ -159,8 +159,10 @@ class AssistantTaskInput(_Strict):
     title: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=6_000)
     assignee: str | None = Field(default=None, max_length=200)
+    participants: list[str] | None = Field(default=None, max_length=50, description="Every explicitly named task participant; use employee names or @usernames.")
     reviewer: str | None = Field(default=None, max_length=200)
     priority: Literal[1, 2, 3] = 2
+    start_at: datetime | None = None
     deadline_at: datetime | None = None
     project_ref: str | None = Field(default=None, max_length=200)
 
@@ -852,14 +854,25 @@ async def _resolve_task_action_payload(db: AsyncSession, actor: ActorContext, da
     assignee_id = await _resolve_employee_reference(db, actor, data.assignee, required=action_type == "delegate_task")
     if action_type == "delegate_task" and assignee_id == actor.employee_id:
         raise ValueError("Delegation must target another employee")
+    participant_ids: list[int] = []
+    for participant in data.participants or []:
+        participant_id = await _resolve_employee_reference(db, actor, participant, required=True)
+        if participant_id not in participant_ids:
+            participant_ids.append(participant_id)
+    if assignee_id is not None and assignee_id not in participant_ids:
+        participant_ids.insert(0, assignee_id)
+    if assignee_id is None and participant_ids:
+        assignee_id = participant_ids[0]
     reviewer_id = await _resolve_employee_reference(db, actor, data.reviewer) if data.reviewer else None
     project_id = await _resolve_project_reference(db, actor, data.project_ref)
     payload = {
         "title": data.title,
         "description": data.description,
         "assignee_id": assignee_id,
+        "assignee_ids": participant_ids or ([assignee_id] if assignee_id else []),
         "reviewer_id": reviewer_id,
         "priority": data.priority,
+        "start_at": (data.start_at or data.deadline_at).isoformat() if (data.start_at or data.deadline_at) else None,
         "deadline_at": data.deadline_at.isoformat() if data.deadline_at else None,
         "project_id": project_id,
         "action_type": action_type,
@@ -932,7 +945,9 @@ async def prepare_task_creation(db: AsyncSession, actor: ActorContext, data: Ass
     )
     action.token_hash = hashlib.sha256(token.encode()).hexdigest()
     people = {}
-    target_ids = {payload.get("assignee_id"), payload.get("reviewer_id")} - {None}
+    assignee_ids = list(payload.get("assignee_ids") or ([payload.get("assignee_id")] if payload.get("assignee_id") else []))
+    reviewer_ids = [payload["reviewer_id"]] if payload.get("reviewer_id") else []
+    target_ids = set(assignee_ids + reviewer_ids)
     if target_ids:
         people = {employee.id: employee.name for employee in (await db.execute(select(Employee).where(Employee.id.in_(target_ids)))).scalars().all()}
     preview = {
@@ -942,9 +957,12 @@ async def prepare_task_creation(db: AsyncSession, actor: ActorContext, data: Ass
         "title": payload["title"],
         "description": payload["description"],
         "priority": payload["priority"],
+        "start_at": payload["start_at"],
         "deadline_at": payload["deadline_at"],
         "assignee_id": payload["assignee_id"],
         "assignee_name": people.get(payload["assignee_id"]),
+        "assignee_ids": assignee_ids,
+        "assignee_names": [people[employee_id] for employee_id in assignee_ids if employee_id in people],
         "reviewer_id": payload["reviewer_id"],
         "reviewer_name": people.get(payload["reviewer_id"]),
         "project_id": payload["project_id"],
@@ -960,6 +978,7 @@ async def _confirm_task_creation(db: AsyncSession, actor: ActorContext, action: 
         return _result("denied", {"reason": "Action is unavailable or expired"})
     payload = dict(action.payload or {})
     deadline_at = datetime.fromisoformat(payload["deadline_at"]) if payload.get("deadline_at") else None
+    start_at = datetime.fromisoformat(payload["start_at"]) if payload.get("start_at") else deadline_at
     assignee_id = payload.get("assignee_id")
     reviewer_id = payload.get("reviewer_id")
     task = Task(
@@ -972,12 +991,13 @@ async def _confirm_task_creation(db: AsyncSession, actor: ActorContext, action: 
         priority=payload.get("priority", 2),
         assignee_id=assignee_id,
         reviewer_id=reviewer_id,
+        start_at=start_at,
         deadline_at=deadline_at,
         created_by_id=actor.employee_id,
     )
     db.add(task)
     await db.flush()
-    assignee_ids = [assignee_id] if assignee_id else []
+    assignee_ids = list(payload.get("assignee_ids") or ([assignee_id] if assignee_id else []))
     reviewer_ids = [reviewer_id] if reviewer_id else []
     for employee_id in assignee_ids:
         db.add(TaskAssignee(task_id=task.id, employee_id=employee_id, assignment_role="primary"))

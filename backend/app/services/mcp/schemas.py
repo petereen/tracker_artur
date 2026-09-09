@@ -116,8 +116,10 @@ class TaskPrepareCreateInput(StrictInput):
     title: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=6000)
     assignee: str | None = Field(default=None, max_length=200)
+    participants: list[str] | None = Field(default=None, max_length=50, description="Every explicitly named task participant; use employee names or @usernames.")
     reviewer: str | None = Field(default=None, max_length=200)
     priority: Literal[1, 2, 3] = 2
+    start_at: datetime | None = None
     deadline_at: datetime | None = None
     project_ref: str | None = Field(default=None, max_length=200)
 

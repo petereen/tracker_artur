@@ -280,6 +280,12 @@ class AIGateway:
             preflight = await self._preflight_grounding(db, actor_context, current)
         except Exception:
             log.warning("ai_gateway.preflight_failed", exc_info=True)
+            # A failed SQLAlchemy query leaves the AsyncSession transaction in
+            # a failed state. Roll it back before the deterministic task
+            # fallback tries to resolve the caller and creates its preview.
+            # This is especially important for Telegram, where knowledge
+            # preflight and task preparation share one short-lived session.
+            await db.rollback()
             preflight = PreflightGrounding(KnowledgeSearchResult("unavailable", ()))
         request.grounding_sources = preflight.sources
         request.grounding_context = {**(grounding_context or {}), "PREFLIGHT_KNOWLEDGE": preflight.context}
@@ -473,6 +479,7 @@ class AIGateway:
                 "reviewer": None,
                 "priority": parsed.priority,
                 "deadline_at": parsed.deadline_at.isoformat() if parsed.deadline_at else None,
+                "start_at": parsed.deadline_at.isoformat() if parsed.deadline_at else None,
                 "project_ref": None,
             },
             request.actor_context,

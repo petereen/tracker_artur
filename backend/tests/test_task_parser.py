@@ -7,6 +7,7 @@ from app.services.task_parser import (
     PRIORITY_LOW,
     PRIORITY_NORMAL,
     PRIORITY_URGENT,
+    is_scheduled_task,
     parse_task_text,
     parse_when,
 )
@@ -108,6 +109,10 @@ def test_parses_mongolian_time_before_relative_day():
     assert p.deadline_at.hour == 16
     assert "маргааш" not in p.title
     assert "16" not in p.title
+
+
+def test_recognizes_mongolian_meeting_task_request_for_offline_gateway():
+    assert is_scheduled_task("би маргааш 16 цагаас хуралтай даалгавар үүсгэ")
 
 
 def test_recognizes_mongolian_low_priority():
