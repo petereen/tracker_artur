@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 import aiohttp
+import aiofiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -356,6 +357,27 @@ async def _embed(text: str) -> list[float] | None:
         return None
 
 
+async def _embed_batch(texts: list[str]) -> list[list[float] | None]:
+    """Embed chunks in one request; lexical indexing never depends on it."""
+    if not texts:
+        return []
+    key = getattr(settings, "OPENAI_API_KEY", "")
+    if not key:
+        return [None] * len(texts)
+    payload = {"model": settings.OPENAI_EMBEDDING_MODEL, "input": [text[:30_000] for text in texts], "dimensions": settings.OPENAI_EMBEDDING_DIMENSIONS}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as session:
+            async with session.post("https://api.openai.com/v1/embeddings", json=payload, headers={"Authorization": f"Bearer {key}"}) as response:
+                if response.status != 200:
+                    return [None] * len(texts)
+                body = await response.json()
+                values = {int(item["index"]): item["embedding"] for item in body.get("data", [])}
+                return [values.get(index) for index in range(len(texts))]
+    except (aiohttp.ClientError, KeyError, IndexError, TypeError, ValueError):
+        log.warning("enterprise_tools.embedding_batch_failed", exc_info=True)
+        return [None] * len(texts)
+
+
 def _chunks(text: str, locator: dict | None = None) -> list[tuple[str, dict]]:
     words = text.split()
     result: list[tuple[str, dict]] = []
@@ -393,45 +415,70 @@ def extract_content(filename: str, content: bytes) -> list[tuple[str, dict]]:
 async def index_company_file(db: AsyncSession, item: CompanyLibraryItem) -> KnowledgeDocument:
     document = await db.scalar(select(KnowledgeDocument).where(KnowledgeDocument.organization_id == item.organization_id, KnowledgeDocument.source_type == "company_file", KnowledgeDocument.source_id == item.id))
     if not document:
-        document = KnowledgeDocument(organization_id=item.organization_id, source_type="company_file", source_id=item.id, title=getattr(item, "title", None) or item.name, content_type=item.content_type, checksum=item.checksum)
+        document = KnowledgeDocument(organization_id=item.organization_id, source_type="company_file", source_id=item.id, title=getattr(item, "title", None) or item.name, content_type=item.content_type, checksum=item.checksum, index_version=2)
         db.add(document); await db.flush()
-    if document.checksum == item.checksum and document.index_status == "ready":
+    if document.checksum == item.checksum and document.index_status == "ready" and getattr(document, "index_version", 1) >= 2:
         return document
     document.index_status = "indexing"; document.content_available = False; document.title = getattr(item, "title", None) or item.name; document.checksum = item.checksum; document.last_error = None
     await db.execute(KnowledgeChunk.__table__.delete().where(KnowledgeChunk.document_id == document.id))
     try:
         pieces = extract_content(item.name, await get_attachment(item.storage_key))
-        for position, (content, locator) in enumerate(pieces):
-            db.add(KnowledgeChunk(document_id=document.id, position=position, content=content, locator=locator, search_vector=content.casefold(), embedding=await _embed(content)))
-        document.index_status = "ready"; document.content_available = bool(pieces); document.indexed_at = datetime.now(timezone.utc)
+        vectors = await _embed_batch([content for content, _ in pieces])
+        for position, ((content, locator), vector) in enumerate(zip(pieces, vectors)):
+            db.add(KnowledgeChunk(document_id=document.id, position=position, content=content, locator=locator, search_vector=content.casefold(), embedding=vector))
+        document.index_status = "ready" if pieces else "partial"; document.content_available = bool(pieces); document.index_version = 2; document.indexed_at = datetime.now(timezone.utc)
     except Exception as exc:  # parsing errors are surfaced as index state, not chat failures
-        document.index_status = "failed"; document.content_available = False; document.last_error = str(exc)[:1000]
+        document.index_status = "failed"; document.content_available = False; document.last_error = type(exc).__name__
     return document
 
 
 async def index_company_knowledge(db: AsyncSession, entry: CompanyKnowledge) -> KnowledgeDocument | None:
-    """Index the administrator-authored article body; file attachments stay in their legacy store."""
+    """Index the article and its legacy attachment as one governed document."""
     if not entry.organization_id:
         return None
     document = await db.scalar(select(KnowledgeDocument).where(KnowledgeDocument.organization_id == entry.organization_id, KnowledgeDocument.source_type == "company_knowledge", KnowledgeDocument.source_id == entry.id))
     if not document:
-        document = KnowledgeDocument(organization_id=entry.organization_id, source_type="company_knowledge", source_id=entry.id, title=entry.title, content_type="text/markdown")
+        document = KnowledgeDocument(organization_id=entry.organization_id, source_type="company_knowledge", source_id=entry.id, title=entry.title, content_type="text/markdown", index_version=2)
         db.add(document); await db.flush()
-    checksum = hashlib.sha256(f"{entry.title}\n{entry.category or ''}\n{entry.content}".encode()).hexdigest()
-    if document.checksum == checksum and document.index_status == "ready":
+    attachment_bytes = b""
+    attachment_error: str | None = None
+    if entry.attachment_stored_name:
+        try:
+            root = Path(settings.KNOWLEDGE_UPLOAD_DIR).resolve()
+            candidate = (root / Path(entry.attachment_stored_name).name).resolve()
+            if root not in candidate.parents:
+                raise ValueError("invalid attachment path")
+            async with aiofiles.open(candidate, "rb") as handle:
+                attachment_bytes = await handle.read()
+        except (OSError, ValueError) as exc:
+            attachment_error = "attachment_unavailable"
+    checksum_input = "\n".join((entry.title, entry.category or "", entry.content, entry.attachment_filename or "", entry.attachment_content_type or "" )).encode() + attachment_bytes
+    checksum = hashlib.sha256(checksum_input).hexdigest()
+    if document.checksum == checksum and document.index_status in {"ready", "partial"} and getattr(document, "index_version", 1) >= 2:
         return document
     document.title = entry.title; document.checksum = checksum; document.index_status = "indexing"; document.last_error = None
     await db.execute(KnowledgeChunk.__table__.delete().where(KnowledgeChunk.document_id == document.id))
     try:
-        for position, (content, locator) in enumerate(_chunks(f"{entry.title}\n{entry.category or ''}\n{entry.content}", {"kind": "article"})):
-            db.add(KnowledgeChunk(document_id=document.id, position=position, content=content, locator=locator, search_vector=content.casefold(), embedding=await _embed(content)))
-        document.index_status = "ready"; document.content_available = True; document.indexed_at = datetime.now(timezone.utc)
+        pieces = _chunks(f"{entry.title}\n{entry.category or ''}\n{entry.content}", {"part": "article", "kind": "article"})
+        if attachment_bytes and entry.attachment_filename:
+            attachment_pieces = extract_content(entry.attachment_filename, attachment_bytes)
+            if not attachment_pieces:
+                attachment_error = "attachment_unextractable"
+            pieces.extend((content, {"part": "attachment", "filename": entry.attachment_filename, "content_type": entry.attachment_content_type, "extension": Path(entry.attachment_filename).suffix.lstrip(".").casefold(), **locator}) for content, locator in attachment_pieces)
+        vectors = await _embed_batch([content for content, _ in pieces])
+        for position, ((content, locator), vector) in enumerate(zip(pieces, vectors)):
+            db.add(KnowledgeChunk(document_id=document.id, position=position, content=content, locator=locator, search_vector=content.casefold(), embedding=vector))
+        document.index_status = "failed" if not pieces else ("ready" if not attachment_error and (not entry.attachment_filename or attachment_bytes) else "partial")
+        document.content_available = bool(pieces); document.index_version = 2; document.indexed_at = datetime.now(timezone.utc)
+        document.content_type = entry.attachment_content_type or "text/markdown"
+        document.last_error = attachment_error
     except Exception as exc:
-        document.index_status = "failed"; document.content_available = False; document.last_error = str(exc)[:1000]
+        document.index_status = "failed"; document.content_available = False; document.last_error = type(exc).__name__
     return document
 
 
 async def _legacy_file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInput) -> dict:
+    """Deprecated compatibility shim; new callers use ``search_files``."""
     if data.operation == "list":
         rows = []
         items = list((await db.execute(select(CompanyLibraryItem).where(
@@ -1163,7 +1210,7 @@ async def execute(db: AsyncSession, actor: ActorContext, tool_name: str, argumen
 
 
 async def run_agent(db: AsyncSession, actor: ActorContext, *, text: str, history: list[dict], channel: str, conversation_id: int | None = None) -> dict:
-    """Execute a bounded Responses API function loop and validate returned sources.
+    """Deprecated pre-gateway loop retained for one compatibility window.
 
     `store:false` keeps enterprise conversation state in this database only.  On
     provider failure the deterministic router remains useful for the four core

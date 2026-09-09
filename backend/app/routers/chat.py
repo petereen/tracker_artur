@@ -40,6 +40,7 @@ from app.services.enterprise_events import record_change
 from app.services.malware_scanner import MalwareDetected, scan_upload
 from app.services.ai_gateway import AIGateway, GatewayError
 from app.services import assistant_ai
+from app.services.assistant_text import detect_language
 from app.services import enterprise_tools
 from app.services.file_search_service import FileSearchPrincipal, authorized_file
 
@@ -277,7 +278,7 @@ async def _send_oyuns_reply(
     routed = None
     try:
         from dataclasses import replace
-        routed_actor = replace(actor, channel="web", detected_language=assistant_ai.detect_language(text).value)
+        routed_actor = replace(actor, channel="web", detected_language=detect_language(text).value)
         routed = await ai_gateway.execute_turn(db, routed_actor, history, conversation_id=conversation.id)
         answer = routed.answer.strip()
     except GatewayError:

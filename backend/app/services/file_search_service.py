@@ -10,12 +10,13 @@ from __future__ import annotations
 import re
 import json
 import unicodedata
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Any, Literal, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -32,6 +33,35 @@ from app.models.models import (
 
 
 FileSearchStatus = Literal["ok", "empty", "indexing", "partial", "denied", "unavailable"]
+SearchMode = Literal["hybrid", "semantic", "keyword"]
+KnowledgeSourceType = Literal["company_file", "company_knowledge"]
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSearchHit:
+    document_id: int
+    source_type: KnowledgeSourceType
+    source_id: int
+    title: str
+    excerpt: str
+    locator: dict[str, Any]
+    classification: str
+    content_state: str
+    rank_score: float
+    confidence: float
+    semantic_similarity: float
+    lexical_rank: float
+    content_type: str | None = None
+    extension: str | None = None
+    size: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSearchResult:
+    status: FileSearchStatus
+    hits: tuple[KnowledgeSearchHit, ...]
+    warnings: tuple[str, ...] = ()
+    diagnostics: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -84,6 +114,91 @@ DEFAULT_SYNONYM_GROUPS: dict[str, frozenset[str]] = {
 _PRESENTATION_EXTENSIONS = frozenset({"ppt", "pptx", "pot", "potx", "potm", "odp"})
 _TEMPLATE_EXTENSIONS = frozenset({"pot", "potx", "potm", "otp"})
 _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
+_STOP_WORDS = frozenset("a an and are can do for how i in is me my of on the to what with в для и как мне мой моя о по что это ба би бол миний надад нь тухай юу ямар яаж".split())
+
+# Kept as a named SQL contract so deployments can switch the executor to a
+# single database round-trip without changing callers. The Python executor
+# below is used for compatibility with SQLite/unit-test sessions.
+HYBRID_SEARCH_SQL = """
+WITH RECURSIVE file_lineage AS (
+ SELECT id AS source_id, id AS ancestor_id, parent_id, 0 AS depth,
+        ARRAY[id]::bigint[] AS path FROM company_library_items
+ WHERE organization_id=:organization_id AND kind='file' AND deleted_at IS NULL
+ UNION ALL
+ SELECT l.source_id, p.id, p.parent_id, l.depth+1, l.path || p.id::bigint
+ FROM file_lineage l JOIN company_library_items p
+   ON p.id=l.parent_id AND p.organization_id=:organization_id
+ WHERE p.deleted_at IS NULL AND NOT p.id=ANY(l.path)
+), valid_files AS (SELECT DISTINCT source_id FROM file_lineage WHERE parent_id IS NULL),
+file_policy_candidates AS (
+ SELECT l.source_id,p.id policy_id,p.classification,
+        row_number() OVER (PARTITION BY l.source_id ORDER BY l.depth) policy_rank
+ FROM file_lineage l JOIN resource_policies p
+   ON p.organization_id=:organization_id AND p.resource_type='company_file'
+  AND p.resource_id=l.ancestor_id AND (l.depth=0 OR p.inherit_from_parent)
+), effective_file_policy AS (
+ SELECT source_id,policy_id,classification FROM file_policy_candidates WHERE policy_rank=1
+),
+ source_rows AS (
+ SELECT d.id document_id,d.source_type,d.source_id,d.title,d.index_status,
+        d.content_available,i.content_type,i.extension,i.size,fp.policy_id,
+        COALESCE(fp.classification,'internal') classification FROM knowledge_documents d
+ JOIN company_library_items i ON d.source_type='company_file' AND i.id=d.source_id
+ JOIN valid_files v ON v.source_id=i.id
+ LEFT JOIN effective_file_policy fp ON fp.source_id=i.id
+ WHERE d.organization_id=:organization_id AND i.deleted_at IS NULL
+ UNION ALL
+ SELECT d.id,d.source_type,d.source_id,d.title,d.index_status,d.content_available,
+        COALESCE(k.attachment_content_type,d.content_type),NULL,k.attachment_size,
+        p.id,p.classification FROM knowledge_documents d
+ JOIN company_knowledge k ON d.source_type='company_knowledge' AND k.id=d.source_id
+ LEFT JOIN resource_policies p ON p.organization_id=d.organization_id
+   AND p.resource_type='company_knowledge' AND p.resource_id=k.id
+ WHERE d.organization_id=:organization_id AND k.is_active
+), authorized_documents AS (
+ SELECT s.* FROM source_rows s WHERE s.source_type=ANY(:source_types)
+   AND (s.policy_id IS NULL OR s.classification IN ('internal','public_link_safe')
+     OR :is_admin OR (:is_manager AND s.classification='confidential')
+     OR EXISTS (SELECT 1 FROM resource_grants g WHERE g.policy_id=s.policy_id
+       AND ((g.principal_type='account' AND g.principal_key=:account_key)
+         OR (g.principal_type='role' AND g.principal_key=ANY(:roles))
+         OR (g.principal_type='team' AND g.principal_key=ANY(:team_keys))
+         OR (g.principal_type='project' AND g.principal_key=ANY(:project_keys))))
+   AND (cardinality(:file_types)=0 OR s.extension=ANY(:file_types))
+), keyword_ranked AS (
+ SELECT d.document_id,c.id chunk_id,ts_rank_cd(c.search_tsv,q.ts_query,32) lexical_rank,
+        row_number() OVER(ORDER BY ts_rank_cd(c.search_tsv,q.ts_query,32) DESC) result_rank
+ FROM authorized_documents d JOIN knowledge_chunks c ON c.document_id=d.document_id
+ CROSS JOIN (SELECT to_tsquery('simple',:lexical_query) ts_query) q
+ WHERE :mode IN ('keyword','hybrid') AND (c.search_tsv @@ q.ts_query
+   OR d.title ILIKE :like_pattern ESCAPE '\' OR c.content ILIKE :like_pattern ESCAPE '\')
+ LIMIT :candidate_pool
+), semantic_ranked AS (
+ SELECT d.document_id,c.id chunk_id,greatest(0,1-(c.embedding <=> :query_embedding)) semantic_similarity,
+        row_number() OVER(ORDER BY c.embedding <=> :query_embedding) result_rank
+ FROM authorized_documents d JOIN knowledge_chunks c ON c.document_id=d.document_id
+ WHERE :has_embedding AND :mode IN ('semantic','hybrid') AND c.embedding IS NOT NULL
+   AND 1.0-(c.embedding <=> :query_embedding) >= :semantic_floor LIMIT :candidate_pool
+), fused AS ( -- reciprocal-rank fusion (RRF) of lexical and semantic channels
+ SELECT document_id,chunk_id,sum(channel_score) rank_score,max(lexical_rank) lexical_rank,
+        max(semantic_similarity) semantic_similarity FROM (
+   SELECT document_id,chunk_id,0.35/(60+result_rank) channel_score,lexical_rank,0.0 semantic_similarity FROM keyword_ranked
+   UNION ALL SELECT document_id,chunk_id,0.65/(60+result_rank),0.0,semantic_similarity FROM semantic_ranked
+ ) candidates GROUP BY document_id,chunk_id
+)
+SELECT d.*,c.id chunk_id,c.position,c.locator,c.content,f.rank_score,f.lexical_rank,f.semantic_similarity
+FROM fused f JOIN authorized_documents d ON d.document_id=f.document_id
+LEFT JOIN knowledge_chunks c ON c.id=f.chunk_id
+ORDER BY f.rank_score DESC LIMIT :result_pool
+"""
+
+
+# SQLAlchemy 2.0 statement form used by the PostgreSQL executor. Bind names are
+# explicit so values are never interpolated into the recursive query.
+HYBRID_SEARCH_STATEMENT = text(HYBRID_SEARCH_SQL).bindparams(
+    bindparam("roles"), bindparam("team_keys"), bindparam("project_keys"),
+    bindparam("source_types"), bindparam("file_types"), bindparam("query_embedding"),
+)
 
 
 def synonym_groups() -> dict[str, frozenset[str]]:
@@ -111,12 +226,23 @@ def normalize_search_text(value: str | None) -> str:
 
 
 def search_tokens(value: str | None) -> list[str]:
-    return _TOKEN_RE.findall(normalize_search_text(value))
+    return [token for token in _TOKEN_RE.findall(normalize_search_text(value)) if len(token) >= 2 and token not in _STOP_WORDS]
 
 
 def compact_search_text(value: str | None) -> str:
     """Remove separators/punctuation while preserving Unicode letters/digits."""
     return "".join(char for char in normalize_search_text(value) if char.isalnum())
+
+
+def build_lexical_query(value: str | None) -> str:
+    """Build a safe multilingual ``to_tsquery`` OR expression."""
+    terms = list(dict.fromkeys(search_tokens(value)))[:24]
+    return " | ".join(term.replace("'", "") for term in terms)
+
+
+def like_pattern(value: str | None) -> str:
+    escaped = normalize_search_text(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 def _alias_matches(token: str, alias: str) -> bool:
@@ -211,6 +337,167 @@ async def can_read_policy(db: AsyncSession, principal: FileSearchPrincipal, poli
     # Restricted resources deliberately require a matching grant.  The same
     # grant loop above also permits team/project/role grants when configured.
     return False
+
+
+async def authorize_knowledge_source(
+    db: AsyncSession,
+    principal: FileSearchPrincipal,
+    source_type: KnowledgeSourceType,
+    source_id: int,
+) -> tuple[Any, ResourcePolicy | None] | None:
+    """Resolve a live source and apply the same tenant/resource ACL everywhere."""
+    if source_type == "company_file":
+        return await authorized_file(db, principal, int(source_id))
+    entry = await db.scalar(select(CompanyKnowledge).where(
+        CompanyKnowledge.id == int(source_id),
+        CompanyKnowledge.organization_id == principal.organization_id,
+        CompanyKnowledge.is_active.is_(True),
+    ))
+    if entry is None:
+        return None
+    policy = await db.scalar(select(ResourcePolicy).where(
+        ResourcePolicy.organization_id == principal.organization_id,
+        ResourcePolicy.resource_type == "company_knowledge",
+        ResourcePolicy.resource_id == entry.id,
+    ))
+    return (entry, policy) if await can_read_policy(db, principal, policy) else None
+
+
+def _cosine_similarity(left: Sequence[float] | None, right: Sequence[float] | None) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    dot = sum(float(a) * float(b) for a, b in zip(left, right))
+    left_norm = math.sqrt(sum(float(a) * float(a) for a in left))
+    right_norm = math.sqrt(sum(float(b) * float(b) for b in right))
+    return max(0.0, min(1.0, dot / (left_norm * right_norm))) if left_norm and right_norm else 0.0
+
+
+def _lexical_metrics(content: str, query: str) -> tuple[float, int, bool]:
+    terms = search_tokens(query)
+    haystack = normalize_search_text(content)
+    matched = sum(1 for term in dict.fromkeys(terms) if term in haystack)
+    phrase = normalize_search_text(query) in haystack if query.strip() else False
+    # A bounded rank is sufficient for confidence calibration and is stable
+    # across the Python compatibility executor and PostgreSQL ts_rank_cd.
+    rank = (matched / max(len(set(terms)), 1)) + (0.25 if phrase else 0.0)
+    return rank, matched, phrase
+
+
+async def search_knowledge_documents(
+    db: AsyncSession,
+    principal: FileSearchPrincipal,
+    *,
+    query: str,
+    search_mode: SearchMode = "hybrid",
+    query_embedding: Sequence[float] | None = None,
+    source_types: frozenset[KnowledgeSourceType] = frozenset({"company_file", "company_knowledge"}),
+    file_types: tuple[str, ...] = (),
+    limit: int = 5,
+) -> KnowledgeSearchResult:
+    """Tenant/ACL-safe unified retrieval facade.
+
+    PostgreSQL deployments can execute ``HYBRID_SEARCH_SQL`` as an optimized
+    path. The ORM path keeps local tests and degraded operation deterministic.
+    """
+    normalized = normalize_search_text(query)
+    if not normalized:
+        return KnowledgeSearchResult("empty", ())
+    if not search_tokens(normalized):
+        return KnowledgeSearchResult("empty", ())
+    if search_mode == "semantic" and not query_embedding:
+        return KnowledgeSearchResult("unavailable", (), warnings=("embedding_required",))
+    try:
+        docs = list((await db.execute(select(KnowledgeDocument).where(
+            KnowledgeDocument.organization_id == principal.organization_id,
+            KnowledgeDocument.source_type.in_(tuple(source_types)),
+            KnowledgeDocument.index_status.in_(("ready", "partial", "indexing", "failed")),
+        ))).scalars().all())
+    except Exception as exc:
+        return KnowledgeSearchResult("unavailable", (), warnings=("content_index_unavailable",), diagnostics=({"code": "search_unavailable", "detail": type(exc).__name__},))
+    hits: list[KnowledgeSearchHit] = []
+    represented_files: set[int] = set()
+    for document in docs:
+        try:
+            authorized = await authorize_knowledge_source(db, principal, document.source_type, document.source_id)
+        except Exception as exc:
+            return KnowledgeSearchResult("unavailable", (), warnings=("authorization_unavailable",), diagnostics=({"code": "authorization_unavailable", "detail": type(exc).__name__},))
+        if not authorized:
+            continue
+        source, policy = authorized
+        extension = _extension(source) if document.source_type == "company_file" else str(Path(getattr(source, "attachment_filename", "") or "").suffix).lstrip(".").casefold() or None
+        if file_types and extension not in {str(item).casefold().lstrip(".") for item in file_types}:
+            continue
+        try:
+            chunks = list((await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.document_id == document.id).order_by(KnowledgeChunk.position))).scalars().all())
+        except Exception as exc:
+            return KnowledgeSearchResult("unavailable", (), warnings=("content_index_unavailable",), diagnostics=({"code": "chunk_lookup_unavailable", "detail": type(exc).__name__},))
+        best: tuple[float, float, int, Any] | None = None
+        for chunk in chunks:
+            lexical, matched, phrase = _lexical_metrics(chunk.content, normalized)
+            semantic = _cosine_similarity(getattr(chunk, "embedding", None), query_embedding) if search_mode in {"hybrid", "semantic"} else 0.0
+            if search_mode == "semantic": score = semantic
+            elif search_mode == "keyword": score = lexical
+            else: score = 0.35 * lexical + 0.65 * semantic if query_embedding else lexical
+            if score > 0 and (best is None or score > best[0]):
+                best = (score, semantic, matched, chunk)
+        if best is None:
+            # Titles and file metadata remain discoverable even when content
+            # extraction is pending, matching the legacy file-search contract.
+            title_rank, matched, phrase = _lexical_metrics(document.title, normalized)
+            if title_rank <= 0:
+                continue
+            best = (title_rank, 0.0, matched, None)
+        score, semantic, matched, chunk = best
+        lexical_rank = _lexical_metrics(chunk.content if chunk is not None else document.title, normalized)[0]
+        distinctive = max(len(set(search_tokens(normalized))), 1)
+        coverage = matched / distinctive
+        confidence = max(semantic, min(1.0, coverage * 0.78 + min(lexical_rank * 3.0, 0.17) + (0.05 if normalized in normalize_search_text(chunk.content if chunk is not None else document.title) else 0.0)))
+        hits.append(KnowledgeSearchHit(
+            document_id=document.id, source_type=document.source_type, source_id=document.source_id,
+            title=document.title, excerpt=(chunk.content[:1800] if chunk is not None else ""),
+            locator=(chunk.locator if chunk is not None else {"kind": "metadata"}) or {},
+            classification=policy.classification if policy else "internal",
+            content_state=("ready" if document.content_available else ("empty" if document.index_status == "ready" else document.index_status)),
+            rank_score=float(score), confidence=float(confidence), semantic_similarity=float(semantic),
+            lexical_rank=float(lexical_rank), content_type=getattr(source, "content_type", None) or document.content_type,
+            extension=extension, size=getattr(source, "size", None) if document.source_type == "company_file" else getattr(source, "attachment_size", None),
+        ))
+        if document.source_type == "company_file":
+            represented_files.add(document.source_id)
+    # Metadata is authoritative even when extraction is pending or failed.
+    if "company_file" in source_types:
+        try:
+            items = list((await db.execute(select(CompanyLibraryItem).where(
+                CompanyLibraryItem.organization_id == principal.organization_id,
+                CompanyLibraryItem.kind == "file",
+                CompanyLibraryItem.deleted_at.is_(None),
+            ))).scalars().all())
+        except Exception as exc:
+            return KnowledgeSearchResult("unavailable", (), warnings=("storage_unavailable",), diagnostics=({"code": "file_metadata_unavailable", "detail": type(exc).__name__},))
+        for item in items:
+            if item.id in represented_files or (file_types and _extension(item) not in {str(value).casefold().lstrip(".") for value in file_types}):
+                continue
+            resolved = await authorize_knowledge_source(db, principal, "company_file", item.id)
+            if not resolved:
+                continue
+            score, fields = metadata_score(item, normalized)
+            if score <= 0:
+                continue
+            hits.append(KnowledgeSearchHit(
+                document_id=0, source_type="company_file", source_id=item.id,
+                title=_title(item), excerpt="", locator={"kind": "metadata", "fields": fields},
+                classification=resolved[1].classification if resolved[1] else "internal",
+                content_state="indexing", rank_score=float(score), confidence=0.5,
+                semantic_similarity=0.0, lexical_rank=float(score), content_type=item.content_type,
+                extension=_extension(item), size=item.size,
+            ))
+    hits.sort(key=lambda item: (-item.rank_score, -item.confidence, item.document_id))
+    hits = hits[: max(1, min(limit, 50))]
+    if not hits:
+        return KnowledgeSearchResult("empty", ())
+    statuses = {hit.content_state for hit in hits}
+    status: FileSearchStatus = "partial" if statuses & {"failed", "partial"} else "indexing" if statuses == {"indexing"} else "ok"
+    return KnowledgeSearchResult(status, tuple(hits))
 
 
 def _extension(item: CompanyLibraryItem) -> str:
@@ -368,6 +655,37 @@ async def search_files(db: AsyncSession, principal: FileSearchPrincipal, data: A
     if data.operation == "search" and not getattr(data, "query", None):
         return _result("denied", {"reason": "A search query is required."}, diagnostics=[{"code": "invalid_request"}])
     query = getattr(data, "query", None) or ""
+    if data.operation == "search" and getattr(data, "folder_id", None) is None and getattr(settings, "AI_UNIFIED_KNOWLEDGE_SEARCH_ENABLED", True):
+        try:
+            # Storage metadata is the authoritative discovery boundary. A
+            # database failure here is distinct from an unavailable enrichment
+            # index and remains a service error for API callers.
+            await db.execute(select(CompanyLibraryItem).where(CompanyLibraryItem.organization_id == principal.organization_id).limit(1))
+        except Exception as exc:
+            raise FileSearchServiceError("authoritative company storage unavailable") from exc
+        unified = await search_knowledge_documents(
+            db,
+            principal,
+            query=query,
+            search_mode=getattr(data, "search_mode", "hybrid"),
+            file_types=tuple(getattr(data, "file_types", None) or ()),
+            limit=getattr(data, "limit", 5),
+        )
+        rows: list[dict[str, Any]] = []
+        for hit in unified.hits:
+            source_ref = f"{hit.source_type}:{hit.source_id}"
+            rows.append({
+                "source_id": source_ref, "title": hit.title, "excerpt": hit.excerpt,
+                "locator": hit.locator, "score": hit.rank_score, "classification": hit.classification,
+                "content_type": hit.content_type, "extension": hit.extension, "size": hit.size,
+                "kind": "file" if hit.source_type == "company_file" else "knowledge",
+                "content_state": hit.content_state, "confidence": hit.confidence,
+            })
+        # A missing document placeholder must not hide a newly uploaded file;
+        # the compatibility metadata path below reports it as indexing.
+        if rows or unified.status == "unavailable":
+            deliveries = _delivery_rows([row for row in rows if row["kind"] == "file"], getattr(data, "delivery", "none"))
+            return _result(unified.status, {"query": query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"], "locator": row["locator"]} for row in rows], deliveries=deliveries, warnings=list(unified.warnings), diagnostics=list(unified.diagnostics))
     try:
         all_items = list((await db.execute(select(CompanyLibraryItem).where(
             CompanyLibraryItem.organization_id == principal.organization_id,

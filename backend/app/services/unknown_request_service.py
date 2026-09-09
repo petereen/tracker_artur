@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.bot.db import get_session
 from app.models.models import AssistantContextExample, UnknownAssistantRequest
-from app.services.knowledge_service import tokenize_search_terms
+from app.services.assistant_text import tokenize_search_terms
 
 log = logging.getLogger(__name__)
 

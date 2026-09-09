@@ -27,10 +27,11 @@ def test_mcp_catalog_uses_strict_versioned_tool_contracts():
     tools = tool_list(_actor())
     names = {tool["name"] for tool in tools}
     assert "oyuns_knowledge_search" in names
-    assert "oyuns_tasks_prepare_create" in names
+    assert "oyuns_tasks_prepare_create" not in names
     assert all(name.startswith("oyuns_") for name in names)
     assert all(tool["inputSchema"].get("additionalProperties") is False for tool in tools)
     assert set(allowed_tool_names(_actor())) == names
+    assert "oyuns_tasks_prepare_create" in set(allowed_tool_names(_actor(), action_intents={"tasks_write"}))
 
 
 def test_mcp_token_is_actor_scoped_and_audience_bound():

@@ -14,10 +14,11 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
-    Text,
+    Text, Computed,
     Time,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -1414,6 +1415,8 @@ class KnowledgeDocument(Base):
     __tablename__ = "knowledge_documents"
     __table_args__ = (
         UniqueConstraint("organization_id", "source_type", "source_id", name="uq_knowledge_document_source"),
+        CheckConstraint("source_type IN ('company_file','company_knowledge')", name="ck_knowledge_documents_source_type"),
+        CheckConstraint("index_status IN ('pending','indexing','ready','partial','failed')", name="ck_knowledge_documents_index_status"),
         Index("ix_knowledge_documents_index_status", "organization_id", "index_status"),
     )
 
@@ -1425,8 +1428,9 @@ class KnowledgeDocument(Base):
     content_type = Column(Text)
     checksum = Column(String(64))
     index_status = Column(String(16), nullable=False, server_default="pending", default="pending")
-    # ``ready`` only means indexing completed.  Image-only and otherwise
-    # unextractable files are ready with ``content_available = false``.
+    index_version = Column(Integer, nullable=False, server_default="1", default=1)
+    # ``partial`` records usable content with an attachment/extractor gap;
+    # image-only and otherwise unextractable files have no content available.
     content_available = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     indexed_at = Column(DateTime(timezone=True))
     last_error = Column(Text)
@@ -1444,6 +1448,11 @@ class KnowledgeChunk(Base):
     locator = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     content = Column(Text, nullable=False)
     search_vector = Column(Text)
+    search_tsv = Column(
+        TSVECTOR,
+        Computed("to_tsvector('simple', coalesce(content, ''))", persisted=True),
+        nullable=False,
+    )
     embedding = Column(Vector(1536) if Vector else ARRAY(Float))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

@@ -8,13 +8,13 @@ import unicodedata
 from sqlalchemy import select
 
 from app.core.enterprise_deps import ActorContext
-from app.models.models import CompanyKnowledge, CompanyLibraryItem, Employee, KnowledgeChunk, KnowledgeDocument, ResourcePolicy, Task
+from app.models.models import Employee, KnowledgeChunk, KnowledgeDocument, Task
 from app.services import enterprise_tools
 from app.services import exchange_rate_service
-from app.services.file_search_service import FileSearchPrincipal, authorized_file
+from app.services.file_search_service import FileSearchPrincipal, authorize_knowledge_source
 from app.services.mcp import schemas
 from app.services.mcp.references import action_reference, resolve_resource_reference, resource_reference
-from app.services.mcp.results import envelope
+from app.services.mcp.results import SanitizationPolicy, envelope
 
 
 def _sanitize_arguments(value: Any) -> Any:
@@ -78,31 +78,25 @@ async def _knowledge_fetch(db, actor: ActorContext, reference: str) -> dict:
     source_type, raw_id = value.split(":", 1)
     if source_type not in {"company_file", "company_knowledge"} or not raw_id.isdigit():
         return {"status": "denied", "data": {}}
-    # Reuse the same file/knowledge policy checks as search before returning
-    # anything. A fetch reference never widens the user's entitlement.
+    # Reuse the same source liveness and policy checks as search before
+    # returning anything. A fetch reference never widens entitlement.
+    resolved = await authorize_knowledge_source(db, FileSearchPrincipal.from_actor(actor), source_type, int(raw_id))
+    if not resolved:
+        return {"status": "empty", "data": {}}
+    source, policy = resolved
     if source_type == "company_file":
-        resolved = await authorized_file(db, FileSearchPrincipal.from_actor(actor), int(raw_id))
-        if not resolved:
-            return {"status": "empty", "data": {}}
-        source, policy = resolved
         document = await db.scalar(select(KnowledgeDocument).where(
             KnowledgeDocument.organization_id == actor.organization_id,
             KnowledgeDocument.source_type == source_type,
             KnowledgeDocument.source_id == int(raw_id),
         ))
-        state = "indexing" if document is None or document.index_status in {"pending", "indexing"} else "failed" if document.index_status == "failed" else "empty" if not getattr(document, "content_available", False) else "ready"
+        state = "indexing" if document is None or document.index_status in {"pending", "indexing"} else "failed" if document.index_status == "failed" else "partial" if document.index_status == "partial" else "empty" if not getattr(document, "content_available", False) else "ready"
         if state != "ready":
-            return {"status": "partial" if state == "failed" else "indexing", "data": {
+            return {"status": "partial" if state in {"failed", "partial"} else "indexing", "data": {
                 "title": getattr(source, "title", None) or source.name,
                 "reference": reference, "content_state": state, "passages": [],
             }}
     else:
-        source = await db.get(CompanyKnowledge, int(raw_id))
-        if not source or source.organization_id != actor.organization_id or not source.is_active:
-            return {"status": "empty", "data": {}}
-        policy = await db.scalar(select(ResourcePolicy).where(ResourcePolicy.organization_id == actor.organization_id, ResourcePolicy.resource_type == "company_knowledge", ResourcePolicy.resource_id == source.id))
-        if not await enterprise_tools.can_read_policy(db, actor, policy):
-            return {"status": "empty", "data": {}}
         document = await db.scalar(select(KnowledgeDocument).where(KnowledgeDocument.organization_id == actor.organization_id, KnowledgeDocument.source_type == source_type, KnowledgeDocument.source_id == int(raw_id)))
         if not document:
             return {"status": "indexing", "data": {"title": source.title, "reference": reference, "content_state": "indexing", "passages": []}}
@@ -142,12 +136,13 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
             items = [{"reference": resource_reference(actor, "knowledge_source", row["source_id"]), "title": row.get("title"), "excerpt": row.get("excerpt"), "locator": row.get("locator"), "classification": row.get("classification"), "content_state": row.get("content_state"), "content_type": row.get("content_type"), "extension": row.get("extension")} for row in rows]
             sources = [{"reference": item["reference"], "title": item["title"], "locator": item.get("locator")} for item in items]
             safe_deliveries = [{"reference": item["reference"], "kind": "company_file_attachment" if data.delivery == "attachment" else "authenticated_file_reference"} for item in items] if data.delivery != "none" else []
-            return envelope(result=result, request_id=request_id, summary=_summary(result, f"Found {len(items)} authorized company files."), data={"items": items, "deliveries": safe_deliveries}, sources=sources)
+            trusted = frozenset({("items", str(index), "excerpt") for index, row in enumerate(rows) if str(row.get("source_id", "")).startswith("company_knowledge:")})
+            return envelope(result=result, request_id=request_id, summary=_summary(result, f"Found {len(items)} authorized company knowledge sources."), data={"items": items, "deliveries": safe_deliveries}, sources=sources, sanitization_policy=SanitizationPolicy(trusted_operational_paths=trusted))
 
         if tool_name == "oyuns_knowledge_fetch":
             data = schemas.KnowledgeFetchInput.model_validate(arguments)
             result = await _knowledge_fetch(db, actor, data.reference)
-            return envelope(result=result, request_id=request_id, summary=_summary(result, "Retrieved the authorized knowledge excerpt."))
+            return envelope(result=result, request_id=request_id, summary=_summary(result, "Retrieved the authorized knowledge excerpt."), sanitization_policy=SanitizationPolicy(trusted_operational_paths=frozenset({("passages", "0", "excerpt"), ("passages", "1", "excerpt")})))
 
         if tool_name == "oyuns_records_search":
             data = schemas.RecordsSearchInput.model_validate(arguments)

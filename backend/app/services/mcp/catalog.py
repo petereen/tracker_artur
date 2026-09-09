@@ -72,22 +72,22 @@ def _strict_schema(model: type[BaseModel]) -> dict:
     return schema
 
 
-def allowed_tool_names(actor: ActorContext, intents: set[str] | frozenset[str] | None = None) -> list[str]:
-    """Return model-visible tools; confirmation is intentionally absent."""
-    intents = set(intents or ())
+def allowed_tool_names(actor: ActorContext, intents: set[str] | frozenset[str] | None = None, *, action_intents: set[str] | frozenset[str] = frozenset()) -> list[str]:
+    """Return all permitted reads; only explicit action intents gate previews."""
+    action_intents = set(action_intents or intents or ())
     permissions = actor.permissions or permissions_for_roles(actor.roles)
     return [tool.name for tool in CATALOG
             if (not tool.required_roles or actor.has_any_role(*tool.required_roles))
             and tool.required_permissions.issubset(permissions)
-            and (not intents or bool(tool.intent_tags.intersection(intents)))]
+            and (tool.read_only or bool(tool.intent_tags.intersection(action_intents)))]
 
 
 def get_tool(name: str) -> ToolDefinition | None:
     return next((tool for tool in CATALOG if tool.name == name), None)
 
 
-def tool_list(actor: ActorContext, intents: set[str] | frozenset[str] | None = None) -> list[dict]:
-    allowed = set(allowed_tool_names(actor, intents))
+def tool_list(actor: ActorContext, intents: set[str] | frozenset[str] | None = None, *, action_intents: set[str] | frozenset[str] = frozenset()) -> list[dict]:
+    allowed = set(allowed_tool_names(actor, intents, action_intents=action_intents))
     return [
         {
             "name": tool.name,

@@ -31,6 +31,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.enterprise_deps import actor_from_telegram_id, file_search_principal_from_telegram_id
 from app.models.models import AssistantConversation, AssistantMessage, CompanyLibraryItem
 from app.services import enterprise_tools
+from app.services.assistant_text import detect_language
 from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
 from app.services.mcp.references import resolve_action_reference
 from app.services.attachment_storage import get_attachment
@@ -215,7 +216,7 @@ async def _enterprise_route(
         rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation.id).order_by(AssistantMessage.id.desc()).limit(12))).scalars().all()
         history = [{"role": row.role, "content": row.content} for row in reversed(rows)]
         db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-        detected = assistant_ai.detect_language(text).value
+        detected = detect_language(text).value
         actor = replace(actor, channel="telegram", detected_language=detected)
         try:
             routed = await ai_gateway.execute_turn(db, actor, [*history, {"role": "user", "content": text}], conversation_id=conversation.id)

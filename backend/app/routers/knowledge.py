@@ -130,6 +130,27 @@ def _index_job(entry: CompanyKnowledge) -> JobQueue:
     return JobQueue(job_type="knowledge_index_article", payload={"entry_id": entry.id}, dedup_key=f"knowledge-index-article:{entry.id}:{entry.updated_at.isoformat() if entry.updated_at else 'new'}")
 
 
+async def _ensure_pending_document(db: AsyncSession, entry: CompanyKnowledge) -> None:
+    document = await db.scalar(select(KnowledgeDocument).where(
+        KnowledgeDocument.organization_id == entry.organization_id,
+        KnowledgeDocument.source_type == "company_knowledge",
+        KnowledgeDocument.source_id == entry.id,
+    ))
+    if document is None:
+        db.add(KnowledgeDocument(
+            organization_id=entry.organization_id,
+            source_type="company_knowledge",
+            source_id=entry.id,
+            title=entry.title,
+            content_type=entry.attachment_content_type or "text/markdown",
+            index_status="pending",
+            index_version=1,
+        ))
+    else:
+        document.index_status = "pending"
+        document.index_version = min(getattr(document, "index_version", 1), 1)
+
+
 @router.get("", response_model=list[KnowledgeOut])
 async def list_knowledge(
     db: AsyncSession = Depends(get_db),
@@ -157,6 +178,7 @@ async def create_knowledge(
     entry = CompanyKnowledge(organization_id=await _organization_id(db, user), **data.model_dump())
     db.add(entry)
     await db.flush()
+    await _ensure_pending_document(db, entry)
     db.add(_index_job(entry))
     await db.commit()
     await db.refresh(entry)
@@ -186,6 +208,7 @@ async def create_knowledge_with_attachment(
     db.add(entry)
     try:
         await db.flush()
+        await _ensure_pending_document(db, entry)
         db.add(_index_job(entry))
         await db.commit()
     except Exception:
@@ -208,6 +231,7 @@ async def update_knowledge(
     for key, value in data.model_dump().items():
         setattr(entry, key, value)
     await db.flush()
+    await _ensure_pending_document(db, entry)
     db.add(_index_job(entry))
     await db.commit()
     await db.refresh(entry)
@@ -230,6 +254,7 @@ async def replace_knowledge_attachment(
         setattr(entry, key, value)
     try:
         await db.flush()
+        await _ensure_pending_document(db, entry)
         db.add(_index_job(entry))
         await db.commit()
     except Exception:
@@ -275,6 +300,7 @@ async def delete_knowledge_attachment(
     entry.attachment_content_type = None
     entry.attachment_size = None
     await db.flush()
+    await _ensure_pending_document(db, entry)
     db.add(_index_job(entry))
     await db.commit()
     await db.refresh(entry)

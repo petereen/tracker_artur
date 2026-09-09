@@ -2,14 +2,49 @@
 from __future__ import annotations
 
 import json
+import re
+import logging
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 MAX_RESULT_BYTES = 32 * 1024
 FORBIDDEN_KEYS = frozenset({
     "token", "token_hash", "storage_key", "telegram_id", "encrypted_payload",
     "password", "password_hash", "access_token", "refresh_token", "raw_id",
 })
+
+@dataclass(frozen=True, slots=True)
+class SanitizationPolicy:
+    trusted_operational_paths: frozenset[tuple[str, ...]] = frozenset()
+    max_depth: int = 12
+
+
+HARD_SECRET_PATTERNS = {
+    "openai_key": re.compile(r"\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,}\b"),
+    "bearer": re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{20,}"),
+    "postgres_uri": re.compile(r"(?i)\bpostgres(?:ql)?(?:\+[a-z0-9_]+)?://[^\s]+"),
+    "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+    "bcrypt": re.compile(r"\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}"),
+    "argon2": re.compile(r"\$argon2(?:id|i|d)\$[^\s]+"),
+    "pbkdf2": re.compile(r"(?i)\bpbkdf2_(?:sha256|sha512)\$[^\s]+"),
+}
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
+_OPERATIONAL_SECRET_PATTERN = re.compile(r"(?i)\b(?:password|passcode|pin|door\s+code|access\s+code)\s*[:=]\s*[^\s,;]+")
+
+
+def sanitize_text(value: str, *, allow_operational_content: bool) -> str:
+    output = value
+    for name, pattern in HARD_SECRET_PATTERNS.items():
+        count = len(pattern.findall(output))
+        if count:
+            log.debug("mcp_result_redaction pattern=%s count=%d", name, count)
+            output = pattern.sub("[REDACTED:SYSTEM_SECRET]", output)
+    if not allow_operational_content:
+        output = _OPERATIONAL_SECRET_PATTERN.sub("[REDACTED:OPERATIONAL_SECRET]", output)
+    return output
 
 
 def _forbidden_key(key: object) -> bool:
@@ -29,18 +64,29 @@ DEFAULT_STATUS_CODE = {
 }
 
 
-def _json_safe(value: Any) -> Any:
+def sanitize_result(value: Any, *, policy: SanitizationPolicy, path: tuple[str, ...] = ()) -> Any:
+    if len(path) > policy.max_depth:
+        return "[REDACTED:MAX_DEPTH]"
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, dict):
         return {
-            str(key): _json_safe(item)
+            str(key): sanitize_result(item, policy=policy, path=(*path, str(key)))
             for key, item in value.items()
             if not _forbidden_key(key)
         }
     if isinstance(value, (list, tuple, set)):
-        return [_json_safe(item) for item in value]
+        return [sanitize_result(item, policy=policy, path=(*path, str(index))) for index, item in enumerate(value)]
+    if isinstance(value, str):
+        if _UUID_RE.match(value) and not value.startswith(("mcpref_", "mcpact_")):
+            return "[REDACTED:INTERNAL_REFERENCE]"
+        return sanitize_text(value, allow_operational_content=path in policy.trusted_operational_paths)
     return value
+
+
+def _json_safe(value: Any) -> Any:
+    """Compatibility wrapper using the strict default policy."""
+    return sanitize_result(value, policy=SanitizationPolicy())
 
 
 def _compact(value: Any, *, text_limit: int, list_limit: int) -> Any:
@@ -72,18 +118,20 @@ def envelope(
     data: dict | None = None,
     sources: list[dict] | None = None,
     next_cursor: str | None = None,
+    sanitization_policy: SanitizationPolicy | None = None,
 ) -> dict:
     status = result.get("status", "unavailable")
     warnings = list(result.get("warnings", []))
     if not warnings and status in DEFAULT_STATUS_CODE:
         warnings = [DEFAULT_STATUS_CODE[status]]
-    body = _json_safe(data if data is not None else result.get("data", {}))
+    policy = sanitization_policy or SanitizationPolicy()
+    body = sanitize_result(data if data is not None else result.get("data", {}), policy=policy)
     page = {"next_cursor": next_cursor, "returned": len(body.get("items", [])) if isinstance(body, dict) and isinstance(body.get("items"), list) else 0}
     output = {
         "status": status,
         "summary": summary,
         "data": body,
-        "sources": _json_safe(sources if sources is not None else []),
+        "sources": sanitize_result(sources if sources is not None else [], policy=policy),
         "page": page,
         "warnings": warnings,
         "request_id": request_id,

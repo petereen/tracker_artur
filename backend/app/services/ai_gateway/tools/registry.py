@@ -24,13 +24,13 @@ class ToolRegistry:
     def get(self, name: str) -> ToolDefinition | None:
         return self._definitions.get(name)
 
-    def visible_tools(self, actor: ActorContext, intents: set[str] | frozenset[str] | None = None) -> list[dict]:
+    def visible_tools(self, actor: ActorContext, intents: set[str] | frozenset[str] | None = None, *, action_intents: set[str] | frozenset[str] = frozenset()) -> list[dict]:
         # Use the catalog serializer so external MCP and internal Responses
         # tool schemas cannot drift apart.
-        return tool_list(actor, intents)
+        return tool_list(actor, intents, action_intents=action_intents)
 
-    def visible_definitions(self, actor: ActorContext, intents: set[str] | frozenset[str] | None = None) -> list[ToolDefinition]:
-        names = {item["name"] for item in self.visible_tools(actor, intents)}
+    def visible_definitions(self, actor: ActorContext, intents: set[str] | frozenset[str] | None = None, *, action_intents: set[str] | frozenset[str] = frozenset()) -> list[ToolDefinition]:
+        names = {item["name"] for item in self.visible_tools(actor, intents, action_intents=action_intents)}
         return [definition for definition in self._definitions.values() if definition.name in names]
 
     @staticmethod

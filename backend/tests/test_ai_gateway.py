@@ -14,8 +14,8 @@ from app.services.ai_gateway.gateway import (
 def test_default_registry_covers_each_supported_category():
     config = registry()
     assert set(config.routes) == set(QueryCategory)
-    assert config.routes[QueryCategory.SIMPLE_QA] == ["luna", "terra", "sol"]
-    assert config.routes[QueryCategory.CODE_GENERATION] == ["sol", "terra"]
+    assert config.routes[QueryCategory.SIMPLE_QA] == ["luna", "terra"]
+    assert config.routes[QueryCategory.CODE_GENERATION] == ["terra", "luna"]
     assert config.output_budgets[QueryCategory.SIMPLE_QA] == 600
 
 

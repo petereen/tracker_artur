@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     ENTERPRISE_TOOLS_ENABLED: bool = False
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBEDDING_DIMENSIONS: int = 1536
+    AI_UNIFIED_KNOWLEDGE_SEARCH_ENABLED: bool = True
+    AI_PREFLIGHT_RAG_ENABLED: bool = True
+    AI_OFFLINE_KNOWLEDGE_FALLBACK_ENABLED: bool = True
+    AI_PREFLIGHT_CONFIDENCE_THRESHOLD: float = 0.82
+    AI_PREFLIGHT_EMBEDDING_TIMEOUT_SECONDS: float = 1.5
+    AI_OFFLINE_MAX_EXCERPT_CHARS: int = 800
+    AI_OFFLINE_TOTAL_EXCERPT_CHARS: int = 1800
     # JSON object of concept name -> aliases. Empty uses the built-in
     # multilingual defaults in the shared file-search service.
     FILE_SEARCH_SYNONYMS_JSON: str = ""

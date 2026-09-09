@@ -45,13 +45,12 @@ DEFAULT = GatewayConfig(
     models={
         "luna": ModelConfig(id="gpt-5.6-luna", reasoning_effort="none"),
         "terra": ModelConfig(id="gpt-5.6-terra", reasoning_effort="medium"),
-        "sol": ModelConfig(id="gpt-5.6-sol", reasoning_effort="medium"),
     },
     routes={
-        QueryCategory.SIMPLE_QA: ["luna", "terra", "sol"],
-        QueryCategory.COMPLEX_REASONING: ["terra", "sol", "luna"],
-        QueryCategory.CODE_GENERATION: ["sol", "terra"],
-        QueryCategory.MULTIMODAL: ["terra", "sol"],
+        QueryCategory.SIMPLE_QA: ["luna", "terra"],
+        QueryCategory.COMPLEX_REASONING: ["terra", "luna"],
+        QueryCategory.CODE_GENERATION: ["terra", "luna"],
+        QueryCategory.MULTIMODAL: ["terra", "luna"],
     },
     input_budgets={
         QueryCategory.SIMPLE_QA: 16_000,

@@ -13,12 +13,14 @@ def actor(role: str = "member") -> ActorContext:
     return ActorContext(7, 3, 9, "person@example.test", "mn", roles, permissions_for_roles(roles), "mn", "web")
 
 
-def test_registry_prunes_mutations_and_privileged_reads_by_permission():
+def test_registry_keeps_reads_visible_and_gates_previews_by_permission():
     member = {item["name"] for item in ToolRegistry().visible_tools(actor(), {"tasks_write", "erp"})}
     assert "oyuns_tasks_prepare_create" in member
     assert "oyuns_erp_read" not in member
     admin = {item["name"] for item in ToolRegistry().visible_tools(actor("admin"), {"erp"})}
-    assert admin == {"oyuns_erp_read"}
+    assert "oyuns_erp_read" in admin
+    assert "oyuns_knowledge_search" in admin
+    assert "oyuns_tasks_prepare_create" not in admin
 
 
 def test_strict_tool_schemas_require_all_properties_for_responses():

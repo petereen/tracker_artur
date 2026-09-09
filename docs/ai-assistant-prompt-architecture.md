@@ -5,9 +5,11 @@
 Telegram and Web Chat use the same pipeline:
 
 1. The application authenticates the actor and organization.
-2. The application retrieves permission-scoped grounding context.
+2. The application performs lexical (and, when needed, bounded semantic)
+   preflight against the unified tenant/ACL-safe knowledge index.
 3. The gateway classifies the complete message, including all statements.
-4. The gateway sends the same strict enterprise tool contract to the live model.
+4. Every authorized read tool is visible; only explicit task-write previews are
+   intent-gated.
 5. Tool execution remains in the application, where ACL checks, validation,
    audit records, and confirmation rules are enforced.
 6. The model receives structured tool results and writes the final answer in the
@@ -27,6 +29,9 @@ The canonical runtime instruction is `ANSWER_SYSTEM` in
   to form an action.
 - Use `file_search_tool` with `operation=list` for directory/list requests and
   `operation=search` for content or semantic search.
+- High-confidence curated passages are injected as `PREFLIGHT_KNOWLEDGE`; call
+  knowledge tools only when that context is absent, incomplete, or a file fetch
+  is requested.
 - Put all user-provided task context into the title/description, resolve only
   authorized people, and use timezone-aware ISO-8601 deadlines.
 - Ask one focused clarification question when a required value is genuinely
@@ -61,10 +66,12 @@ Malformed model arguments are converted into a structured clarification result.
 Unexpected tool exceptions are logged with the tool name and converted into an
 `unavailable` result. They must not abort the Telegram or Web conversation.
 
-Provider/API failures are logged with the provider body and request stage. The
-channel adapter may localize a short retry message, but it must not fabricate a
-business answer or claim that a task, meeting, reminder, or file operation was
-completed.
+Retryable provider failures invoke the deterministic local lexical knowledge
+fallback, which returns bounded authorized excerpts and explicitly states that
+calendar, task, ERP, directory, and action portions were not processed. Provider
+400/401/403 and malformed responses remain operational errors. Audit records keep
+failure class and opaque references only; prompts, excerpts, credentials, and raw
+provider bodies are never logged.
 
 ## Verification checklist
 

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
-from app.models.models import CompanyLibraryItem, JobQueue
+from app.models.models import CompanyLibraryItem, JobQueue, KnowledgeDocument
 from app.services.attachment_storage import delete_attachment, get_attachment, iter_attachment_chunks, put_attachment
 from app.services.enterprise_events import record_change
 from app.services.file_search_service import (
@@ -113,6 +113,17 @@ async def _active_folder(db: AsyncSession, folder_id: int | None, actor: ActorCo
     if not await can_read_policy(db, actor, await _policy_for_file(db, folder)):
         raise HTTPException(status_code=404, detail="Folder not found")
     return folder
+
+
+async def _mark_file_index_pending(db: AsyncSession, item: CompanyLibraryItem) -> None:
+    document = await db.scalar(select(KnowledgeDocument).where(
+        KnowledgeDocument.organization_id == item.organization_id,
+        KnowledgeDocument.source_type == "company_file",
+        KnowledgeDocument.source_id == item.id,
+    ))
+    if document:
+        document.index_status = "pending"
+        document.index_version = min(getattr(document, "index_version", 1), 1)
 
 
 async def _item_for_actor(db: AsyncSession, item_id: int, actor: ActorContext) -> CompanyLibraryItem:
@@ -347,6 +358,16 @@ async def upload_company_file(
             uploaded_items.append((item, scan_status, name, checksum))
         await db.flush()
         for item, scan_status, name, checksum in uploaded_items:
+            db.add(KnowledgeDocument(
+                organization_id=item.organization_id,
+                source_type="company_file",
+                source_id=item.id,
+                title=item.title or item.name,
+                content_type=item.content_type,
+                checksum=checksum,
+                index_status="pending",
+                index_version=1,
+            ))
             await record_change(db, actor=actor, topic="company_files", aggregate_type="company_library_item", aggregate_id=item.id, operation="uploaded", after={"name": name, "parent_id": parent_id, "size": item.size, "checksum": checksum, "scan_status": scan_status})
             db.add(JobQueue(job_type="knowledge_index_file", payload={"item_id": item.id}, dedup_key=f"knowledge-index-file:{item.id}:{checksum}"))
         await db.commit()
@@ -405,6 +426,7 @@ async def update_company_item(
         item.extension = PurePosixPath(new_name).suffix.casefold().lstrip(".")
         item.search_key = compact_search_text(new_name)
         item.searchable_metadata = {**(getattr(item, "searchable_metadata", None) or {}), "filename": new_name}
+        await _mark_file_index_pending(db, item)
     item.parent_id = target_parent_id
     item.updated_at = datetime.now(timezone.utc)
     try:
@@ -446,6 +468,8 @@ async def restore_company_item(
     item.deleted_at = None
     item.deleted_by_account_id = None
     item.updated_at = datetime.now(timezone.utc)
+    if item.kind == "file":
+        await _mark_file_index_pending(db, item)
     try:
         await record_change(db, actor=actor, topic="company_files", aggregate_type="company_library_item", aggregate_id=item.id, operation="restored", after={"name": item.name, "parent_id": item.parent_id})
         await db.commit()

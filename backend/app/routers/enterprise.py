@@ -99,6 +99,7 @@ from app.services.google_calendar import (
 )
 from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services import assistant_ai, exchange_rate_service
+from app.services.assistant_text import detect_language
 from app.services.attendance_service import sync_worktime_attendance
 from app.services.worktime_geofence import WORKTIME_GEOFENCE_KEY, WORKTIME_GEOFENCE_MAX_RADIUS_METERS, WORKTIME_GEOFENCE_MIN_RADIUS_METERS, WORKTIME_GEOFENCE_RADIUS_METERS, configured_worktime_location, configured_worktime_radius, validate_worktime_location
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
@@ -3408,7 +3409,7 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
     text = data.text.strip()
     from dataclasses import replace
-    actor = replace(actor, channel="web", detected_language=assistant_ai.detect_language(text).value)
+    actor = replace(actor, channel="web", detected_language=detect_language(text).value)
     db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
     tool_sources: list[dict] = []
     tool_deliveries: list[dict] = []
