@@ -55,6 +55,12 @@ def permissions_for_roles(roles: frozenset[str]) -> frozenset[str]:
     # remain relevant to non-assistant APIs and mutation-specific checks.
     # Assistant writes continue to require an explicit preview/confirmation
     # flow, while assignment policy is enforced by collaboration_permissions.
+    # Keep the read capability for active accounts even during the short window
+    # between account creation and role assignment. This makes the curated
+    # company knowledge source available to every authenticated Oyuns agent
+    # user without granting any management or write capability.
+    if not roles:
+        return frozenset({"assistant.read"})
     if roles:
         return frozenset({
             "assistant.read",

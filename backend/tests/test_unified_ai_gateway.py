@@ -13,6 +13,17 @@ def actor(role: str = "member") -> ActorContext:
     return ActorContext(7, 3, 9, "person@example.test", "mn", roles, permissions_for_roles(roles), "mn", "web")
 
 
+def test_unassigned_authenticated_accounts_can_search_company_knowledge():
+    permissions = permissions_for_roles(frozenset())
+    unassigned = ActorContext(7, 3, 9, "person@example.test", "mn", frozenset(), permissions, "mn", "web")
+    names = {item["name"] for item in ToolRegistry().visible_tools(unassigned, {"knowledge"})}
+
+    assert permissions == frozenset({"assistant.read"})
+    assert "oyuns_knowledge_search" in names
+    assert "oyuns_knowledge_fetch" in names
+    assert "oyuns_tasks_prepare_create" not in names
+
+
 def test_registry_keeps_reads_visible_and_gates_previews_by_permission():
     member = {item["name"] for item in ToolRegistry().visible_tools(actor(), {"tasks_write", "erp"})}
     assert "oyuns_tasks_prepare_create" in member
