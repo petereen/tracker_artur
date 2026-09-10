@@ -63,7 +63,7 @@ def test_governed_tool_inputs_cover_the_public_contract():
     assert CalendarInput(intent="availability", scope="team").scope == "team"
     preview = ProjectUpdateInput(operation="update_task", task_id=4, changes={"workflow_status": "done"})
     assert preview.changes.workflow_status == "done"
-    assert {spec["name"] for spec in tool_specs()} == {"file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool", "employee_directory_tool", "create_task", "delegate_task"}
+    assert {spec["name"] for spec in tool_specs()} == {"file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool", "employee_directory_tool", "create_task", "delegate_task", "erp_query_tool"}
     task = AssistantTaskInput(title="Prepare access review", assignee="Ada", priority=1, start_at="2026-06-02T08:00:00+08:00")
     assert task.assignee == "Ada"
     assert task.start_at is not None

@@ -31,7 +31,7 @@ class ResponseCache:
         if self._redis is None:
             try:
                 from redis.asyncio import Redis
-                self._redis = Redis.from_url(settings.AI_REDIS_URL, decode_responses=True)
+                self._redis = Redis.from_url(settings.AI_REDIS_URL, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
             except Exception:
                 log.warning("ai_gateway.redis_unavailable", exc_info=True)
                 return None

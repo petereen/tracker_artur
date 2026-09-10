@@ -7,8 +7,8 @@ export function WorkspaceModeToggle() {
   const { isManagerMode, isEligible, isLoading, isSaving, setMode } = useWorkspaceMode()
   if (!isEligible) return null
   const nextMode = isManagerMode ? 'member' : 'manager'
-  const currentLabel = isManagerMode ? t('workspaceMode.manager', 'Manager Mode') : t('workspaceMode.member', 'Member Mode')
-  const nextLabel = nextMode === 'manager' ? t('workspaceMode.manager', 'Manager Mode') : t('workspaceMode.member', 'Member Mode')
+  const currentLabel = isManagerMode ? t('workspaceMode.manager', 'Менежер харагдац') : t('workspaceMode.member', 'Хувь ажилтны харагдац')
+  const nextLabel = nextMode === 'manager' ? t('workspaceMode.manager', 'Менежер харагдац') : t('workspaceMode.member', 'Хувь ажилтны харагдац')
 
   return <button
     type="button"
@@ -22,7 +22,7 @@ export function WorkspaceModeToggle() {
     onClick={() => void setMode(nextMode)}
   >
     <span className="workspace-mode-icon" aria-hidden="true">{isManagerMode ? <BriefcaseBusiness size={14} /> : <UserRound size={14} />}</span>
-    <span className="workspace-mode-copy"><strong>{currentLabel}</strong><small id="workspace-mode-description">{isManagerMode ? t('workspaceMode.companyHint', 'Company view') : t('workspaceMode.personalHint', 'Personal view')}</small></span>
+    <span className="workspace-mode-copy"><strong>{currentLabel}</strong><small id="workspace-mode-description">{isManagerMode ? t('workspaceMode.companyHint', 'Компани') : t('workspaceMode.personalHint', 'Хувь ажилтан')}</small></span>
     <span className="workspace-mode-track" aria-hidden="true"><i /></span>
   </button>
 }

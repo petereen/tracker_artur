@@ -10,6 +10,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from app.models.models import Base
+
 
 revision: str = "v0w1x2y3z4a5"
 down_revision: Union[str, Sequence[str], None] = "u9v0w1x2y3z4"
@@ -52,6 +54,11 @@ def upgrade() -> None:
     )
     op.create_index("ix_calendar_entries_org_period", "calendar_entries", ["organization_id", "starts_at"])
     op.create_index("ix_calendar_entries_account_period", "calendar_entries", ["account_id", "starts_at"])
+    # q5r6s7t8u9v0 creates the calendar connection table before this revision,
+    # but calendar links depend on the calendar entry table created here.
+    # Create the complete ORM shape now so the FK is valid and later sync
+    # migrations can simply add/check their compatibility constraints.
+    Base.metadata.tables["calendar_event_links"].create(bind=op.get_bind(), checkfirst=True)
     op.create_table(
         "holiday_records",
         sa.Column("id", sa.Integer(), primary_key=True), sa.Column("organization_id", sa.Integer(), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
@@ -74,6 +81,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("assistant_messages"); op.drop_table("assistant_conversations")
+    Base.metadata.tables["calendar_event_links"].drop(bind=op.get_bind(), checkfirst=True)
     op.drop_table("holiday_records"); op.drop_table("calendar_entries"); op.drop_table("project_requests")
     for column in ("work_branch", "work_direction", "birthday", "phone_number"):
         op.drop_column("employees", column)

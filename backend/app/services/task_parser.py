@@ -72,6 +72,7 @@ def _explicit_mongolian_deadline(
     else:
         day_word = match.group(1)
         hour, minute = match.group(2), match.group(3)
+    day_word = day_word.casefold()
     days_ahead = 0 if day_word.startswith("өнөөдөр") else 1 if day_word == "маргааш" else 2
     target_date = (now + timedelta(days=days_ahead)).date()
     target_time = time(hour=int(hour), minute=int(minute or 0))
@@ -144,6 +145,50 @@ _SCHEDULED_TASK_RE = re.compile(
 def is_scheduled_task(text: str) -> bool:
     """Recognize an informal meeting statement as a self-task candidate."""
     return bool(_SCHEDULED_TASK_RE.search(text or ""))
+
+
+def is_simple_self_meeting(text: str) -> bool:
+    """Only complete, standalone self-meeting requests may skip the model."""
+    day = r"(?:өнөөдөр|маргааш|нөгөөдөр)"
+    clock = r"(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*цаг(?:аас|т)?"
+    return bool(re.fullmatch(
+        rf"\s*(?:би\s+)?(?:{day}\s+(?:би\s+)?{clock}|{clock}\s+{day})"
+        r"\s+(?:хуралтай|уулзалттай)(?:\s+шүү)?[,.!]?\s+"
+        r"(?:надад\s+)?даалгавар\s+үүсгэ(?:эрэй)?[.!]?\s*",
+        text or "", flags=re.IGNORECASE,
+    ))
+
+
+def task_schedule_fields(text: str, *, now: datetime, tz: str) -> dict[str, str]:
+    """Recover a single explicit time; leave multiple dates/ranges to the model.
+
+    A meeting or unspecified scheduled time is a start. Completion language
+    explicitly marks a deadline. Never invent a meeting end time.
+    """
+    clocks = re.findall(r"\b\d{1,2}(?::\d{2}(?:\s*[ap]m)?|\s*цаг(?:аас|т)?|\s*[ap]m)\b", text, re.I)
+    days = re.findall(r"\b(?:өнөөдөр|маргааш|нөгөөдөр|today|tomorrow|завтра|послезавтра|сегодня|даваа|мягмар|лхагва|пүрэв|баасан|бямба|ням|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", text, re.I)
+    dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", text)
+    if len(clocks) > 1 or len(days) + len(dates) > 1:
+        return {}
+    if not clocks and not days and not dates:
+        return {}
+    if dates:
+        try:
+            day = datetime.fromisoformat(dates[0]).date()
+        except ValueError:
+            return {}
+        clock = parse_when(clocks[0], now=now, tz=tz) if clocks else None
+        if clocks and clock is None:
+            return {}
+        instant = datetime.combine(day, time(clock.hour, clock.minute) if clock else time.min, tzinfo=ZoneInfo(tz))
+    else:
+        instant = parse_task_text(text, now=now, tz=tz).deadline_at
+    if instant is None:
+        return {}
+    if not clocks:
+        instant = instant.replace(hour=0, minute=0, second=0, microsecond=0)
+    deadline = bool(re.search(r"гэхэд|дуусга|эцсийн хугацаа|deadline|\bby\b|\buntil\b|\bдо\b", text, re.I))
+    return {"deadline_at" if deadline else "start_at": instant.isoformat()}
 
 
 def _detect_priority(text: str) -> int:

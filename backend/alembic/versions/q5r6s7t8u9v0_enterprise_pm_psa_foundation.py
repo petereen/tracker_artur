@@ -27,12 +27,48 @@ NEW_TABLES = [
     "checkin_questions", "checkins", "checkin_answers", "report_comments",
     "objectives", "key_results", "milestones", "goal_links", "audit_logs",
     "domain_events", "job_queue", "idempotency_records", "calendar_connections",
-    "calendar_event_links",
 ]
 
 
+MODEL_TABLE_ALIASES = {
+    # The ORM kept the legacy model name while the table was renamed by the
+    # HR migration.  Keep the foundation migration's logical name stable.
+    "time_off": "leave_requests",
+}
+
+
+def _physical_table_name(name: str) -> str:
+    bind = op.get_bind()
+    existing = set(sa.inspect(bind).get_table_names())
+    if name in existing:
+        return name
+    return MODEL_TABLE_ALIASES.get(name, name)
+
+
+def _model_table(name: str):
+    return Base.metadata.tables.get(_physical_table_name(name))
+
+
 def _create(name: str) -> None:
-    Base.metadata.tables[name].create(bind=op.get_bind(), checkfirst=True)
+    # Preserve a legacy physical table so j0k1l2m3n4o5 can rename it and keep
+    # its data.  The ORM alias is only used when the table is genuinely new.
+    if name in MODEL_TABLE_ALIASES and _physical_table_name(name) == name:
+        return
+    table = _model_table(name)
+    if table is not None:
+        table.create(bind=op.get_bind(), checkfirst=True)
+
+
+def _drop(name: str) -> None:
+    if name in MODEL_TABLE_ALIASES and name in sa.inspect(op.get_bind()).get_table_names():
+        # This table predates the foundation migration; leave it for the HR
+        # migration that owns the legacy-to-canonical rename.
+        return
+    physical_name = _physical_table_name(name)
+    if physical_name in Base.metadata.tables:
+        Base.metadata.tables[physical_name].drop(bind=op.get_bind(), checkfirst=True)
+    else:
+        op.drop_table(physical_name, schema=None, if_exists=True)
 
 
 def _add_columns(table: str, columns: list[sa.Column]) -> None:
@@ -180,7 +216,7 @@ def upgrade() -> None:
         _create(name)
     for name in ("objectives", "key_results", "milestones", "goal_links"):
         _create(name)
-    for name in ("audit_logs", "domain_events", "job_queue", "idempotency_records", "calendar_connections", "calendar_event_links"):
+    for name in ("audit_logs", "domain_events", "job_queue", "idempotency_records", "calendar_connections"):
         _create(name)
 
     _add_columns("notification_outbox", [
@@ -200,14 +236,14 @@ def downgrade() -> None:
         op.drop_column("notification_outbox", column)
 
     for name in (
-        "calendar_event_links", "calendar_connections", "idempotency_records", "job_queue", "domain_events",
+        "calendar_connections", "idempotency_records", "job_queue", "domain_events",
         "audit_logs", "goal_links", "milestones", "key_results", "objectives", "report_comments",
         "checkin_answers", "checkins", "checkin_questions", "checkin_templates", "saved_views", "attachments",
         "task_check_items", "task_dependencies", "task_assignees", "resource_allocations", "time_off",
         "shift_schedules", "role_assignments", "exchange_rate_snapshots", "project_rates", "project_members",
         "employee_skills", "team_members", "refresh_sessions",
     ):
-        op.drop_table(name)
+        _drop(name)
 
     for index in ("uq_work_time_entries_open_employee", "ix_work_time_entries_local_work_date", "ix_work_time_entries_task_id", "ix_work_time_entries_project_id", "ix_work_time_entries_employee_id"):
         op.drop_index(index, table_name="work_time_entries")
@@ -246,7 +282,7 @@ def downgrade() -> None:
         op.drop_column("tasks", column)
 
     for name in ("projects", "clients", "skills", "teams"):
-        op.drop_table(name)
+        _drop(name)
     op.drop_table("user_accounts")
     op.drop_constraint("fk_employees_manager", "employees", type_="foreignkey")
     op.drop_constraint("uq_employees_email", "employees", type_="unique")

@@ -130,23 +130,26 @@ def create_action_preview_token(*, action_id: int, payload_digest: str, account_
     # Telegram callback_data is capped at 64 bytes.  The full validated
     # payload and expiry remain in AssistantPendingAction; this compact token
     # carries enough signed material to bind the callback to that row.
-    action_ref = base64.b32encode(str(action_id).encode()).decode().rstrip("=").lower()
+    action_ref = format(action_id, "x")
     short_nonce = (nonce or secrets.token_urlsafe(8)).replace("-", "").replace("_", "")[:8]
     digest_prefix = payload_digest[:12]
     expires_at = int(time.time()) + (ttl_seconds or settings.AI_PREVIEW_TOKEN_TTL_SECONDS)
     expires_ref = format(expires_at, "x")
-    canonical = f"{action_ref}|{digest_prefix}|{short_nonce}|{expires_ref}|{account_id}|{organization_id}|{channel}"
+    canonical = f"ap2|{action_ref}|{digest_prefix}|{short_nonce}|{expires_ref}|{account_id}|{organization_id}|{channel}"
     signature = base64.urlsafe_b64encode(hmac.new(settings.SECRET_KEY.encode(), canonical.encode(), hashlib.sha256).digest()).decode().rstrip("=")[:16]
-    return f"ap1.{action_ref}.{digest_prefix}.{short_nonce}.{expires_ref}.{signature}"
+    return f"ap2.{action_ref}.{digest_prefix}.{short_nonce}.{expires_ref}.{signature}"
 
 
 def decode_action_preview_token(token: str) -> dict[str, Any] | None:
     try:
         version, action_ref, digest_prefix, nonce, expires_ref, signature = token.split(".", 5)
-        if version != "ap1" or not action_ref or len(digest_prefix) != 12 or not nonce or not expires_ref or len(signature) != 16:
+        if version not in {"ap1", "ap2"} or not action_ref or len(digest_prefix) != 12 or not nonce or not expires_ref or len(signature) != 16:
             return None
-        padded = action_ref.upper() + "=" * (-len(action_ref) % 8)
-        action_id = base64.b32decode(padded.encode()).decode()
+        if version == "ap2":
+            action_id = str(int(action_ref, 16))
+        else:
+            padded = action_ref.upper() + "=" * (-len(action_ref) % 8)
+            action_id = base64.b32decode(padded.encode()).decode()
         if not action_id.isdigit():
             return None
         expires_at = int(expires_ref, 16)
@@ -154,7 +157,7 @@ def decode_action_preview_token(token: str) -> dict[str, Any] | None:
         return None
     if expires_at < int(time.time()):
         return None
-    return {"kind": "oyuns_action_preview", "action_id": action_id, "digest_prefix": digest_prefix, "nonce": nonce, "expires_at": expires_at, "expires_ref": expires_ref, "signature": signature}
+    return {"kind": "oyuns_action_preview", "version": version, "action_id": action_id, "digest_prefix": digest_prefix, "nonce": nonce, "expires_at": expires_at, "expires_ref": expires_ref, "signature": signature}
 
 
 def verify_action_preview_token(token: str, *, payload_digest: str, account_id: int,
@@ -163,5 +166,7 @@ def verify_action_preview_token(token: str, *, payload_digest: str, account_id: 
     if not claims or claims["digest_prefix"] != payload_digest[:12]:
         return False
     canonical = f"{base64.b32encode(str(claims['action_id']).encode()).decode().rstrip('=').lower()}|{claims['digest_prefix']}|{claims['nonce']}|{claims['expires_ref']}|{account_id}|{organization_id}|{channel}"
+    if claims["version"] == "ap2":
+        canonical = f"ap2|{int(claims['action_id']):x}|{claims['digest_prefix']}|{claims['nonce']}|{claims['expires_ref']}|{account_id}|{organization_id}|{channel}"
     expected = base64.urlsafe_b64encode(hmac.new(settings.SECRET_KEY.encode(), canonical.encode(), hashlib.sha256).digest()).decode().rstrip("=")[:16]
     return hmac.compare_digest(expected, str(claims["signature"]))

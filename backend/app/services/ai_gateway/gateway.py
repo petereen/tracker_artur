@@ -32,7 +32,8 @@ from app.services.mcp.references import resolve_resource_reference, resource_ref
 from app.services.mcp.results import sanitize_text
 from app.services.file_search_service import FileSearchPrincipal, KnowledgeSearchResult, is_file_search_query, search_knowledge_documents, search_tokens
 from app.services.assistant_text import detect_language
-from app.services.task_parser import is_scheduled_task, parse_task_text
+from app.services.task_parser import is_scheduled_task, is_simple_self_meeting, parse_task_text, task_schedule_fields
+from app.services.task_preview import task_preview_text
 from app.models.models import Employee
 
 log = logging.getLogger(__name__)
@@ -59,7 +60,9 @@ ANSWER_SYSTEM = """You are OYUNS, a reliable enterprise assistant shared by Tele
 
 The grounding context includes the caller's own employee record (name and an opaque `employee_reference`). When the user asks about their own tasks, workload, calendar, or statistics (for example "my tasks", "миний даалгавар", "what do I have today"), pass that `employee_reference` to the relevant read tool. Never ask the user for their name, employee ID, or registered email to resolve their own identity: the system already knows who they are.
 
-For multi-statement requests, separate read intents from action intents. Complete safe retrieval first when it is needed to resolve the action. For task creation or delegation, call the available task-preview tool (either the legacy create/delegate tool or an `oyuns_tasks_prepare_*` tool) with a concise title, all relevant context in the description, the resolved assignee, priority, and an ISO-8601 deadline with UTC offset when the user supplied a time. Creating a task for the current user requires only a title: use assignee="self" and the default priority when no assignee or priority was supplied. Delegating a task requires only a title and a clearly named target employee. Treat description, reviewer, project, priority, and deadline as optional; pass null/default values instead of asking the user for them. Ask one focused clarification question only when the title, delegated target, or a supplied date/time cannot be safely resolved. Always present a task/update preview for confirmation; never claim a mutation happened from a preview. A calendar read does not create or schedule an event; do not claim it did. If the product has no write tool for a requested meeting/reminder, say that clearly and ask whether the user wants an authorized task/reminder draft instead.
+Use current_time and timezone from grounding to resolve relative dates. For task creation, put scheduled/meeting times in start_at; use deadline_at only for an explicit completion deadline or end. Do not invent an end time. Put every named participant in participants and only explicit reviewers in reviewer. Preserve location and other relevant context in description. All timestamps must include the caller's UTC offset.
+
+For multi-statement requests, separate read intents from action intents. Complete safe retrieval first when it is needed to resolve the action. For task creation or delegation, call the available task-preview tool (either the legacy create/delegate tool or an `oyuns_tasks_prepare_*` tool) with a concise title, all relevant context in the description, the resolved assignee, priority, and ISO-8601 start_at/deadline_at values with UTC offsets according to the scheduling rules above. Creating a task for the current user requires only a title: use assignee="self" and the default priority when no assignee or priority was supplied. Delegating a task requires only a title and a clearly named target employee. Treat description, reviewer, project, priority, and deadline as optional; pass null/default values instead of asking the user for them. Ask one focused clarification question only when the title, delegated target, or a supplied date/time cannot be safely resolved. Always present a task/update preview for confirmation; never claim a mutation happened from a preview. A calendar read does not create or schedule an event; do not claim it did. If the product has no write tool for a requested meeting/reminder, say that clearly and ask whether the user wants an authorized task/reminder draft instead.
 
 For file requests, use the available knowledge-search tool (legacy `file_search_tool` or `oyuns_knowledge_search`) for content or semantic search; use the legacy directory operation only when that legacy tool is present. Report only authorized results and cite returned sources. For tool results with status=empty, explain that no matching authorized records were found. For status=indexing, explain that metadata matched while content indexing is still pending and offer the file itself when delivery was requested. For status=denied, explain the access or missing-parameter issue without revealing restricted data. For status=unavailable or partial, acknowledge the specific affected capability, state whether any action was performed, and offer a safe retry or focused clarification. Never expose internal IDs, action tokens, raw JSON, credentials, hidden fields, or retrieval metadata. For current/factual requests, use web search and cite returned sources. Never claim an action was performed until the application confirms it.
 
@@ -246,7 +249,7 @@ class AIGateway:
         current = str(user_items[-1].get("content", "")).strip()
         if not current:
             raise GatewayError("A user message is required", status_code=400)
-        grounding_context: dict | None = None
+        grounding_context: dict = {"timezone": "Asia/Ulaanbaatar"}
         if actor_context.employee_id is not None:
             self_identity: dict = {
                 "name": actor_context.email,
@@ -262,7 +265,14 @@ class AIGateway:
                 self_identity["name"] = employee.name or actor_context.email
                 if employee.telegram_username:
                     self_identity["telegram_username"] = employee.telegram_username
-            grounding_context = {"current_employee": self_identity}
+                grounding_context["timezone"] = employee.timezone or "Asia/Ulaanbaatar"
+            grounding_context["current_employee"] = self_identity
+        try:
+            zone = ZoneInfo(grounding_context["timezone"])
+        except Exception:
+            zone = ZoneInfo("Asia/Ulaanbaatar")
+            grounding_context["timezone"] = zone.key
+        grounding_context["current_time"] = datetime.now(zone).isoformat()
         request = GatewayRequest(
             text=current,
             history=history[:-1],
@@ -273,6 +283,10 @@ class AIGateway:
             database=db,
             grounding_context=grounding_context,
         )
+        if is_simple_self_meeting(current):
+            preview = await self._offline_task_preview(db, request, fast=True)
+            if preview is not None:
+                return preview
         # Knowledge retrieval is an enhancement to the live model turn.  A
         # missing/stale retrieval migration or a transient database/index
         # failure must not turn every ordinary assistant message into HTTP
@@ -418,6 +432,8 @@ class AIGateway:
         raise GatewayError("Live model unavailable", kind="network", retryable=True, stage=stage)
 
     async def _classify_model(self, text: str) -> RoutingDecision:
+        if "tasks_write" in self._infer_enterprise_intents(text):
+            return RoutingDecision(model_key="luna", reasoning_effort="none", output_format="plain_text", verbosity="low", action_intents=["tasks_write"])
         config = registry()
         classifier_key = "luna" if "luna" in config.models else "terra" if "terra" in config.models else next(iter(config.models), "luna")
         model = config.models.get(classifier_key)
@@ -457,49 +473,68 @@ class AIGateway:
             enterprise_intents=["tasks_write"] if decision.action_intents or scheduled_task else [],
         )
 
-    async def _offline_task_preview(self, db: Any, request: GatewayRequest) -> GatewayResponse | None:
-        """Prepare an implicit meeting task when the live model is unavailable."""
-        if request.actor_context is None or not is_scheduled_task(request.text):
+    async def _offline_task_preview(self, db: Any, request: GatewayRequest, *, fast: bool = False) -> GatewayResponse | None:
+        """Prepare only unambiguous self meetings through the governed tool."""
+        if request.actor_context is None or not is_simple_self_meeting(request.text):
             return None
-        timezone_name = "Asia/Ulaanbaatar"
-        if request.actor_context.employee_id is not None:
-            employee = await db.get(Employee, request.actor_context.employee_id)
-            timezone_name = getattr(employee, "timezone", None) or timezone_name
+        context = request.grounding_context or {}
+        timezone_name = context.get("timezone", "Asia/Ulaanbaatar")
         try:
             zone = ZoneInfo(timezone_name)
         except Exception:
             zone = ZoneInfo("Asia/Ulaanbaatar")
-        parsed = parse_task_text(request.text, now=datetime.now(zone), tz=timezone_name)
-        result = await self.tool_registry.dispatch_tool(
-            "oyuns_tasks_prepare_create",
-            {
-                "title": parsed.title,
-                "description": request.text[:6_000],
-                "assignee": "self",
-                "reviewer": None,
-                "priority": parsed.priority,
-                "deadline_at": parsed.deadline_at.isoformat() if parsed.deadline_at else None,
-                "start_at": parsed.deadline_at.isoformat() if parsed.deadline_at else None,
-                "project_ref": None,
-            },
-            request.actor_context,
-            db=db,
-            conversation_id=request.conversation_id,
-        )
-        if result.get("status") not in {"ok", "empty"}:
-            return None
-        answer = "Даалгаврын ноорог бэлэн боллоо. Баталгаажуулбал үүсгэнэ."
+        now = datetime.fromisoformat(context["current_time"]) if context.get("current_time") else datetime.now(zone)
+        parsed = parse_task_text(request.text, now=now, tz=timezone_name)
+        async def dispatch():
+            return await self.tool_registry.dispatch_tool(
+                "oyuns_tasks_prepare_create",
+                {
+                    "title": "Уулзалт" if "уулзалт" in request.text.casefold() else "Хурал",
+                    "description": request.text[:6_000],
+                    "assignee": "self",
+                    "reviewer": None,
+                    "priority": parsed.priority,
+                    "deadline_at": None,
+                    "start_at": parsed.deadline_at.isoformat() if parsed.deadline_at else None,
+                    "project_ref": None,
+                },
+                request.actor_context,
+                db=db,
+                conversation_id=request.conversation_id,
+            )
+        try:
+            async with asyncio.timeout(settings.AI_GATEWAY_TOOL_TIMEOUT_SECONDS):
+                if isinstance(db, AsyncSession):
+                    async with db.begin_nested() as savepoint:
+                        result = await dispatch()
+                        if result.get("status") == "unavailable":
+                            await savepoint.rollback()
+                else:
+                    result = await dispatch()
+        except Exception:
+            log.exception("ai_gateway.task_preview_failed channel=%s", request.channel)
+            result = {"status": "unavailable", "data": {}}
+        pending = result.get("data", {}).get("pending_action")
+        if not pending:
+            if not fast:
+                return None
+            return GatewayResponse(
+                answer="Даалгаврын ноорог хадгалж чадсангүй. Түр хүлээгээд дахин оролдоно уу." if request.language_hint == "mn" else "The task draft could not be saved. Please retry shortly.",
+                sources=[], route="task_preview_unavailable", model="local-task-parser", cache="bypass",
+                web_search_used=False, usage={}, tool_results=[result], degraded=True, degraded_reason="task_preview_unavailable",
+            )
+        answer = task_preview_text(pending, request.actor_context.detected_language)
         return GatewayResponse(
             answer=answer,
             sources=[],
-            route="offline_task_preview",
+            route="task_fast_path" if fast else "offline_task_preview",
             model="local-task-parser",
             cache="bypass",
             web_search_used=False,
             usage={},
             tool_results=[result],
-            degraded=True,
-            degraded_reason="live_ai_unavailable",
+            degraded=not fast,
+            degraded_reason=None if fast else "live_ai_unavailable",
         )
 
     @staticmethod
@@ -703,6 +738,16 @@ class AIGateway:
             ]
             async def local_executor(name: str, arguments: dict) -> dict:
                 definition = self.tool_registry.get(name)
+                if name == "oyuns_tasks_prepare_create":
+                    context = request.grounding_context or {}
+                    timezone_name = context.get("timezone", "Asia/Ulaanbaatar")
+                    now = datetime.fromisoformat(context["current_time"]) if context.get("current_time") else datetime.now(ZoneInfo(timezone_name))
+                    schedule = task_schedule_fields(request.text, now=now, tz=timezone_name)
+                    arguments = {**arguments, **schedule}
+                    # A single scheduled start is not an end. Older prompts
+                    # often copied that same instant into deadline_at.
+                    if schedule.get("start_at"):
+                        arguments["deadline_at"] = None
                 # AsyncSession is not safe for concurrent operations. Read
                 # calls receive independent short-lived sessions; previews
                 # stay on the request transaction and therefore serialize.
@@ -712,10 +757,16 @@ class AIGateway:
                             name, arguments, request.actor_context, db=read_db,
                             conversation_id=request.conversation_id,
                         )
-                return await self.tool_registry.dispatch_tool(
-                    name, arguments, request.actor_context, db=request.database,
-                    conversation_id=request.conversation_id,
-                )
+                if isinstance(request.database, AsyncSession):
+                    async with request.database.begin_nested() as savepoint:
+                        result = await self.tool_registry.dispatch_tool(
+                            name, arguments, request.actor_context, db=request.database,
+                            conversation_id=request.conversation_id,
+                        )
+                        if result.get("status") == "unavailable":
+                            await savepoint.rollback()
+                        return result
+                return await self.tool_registry.dispatch_tool(name, arguments, request.actor_context, db=request.database, conversation_id=request.conversation_id)
             request.execute_tool = local_executor
         else:
             tools = [request.mcp_tool] if request.mcp_tool else (list(request.tools) if request.execute_tool else [])
@@ -827,19 +878,33 @@ class AIGateway:
                                 log.exception("ai_gateway.tool_execution_failed tool=%s", call.get("name"))
                                 result = {"status": "unavailable", "data": {"reason": "The requested enterprise capability is temporarily unavailable. No action was performed."}, "sources": [], "deliveries": [], "warnings": []}
                         return call, result
+                    async def timed_call(call: dict) -> tuple[dict, dict]:
+                        try:
+                            return await asyncio.wait_for(run_call(call), timeout=settings.AI_GATEWAY_TOOL_TIMEOUT_SECONDS)
+                        except TimeoutError:
+                            log.warning("ai_gateway.tool_timeout tool=%s", call.get("name"))
+                            return call, {"status": "unavailable", "data": {"reason": "The requested tool timed out. No confirmed action was performed."}, "sources": [], "deliveries": []}
                     if request.actor_context and not mutation_calls and len(selected_calls) > 1:
                         semaphore = asyncio.Semaphore(max(1, settings.AI_GATEWAY_READ_CONCURRENCY))
                         async def bounded(call: dict) -> tuple[dict, dict]:
                             async with semaphore:
-                                return await asyncio.wait_for(run_call(call), timeout=settings.AI_GATEWAY_TOOL_TIMEOUT_SECONDS)
+                                return await timed_call(call)
                         results = await asyncio.gather(*(bounded(call) for call in selected_calls))
                     else:
                         results = []
                         for call in selected_calls:
-                            results.append(await asyncio.wait_for(run_call(call), timeout=settings.AI_GATEWAY_TOOL_TIMEOUT_SECONDS))
+                            results.append(await timed_call(call))
                     for call, result in results:
                         if isinstance(result, dict):
                             collected_tool_results.append(result)
+                            pending = result.get("data", {}).get("pending_action")
+                            if pending and call.get("name") == "oyuns_tasks_prepare_create":
+                                return GatewayResponse(
+                                    answer=task_preview_text(pending, request.actor_context.detected_language if request.actor_context else classification.language),
+                                    sources=request.grounding_sources, route="task_preview", model=model.id,
+                                    cache="bypass", web_search_used=False, usage=body.get("usage", {}),
+                                    tool_results=collected_tool_results,
+                                )
                         inputs.append({"type": "function_call_output", "call_id": call.get("call_id"), "output": json.dumps(result, default=str, ensure_ascii=False)})
                 raise GatewayError("Live model exceeded tool-call budget", status_code=502)
             except GatewayError as exc:

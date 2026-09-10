@@ -179,11 +179,11 @@ class AssistantTaskInput(_Strict):
     def _trim_optional_text(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
 
-    @field_validator("deadline_at")
+    @field_validator("start_at", "deadline_at")
     @classmethod
     def _require_timezone(cls, value: datetime | None) -> datetime | None:
         if value is not None and (value.tzinfo is None or value.utcoffset() is None):
-            raise ValueError("deadline_at must include a UTC offset")
+            raise ValueError("Task timestamps must include a UTC offset")
         return value
 
 
@@ -872,7 +872,7 @@ async def _resolve_task_action_payload(db: AsyncSession, actor: ActorContext, da
         "assignee_ids": participant_ids or ([assignee_id] if assignee_id else []),
         "reviewer_id": reviewer_id,
         "priority": data.priority,
-        "start_at": (data.start_at or data.deadline_at).isoformat() if (data.start_at or data.deadline_at) else None,
+        "start_at": data.start_at.isoformat() if data.start_at else None,
         "deadline_at": data.deadline_at.isoformat() if data.deadline_at else None,
         "project_id": project_id,
         "action_type": action_type,
@@ -914,6 +914,7 @@ def _assistant_task_output(task: Task, *, assignee_ids: list[int], reviewer_ids:
         "description": task.description,
         "status": task.workflow_status,
         "priority": task.priority,
+        "start_at": task.start_at.isoformat() if task.start_at else None,
         "deadline_at": task.deadline_at.isoformat() if task.deadline_at else None,
         "project_id": task.project_id,
         "assignee_ids": sorted(set(assignee_ids)),
@@ -978,7 +979,7 @@ async def _confirm_task_creation(db: AsyncSession, actor: ActorContext, action: 
         return _result("denied", {"reason": "Action is unavailable or expired"})
     payload = dict(action.payload or {})
     deadline_at = datetime.fromisoformat(payload["deadline_at"]) if payload.get("deadline_at") else None
-    start_at = datetime.fromisoformat(payload["start_at"]) if payload.get("start_at") else deadline_at
+    start_at = datetime.fromisoformat(payload["start_at"]) if payload.get("start_at") else None
     assignee_id = payload.get("assignee_id")
     reviewer_id = payload.get("reviewer_id")
     task = Task(
@@ -1000,7 +1001,7 @@ async def _confirm_task_creation(db: AsyncSession, actor: ActorContext, action: 
     assignee_ids = list(payload.get("assignee_ids") or ([assignee_id] if assignee_id else []))
     reviewer_ids = [reviewer_id] if reviewer_id else []
     for employee_id in assignee_ids:
-        db.add(TaskAssignee(task_id=task.id, employee_id=employee_id, assignment_role="primary"))
+        db.add(TaskAssignee(task_id=task.id, employee_id=employee_id, assignment_role="primary" if employee_id == assignee_id else "contributor"))
     for employee_id in reviewer_ids:
         db.add(TaskReviewer(task_id=task.id, employee_id=employee_id))
     output = _assistant_task_output(task, assignee_ids=assignee_ids, reviewer_ids=reviewer_ids)

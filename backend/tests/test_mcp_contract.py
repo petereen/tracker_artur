@@ -104,7 +104,7 @@ def test_gateway_uses_remote_mcp_and_preserves_deferred_list_context(monkeypatch
 
     async def classify(_text):
         return Classification(
-            category="simple_qa", language="mn", requires_freshness=False,
+            category="simple_qa", language="en", requires_freshness=False,
             requires_enterprise_tools=True, requested_modalities=["text"], cache_eligible=False,
         )
 

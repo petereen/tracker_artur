@@ -268,8 +268,8 @@ async def _enterprise_route(
                 callback_token = None
         else:
             callback_token = legacy_token
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Confirm task", callback_data=f"assistant-confirm:{callback_token}")]]) if callback_token else None
-        await _answer(message, html.escape(result["answer"]), reply_markup=keyboard, parse_mode="HTML")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Баталгаажуулах" if detected == "mn" else "Confirm task", callback_data=callback_token)]]) if callback_token else None
+        await _answer(message, result["answer"], reply_markup=keyboard, parse_mode=None)
         protected_links = [delivery.get("url") for delivery in result.get("deliveries", []) if delivery.get("kind") == "authenticated_link" and delivery.get("url")]
         if protected_links:
             await _answer(message, "Open protected file: " + "\n".join(protected_links), parse_mode=None)
@@ -694,6 +694,8 @@ async def route_and_respond(
 
 
 @router.callback_query(F.data.startswith("assistant-confirm:"))
+@router.callback_query(F.data.startswith("ap1."))
+@router.callback_query(F.data.startswith("ap2."))
 async def confirm_enterprise_task_update(callback: CallbackQuery, tg_id: str | None = None):
     token = (callback.data or "").split(":", 1)[-1]
     if not tg_id:

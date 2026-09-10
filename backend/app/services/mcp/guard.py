@@ -27,7 +27,7 @@ class MCPGuard:
         self._connect_attempted = True
         try:
             from redis.asyncio import Redis
-            client = Redis.from_url(settings.AI_REDIS_URL, decode_responses=True)
+            client = Redis.from_url(settings.AI_REDIS_URL, decode_responses=True, socket_connect_timeout=1, socket_timeout=1)
             await client.ping()
             self._redis = client
         except Exception:

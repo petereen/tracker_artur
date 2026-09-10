@@ -59,6 +59,9 @@ def test_freshness_language_repair_does_not_keep_removed_web_tool_choice(monkeyp
     posted = []
 
     class Cache:
+        async def get_exact(self, _key):
+            return None
+
         async def circuit_open(self, _key):
             return False
 

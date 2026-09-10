@@ -1,6 +1,24 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Repair the enterprise foundation migration for renamed `time_off` metadata and calendar-table dependency ordering (`backend/alembic/versions/q5r6s7t8u9v0_enterprise_pm_psa_foundation.py`, `backend/alembic/versions/v0w1x2y3z4a5_erp_reliability_workspace.py`)
+- [x] Preserve legacy `time_off` data for the follow-up rename migration when the restored database still has the old physical table (`backend/alembic/versions/q5r6s7t8u9v0_enterprise_pm_psa_foundation.py`)
+- [x] Keep foundation rollback from dropping a pre-existing legacy `time_off` table (`backend/alembic/versions/q5r6s7t8u9v0_enterprise_pm_psa_foundation.py`)
+- [x] Extend server schedule recovery to ISO dates and weekdays; date-only requests no longer inherit the current clock time, and AM/PM ranges are left intact (`backend/app/services/task_parser.py`)
+- [x] Verify confirmed task dates, notifications, conversation persistence, and idempotent confirmation against isolated PostgreSQL 16 for Web and Telegram; both integration tests pass and the test server is stopped
+- [x] Add opt-in PostgreSQL preview/confirmation/reload/replay test using real task, audit, conversation, and notification tables in a temporary schema; add date-only and AM/PM-range cases (`backend/tests`)
+- [x] Correct reserved pytest parameter name in new schedule regression cases (`backend/tests/test_assistant_task_reliability.py`)
+- [x] Shorten signed action tokens and send them directly as Telegram callbacks; retain old token/button compatibility and avoid HTML chunk parsing errors (`backend/app/core/security.py`, `backend/app/bot/assistant_handlers.py`)
+- [x] Wire timezone/current-time grounding, explicit schedule recovery, no-model self-meeting previews, and immediate stored-preview responses into the shared gateway; persist starts independently of deadlines and retain contributor roles
+- [x] Add conservative standalone meeting detection, schedule recovery, and deterministic rendering of stored preview fields (`backend/app/services/task_parser.py`, `backend/app/services/task_preview.py`)
+- [x] Run 75 focused backend tests plus two PostgreSQL integration tests covering parser, gateway, Telegram delivery/callbacks, task creation fields, security, and transaction recovery; all 77 pass in isolated Python 3.12 environment
+- [x] Document separate backend/bot redeployment and live verification steps (`docs/assistant-reliability.md`)
+- [x] Add regression cases for actual Telegram payload bytes/delivery/callbacks, old-token compatibility, local times, live-model omissions, confirmation fields, and zero-model fast paths (`backend/tests/test_assistant_task_reliability.py`)
+- [x] Fix capitalized Mongolian relative-day parsing (Маргааш previously resolved two days ahead) and refresh stale tool/cache test fixtures exposed by dependency-backed tests
+- [x] Remove contradictory deadline prompt wording and align remote-tool test language with its English fixture
+- [x] Cover fast-path timeout recovery and reject timezone-less task starts (`backend/tests/test_assistant_task_reliability.py`)
+- [x] Skip model classification for explicit task-write intents and isolate preview failures/timeouts so they do not poison the conversation transaction (`backend/app/services/ai_gateway/gateway.py`)
+- [x] Bound Redis socket waits and fast-path preview execution; report draft storage failures without retrying AI models (`backend/app/services/ai_gateway`, `backend/app/services/mcp/guard.py`)
 - [x] Replace assistant lookup whole-request rollback with savepoints so failed optional reads preserve conversations and messages in Web and Telegram (`backend/app/services/ai_gateway/gateway.py`)
 - [x] Add real AsyncSession regression coverage for new/existing Web/Telegram conversations and failed identity/knowledge lookups (`backend/tests/test_assistant_transaction_recovery.py`)
 - [x] Verify assistant transaction recovery in isolated Python 3.12 environment: eight real AsyncSession/SQLite cases pass; the previous implementation fails all four knowledge-failure cases. Add repeatable test dependencies (`backend/requirements-test.txt`)
