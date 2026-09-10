@@ -29,3 +29,10 @@ def test_task_reviewer_backfill_depends_on_reviewer_column_migration():
     source = (VERSIONS / "c1d2e3f4g5h6_add_task_reviewer_lists.py").read_text()
 
     assert 'down_revision = "a0b1c2d3e4f5"' in source
+
+
+def test_account_preferences_migration_is_safe_when_foundation_already_created_column():
+    source = (VERSIONS / "d6e7f8g9h0i1_account_preferences.py").read_text()
+
+    assert "def _has_column" in source
+    assert 'if _has_column("user_accounts", "preferences"):' in source

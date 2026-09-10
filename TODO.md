@@ -6,6 +6,7 @@
 - [x] Keep foundation rollback from dropping a pre-existing legacy `time_off` table (`backend/alembic/versions/q5r6s7t8u9v0_enterprise_pm_psa_foundation.py`)
 - [x] Order task-reviewer backfill after the migration that adds `tasks.reviewer_id` (`backend/alembic/versions/c1d2e3f4g5h6_add_task_reviewer_lists.py`)
 - [x] Make calendar-entry creation and indexes retry-safe after a partial migration attempt (`backend/alembic/versions/v0w1x2y3z4a5_erp_reliability_workspace.py`)
+- [x] Make account-preferences migration compatible with the foundation ORM table shape (`backend/alembic/versions/d6e7f8g9h0i1_account_preferences.py`)
 - [x] Extend server schedule recovery to ISO dates and weekdays; date-only requests no longer inherit the current clock time, and AM/PM ranges are left intact (`backend/app/services/task_parser.py`)
 - [x] Verify confirmed task dates, notifications, conversation persistence, and idempotent confirmation against isolated PostgreSQL 16 for Web and Telegram; both integration tests pass and the test server is stopped
 - [x] Add opt-in PostgreSQL preview/confirmation/reload/replay test using real task, audit, conversation, and notification tables in a temporary schema; add date-only and AM/PM-range cases (`backend/tests`)

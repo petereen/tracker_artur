@@ -13,7 +13,13 @@ branch_labels = None
 depends_on = None
 
 
+def _has_column(table: str, column: str) -> bool:
+    return any(item["name"] == column for item in sa.inspect(op.get_bind()).get_columns(table))
+
+
 def upgrade() -> None:
+    if _has_column("user_accounts", "preferences"):
+        return
     op.add_column(
         "user_accounts",
         sa.Column(
