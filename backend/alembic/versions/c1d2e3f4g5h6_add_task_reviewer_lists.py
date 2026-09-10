@@ -1,13 +1,13 @@
 """add multiple task reviewers
 
 Revision ID: c1d2e3f4g5h6
-Revises: z4a5b6c7d8e9
+Revises: a0b1c2d3e4f5
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "c1d2e3f4g5h6"
-down_revision = "z4a5b6c7d8e9"
+down_revision = "a0b1c2d3e4f5"
 branch_labels = None
 depends_on = None
 

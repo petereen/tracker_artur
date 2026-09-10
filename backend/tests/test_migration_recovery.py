@@ -23,3 +23,9 @@ def test_calendar_event_links_are_created_after_calendar_entries_exist():
     assert erp.index('op.create_table(\n        "calendar_entries"') < erp.index(
         'Base.metadata.tables["calendar_event_links"].create'
     )
+
+
+def test_task_reviewer_backfill_depends_on_reviewer_column_migration():
+    source = (VERSIONS / "c1d2e3f4g5h6_add_task_reviewer_lists.py").read_text()
+
+    assert 'down_revision = "a0b1c2d3e4f5"' in source

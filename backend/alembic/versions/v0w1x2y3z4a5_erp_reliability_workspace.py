@@ -19,6 +19,12 @@ branch_labels = None
 depends_on = None
 
 
+def _create_index_if_missing(name: str, table: str, columns: list[str]) -> None:
+    indexes = {item["name"] for item in sa.inspect(op.get_bind()).get_indexes(table)}
+    if name not in indexes:
+        op.create_index(name, table, columns)
+
+
 def upgrade() -> None:
     op.add_column("employees", sa.Column("phone_number", sa.Text(), nullable=True))
     op.add_column("employees", sa.Column("birthday", sa.Date(), nullable=True))
@@ -51,9 +57,10 @@ def upgrade() -> None:
         sa.Column("starts_at", sa.DateTime(timezone=True), nullable=False), sa.Column("ends_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("remind_at", sa.DateTime(timezone=True)), sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()), sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        if_not_exists=True,
     )
-    op.create_index("ix_calendar_entries_org_period", "calendar_entries", ["organization_id", "starts_at"])
-    op.create_index("ix_calendar_entries_account_period", "calendar_entries", ["account_id", "starts_at"])
+    _create_index_if_missing("ix_calendar_entries_org_period", "calendar_entries", ["organization_id", "starts_at"])
+    _create_index_if_missing("ix_calendar_entries_account_period", "calendar_entries", ["account_id", "starts_at"])
     # q5r6s7t8u9v0 creates the calendar connection table before this revision,
     # but calendar links depend on the calendar entry table created here.
     # Create the complete ORM shape now so the FK is valid and later sync
