@@ -41,7 +41,7 @@ const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/worktime': 'Ажлын цагийн бүртгэл', '/hr': 'Хүний нөөц', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
   '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө', '/contracts': 'Гэрээ',
   '/chat': 'Чат',
-  '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо',
+  '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо', '/contracts/archive': 'Гэрээний архив',
   '/erp': 'ERP үйл ажиллагаа',
   '/erp/payroll': 'Монгол цалингийн тооцоо',
   '/erp/payroll/tax-benefits': 'Татвар ба хангамж',
@@ -85,7 +85,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         const event = JSON.parse(message.data)
         cursor = event.id
         cursorStorage.set(cursorKey, String(cursor))
-        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', contracts: 'contracts', okrs: 'objectives', notifications: 'notifications', hr: 'hr', company_files: 'company-files', erp: 'erp', chat: 'chat', chat_presence: 'chat' }
+        const topicMap: Record<string, string> = { tasks: 'tasks', projects: 'projects', clocks: 'clock', capacity: 'capacity', reports: 'reports', contracts: 'contracts', contract_archive: 'contract-archive', okrs: 'objectives', notifications: 'notifications', hr: 'hr', company_files: 'company-files', erp: 'erp', chat: 'chat', chat_presence: 'chat' }
         const key = topicMap[event.topic]
         if (key) queryClient.invalidateQueries({ queryKey: ['v1', key] })
         if (event.topic === 'chat' && event.operation === 'message_sent' && event.payload?.sender_account_id !== accountId) {

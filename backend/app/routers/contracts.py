@@ -11,22 +11,24 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.enterprise_deps import ActorContext, get_actor
-from app.models.contracts import ContractComment, ContractDocument, ContractFile, ContractReview, ContractRevision
-from app.models.models import AuditLog, Employee, Project, Task, UserAccount, UserNotification
+from app.core.enterprise_deps import ActorContext, get_actor, require_roles
+from app.models.contracts import ContractArchiveAccess, ContractArchiveEntry, ContractArchiveFolder, ContractComment, ContractDocument, ContractFile, ContractReview, ContractRevision
+from app.models.models import AuditLog, Employee, Project, RoleAssignment, Task, UserAccount, UserNotification
 from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
 from app.services.enterprise_events import record_change
-from app.services.malware_scanner import MalwareDetected, scan_upload
+from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
 
 
 router = APIRouter()
 MANAGEMENT_ROLES = ("admin", "manager", "team_lead")
+ARCHIVE_MANAGER_ROLES = ("admin", "legal_counsel")
 BODY_NODE_TYPES = {"doc", "paragraph", "heading", "bulletList", "orderedList", "listItem", "blockquote", "hardBreak", "text", "table", "tableRow", "tableCell", "tableHeader", "horizontalRule"}
 BODY_MARK_TYPES = {"bold", "italic", "underline", "link"}
 SUPPORTING_TYPES = {"application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png", "image/tiff"}
@@ -77,6 +79,43 @@ class CommentInput(BaseModel):
     revision_id: int
     parent_id: int | None = None
     anchor: dict[str, Any] | None = None
+
+
+class ArchiveFolderInput(BaseModel):
+    name: str = Field(min_length=1, max_length=240)
+    description: str | None = Field(default=None, max_length=4000)
+    parent_id: int | None = None
+
+
+class ArchiveFolderPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=240)
+    description: str | None = Field(default=None, max_length=4000)
+    version: int = Field(default=1, ge=1)
+
+
+class ArchiveGrantInput(BaseModel):
+    account_id: int
+    permission: Literal["view", "edit"] = "view"
+
+
+class ArchiveAccessInput(BaseModel):
+    name: str = Field(min_length=1, max_length=240)
+    description: str | None = Field(default=None, max_length=4000)
+    version: int = Field(default=1, ge=1)
+    grants: list[ArchiveGrantInput] = Field(default_factory=list, max_length=100)
+
+
+class ArchiveEntryPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=240)
+    category: str | None = Field(default=None, max_length=240)
+
+
+class ArchiveReviewInput(BaseModel):
+    decision: Literal["approve", "reject"]
+    folder_id: int | None = None
+    new_folder: ArchiveFolderInput | None = None
+    category: str | None = Field(default=None, max_length=240)
+    reason: str | None = Field(default=None, max_length=5000)
 
 
 def _now() -> datetime:
@@ -260,7 +299,7 @@ async def list_contracts(view: Literal["all", "drafts", "pending_my_approval", "
     rows = (await db.execute(query.order_by(ContractDocument.updated_at.desc(), ContractDocument.id.desc()).limit(500))).all()
     pending_ids = set((await db.execute(select(ContractReview.contract_id).where(ContractReview.reviewer_account_id == actor.account_id, ContractReview.decision == "pending", ContractReview.round_number == ContractDocument.submission_round).join(ContractDocument, ContractDocument.id == ContractReview.contract_id, isouter=False))).scalars().all())
     def matches(key: str, contract: ContractDocument) -> bool:
-        return key == "all" or (key == "drafts" and contract.author_account_id == actor.account_id and contract.status == "DRAFT") or (key == "pending_my_approval" and contract.status == "PENDING_REVIEW" and contract.id in pending_ids) or (key == "submitted_by_me" and contract.author_account_id == actor.account_id and contract.status == "PENDING_REVIEW") or (key == "approved" and contract.status == "APPROVED") or (key == "signed" and contract.status == "SIGNED_AND_STAMPED") or (key == "returned" and contract.status in ("CHANGES_REQUESTED", "REJECTED"))
+        return (key == "all" and contract.status != "SIGNED_AND_STAMPED") or (key == "drafts" and contract.author_account_id == actor.account_id and contract.status == "DRAFT") or (key == "pending_my_approval" and contract.status == "PENDING_REVIEW" and contract.id in pending_ids) or (key == "submitted_by_me" and contract.author_account_id == actor.account_id and contract.status == "PENDING_REVIEW") or (key == "approved" and contract.status == "APPROVED") or (key == "signed" and contract.status == "SIGNED_AND_STAMPED") or (key == "returned" and contract.status in ("CHANGES_REQUESTED", "REJECTED"))
     counts = {key: sum(1 for contract, _, _ in rows if matches(key, contract)) for key in ("all", "drafts", "pending_my_approval", "submitted_by_me", "approved", "signed", "returned")}
     visible = [row for row in rows if matches(view, row[0])]
     return {"items": [_contract_summary(contract, revision, author_name) for contract, revision, author_name in visible], "counts": counts}
@@ -595,6 +634,10 @@ async def mark_contract_printed(public_id: UUID, db: AsyncSession = Depends(get_
 @router.post("/contracts/{public_id}/confirm-final")
 async def confirm_contract_final(public_id: UUID, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     contract = await _get_contract(db, public_id, actor, lock=True)
+    if contract.status == "SIGNED_AND_STAMPED":
+        existing = await db.scalar(select(ContractArchiveEntry).where(ContractArchiveEntry.contract_id == contract.id, ContractArchiveEntry.review_status.in_(("pending", "approved")), ContractArchiveEntry.deleted_at.is_(None)))
+        if existing:
+            return {"id": contract.id, "status": contract.status, "signed_at": contract.signed_at, "file_id": existing.contract_file_id, "archive_entry_id": existing.id, "archive_review_status": existing.review_status}
     if contract.status != "APPROVED":
         raise HTTPException(status_code=409, detail="Only approved contracts can be archived")
     is_reviewer = bool(await db.scalar(select(ContractReview.id).where(ContractReview.contract_id == contract.id, ContractReview.reviewer_account_id == actor.account_id)))
@@ -610,8 +653,674 @@ async def confirm_contract_final(public_id: UUID, db: AsyncSession = Depends(get
     contract.signed_at = item.confirmed_at
     contract.status = "SIGNED_AND_STAMPED"
     contract.version += 1
-    event = await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="signed_and_archived", version=contract.version, after={"status": contract.status, "file_id": item.id})
+    archive_entry = ContractArchiveEntry(organization_id=actor.organization_id, source="signed_contract", contract_id=contract.id, contract_file_id=item.id, name=item.filename, category=_archive_folder_category(contract.document_type), content_type=item.content_type, size=item.size, checksum=item.checksum, scan_status=item.scan_status, review_status="pending", created_by_account_id=actor.account_id, author_account_id=contract.author_account_id)
+    db.add(archive_entry)
+    await db.flush()
+    event = await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="signed_and_archived", version=contract.version, after={"status": contract.status, "file_id": item.id, "archive_entry_id": archive_entry.id, "archive_review_status": "pending"})
     participants = await _participant_account_ids(db, contract.id, contract.author_account_id)
     await create_notifications(db, organization_id=actor.organization_id, account_ids=participants, exclude_employee_id=actor.employee_id, kind="contract_signed", title="Гэрээ архивлагдлаа", body=f"{contract.title} гарын үсэг, тамгатайгаар архивлагдлаа.", target_url=f"/contracts/{contract.public_id}", payload={"contract_id": contract.id}, source_event_id=event.id, dedup_key=f"contract-signed:{contract.id}:v{contract.version}")
+    today = date.today()
+    legal_reviewers = (await db.execute(select(RoleAssignment.account_id).join(UserAccount, UserAccount.id == RoleAssignment.account_id).where(RoleAssignment.role.in_(ARCHIVE_MANAGER_ROLES), UserAccount.organization_id == actor.organization_id, UserAccount.status == "active", or_(RoleAssignment.valid_from.is_(None), RoleAssignment.valid_from <= today), or_(RoleAssignment.valid_until.is_(None), RoleAssignment.valid_until >= today)))).scalars().all()
+    await create_notifications(db, organization_id=actor.organization_id, account_ids=[account_id for account_id in legal_reviewers if account_id != actor.account_id], kind="contract_archive_review", title="Гарын үсэг зурсан гэрээ хянах шаардлагатай", body=f"{contract.title} архивын хяналтад орлоо.", target_url=f"/contracts/archive", payload={"contract_id": contract.id, "archive_entry_id": archive_entry.id}, source_event_id=event.id, dedup_key=f"contract-archive-pending:{archive_entry.id}")
     await db.commit()
-    return {"id": contract.id, "status": contract.status, "signed_at": contract.signed_at, "file_id": item.id}
+    return {"id": contract.id, "status": contract.status, "signed_at": contract.signed_at, "file_id": item.id, "archive_entry_id": archive_entry.id, "archive_review_status": archive_entry.review_status}
+
+
+# ---------------------------------------------------------------------------
+# Contract archive
+
+ARCHIVE_UPLOAD_TYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "image/jpeg",
+    "image/png",
+    "image/tiff",
+}
+ARCHIVE_BLOCKED_CONTENT_TYPES = {"application/x-msdownload", "application/x-sh", "application/x-executable"}
+ARCHIVE_BLOCKED_EXTENSIONS = (".exe", ".dll", ".bat", ".cmd", ".sh")
+
+
+def _archive_name(value: str) -> str:
+    cleaned = value.replace("\\", "/").split("/")[-1].strip()
+    if not cleaned or cleaned in {".", ".."}:
+        raise HTTPException(status_code=422, detail="A valid archive name is required")
+    return cleaned[:240]
+
+
+def _archive_category(value: str | None) -> str:
+    return (value or "Бусад").strip()[:240] or "Бусад"
+
+
+async def _archive_context(db: AsyncSession, actor: ActorContext):
+    folders = list((await db.execute(select(ContractArchiveFolder).where(ContractArchiveFolder.organization_id == actor.organization_id))).scalars().all())
+    grants = list((await db.execute(
+        select(ContractArchiveAccess).join(ContractArchiveFolder, ContractArchiveFolder.id == ContractArchiveAccess.folder_id).where(ContractArchiveAccess.organization_id == actor.organization_id, ContractArchiveFolder.organization_id == actor.organization_id)
+    )).scalars().all())
+    return folders, grants
+
+
+def _archive_ancestors(folder_id: int | None, by_id: dict[int, ContractArchiveFolder]) -> list[int]:
+    result: list[int] = []
+    seen: set[int] = set()
+    current = folder_id
+    while current is not None and current not in seen:
+        seen.add(current)
+        result.append(current)
+        folder = by_id.get(current)
+        current = folder.parent_id if folder else None
+    return result
+
+
+def _archive_descendants(folder_id: int, by_id: dict[int, ContractArchiveFolder]) -> set[int]:
+    children: dict[int, list[int]] = {}
+    for folder in by_id.values():
+        if folder.parent_id is not None:
+            children.setdefault(folder.parent_id, []).append(folder.id)
+    result: set[int] = set()
+    stack = list(children.get(folder_id, []))
+    while stack:
+        current = stack.pop()
+        if current in result:
+            continue
+        result.add(current)
+        stack.extend(children.get(current, []))
+    return result
+
+
+def _archive_can_view_folder(folder_id: int | None, actor: ActorContext, by_id: dict[int, ContractArchiveFolder], grants: list[ContractArchiveAccess]) -> bool:
+    if actor.has_any_role(*ARCHIVE_MANAGER_ROLES):
+        return True
+    if folder_id is not None and (folder := by_id.get(folder_id)) is not None and folder.deleted_at is not None:
+        return False
+    account_id = actor.account_id
+    ancestors = set(_archive_ancestors(folder_id, by_id))
+    return any(grant.account_id == account_id and grant.folder_id in ancestors and by_id.get(grant.folder_id) is not None and by_id[grant.folder_id].deleted_at is None for grant in grants)
+
+
+def _archive_can_traverse_folder(folder_id: int, actor: ActorContext, by_id: dict[int, ContractArchiveFolder], grants: list[ContractArchiveAccess]) -> bool:
+    if by_id.get(folder_id) is not None and by_id[folder_id].deleted_at is not None:
+        return False
+    if _archive_can_view_folder(folder_id, actor, by_id, grants):
+        return True
+    descendants = _archive_descendants(folder_id, by_id) | {folder_id}
+    return any(grant.account_id == actor.account_id and grant.folder_id in descendants and by_id.get(grant.folder_id) is not None and by_id[grant.folder_id].deleted_at is None for grant in grants)
+
+
+async def _archive_folder(db: AsyncSession, folder_id: int, actor: ActorContext, *, allow_deleted: bool = False, lock: bool = False) -> ContractArchiveFolder:
+    folder = await db.scalar(select(ContractArchiveFolder).where(ContractArchiveFolder.id == folder_id, ContractArchiveFolder.organization_id == actor.organization_id).with_for_update()) if lock else await db.scalar(select(ContractArchiveFolder).where(ContractArchiveFolder.id == folder_id, ContractArchiveFolder.organization_id == actor.organization_id))
+    if not folder or (folder.deleted_at is not None and not allow_deleted):
+        raise HTTPException(status_code=404, detail="Archive folder not found")
+    folders, grants = await _archive_context(db, actor)
+    by_id = {row.id: row for row in folders}
+    if not _archive_can_traverse_folder(folder.id, actor, by_id, grants):
+        raise HTTPException(status_code=404, detail="Archive folder not found")
+    return folder
+
+
+async def _archive_require_manager(actor: ActorContext = Depends(get_actor)) -> ActorContext:
+    if not actor.has_any_role(*ARCHIVE_MANAGER_ROLES):
+        raise HTTPException(status_code=403, detail="Archive management requires admin or legal counsel access")
+    return actor
+
+
+async def _archive_ensure_name(db: AsyncSession, actor: ActorContext, name: str, parent_id: int | None, *, exclude_id: int | None = None) -> None:
+    query = select(ContractArchiveFolder.id).where(
+        ContractArchiveFolder.organization_id == actor.organization_id,
+        ContractArchiveFolder.deleted_at.is_(None),
+        func.lower(ContractArchiveFolder.name) == name.lower(),
+    )
+    query = query.where(ContractArchiveFolder.parent_id == parent_id) if parent_id is not None else query.where(ContractArchiveFolder.parent_id.is_(None))
+    if exclude_id is not None:
+        query = query.where(ContractArchiveFolder.id != exclude_id)
+    entry_query = select(ContractArchiveEntry.id).where(
+        ContractArchiveEntry.organization_id == actor.organization_id,
+        ContractArchiveEntry.folder_id == parent_id,
+        ContractArchiveEntry.deleted_at.is_(None),
+        func.lower(ContractArchiveEntry.name) == name.lower(),
+    )
+    if await db.scalar(query) or await db.scalar(entry_query):
+        raise HTTPException(status_code=409, detail="A folder with this name already exists")
+
+
+async def _archive_ensure_entry_name(db: AsyncSession, actor: ActorContext, name: str, folder_id: int, *, exclude_id: int | None = None) -> None:
+    folder_query = select(ContractArchiveFolder.id).where(ContractArchiveFolder.organization_id == actor.organization_id, ContractArchiveFolder.deleted_at.is_(None), ContractArchiveFolder.parent_id == folder_id, func.lower(ContractArchiveFolder.name) == name.lower())
+    entry_query = select(ContractArchiveEntry.id).where(ContractArchiveEntry.organization_id == actor.organization_id, ContractArchiveEntry.folder_id == folder_id, ContractArchiveEntry.deleted_at.is_(None), func.lower(ContractArchiveEntry.name) == name.lower())
+    if exclude_id is not None:
+        entry_query = entry_query.where(ContractArchiveEntry.id != exclude_id)
+    if await db.scalar(folder_query) or await db.scalar(entry_query):
+        raise HTTPException(status_code=409, detail="An archive item with this name already exists in the folder")
+
+
+def _archive_folder_category(document_type: str) -> str:
+    return {"contract": "Гэрээ", "agreement": "Хэлэлцээр", "official_letter": "Албан бичиг"}.get(document_type, "Бусад")
+
+
+async def _archive_entry(db: AsyncSession, entry_id: int, actor: ActorContext, *, lock: bool = False) -> ContractArchiveEntry:
+    query = select(ContractArchiveEntry).where(ContractArchiveEntry.id == entry_id, ContractArchiveEntry.organization_id == actor.organization_id)
+    if lock:
+        query = query.with_for_update()
+    entry = await db.scalar(query)
+    if not entry or entry.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Archive item not found")
+    if entry.review_status == "pending" and not actor.has_any_role(*ARCHIVE_MANAGER_ROLES):
+        raise HTTPException(status_code=404, detail="Archive item not found")
+    if entry.folder_id is not None:
+        await _archive_folder(db, entry.folder_id, actor)
+    elif not actor.has_any_role(*ARCHIVE_MANAGER_ROLES):
+        raise HTTPException(status_code=404, detail="Archive item not found")
+    return entry
+
+
+async def _archive_entry_visible(db: AsyncSession, entry: ContractArchiveEntry, actor: ActorContext) -> bool:
+    if actor.has_any_role(*ARCHIVE_MANAGER_ROLES):
+        return True
+    if entry.review_status != "approved" or entry.folder_id is None:
+        return False
+    folders, grants = await _archive_context(db, actor)
+    return _archive_can_view_folder(entry.folder_id, actor, {row.id: row for row in folders}, grants)
+
+
+async def _archive_people(db: AsyncSession, account_ids: set[int]) -> dict[int, dict[str, Any]]:
+    if not account_ids:
+        return {}
+    rows = (await db.execute(select(UserAccount, Employee).outerjoin(Employee, Employee.id == UserAccount.employee_id).where(UserAccount.id.in_(account_ids)))).all()
+    role_rows = (await db.execute(select(RoleAssignment.account_id, RoleAssignment.role).where(RoleAssignment.account_id.in_(account_ids)))).all()
+    role_map: dict[int, list[str]] = {}
+    for account_id, role in role_rows:
+        role_map.setdefault(account_id, []).append(role)
+    result: dict[int, dict[str, Any]] = {}
+    for account, employee in rows:
+        metadata = (employee.metadata_json or {}) if employee else {}
+        result[account.id] = {"account_id": account.id, "employee_id": employee.id if employee else None, "name": employee.name if employee else account.email, "avatar_url": metadata.get("avatar_url") or (employee.photo_url if employee else None), "email": account.email, "roles": sorted(set(role_map.get(account.id, [])))}
+    return result
+
+
+async def _archive_entry_out(
+    db: AsyncSession,
+    entry: ContractArchiveEntry,
+    people: dict[int, dict[str, Any]] | None = None,
+    actor: ActorContext | None = None,
+) -> dict[str, Any]:
+    people = people or await _archive_people(db, {value for value in (entry.author_account_id, entry.created_by_account_id, entry.reviewed_by_account_id) if value})
+    author = people.get(entry.author_account_id or entry.created_by_account_id or -1)
+    uploader = people.get(entry.created_by_account_id or -1)
+    reviewer = people.get(entry.reviewed_by_account_id or -1)
+    contract = await db.scalar(select(ContractDocument).where(ContractDocument.id == entry.contract_id, ContractDocument.organization_id == entry.organization_id)) if entry.contract_id else None
+    return {
+        "id": entry.id,
+        "public_id": str(entry.public_id),
+        "folder_id": entry.folder_id,
+        "source": entry.source,
+        "contract_id": entry.contract_id,
+        "name": entry.name,
+        "category": entry.category,
+        "content_type": entry.content_type,
+        "size": entry.size,
+        "checksum": entry.checksum,
+        "scan_status": entry.scan_status,
+        "review_status": entry.review_status,
+        "review_reason": entry.review_reason,
+        "signing_status": "Гарын үсэг зурсан" if entry.source == "signed_contract" else "Гараар байршуулсан",
+        "author": author,
+        "uploader": uploader,
+        "reviewer": reviewer,
+        "contract_title": contract.title if contract else None,
+        "created_at": entry.created_at,
+        "updated_at": entry.updated_at,
+        "reviewed_at": entry.reviewed_at,
+        "can_view": True,
+        "can_download": True,
+        "can_edit": bool(actor and actor.has_any_role(*ARCHIVE_MANAGER_ROLES)),
+        "can_delete": bool(actor and actor.has_any_role(*ARCHIVE_MANAGER_ROLES)),
+        "can_manage_access": bool(actor and actor.has_any_role(*ARCHIVE_MANAGER_ROLES)),
+    }
+
+
+async def _archive_folder_out(db: AsyncSession, folder: ContractArchiveFolder, actor: ActorContext, by_id: dict[int, ContractArchiveFolder], grants: list[ContractArchiveAccess], entries: list[ContractArchiveEntry]) -> dict[str, Any]:
+    descendants = _archive_descendants(folder.id, by_id) | {folder.id}
+    visible_entries = [entry for entry in entries if entry.folder_id in descendants and entry.review_status == "approved" and entry.deleted_at is None and (actor.has_any_role(*ARCHIVE_MANAGER_ROLES) or _archive_can_view_folder(entry.folder_id, actor, by_id, grants))]
+    visible_folders = [row for row in by_id.values() if row.id in descendants and row.deleted_at is None and (actor.has_any_role(*ARCHIVE_MANAGER_ROLES) or _archive_can_traverse_folder(row.id, actor, by_id, grants))]
+    def manifest_path(entry: ContractArchiveEntry) -> str:
+        parts = [entry.name]
+        current = by_id.get(entry.folder_id or -1)
+        while current is not None and current.id != folder.id:
+            parts.append(current.name)
+            current = by_id.get(current.parent_id or -1)
+        if current is not None:
+            parts.append(current.name)
+        return "/".join(reversed(parts))
+    manifest = "\n".join(f"{manifest_path(entry)}:{entry.checksum}" for entry in sorted(visible_entries, key=lambda item: manifest_path(item).casefold()))
+    people = await _archive_people(db, {folder.created_by_account_id} if folder.created_by_account_id else set())
+    privileged = actor.has_any_role(*ARCHIVE_MANAGER_ROLES)
+    directly_visible = privileged or _archive_can_view_folder(folder.id, actor, by_id, grants)
+    return {
+        "id": folder.id,
+        "parent_id": folder.parent_id,
+        "name": folder.name,
+        "description": folder.description if directly_visible else None,
+        "author": people.get(folder.created_by_account_id) if folder.created_by_account_id and directly_visible else None,
+        "created_at": folder.created_at,
+        "updated_at": folder.updated_at,
+        "version": folder.version,
+        "nested_item_count": len(visible_entries) + max(0, len(visible_folders) - 1),
+        "total_size": sum(entry.size for entry in visible_entries),
+        "manifest_checksum": hashlib.sha256(manifest.encode("utf-8")).hexdigest(),
+        "can_view": directly_visible,
+        "can_download": directly_visible,
+        "can_edit": privileged,
+        "can_delete": privileged,
+        "can_manage_access": privileged,
+    }
+
+
+@router.get("/contract-archive")
+async def list_contract_archive(
+    folder_id: int | None = None,
+    q: str | None = Query(default=None, max_length=200),
+    sort: Literal["name", "created_at", "size"] = "name",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    folders, grants = await _archive_context(db, actor)
+    by_id = {row.id: row for row in folders}
+    if folder_id is not None:
+        folder = by_id.get(folder_id)
+        if not folder or folder.deleted_at is not None or not _archive_can_traverse_folder(folder_id, actor, by_id, grants):
+            raise HTTPException(status_code=404, detail="Archive folder not found")
+    entries = list((await db.execute(select(ContractArchiveEntry).where(ContractArchiveEntry.organization_id == actor.organization_id, ContractArchiveEntry.review_status == "approved", ContractArchiveEntry.deleted_at.is_(None)))).scalars().all())
+    child_folders = [row for row in folders if row.deleted_at is None and row.parent_id == folder_id and _archive_can_traverse_folder(row.id, actor, by_id, grants)]
+    child_entries = [row for row in entries if row.folder_id == folder_id and (actor.has_any_role(*ARCHIVE_MANAGER_ROLES) or _archive_can_view_folder(row.folder_id, actor, by_id, grants))]
+    if q and q.strip():
+        needle = q.strip().casefold()
+        child_folders = [row for row in child_folders if needle in row.name.casefold() or needle in (row.description or "").casefold()]
+        child_entries = [row for row in child_entries if needle in row.name.casefold() or needle in row.category.casefold()]
+    folder_outputs = {row.id: await _archive_folder_out(db, row, actor, by_id, grants, entries) for row in child_folders}
+    if sort == "created_at":
+        combined: list[tuple[str, Any]] = [
+            ("folder", row) for row in child_folders
+        ] + [("entry", row) for row in child_entries]
+        combined.sort(key=lambda item: (item[1].created_at or datetime.min.replace(tzinfo=timezone.utc), item[1].name.casefold()), reverse=True)
+    elif sort == "size":
+        combined = [("folder", row) for row in child_folders] + [("entry", row) for row in child_entries]
+        combined.sort(key=lambda item: (folder_outputs[item[1].id]["total_size"] if item[0] == "folder" else item[1].size, item[1].name.casefold()), reverse=True)
+    else:
+        child_folders.sort(key=lambda row: row.name.casefold())
+        child_entries.sort(key=lambda row: row.name.casefold())
+        combined = [("folder", row) for row in child_folders] + [("entry", row) for row in child_entries]
+    total = len(combined)
+    page_items = combined[(page - 1) * page_size: page * page_size]
+    people = await _archive_people(db, {value for _, row in page_items for value in (getattr(row, "author_account_id", None), getattr(row, "created_by_account_id", None), getattr(row, "reviewed_by_account_id", None)) if value})
+    current = await _archive_folder_out(db, by_id[folder_id], actor, by_id, grants, entries) if folder_id is not None else None
+    breadcrumbs = [{"id": row.id, "name": row.name} for row in reversed([by_id[value] for value in _archive_ancestors(folder_id, by_id)])] if folder_id is not None else []
+    pending_count = await db.scalar(select(func.count(ContractArchiveEntry.id)).where(ContractArchiveEntry.organization_id == actor.organization_id, ContractArchiveEntry.review_status == "pending", ContractArchiveEntry.deleted_at.is_(None))) if actor.has_any_role(*ARCHIVE_MANAGER_ROLES) else 0
+    can_manage = actor.has_any_role(*ARCHIVE_MANAGER_ROLES)
+    folder_options = [await _archive_folder_out(db, row, actor, by_id, grants, entries) for row in sorted(folders, key=lambda item: item.name.casefold()) if row.deleted_at is None and _archive_can_traverse_folder(row.id, actor, by_id, grants)] if can_manage else []
+    return {"current_folder": current, "breadcrumbs": breadcrumbs, "folders": [folder_outputs[row.id] for kind, row in page_items if kind == "folder"], "folder_options": folder_options, "items": [await _archive_entry_out(db, row, people, actor) for kind, row in page_items if kind == "entry"], "total": total, "page": page, "page_size": page_size, "pending_review_count": pending_count, "can_manage": can_manage}
+
+
+@router.get("/contract-archive/review-queue")
+async def list_contract_archive_review_queue(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    rows = (await db.execute(select(ContractArchiveEntry).where(ContractArchiveEntry.organization_id == actor.organization_id, ContractArchiveEntry.review_status == "pending", ContractArchiveEntry.deleted_at.is_(None)).order_by(ContractArchiveEntry.created_at))).scalars().all()
+    people = await _archive_people(db, {value for row in rows for value in (row.author_account_id, row.created_by_account_id, row.reviewed_by_account_id) if value})
+    return {"items": [await _archive_entry_out(db, row, people, actor) for row in rows]}
+
+
+@router.get("/contract-archive/access-candidates")
+async def list_contract_archive_access_candidates(q: str | None = Query(default=None, max_length=120), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    query = select(UserAccount, Employee).join(Employee, Employee.id == UserAccount.employee_id).where(UserAccount.organization_id == actor.organization_id, Employee.organization_id == actor.organization_id, UserAccount.status == "active", Employee.is_active.is_(True)).order_by(Employee.name)
+    rows = (await db.execute(query)).all()
+    if q and q.strip():
+        needle = q.strip().casefold()
+        rows = [(account, employee) for account, employee in rows if needle in employee.name.casefold() or needle in (employee.job_title or "").casefold() or needle in account.email.casefold()]
+    account_ids = [account.id for account, _ in rows]
+    today = date.today()
+    role_rows = (await db.execute(select(RoleAssignment.account_id, RoleAssignment.role).where(RoleAssignment.account_id.in_(account_ids), or_(RoleAssignment.valid_from.is_(None), RoleAssignment.valid_from <= today), or_(RoleAssignment.valid_until.is_(None), RoleAssignment.valid_until >= today)))).all() if account_ids else []
+    roles: dict[int, list[str]] = {}
+    for account_id, role in role_rows:
+        roles.setdefault(account_id, []).append(role)
+    return [{"account_id": account.id, "employee_id": employee.id, "name": employee.name, "job_title": employee.job_title, "avatar_url": (employee.metadata_json or {}).get("avatar_url") or employee.photo_url, "roles": sorted(set(roles.get(account.id, [])))} for account, employee in rows]
+
+
+@router.post("/contract-archive/folders", status_code=status.HTTP_201_CREATED)
+async def create_contract_archive_folder(data: ArchiveFolderInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    name = _archive_name(data.name)
+    if data.parent_id is not None:
+        parent = await db.scalar(select(ContractArchiveFolder).where(ContractArchiveFolder.id == data.parent_id, ContractArchiveFolder.organization_id == actor.organization_id).with_for_update())
+        if not parent or parent.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Parent archive folder not found")
+    await _archive_ensure_name(db, actor, name, data.parent_id)
+    folder = ContractArchiveFolder(organization_id=actor.organization_id, parent_id=data.parent_id, name=name, description=(data.description or "").strip() or None, created_by_account_id=actor.account_id)
+    db.add(folder)
+    try:
+        await db.flush()
+        await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_folder", aggregate_id=folder.id, operation="created", after={"name": name, "parent_id": data.parent_id})
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A folder with this name already exists") from exc
+    folders, grants = await _archive_context(db, actor)
+    entries = []
+    return await _archive_folder_out(db, folder, actor, {row.id: row for row in folders}, grants, entries)
+
+
+@router.get("/contract-archive/folders/{folder_id}")
+async def get_contract_archive_folder(folder_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    folder = await _archive_folder(db, folder_id, actor)
+    folders, grants = await _archive_context(db, actor)
+    entries = list((await db.execute(select(ContractArchiveEntry).where(ContractArchiveEntry.organization_id == actor.organization_id))).scalars().all())
+    direct = [grant for grant in grants if grant.folder_id == folder_id]
+    ancestor_ids = set(_archive_ancestors(folder.parent_id, {row.id: row for row in folders}))
+    direct_ids = {item.account_id for item in direct}
+    inherited_by_account: dict[int, ContractArchiveAccess] = {}
+    for grant in grants:
+        if grant.folder_id in ancestor_ids and grant.account_id not in direct_ids and (grant.account_id not in inherited_by_account or grant.permission == "edit"):
+            inherited_by_account[grant.account_id] = grant
+    inherited = list(inherited_by_account.values())
+    people = await _archive_people(db, {grant.account_id for grant in direct})
+    inherited_people = await _archive_people(db, {grant.account_id for grant in inherited})
+    can_manage = actor.has_any_role(*ARCHIVE_MANAGER_ROLES)
+    directly_visible = can_manage or _archive_can_view_folder(folder.id, actor, {row.id: row for row in folders}, grants)
+    timeline = [{"id": event.id, "operation": event.action, "actor_account_id": event.actor_account_id, "created_at": event.created_at, "before": event.before_data, "after": event.after_data} for event in (await db.execute(select(AuditLog).where(AuditLog.organization_id == actor.organization_id, AuditLog.entity_type == "contract_archive_folder", AuditLog.entity_id == folder_id).order_by(AuditLog.created_at))).scalars().all()] if directly_visible else []
+    return {**await _archive_folder_out(db, folder, actor, {row.id: row for row in folders}, grants, entries), "access": [{"account_id": grant.account_id, "permission": grant.permission, "employee": people.get(grant.account_id), "inherited": False} for grant in direct] if can_manage else [], "inherited_access": [{"account_id": grant.account_id, "permission": grant.permission, "employee": inherited_people.get(grant.account_id), "inherited": True} for grant in inherited] if can_manage else [], "timeline": timeline}
+
+
+@router.patch("/contract-archive/folders/{folder_id}")
+async def update_contract_archive_folder(folder_id: int, data: ArchiveFolderPatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    folder = await _archive_folder(db, folder_id, actor, allow_deleted=False, lock=True)
+    if data.version != folder.version:
+        raise HTTPException(status_code=409, detail={"message": "Archive folder changed", "latest_version": folder.version})
+    name = _archive_name(data.name) if data.name is not None else folder.name
+    await _archive_ensure_name(db, actor, name, folder.parent_id, exclude_id=folder.id)
+    before = {"name": folder.name, "description": folder.description}
+    folder.name = name
+    if "description" in data.model_fields_set:
+        folder.description = (data.description or "").strip() or None
+    folder.version += 1
+    try:
+        await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_folder", aggregate_id=folder.id, operation="updated", before=before, after={"name": folder.name, "description": folder.description})
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A folder with this name already exists") from exc
+    folders, grants = await _archive_context(db, actor)
+    entries = list((await db.execute(select(ContractArchiveEntry).where(ContractArchiveEntry.organization_id == actor.organization_id))).scalars().all())
+    return await _archive_folder_out(db, folder, actor, {row.id: row for row in folders}, grants, entries)
+
+
+@router.put("/contract-archive/folders/{folder_id}/access")
+async def update_contract_archive_access(folder_id: int, data: ArchiveAccessInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    folder = await _archive_folder(db, folder_id, actor, lock=True)
+    if data.version != folder.version:
+        raise HTTPException(status_code=409, detail={"message": "Archive folder changed", "latest_version": folder.version})
+    name = _archive_name(data.name)
+    await _archive_ensure_name(db, actor, name, folder.parent_id, exclude_id=folder.id)
+    accounts = list((await db.execute(select(UserAccount).join(Employee, Employee.id == UserAccount.employee_id).where(UserAccount.organization_id == actor.organization_id, Employee.organization_id == actor.organization_id, UserAccount.id.in_({grant.account_id for grant in data.grants}), UserAccount.status == "active", Employee.is_active.is_(True)))).scalars().all()) if data.grants else []
+    if len(accounts) != len({grant.account_id for grant in data.grants}):
+        raise HTTPException(status_code=422, detail="Access can only be assigned to active employee accounts in this organization")
+    today = date.today()
+    role_map = {account.id: set((await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id, or_(RoleAssignment.valid_from.is_(None), RoleAssignment.valid_from <= today), or_(RoleAssignment.valid_until.is_(None), RoleAssignment.valid_until >= today)))).scalars().all()) for account in accounts}
+    if any(grant.permission == "edit" and not set(ARCHIVE_MANAGER_ROLES).intersection(role_map.get(grant.account_id, set())) for grant in data.grants):
+        raise HTTPException(status_code=422, detail="Only admin or legal counsel accounts can receive edit access")
+    await db.execute(ContractArchiveAccess.__table__.delete().where(ContractArchiveAccess.organization_id == actor.organization_id, ContractArchiveAccess.folder_id == folder_id))
+    for grant in {item.account_id: item for item in data.grants}.values():
+        db.add(ContractArchiveAccess(organization_id=actor.organization_id, folder_id=folder_id, account_id=grant.account_id, permission=grant.permission))
+    folder.name = name
+    folder.description = (data.description or "").strip() or None
+    folder.version += 1
+    try:
+        await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_folder", aggregate_id=folder.id, operation="access_updated", after={"grant_count": len(data.grants), "name": folder.name})
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Archive folder changed; reload and try again") from exc
+    return await get_contract_archive_folder(folder_id, db, actor)
+
+
+@router.delete("/contract-archive/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_contract_archive_folder(folder_id: int, verification_name: str | None = Query(default=None), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    folder = await _archive_folder(db, folder_id, actor, allow_deleted=False, lock=True)
+    folders, _ = await _archive_context(db, actor)
+    by_id = {row.id: row for row in folders}
+    descendants = _archive_descendants(folder_id, by_id) | {folder_id}
+    # Lock the complete subtree so an upload or concurrent delete cannot race
+    # the non-empty verification and leave live content below a soft-deleted
+    # folder.
+    await db.execute(select(ContractArchiveFolder.id).where(ContractArchiveFolder.organization_id == actor.organization_id, ContractArchiveFolder.id.in_(descendants)).order_by(ContractArchiveFolder.id).with_for_update())
+    active_child = any(row.id in descendants and row.deleted_at is None and row.id != folder_id for row in folders)
+    active_entries = await db.scalar(select(func.count(ContractArchiveEntry.id)).where(ContractArchiveEntry.organization_id == actor.organization_id, ContractArchiveEntry.folder_id.in_(descendants), ContractArchiveEntry.deleted_at.is_(None)))
+    if (active_child or active_entries) and verification_name != folder.name:
+        raise HTTPException(status_code=422, detail="Enter the exact folder name to delete a non-empty folder")
+    now = _now()
+    for row in folders:
+        if row.id in descendants:
+            row.deleted_at = now
+            row.deleted_by_account_id = actor.account_id
+    entries = (await db.execute(select(ContractArchiveEntry).where(ContractArchiveEntry.organization_id == actor.organization_id, ContractArchiveEntry.folder_id.in_(descendants), ContractArchiveEntry.deleted_at.is_(None)).order_by(ContractArchiveEntry.id).with_for_update())).scalars().all()
+    for entry in entries:
+        entry.deleted_at = now
+        entry.deleted_by_account_id = actor.account_id
+    await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_folder", aggregate_id=folder.id, operation="deleted", after={"descendant_count": len(descendants), "entry_count": len(entries)})
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/contract-archive/entries", status_code=status.HTTP_201_CREATED)
+@router.post("/contract-archive/entries/upload", status_code=status.HTTP_201_CREATED)
+async def upload_contract_archive_entry(folder_id: int, category: str = "Бусад", file: UploadFile = File(...), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    await _archive_folder(db, folder_id, actor, lock=True)
+    filename = _archive_name(file.filename or "archive-file")
+    await _archive_ensure_entry_name(db, actor, filename, folder_id)
+    content = await file.read(settings.ATTACHMENT_MAX_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="Archive file is empty")
+    if len(content) > settings.ATTACHMENT_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Archive file exceeds configured size limit")
+    content_type = file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    if content_type in ARCHIVE_BLOCKED_CONTENT_TYPES or filename.casefold().endswith(ARCHIVE_BLOCKED_EXTENSIONS):
+        raise HTTPException(status_code=415, detail="Executable files are not allowed")
+    if content_type not in ARCHIVE_UPLOAD_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported archive file type")
+    try:
+        scan_status = await scan_upload(content)
+    except MalwareDetected as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MalwareScanUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    storage_key = f"{actor.organization_id}/contract-archive/{uuid.uuid4().hex}"
+    checksum = hashlib.sha256(content).hexdigest()
+    await put_attachment(storage_key, content, content_type)
+    entry = ContractArchiveEntry(organization_id=actor.organization_id, folder_id=folder_id, source="manual_upload", storage_key=storage_key, name=filename, category=_archive_category(category), content_type=content_type, size=len(content), checksum=checksum, scan_status=scan_status, review_status="approved", created_by_account_id=actor.account_id, author_account_id=actor.account_id)
+    db.add(entry)
+    try:
+        await db.flush()
+        await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation="uploaded", after={"name": filename, "folder_id": folder_id, "size": entry.size, "checksum": checksum, "scan_status": scan_status})
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        await delete_attachment(storage_key)
+        raise HTTPException(status_code=409, detail="An archive item with this name already exists in the folder") from exc
+    except Exception:
+        await db.rollback()
+        await delete_attachment(storage_key)
+        raise
+    return await _archive_entry_out(db, entry, actor=actor)
+
+
+@router.get("/contract-archive/entries/{entry_id}")
+async def get_contract_archive_entry(entry_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    entry = await _archive_entry(db, entry_id, actor)
+    if not await _archive_entry_visible(db, entry, actor):
+        raise HTTPException(status_code=404, detail="Archive item not found")
+    events = (await db.execute(select(AuditLog).where(AuditLog.organization_id == actor.organization_id, AuditLog.entity_type == "contract_archive_entry", AuditLog.entity_id == entry_id).order_by(AuditLog.created_at))).scalars().all()
+    return {**await _archive_entry_out(db, entry, actor=actor), "timeline": [{"id": event.id, "operation": event.action, "actor_account_id": event.actor_account_id, "created_at": event.created_at, "before": event.before_data, "after": event.after_data} for event in events]}
+
+
+@router.patch("/contract-archive/entries/{entry_id}")
+async def update_contract_archive_entry(entry_id: int, data: ArchiveEntryPatch | None = None, name: str | None = Query(default=None, max_length=240), category: str | None = Query(default=None, max_length=240), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    data = data or ArchiveEntryPatch(name=name, category=category)
+    entry = await _archive_entry(db, entry_id, actor, lock=True)
+    before = {"name": entry.name, "category": entry.category}
+    if data.name is not None:
+        entry.name = _archive_name(data.name)
+        if entry.folder_id is not None:
+            await _archive_ensure_entry_name(db, actor, entry.name, entry.folder_id, exclude_id=entry.id)
+    if data.category is not None:
+        entry.category = _archive_category(data.category)
+    try:
+        await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation="updated", before=before, after={"name": entry.name, "category": entry.category})
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="An archive item with this name already exists in the folder") from exc
+    return await _archive_entry_out(db, entry, actor=actor)
+
+
+@router.delete("/contract-archive/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_contract_archive_entry(entry_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    entry = await _archive_entry(db, entry_id, actor, lock=True)
+    entry.deleted_at = _now()
+    entry.deleted_by_account_id = actor.account_id
+    await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation="deleted", after={"name": entry.name})
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/contract-archive/entries/{entry_id}/content")
+async def get_contract_archive_content(entry_id: int, download: bool = False, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    entry = await _archive_entry(db, entry_id, actor)
+    if not await _archive_entry_visible(db, entry, actor):
+        raise HTTPException(status_code=404, detail="Archive item not found")
+    storage_key = entry.storage_key
+    if entry.contract_file_id:
+        source = await db.scalar(select(ContractFile).join(ContractDocument, ContractDocument.id == ContractFile.contract_id).where(ContractFile.id == entry.contract_file_id, ContractFile.contract_id == entry.contract_id, ContractDocument.organization_id == actor.organization_id))
+        if not source:
+            raise HTTPException(status_code=410, detail="Archived contract file is unavailable")
+        storage_key = source.storage_key
+    if not storage_key:
+        raise HTTPException(status_code=410, detail="Archived file is unavailable")
+    try:
+        content = await get_attachment(storage_key)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Archive storage is temporarily unavailable") from exc
+    await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation="downloaded" if download else "previewed", after={"name": entry.name})
+    await db.commit()
+    disposition = "attachment" if download else "inline"
+    safe_name = entry.name.replace('"', "")
+    return Response(content, media_type=entry.content_type, headers={"Content-Disposition": f'{disposition}; filename="{safe_name}"', "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/contract-archive/entries/{entry_id}/download")
+async def download_contract_archive_entry(entry_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    return await get_contract_archive_content(entry_id, download=True, db=db, actor=actor)
+
+
+@router.get("/contract-archive/entries/{entry_id}/preview")
+async def preview_contract_archive_entry(entry_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    entry = await _archive_entry(db, entry_id, actor)
+    if not await _archive_entry_visible(db, entry, actor):
+        raise HTTPException(status_code=404, detail="Archive item not found")
+    storage_key = entry.storage_key
+    if entry.contract_file_id:
+        source = await db.scalar(select(ContractFile).join(ContractDocument, ContractDocument.id == ContractFile.contract_id).where(ContractFile.id == entry.contract_file_id, ContractFile.contract_id == entry.contract_id, ContractDocument.organization_id == actor.organization_id))
+        storage_key = source.storage_key if source else None
+    if not storage_key:
+        raise HTTPException(status_code=410, detail="Archived file is unavailable")
+    try:
+        content = await get_attachment(storage_key)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Archive storage is temporarily unavailable") from exc
+    if entry.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        try:
+            import zipfile
+            from io import BytesIO
+            from xml.etree import ElementTree
+
+            with zipfile.ZipFile(BytesIO(content)) as archive:
+                document = ElementTree.fromstring(archive.read("word/document.xml"))
+            text = " ".join(node.text or "" for node in document.iter() if node.tag.rsplit("}", 1)[-1] == "t")
+            return Response(text, media_type="text/plain; charset=utf-8", headers={"X-Content-Type-Options": "nosniff"})
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="DOCX preview could not be generated") from exc
+    if entry.content_type == "application/pdf":
+        return Response(content, media_type=entry.content_type, headers={"X-Content-Type-Options": "nosniff"})
+    raise HTTPException(status_code=415, detail="Preview is unavailable for this file type")
+
+
+@router.post("/contract-archive/entries/{entry_id}/print")
+async def print_contract_archive_entry(entry_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    entry = await _archive_entry(db, entry_id, actor)
+    if not await _archive_entry_visible(db, entry, actor):
+        raise HTTPException(status_code=404, detail="Archive item not found")
+    await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation="printed", after={"name": entry.name})
+    await db.commit()
+    return {"id": entry.id, "printed_at": _now()}
+
+
+@router.post("/contract-archive/entries/{entry_id}/review")
+async def review_contract_archive_entry(entry_id: int, data: ArchiveReviewInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    entry = await _archive_entry(db, entry_id, actor, lock=True)
+    if entry.review_status != "pending" or entry.source != "signed_contract" or not entry.contract_id:
+        raise HTTPException(status_code=409, detail="Only pending signed contracts can be reviewed")
+    contract = await db.scalar(select(ContractDocument).where(ContractDocument.id == entry.contract_id, ContractDocument.organization_id == actor.organization_id).with_for_update())
+    if not contract:
+        raise HTTPException(status_code=409, detail="The source contract is unavailable")
+    if data.decision == "reject":
+        reason = (data.reason or "").strip()
+        if not reason:
+            raise HTTPException(status_code=422, detail="A rejection reason is required")
+        entry.review_status = "rejected"
+        entry.review_reason = reason
+        entry.reviewed_by_account_id = actor.account_id
+        entry.reviewed_at = _now()
+        contract.status = "APPROVED"
+        contract.signed_final_file_id = None
+        contract.signed_at = None
+        contract.version += 1
+        operation = "review_rejected"
+        after = {"decision": "reject", "reason": reason, "contract_id": contract.id}
+        title = "Гэрээний архивын файл буцаагдлаа"
+        body = f"{entry.name} файлыг дахин байршуулна уу. Шалтгаан: {reason}"
+    else:
+        if data.folder_id is not None and data.new_folder is not None:
+            raise HTTPException(status_code=422, detail="Choose an existing folder or create a new folder, not both")
+        if data.folder_id is None and data.new_folder is None:
+            raise HTTPException(status_code=422, detail="Select or create a destination folder")
+        if data.new_folder:
+            folder_name = _archive_name(data.new_folder.name)
+            if data.new_folder.parent_id is not None:
+                parent = await db.scalar(select(ContractArchiveFolder).where(ContractArchiveFolder.id == data.new_folder.parent_id, ContractArchiveFolder.organization_id == actor.organization_id).with_for_update())
+                if not parent or parent.deleted_at is not None:
+                    raise HTTPException(status_code=404, detail="Parent archive folder not found")
+            await _archive_ensure_name(db, actor, folder_name, data.new_folder.parent_id)
+            folder = ContractArchiveFolder(organization_id=actor.organization_id, parent_id=data.new_folder.parent_id, name=folder_name, description=(data.new_folder.description or "").strip() or None, created_by_account_id=actor.account_id)
+            db.add(folder)
+            await db.flush()
+        else:
+            folder = await db.scalar(select(ContractArchiveFolder).where(ContractArchiveFolder.id == data.folder_id, ContractArchiveFolder.organization_id == actor.organization_id).with_for_update())
+            if not folder or folder.deleted_at is not None:
+                raise HTTPException(status_code=404, detail="Destination archive folder not found")
+        await _archive_ensure_entry_name(db, actor, entry.name, folder.id)
+        entry.folder_id = folder.id
+        entry.category = _archive_category(data.category or entry.category)
+        entry.review_status = "approved"
+        entry.review_reason = None
+        entry.reviewed_by_account_id = actor.account_id
+        entry.reviewed_at = _now()
+        operation = "review_approved"
+        after = {"decision": "approve", "folder_id": folder.id, "contract_id": contract.id, "category": entry.category}
+        title = "Гэрээ архивлагдлаа"
+        body = f"{entry.name} гэрээний архивт баталгаажлаа."
+    event = await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation=operation, after=after)
+    recipients = await _participant_account_ids(db, contract.id, contract.author_account_id)
+    if data.decision == "reject":
+        recipients = list(dict.fromkeys([*recipients, entry.created_by_account_id]))
+    await create_notifications(db, organization_id=actor.organization_id, account_ids=[item for item in recipients if item and item != actor.account_id], kind="contract_archive_review", title=title, body=body, target_url=f"/contracts/{contract.public_id}", payload={"contract_id": contract.id, "archive_entry_id": entry.id, "decision": data.decision}, source_event_id=event.id, dedup_key=f"contract-archive-review:{entry.id}:{entry.review_status}")
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="This archive review was changed concurrently") from exc
+    return {**await _archive_entry_out(db, entry, actor=actor), "contract_status": contract.status}

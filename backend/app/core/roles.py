@@ -8,7 +8,7 @@ SYSTEM_ROLES = frozenset({
     "member",
     "contractor",
     "client_auditor",
+    "legal_counsel",
 })
 
 WORKTIME_REPORT_ROLES = frozenset({"admin", "manager", "hr", "team_lead"})
-

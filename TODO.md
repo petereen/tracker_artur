@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Deliver contract archive folders, signed-file review, archive RBAC, and archive workspace UI (`backend/app/models/contracts.py`, `backend/app/routers/contracts.py`, `frontend/src/components/ContractArchiveWorkspace.tsx`, `frontend/src/api/enterprise.ts`)
+- [x] Add `legal_counsel` to system role constraints and account-management selectors (`backend/app/core/roles.py`, `backend/app/models/models.py`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/EmployeesPage.tsx`)
+- [x] Add archive migration and backend/frontend regression coverage (`backend/alembic/versions/n1o2p3q4r5s6_contract_archive.py`, `backend/tests/test_contracts_contract.py`, `backend/tests/test_alembic_graph.py`, `frontend/src/components/ContractArchiveWorkspace.test.tsx`)
 - [x] Repair the enterprise foundation migration for renamed `time_off` metadata and calendar-table dependency ordering (`backend/alembic/versions/q5r6s7t8u9v0_enterprise_pm_psa_foundation.py`, `backend/alembic/versions/v0w1x2y3z4a5_erp_reliability_workspace.py`)
 - [x] Preserve legacy `time_off` data for the follow-up rename migration when the restored database still has the old physical table (`backend/alembic/versions/q5r6s7t8u9v0_enterprise_pm_psa_foundation.py`)
 - [x] Keep foundation rollback from dropping a pre-existing legacy `time_off` table (`backend/alembic/versions/q5r6s7t8u9v0_enterprise_pm_psa_foundation.py`)

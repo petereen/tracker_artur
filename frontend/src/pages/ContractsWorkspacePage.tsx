@@ -69,7 +69,6 @@ const tabs: Array<{ key: ContractView; label: string }> = [
   { key: "pending_my_approval", label: "Хянагдаж буй" },
   { key: "submitted_by_me", label: "Илгээсэн" },
   { key: "approved", label: "Баталгаажсан" },
-  { key: "signed", label: "Гарын үсэг зурсан" },
   { key: "returned", label: "Буцаагдсан" },
 ];
 const typeLabels: Record<ContractDocumentType, string> = {
@@ -622,6 +621,7 @@ function ContractDetailView({
   );
   return (
     <section className="contract-detail">
+      <div className="contract-module-tabs"><a href="/contracts" className="active">Гэрээний төсөл</a><a href="/contracts/archive">Архив</a></div>
       <div className="workspace-toolbar contract-detail-toolbar">
         <button className="back-link" onClick={onBack}>
           ← Гэрээний жагсаалт
@@ -1012,6 +1012,7 @@ export function ContractsWorkspacePage() {
     );
   return (
     <section className="contracts-workspace">
+      <div className="contract-module-tabs"><a href="/contracts" className="active">Гэрээний төсөл</a><a href="/contracts/archive">Архив</a></div>
       <div className="workspace-toolbar contracts-toolbar">
         <div className="toolbar-start">
           <div className="contract-tabs" role="tablist">

@@ -26,6 +26,7 @@ const TaxBenefitsWorkspacePage = lazy(() => import('./pages/TaxBenefitsWorkspace
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
 const PlansPage = lazy(() => import('./pages/PlansPage').then((module) => ({ default: module.PlansPage })))
 const ContractsWorkspacePage = lazy(() => import('./pages/ContractsWorkspacePage').then((module) => ({ default: module.ContractsWorkspacePage })))
+const ContractArchiveWorkspace = lazy(() => import('./components/ContractArchiveWorkspace').then((module) => ({ default: module.ContractArchiveWorkspace })))
 const ContractPrintPage = lazy(() => import('./pages/ContractsWorkspacePage').then((module) => ({ default: module.ContractPrintPage })))
 const AdministrationHubPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdministrationHubPage })))
 const WorkspaceIdentitySettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.WorkspaceIdentitySettingsPage })))
@@ -89,6 +90,7 @@ function AuthenticatedApp() {
         <Route path="capacity" element={<CapacityWorkspacePage />} />
         <Route path="plans" element={<PlansPage />} />
         <Route path="contracts" element={<ContractsWorkspacePage />} />
+        <Route path="contracts/archive" element={<ContractArchiveWorkspace />} />
         <Route path="contracts/:publicId" element={<ContractsWorkspacePage />} />
         <Route path="okrs" element={<Navigate to="/plans" replace />} />
         <Route path="analytics" element={<StatsWorkspacePage />} />

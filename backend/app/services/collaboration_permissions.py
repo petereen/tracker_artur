@@ -7,7 +7,10 @@ from app.models.models import Organization
 
 from app.core.roles import SYSTEM_ROLES
 
-ALL_EMPLOYEE_ROLES = SYSTEM_ROLES
+# Legal Counsel is an archive-specific role. Keep it out of unrelated
+# collaboration/task-assignment settings even though it remains a canonical
+# account role elsewhere in the system.
+ALL_EMPLOYEE_ROLES = frozenset(role for role in SYSTEM_ROLES if role != "legal_counsel")
 SETTINGS_KEY = "task_assignment_roles"
 
 

@@ -28,7 +28,7 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
 
 const ACCESS_ROLES = [
   ['member', 'Member'], ['manager', 'Manager'], ['team_lead', 'Team lead'], ['hr', 'HR'],
-  ['contractor', 'Contractor'], ['client_auditor', 'Client auditor'], ['admin', 'Admin'],
+  ['contractor', 'Contractor'], ['client_auditor', 'Client auditor'], ['legal_counsel', 'Хуульч'], ['admin', 'Admin'],
 ] as const
 
 function formatMinutes(minutes: number) {

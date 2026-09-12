@@ -46,6 +46,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "member": frozenset({"assistant.read", "assistant.preview"}),
     "contractor": frozenset({"assistant.read"}),
     "client_auditor": frozenset({"assistant.read", "assistant.analytics"}),
+    "legal_counsel": frozenset({"assistant.read", "assistant.preview"}),
 }
 
 
