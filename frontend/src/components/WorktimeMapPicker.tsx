@@ -133,7 +133,7 @@ export function WorktimeMapPicker({ latitude, longitude, radiusMeters, disabled 
       role="application"
       aria-label="Оффисын байршил сонгох газрын зураг"
     >
-      {tiles.map((tile) => <img key={tile.key} className="worktime-map-tile" src={`https://tile.openstreetmap.org/${ZOOM}/${tile.tileX}/${tile.tileY}.png`} alt="" aria-hidden="true" style={{ left: tile.x, top: tile.y }} />)}
+      {tiles.map((tile) => <img key={tile.key} className="worktime-map-tile" src={`https://tile.openstreetmap.org/${ZOOM}/${tile.tileX}/${tile.tileY}.png`} referrerPolicy="origin" alt="" aria-hidden="true" style={{ left: tile.x, top: tile.y }} />)}
       {selected && <div className="worktime-geofence-circle" style={{ left: selectedScreen.x - radiusPixels, top: selectedScreen.y - radiusPixels, width: radiusPixels * 2, height: radiusPixels * 2 }} aria-hidden="true" />}
       <button
         type="button"
@@ -149,4 +149,3 @@ export function WorktimeMapPicker({ latitude, longitude, radiusMeters, disabled 
     </div>
   </div>
 }
-

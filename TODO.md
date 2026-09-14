@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Fix OpenStreetMap tile access in the Automation map picker by preserving a valid cross-origin referrer (`frontend/src/components/WorktimeMapPicker.tsx`, `frontend/nginx.conf`, `frontend/src/components/WorktimeMapPicker.test.tsx`) — the server policy now sends the app origin cross-origin, map tile images explicitly use `referrerPolicy="origin"`, and focused test/build checks pass
 - [x] Add per-day expand/collapse controls to the weekly HR attendance register (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/index.css`) — each visible date is grouped under an accessible header, expanded by default, and can collapse/expand all workers for that day; build and diff checks pass
 - [x] Improve HR Monthly Register attendance review with weekly defaults, filters, and non-working-day handling (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/hr/router.py`) — weekly Monday–Sunday navigation, employee/status filters, holiday/weekend metadata, hidden empty non-working days, and highlighted worked non-working days; frontend build passes, 103/104 tests pass with one unrelated existing WorkspaceModeToggle locale expectation failure
 - [x] Keep selected worker details visible immediately in Access Control's current access roster (`frontend/src/components/ContractArchiveWorkspace.tsx`, `frontend/src/components/ContractArchiveWorkspace.test.tsx`) — preserve the selected candidate locally until the folder detail refresh completes

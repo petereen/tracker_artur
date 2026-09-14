@@ -13,5 +13,13 @@ describe('WorktimeMapPicker', () => {
     expect(onChange.mock.calls[0][0].latitude).toBeCloseTo(47.9184, 2)
     expect(onChange.mock.calls[0][0].longitude).toBeGreaterThan(106.9177)
   })
-})
 
+  it('sends the app origin when loading OpenStreetMap tiles', () => {
+    const { container } = render(<WorktimeMapPicker latitude={47.9184} longitude={106.9177} radiusMeters={150} onChange={vi.fn()} />)
+
+    const tiles = container.querySelectorAll<HTMLImageElement>('.worktime-map-tile')
+    expect(tiles.length).toBeGreaterThan(0)
+    expect(Array.from(tiles).every((tile) => tile.getAttribute('referrerpolicy') === 'origin')).toBe(true)
+    expect(Array.from(tiles).every((tile) => tile.src.startsWith('https://tile.openstreetmap.org/'))).toBe(true)
+  })
+})
