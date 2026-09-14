@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Keep selected worker details visible immediately in Access Control's current access roster (`frontend/src/components/ContractArchiveWorkspace.tsx`, `frontend/src/components/ContractArchiveWorkspace.test.tsx`) — preserve the selected candidate locally until the folder detail refresh completes
 - [x] Build shift-free skeleton loading state machine, query regions, route fallbacks, and CLS verification (`frontend/src/components/Loading.tsx`, `frontend/src/App.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
 - [x] Migrate core query loading call sites and standardize layout-safe skeleton primitives (`frontend/src/pages`, `frontend/src/components`, `frontend/src/index.css`)
 - [ ] Audit remaining domain-specific read loaders and migrate them to QueryRegion where their surrounding layout can be reserved (`frontend/src/pages`)
