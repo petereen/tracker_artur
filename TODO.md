@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Improve HR Monthly Register attendance review with weekly defaults, filters, and non-working-day handling (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/hr/router.py`) — weekly Monday–Sunday navigation, employee/status filters, holiday/weekend metadata, hidden empty non-working days, and highlighted worked non-working days; frontend build passes, 103/104 tests pass with one unrelated existing WorkspaceModeToggle locale expectation failure
 - [x] Keep selected worker details visible immediately in Access Control's current access roster (`frontend/src/components/ContractArchiveWorkspace.tsx`, `frontend/src/components/ContractArchiveWorkspace.test.tsx`) — preserve the selected candidate locally until the folder detail refresh completes
 - [x] Build shift-free skeleton loading state machine, query regions, route fallbacks, and CLS verification (`frontend/src/components/Loading.tsx`, `frontend/src/App.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
 - [x] Migrate core query loading call sites and standardize layout-safe skeleton primitives (`frontend/src/pages`, `frontend/src/components`, `frontend/src/index.css`)

@@ -18,6 +18,7 @@ from app.models.models import (
     EmployeeCompensationItem,
     EmployeeDetails,
     EmployeePayrollProfile,
+    HolidayRecord,
     LeaveBalance,
     PayrollRun,
     PayrollSalaryComponentMaster,
@@ -465,24 +466,34 @@ async def _attendance_items(db: AsyncSession, actor: ActorContext, start: date, 
     employees = (await db.execute(query.order_by(Employee.name))).scalars().all()
     logs = (await db.execute(select(AttendanceLog).where(AttendanceLog.organization_id == actor.organization_id, AttendanceLog.attendance_date >= start, AttendanceLog.attendance_date <= end))).scalars().all()
     by_key = {(row.employee_id, row.attendance_date): row for row in logs}
+    holiday_rows = (await db.execute(select(HolidayRecord.holiday_date, HolidayRecord.name).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.is_active.is_(True), HolidayRecord.holiday_date >= start, HolidayRecord.holiday_date <= end))).all()
+    holidays = {holiday_date: name for holiday_date, name in holiday_rows}
     output = []
     current = start
     while current <= end:
         for employee in employees:
             log = by_key.get((employee.id, current)); suggestion = await suggested_attendance(db, employee, current)
-            output.append({"id": log.id if log else None, "employee_id": employee.id, "employee_name": employee.name, "attendance_date": current.isoformat(), "status": log.status if log else suggestion.get("suggested_status"), "suggested_status": suggestion.get("suggested_status"), "on_leave": suggestion.get("on_leave", False), "source": log.source if log else "derived", "worked_minutes": log.worked_minutes if log else suggestion.get("worked_minutes", 0), "first_started_at": log.first_started_at if log else suggestion.get("first_started_at"), "last_ended_at": log.last_ended_at if log else suggestion.get("last_ended_at"), "confirmed": bool(log and log.confirmed_at), "version": log.version if log else None})
+            non_working_day = current.weekday() >= 5 or current in holidays
+            output.append({"id": log.id if log else None, "employee_id": employee.id, "employee_name": employee.name, "attendance_date": current.isoformat(), "status": log.status if log else suggestion.get("suggested_status"), "suggested_status": suggestion.get("suggested_status"), "on_leave": suggestion.get("on_leave", False), "source": log.source if log else "derived", "worked_minutes": log.worked_minutes if log else suggestion.get("worked_minutes", 0), "first_started_at": log.first_started_at if log else suggestion.get("first_started_at"), "last_ended_at": log.last_ended_at if log else suggestion.get("last_ended_at"), "confirmed": bool(log and log.confirmed_at), "version": log.version if log else None, "is_non_working_day": non_working_day, "non_working_day_name": holidays.get(current) or ("Амралтын өдөр" if current.weekday() >= 5 else None)})
         current += timedelta(days=1)
     return output
 
 
 @router.get("/attendance")
-async def list_attendance(month: str | None = None, employee_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    try:
-        start = date.fromisoformat((month or date.today().strftime("%Y-%m")) + "-01")
-    except ValueError: raise HTTPException(status_code=422, detail="month must use YYYY-MM")
-    end = date(start.year + (1 if start.month == 12 else 0), 1 if start.month == 12 else start.month + 1, 1) - timedelta(days=1)
+async def list_attendance(month: str | None = None, employee_id: int | None = None, start_date: date | None = None, end_date: date | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if (start_date is None) != (end_date is None): raise HTTPException(status_code=422, detail="start_date and end_date must be provided together")
+    if start_date is not None:
+        start, end = start_date, end_date
+        if end < start or (end - start).days > 31: raise HTTPException(status_code=422, detail="Attendance range must be between 1 and 32 days")
+        period = start.strftime("%Y-%m-%d")
+    else:
+        try:
+            start = date.fromisoformat((month or date.today().strftime("%Y-%m")) + "-01")
+        except ValueError: raise HTTPException(status_code=422, detail="month must use YYYY-MM")
+        end = date(start.year + (1 if start.month == 12 else 0), 1 if start.month == 12 else start.month + 1, 1) - timedelta(days=1)
+        period = start.strftime("%Y-%m")
     if employee_id: await employee_in_scope(db, actor, employee_id)
-    return {"month": start.strftime("%Y-%m"), "items": await _attendance_items(db, actor, start, end, employee_id)}
+    return {"month": start.strftime("%Y-%m"), "period": period, "period_start": start.isoformat(), "period_end": end.isoformat(), "items": await _attendance_items(db, actor, start, end, employee_id)}
 
 
 @router.put("/attendance", status_code=status.HTTP_200_OK)
@@ -509,7 +520,7 @@ async def update_attendance_bulk(data: AttendanceBulkUpdate, db: AsyncSession = 
 
 @router.get("/attendance/export.csv")
 async def export_attendance(month: str | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGER_ROLES))):
-    data = await list_attendance(month, None, db, actor)
+    data = await list_attendance(month=month, employee_id=None, db=db, actor=actor)
     output = io.StringIO(); output.write("\ufeff")
     writer = csv.writer(output); writer.writerow(["Employee", "Date", "Status", "Worked minutes", "First started", "Last ended", "Source", "Confirmed"])
     for item in data["items"]: writer.writerow([item["employee_name"], item["attendance_date"], item["status"] or "", item["worked_minutes"], item["first_started_at"] or "", item["last_ended_at"] or "", item["source"], item["confirmed"]])

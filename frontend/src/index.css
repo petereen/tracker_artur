@@ -36,6 +36,13 @@
 .hr-request-actions, .hr-status-buttons, .hr-modal-actions, .hr-invite-result > div { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; }
 .hr-request-actions button, .hr-status-buttons button { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-muted); cursor: pointer; font: 600 10px var(--font-brand); padding: 6px 7px; text-transform: capitalize; }
 .hr-inline-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+.hr-attendance-controls { align-items: center; display: grid; gap: 9px; grid-template-columns: auto minmax(180px, 1fr) 160px; margin: 4px 0 12px; }
+.hr-week-nav { align-items: center; display: flex; gap: 7px; white-space: nowrap; }
+.hr-week-nav strong { font-size: 12px; min-width: 145px; text-align: center; }
+.hr-attendance-filter { align-items: center; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 10px; color: var(--color-muted); display: flex; gap: 7px; min-height: 38px; padding: 0 9px; }
+.hr-attendance-filter select { background: transparent; border: 0; color: var(--color-text); font: 500 11px var(--font-brand); outline: 0; width: 100%; }
+.hr-attendance-list article.non-working-day { background: color-mix(in srgb, var(--color-amber-soft) 60%, var(--color-surface)); border-color: color-mix(in srgb, var(--color-amber) 35%, var(--color-border-soft)); }
+.hr-attendance-list article.non-working-day em { color: var(--color-amber); font-size: 9px; font-style: normal; font-weight: 700; letter-spacing: .04em; }
 .hr-attendance-select { align-items: flex-start; cursor: pointer; display: flex; gap: 10px; }
 .hr-attendance-select input { accent-color: var(--color-primary); margin-top: 3px; }
 .hr-attendance-select { flex: 1; min-width: 0; }
@@ -56,7 +63,7 @@
 .hr-invite-result { display: grid; gap: 14px; }
 .hr-invite-result code { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 9px; display: block; font-size: 11px; overflow-wrap: anywhere; padding: 11px; }
 .hr-modal-actions { justify-content: flex-end; margin-top: 18px; }
-@media (max-width: 760px) { .hr-toolbar, .hr-panel-grid, .hr-form-grid { grid-template-columns: 1fr; } .hr-balance-grid { grid-template-columns: repeat(3, minmax(90px, 1fr)); overflow-x: auto; } .hr-drawer { padding: 20px 16px calc(20px + var(--safe-area-bottom)); } }
+@media (max-width: 760px) { .hr-toolbar, .hr-panel-grid, .hr-form-grid, .hr-attendance-controls { grid-template-columns: 1fr; } .hr-week-nav { justify-content: space-between; } .hr-week-nav strong { min-width: 0; } .hr-balance-grid { grid-template-columns: repeat(3, minmax(90px, 1fr)); overflow-x: auto; } .hr-drawer { padding: 20px 16px calc(20px + var(--safe-area-bottom)); } }
 
 :root {
   color-scheme: light dark;
