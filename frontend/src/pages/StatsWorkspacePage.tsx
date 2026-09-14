@@ -11,7 +11,7 @@ import { TimePeriodFilter } from "../components/TimePeriodFilter";
 import { EMPTY_ROLES, useAuthStore } from "../store/auth";
 import { HeatmapCalendar } from "../components/HeatmapCalendar";
 import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
-import { QueryRegion, Skeleton } from "../components/Loading";
+import { QueryRegion, Skeleton, combineQueryRegionStates, toQueryRegionState } from "../components/Loading";
 import { DropdownSelect } from "../components/DropdownSelect";
 import { WorkHourHierarchyChart } from "../components/WorkHourHierarchyChart";
 import { WorktimeExportModal } from "../components/WorktimeExportModal";
@@ -121,12 +121,7 @@ export function StatsWorkspacePage() {
         </div>
       </div>
       <QueryRegion
-        pending={
-          summary.isLoading ||
-          summary.isFetching ||
-          daily.isLoading ||
-          daily.isFetching
-        }
+        state={combineQueryRegionStates([toQueryRegionState(summary), toQueryRegionState(daily)])}
         skeleton={
           <>
             <div className="metrics-grid">

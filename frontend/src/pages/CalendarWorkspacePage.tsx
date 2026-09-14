@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { isNativePlatform } from '../platform/runtime'
 import { useCalendarEvents, useCreateCalendarEntry, useCreateEnterpriseTask, useDeleteCalendarEntry, useDeleteEnterpriseTask, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarList, useGoogleCalendarSelect, useGoogleCalendarStatus, useGoogleCalendarSync, useHolidaySettings, useSetHolidayCountry, useUpdateCalendarEntry, useUpdateEnterpriseTask, useWorkerDirectory } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
-import { CalendarSkeleton, QueryRegion } from '../components/Loading'
+import { CalendarSkeleton, QueryRegion, toQueryRegionState } from '../components/Loading'
 import { useWorkspaceMode } from '../components/WorkspaceModeProvider'
 
 function localDate(value: Date) { const offset = value.getTimezoneOffset() * 60_000; return new Date(value.getTime() - offset).toISOString().slice(0, 10) }
@@ -360,7 +360,7 @@ export function CalendarWorkspacePage() {
     <div className="calendar-month-nav"><strong>{anchor.toLocaleDateString('mn-MN', { year: 'numeric', month: 'long' })}</strong><div className="calendar-holiday-setting"><span className="holiday-country">Амралт: {holidaySettings.data?.country || 'MN'}</span>{isAdmin && <select aria-label="Амралтын өдрийн улс" value={holidaySettings.data?.country || 'MN'} onChange={(event) => setCountry.mutate(event.target.value)} disabled={setCountry.isPending}>{holidaySettings.data?.countries.map((country) => <option key={country.countryCode} value={country.countryCode}>{country.name}</option>)}</select>}</div><div className="calendar-nav-actions"><button onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1)))} aria-label="Өмнөх сар">←</button><button className="calendar-today-button" onClick={() => startTransition(() => { const today = new Date(); setAnchor(new Date(today.getFullYear(), today.getMonth(), 1)) })}>Өнөөдөр</button><button onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1)))} aria-label="Дараагийн сар">→</button></div></div>
     <div className="calendar-filter-toolbar" role="toolbar" aria-label="Календарийн төрлийн шүүлтүүр"><div className="calendar-filter-chips"><span className="calendar-filter-label">Харах</span>{CALENDAR_FILTERS.map((filter) => <button type="button" key={filter.key} className={`calendar-filter-chip ${filter.key} ${filters[filter.key] ? 'active' : ''}`} aria-pressed={filters[filter.key]} onClick={() => toggleFilter(filter.key)}><i aria-hidden />{filter.label}</button>)}</div><button type="button" className="calendar-filter-all" onClick={setAllFilters}>{allFiltersSelected ? 'Бүгдийг цуцлах' : 'Бүгдийг сонгох'}</button></div>
     {events.isError && <div className="panel calendar-status error">Календарийн мэдээлэл ачаалагдсангүй. Дахин оролдоно уу.</div>}
-    <QueryRegion pending={events.isLoading || events.isFetching} skeleton={<CalendarSkeleton />}><>
+    <QueryRegion state={toQueryRegionState(events)} skeleton={<CalendarSkeleton />}><>
       <div className="planning-calendar panel" style={{ gridTemplateRows: calendarGridRows }}>{days.map((day) => {
         const key = localDate(day)
         const redDay = day.getDay() === 0 || day.getDay() === 6 || holidayKeys.has(key)

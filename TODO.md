@@ -1,6 +1,18 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Build shift-free skeleton loading state machine, query regions, route fallbacks, and CLS verification (`frontend/src/components/Loading.tsx`, `frontend/src/App.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
+- [x] Migrate core query loading call sites and standardize layout-safe skeleton primitives (`frontend/src/pages`, `frontend/src/components`, `frontend/src/index.css`)
+- [ ] Audit remaining domain-specific read loaders and migrate them to QueryRegion where their surrounding layout can be reserved (`frontend/src/pages`)
+- [x] Fix calendar CLS smoke fixtures and delay background refresh indicators (`frontend/e2e/loading-cls.spec.ts`, `frontend/src/components/Loading.tsx`)
+- [x] Cover delayed background refresh feedback in QueryRegion tests (`frontend/src/components/Loading.test.tsx`)
+- [x] Scope the CLS browser budget to the desktop shell project (`frontend/e2e/loading-cls.spec.ts`)
+- [x] Add shared table geometry tokens, fixed semantic table layout, reserved row heights, and tabular numerals (`frontend/src/index.css`)
+- [x] Tag sampled Sentry route transactions with normalized route, viewport class, and loading-system version (`frontend/src/components/EnterpriseShell.tsx`)
+- [x] Keep `aria-busy` immediate while visually delaying refresh status feedback (`frontend/src/components/Loading.tsx`)
+- [x] Add normalized and combined query-state unit coverage, including successful `null` data (`frontend/src/components/Loading.test.tsx`)
+- [x] Add auth regression coverage for credential rotation preserving actor/query identity (`frontend/src/store/auth.test.ts`)
+- [x] Re-align contract archive dialogs with the compact UI scale and fix Access Control footer sizing (`frontend/src/index.css`) — create-folder dialog now follows archive sizing; Access Control uses an auto-sized footer row with compact actions
 - [x] Polish contract archive new-folder dialog form sizing and spacing (`frontend/src/components/ContractArchiveWorkspace.tsx`, `frontend/src/index.css`) — dedicated dialog layout uses full-width, taller controls with responsive mobile sizing
 - [x] Eliminate theme and role-based UI flashes during initial load and route transitions (`frontend/index.html`, `frontend/src/store/auth.ts`, `frontend/src/api/enterprise.ts`, `frontend/src/api/enterprise.test.ts`, `frontend/src/store/auth.test.ts`, `frontend/src/App.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
 - [x] Isolate authenticated query/UI state across account switches and enforce role-scoped routes (`frontend/src/api/client.ts`, `frontend/src/api/enterprise.ts`, `frontend/src/App.tsx`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/Sidebar.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/api/client.test.ts`)
@@ -460,6 +472,18 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Add normalized QueryRegion state, delayed skeleton timing, retained cross-fade layers, skeleton primitives, and compositor-safe loading CSS (`frontend/src/components/Loading.tsx`, `frontend/src/index.css`)
+- [x] Update loading primitive regression coverage for delayed reveal and minimum visible duration (`frontend/src/components/Loading.test.tsx`)
+- [x] Cover QueryRegion stale-while-revalidate, aria-busy, initial error, and retry behavior (`frontend/src/components/Loading.test.tsx`)
+- [x] Complete skeleton-to-content overlap so retained skeletons cross-fade with the revealed result (`frontend/src/components/Loading.tsx`)
+- [x] Preserve the authenticated shell when actor refreshes fail after cached actor data exists (`frontend/src/App.tsx`)
+- [x] Make aggregated calendar queries report a cache miss until all month requests resolve (`frontend/src/api/enterprise.ts`)
+- [x] Gate every lazy route module behind the same 150ms reveal and 300ms minimum fallback timing (`frontend/src/components/Loading.tsx`, `frontend/src/App.tsx`)
+- [x] Preserve actor/query identity across token rotations while retaining cache clearing for account replacement (`frontend/src/api/client.ts`, `frontend/src/store/auth.ts`)
+- [x] Gate authenticated shell rendering on the initial actor query while preserving cached roles during background fetches (`frontend/src/App.tsx`)
+- [x] Keep authenticated navigation and role-derived shell state stable during actor background refreshes (`frontend/src/components/EnterpriseShell.tsx`)
+- [x] Add route-aware Suspense fallbacks and delayed destination skeleton reveal (`frontend/src/components/Loading.tsx`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
+- [x] Enable sampled browser tracing for Core Web Vitals collection through Sentry (`frontend/src/main.tsx`)
 - [x] Route new payroll operations through the dedicated Payroll Entry workflow; HR now links to Payroll Entry creation, employees use new self-service payslips, and legacy run URLs redirect to the new workspace (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/App.tsx`)
 - [x] Scope canonical Payroll inputs to tenant-owned worktime, employee schedules, confirmed late attendance, and explicit missing-attendance policy metadata (`backend/app/payroll/inputs.py`)
 - [x] Preserve Payroll Entry employee filters, manual adjustments, canonical input snapshots, and validation results across refresh/recheck (`backend/app/payroll/frappe_service.py`, `backend/app/payroll/router.py`)

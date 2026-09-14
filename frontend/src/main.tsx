@@ -18,6 +18,7 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     dsn: import.meta.env.VITE_SENTRY_DSN,
     environment: import.meta.env.VITE_SENTRY_ENVIRONMENT ?? 'production',
     tracesSampleRate: 0.1,
+    integrations: [Sentry.browserTracingIntegration()],
   })
 }
 

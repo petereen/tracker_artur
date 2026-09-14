@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
+import * as Sentry from '@sentry/react'
 import { api } from '../api/client'
 import {
   BarChart3, BriefcaseBusiness, Calculator, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine, UserRoundCog,
@@ -15,7 +16,7 @@ import { OyunsAssistant } from './OyunsAssistant'
 import { NotificationCenter } from './NotificationCenter'
 import { WorkspaceModeProvider } from './WorkspaceModeProvider'
 import { WorkspaceModeToggle } from './WorkspaceModeToggle'
-import { WorkspaceSkeleton } from './Loading'
+import { WorkspaceRouteSkeleton } from './Loading'
 import { GlobalCommandBar } from './GlobalCommandBar'
 import { getRealtimeUrl, resolvePublicAssetUrl, safeLocalStorage, safeSessionStorage } from '../platform/runtime'
 import { showDesktopChatAlert } from '../platform/chat-notifications'
@@ -145,7 +146,7 @@ export function EnterpriseShell() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (safeLocalStorage().get('oyuns-theme') as 'light' | 'dark') || 'light')
   const workers = useWorkerDirectory()
   const branding = useBrandingSettings()
-  const actorResolved = Boolean(actorQuery.data && !actorQuery.isPending && !actorQuery.isFetching)
+  const actorResolved = Boolean(actorQuery.data)
   const roles = actorResolved ? actorQuery.data?.roles ?? EMPTY_ROLES : EMPTY_ROLES
   const canAccessERP = roles.some((role) => ERP_ROLES.includes(role))
   const canReadERPVisibility = canAccessERP || roles.some((role) => PAYROLL_ROLES.includes(role))
@@ -154,6 +155,15 @@ export function EnterpriseShell() {
   const openDirectChat = useOpenDirectConversation()
 
   useEffect(() => setMobileOpen(false), [location.pathname])
+  useEffect(() => {
+    const normalizedRoute = location.pathname
+      .replace(/\/\d+(?=\/|$)/g, '/:id')
+      .replace(/\/[^/]+(?=\/print$)/g, '/:publicId')
+    const viewport = window.innerWidth < 800 ? 'mobile' : window.innerWidth < 1200 ? 'tablet' : 'desktop'
+    Sentry.setTag('loading.route', normalizedRoute || '/')
+    Sentry.setTag('loading.viewport', viewport)
+    Sentry.setTag('loading.version', 'skeleton-v1')
+  }, [location.pathname])
   useEffect(() => {
     if (!workersOpen) return
     const dismissOnOutsidePointer = (event: PointerEvent) => {
@@ -304,7 +314,7 @@ export function EnterpriseShell() {
               <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>
             </div>
           </header>
-          <div className={`workspace-content ${location.pathname.startsWith('/chat') ? 'chat-route-content' : ''}`}><Suspense fallback={<WorkspaceSkeleton />}><Outlet /></Suspense></div>
+          <div className={`workspace-content ${location.pathname.startsWith('/chat') ? 'chat-route-content' : ''}`}><Suspense fallback={<WorkspaceRouteSkeleton pathname={location.pathname} />}><Outlet /></Suspense></div>
         </main>
         <nav className="mobile-tabbar" aria-label="Шуурхай цэс">
           {mobileNav.map(({ to, label, icon: Icon }) => (

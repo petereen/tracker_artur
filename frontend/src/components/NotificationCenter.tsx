@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Bell, Bookmark, CheckCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useNotifications, useReadAllNotifications, useReadNotification, useToggleNotificationPriority, UserNotification } from '../api/enterprise'
-import { InlinePending, QueryRegion, Skeleton } from './Loading'
+import { InlinePending, QueryRegion, Skeleton, toQueryRegionState } from './Loading'
 
 function relativeTime(value: string) {
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000))
@@ -48,13 +48,12 @@ export function NotificationCenter() {
       <header><div><span className="eyebrow">Activity</span><h2>Мэдэгдэл</h2></div>{unread > 0 && <button onClick={() => readAll.mutate()} disabled={readAll.isPending}><CheckCheck size={15} />Бүгдийг унших{readAll.isPending && <InlinePending label="Мэдэгдлүүдийг уншсан болгож байна…" />}</button>}</header>
       <nav className="notification-filters" aria-label="Мэдэгдлийн шүүлтүүр"><button className={!priorityOnly ? 'active' : ''} onClick={() => setPriorityOnly(false)} aria-pressed={!priorityOnly}>Бүгд</button><button className={priorityOnly ? 'active' : ''} onClick={() => setPriorityOnly(true)} aria-pressed={priorityOnly}><Bookmark size={13} />Чухал</button></nav>
       <div className="notification-list">
-        {notifications.isLoading && <QueryRegion pending={notifications.isLoading} skeleton={<Skeleton variant="table-row" count={4} />}>{null}</QueryRegion>}
-        {notifications.isError && <p>Мэдэгдэл ачаалж чадсангүй.</p>}
-        {!notifications.isLoading && !visibleItems.length && <p>{priorityOnly ? 'Чухал мэдэгдэл алга.' : 'Шинэ мэдэгдэл алга.'}</p>}
-        {visibleItems.map((item) => <div key={item.id} className={`notification-item ${item.read_at ? '' : 'unread'}`}>
+        <QueryRegion state={toQueryRegionState(notifications)} empty={Boolean(notifications.data && !visibleItems.length)} emptyFallback={<p>{priorityOnly ? 'Чухал мэдэгдэл алга.' : 'Шинэ мэдэгдэл алга.'}</p>} errorFallback={() => <p role="alert">Мэдэгдэл ачаалж чадсангүй.</p>} skeleton={<Skeleton variant="table-row" count={4} />}>
+          {visibleItems.length ? <>{visibleItems.map((item) => <div key={item.id} className={`notification-item ${item.read_at ? '' : 'unread'}`}>
           <button className="notification-item-main" onClick={() => openItem(item)}><i aria-hidden /><span><strong>{item.title}</strong><p>{item.body}</p><small>{relativeTime(item.created_at)} · Telegram: {item.telegram_status === 'sent' ? 'илгээгдсэн' : item.telegram_status === 'queued' ? 'хүлээгдэж байна' : item.telegram_status === 'failed' ? 'алдаа' : 'холбогдоогүй'}</small></span></button>
           <button className={`notification-priority ${item.is_priority ? 'active' : ''}`} onClick={() => togglePriority.mutate({ id: item.id, is_priority: !item.is_priority })} aria-label={item.is_priority ? 'Чухал төлөвийг болиулах' : 'Чухал гэж тэмдэглэх'} aria-pressed={item.is_priority}><Bookmark size={17} fill={item.is_priority ? 'currentColor' : 'none'} /></button>
-        </div>)}
+        </div>)}</> : null}
+        </QueryRegion>
       </div>
     </section>}
   </div>

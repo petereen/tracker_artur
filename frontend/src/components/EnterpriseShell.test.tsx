@@ -28,7 +28,7 @@ vi.mock('../api/enterprise', () => ({
 }))
 vi.mock('./NotificationCenter', () => ({ NotificationCenter: () => null }))
 vi.mock('./OyunsAssistant', () => ({ OyunsAssistant: () => null }))
-vi.mock('./Loading', () => ({ WorkspaceSkeleton: () => null }))
+vi.mock('./Loading', () => ({ WorkspaceRouteSkeleton: () => null }))
 
 describe('enterprise sidebar', () => {
   beforeEach(() => { mocks.workers = []; mocks.profile = null; mocks.openDirect.mockClear() })

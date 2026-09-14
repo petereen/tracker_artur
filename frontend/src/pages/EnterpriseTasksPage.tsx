@@ -67,6 +67,7 @@ import {
   KanbanSkeleton,
   QueryRegion,
   TableSkeleton,
+  toQueryRegionState,
 } from "../components/Loading";
 import { UserTagPicker } from "../components/UserTagPicker";
 import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
@@ -1109,7 +1110,7 @@ export function EnterpriseTasksPage() {
         </div>
       )}
       <QueryRegion
-        pending={tasks.isLoading || tasks.isFetching}
+        state={toQueryRegionState(tasks)}
         skeleton={
           view === "board" ? <KanbanSkeleton /> : <TableSkeleton rows={6} />
         }

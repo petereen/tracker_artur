@@ -14,10 +14,12 @@ const refreshClient = axios.create({ baseURL: apiBaseUrl, withCredentials: true 
 let refreshPromise: Promise<string> | null = null
 let proactiveTimer: number | undefined
 
-export async function acceptSession(data: { access_token: string; expires_in?: number; refresh_token?: string | null }) {
+export async function acceptSession(data: { access_token: string; expires_in?: number; refresh_token?: string | null }, { preserveIdentity = false }: { preserveIdentity?: boolean } = {}) {
   const expiresIn = data.expires_in ?? 15 * 60
   if (isNativePlatform() && data.refresh_token) await setNativeRefreshToken(data.refresh_token)
-  useAuthStore.getState().setSession(data.access_token, expiresIn)
+  const store = useAuthStore.getState()
+  if (preserveIdentity) store.setRefreshedSession(data.access_token, expiresIn)
+  else store.setSession(data.access_token, expiresIn)
   if (proactiveTimer && typeof window !== 'undefined') window.clearTimeout(proactiveTimer)
   if (typeof window !== 'undefined') {
     proactiveTimer = window.setTimeout(() => { refreshAccessToken().catch(() => undefined) }, Math.max(10_000, (expiresIn - 60) * 1000))
@@ -28,7 +30,7 @@ export async function acceptSession(data: { access_token: string; expires_in?: n
 async function rotateSession() {
   const refreshToken = isNativePlatform() ? await getNativeRefreshToken() : null
   const { data } = await refreshClient.post('/v1/auth/refresh', refreshToken ? { refresh_token: refreshToken } : undefined)
-  return acceptSession(data)
+  return acceptSession(data, { preserveIdentity: true })
 }
 
 export async function clearSessionCredentials() {

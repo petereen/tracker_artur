@@ -915,8 +915,9 @@ export function useCalendarEvents(scope: 'private' | 'corporate', anchor: Date, 
     }
     return combined
   }, { tasks: [], projects: [], plans: [], entries: [], holidays: [], time_blocks: [] } as Record<string, any[]>)
+  const allLoaded = queries.every((query) => query.data !== undefined)
   return {
-    data,
+    data: allLoaded ? data : undefined,
     isLoading: queries.some((query) => query.isLoading),
     isFetching: queries.some((query) => query.isFetching),
     isError: queries.some((query) => query.isError),

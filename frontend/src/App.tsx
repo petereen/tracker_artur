@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef } from 'react'
+import { Suspense, useEffect, useRef } from 'react'
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { clearAuthenticatedQueryCache } from './api/client'
@@ -8,7 +8,7 @@ import { useAuthStore } from './store/auth'
 import { useWorkspaceModeStore } from './store/workspaceMode'
 import { LoginPage } from './pages/LoginPage'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordResetPages'
-import { InitialWorkspaceSkeleton } from './components/Loading'
+import { InitialWorkspaceSkeleton, lazyWithPreload as lazy } from './components/Loading'
 import { notificationService } from './platform/notifications'
 import { isNativePlatform } from './platform/runtime'
 import { CallProvider } from './components/CallProvider'
@@ -54,7 +54,8 @@ function RequireRoles({ allowedRoles }: { allowedRoles: string[] }) {
   const actor = useActor(Boolean(token))
 
   if (!token) return <Navigate to="/" replace />
-  if (actor.isPending || actor.isFetching || !actor.data) return <InitialWorkspaceSkeleton />
+  if (actor.isError && !actor.data) return <SessionBootstrapError onRetry={() => void actor.refetch()} />
+  if (actor.isLoading || !actor.data) return <InitialWorkspaceSkeleton />
   if (!actor.data.roles.some((role) => allowedRoles.includes(role))) return <Navigate to="/" replace />
   return <Outlet />
 }
@@ -84,6 +85,7 @@ function AuthenticatedApp() {
   const token = useAuthStore((state) => state.token)
   const initialized = useAuthStore((state) => state.initialized)
   const queryClient = useQueryClient()
+  const actor = useActor(Boolean(initialized && token))
   const previousToken = useRef<string | null>(null)
 
   useEffect(() => {
@@ -100,6 +102,8 @@ function AuthenticatedApp() {
 
   if (!initialized) return <InitialWorkspaceSkeleton />
   if (!token) return <LoginPage />
+  if (actor.isError && !actor.data) return <SessionBootstrapError onRetry={() => void actor.refetch()} />
+  if (actor.isLoading || !actor.data) return <InitialWorkspaceSkeleton />
 
   return (
     <CallProvider>
@@ -168,6 +172,10 @@ function AuthenticatedApp() {
       </Routes>
     </CallProvider>
   )
+}
+
+function SessionBootstrapError({ onRetry }: { onRetry: () => void }) {
+  return <main className="workspace-bootstrap-error" role="alert"><div className="query-region-state"><strong>Ажлын орон зайг нээж чадсангүй.</strong><button className="secondary-action" type="button" onClick={onRetry}>Дахин оролдох</button></div></main>
 }
 
 export default function App() {
