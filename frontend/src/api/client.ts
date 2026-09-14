@@ -1,4 +1,5 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
+import type { QueryClient } from '@tanstack/react-query'
 import { clearNativeRefreshToken, getNativeRefreshToken, setNativeRefreshToken } from '../platform/secure-session'
 import { getApiBaseUrl, isNativePlatform } from '../platform/runtime'
 import { useAuthStore } from '../store/auth'
@@ -34,6 +35,17 @@ export async function clearSessionCredentials() {
   if (proactiveTimer && typeof window !== 'undefined') window.clearTimeout(proactiveTimer)
   proactiveTimer = undefined
   await clearNativeRefreshToken()
+}
+
+/**
+ * Authenticated query keys are intentionally not persisted, but they are
+ * shared by every account in this browser tab. Clear them at the session
+ * boundary so the next account can never render the previous account's actor,
+ * permissions, or organization data while its request is in flight.
+ */
+export async function clearAuthenticatedQueryCache(queryClient: QueryClient) {
+  await queryClient.cancelQueries()
+  queryClient.clear()
 }
 
 export function refreshAccessToken(): Promise<string> {

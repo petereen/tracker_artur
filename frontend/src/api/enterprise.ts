@@ -1,7 +1,7 @@
 import { InfiniteData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import toast from 'react-hot-toast'
-import { acceptSession, api, clearSessionCredentials, publicApi, refreshAccessToken } from './client'
+import { acceptSession, api, clearAuthenticatedQueryCache, clearSessionCredentials, publicApi, refreshAccessToken } from './client'
 import { notificationService } from '../platform/notifications'
 import { getNativeRefreshToken } from '../platform/secure-session'
 import { isNativePlatform, requireWebCapability } from '../platform/runtime'
@@ -359,9 +359,13 @@ export async function downloadContractArchiveEntry(entry: ContractArchiveEntry) 
 export async function recordContractArchivePrint(entry: ContractArchiveEntry) { await api.post(`/v1/contract-archive/entries/${entry.id}/print`) }
 
 export function useEnterpriseLogin() {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: { email: string; password: string }) => api.post('/v1/auth/login', input).then((response) => response.data),
-    onSuccess: acceptSession,
+    onSuccess: async (data) => {
+      await clearAuthenticatedQueryCache(queryClient)
+      await acceptSession(data)
+    },
   })
 }
 
@@ -451,9 +455,12 @@ export async function bootstrapSession() {
   }
 }
 
+export const actorQueryKey = (sessionVersion: number) => ['v1', 'actor', sessionVersion] as const
+
 export function useActor(enabled = true) {
+  const sessionVersion = useAuthStore((state) => state.sessionVersion)
   return useQuery<Actor>({
-    queryKey: ['v1', 'actor'],
+    queryKey: actorQueryKey(sessionVersion),
     queryFn: () => api.get('/v1/auth/me').then((response) => response.data),
     enabled,
   })
@@ -461,6 +468,7 @@ export function useActor(enabled = true) {
 
 export function useEnterpriseLogout() {
   const logout = useAuthStore((state) => state.logout)
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async () => {
       if (isNativePlatform()) await notificationService.unregister()
@@ -471,7 +479,10 @@ export function useEnterpriseLogout() {
         await clearSessionCredentials()
       }
     },
-    onSettled: () => logout(),
+    onSettled: async () => {
+      await clearAuthenticatedQueryCache(queryClient)
+      logout()
+    },
   })
 }
 

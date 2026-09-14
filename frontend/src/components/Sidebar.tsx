@@ -1,4 +1,4 @@
-import { useAuthStore } from '../store/auth'
+import { useEnterpriseLogout } from '../api/enterprise'
 
 const NAV = [
   { id: 'dashboard',  label: 'Хянах самбар',  icon: '▦' },
@@ -16,7 +16,7 @@ const NAV = [
 ]
 
 export function Sidebar({ active, onNav }: { active: string; onNav: (id: string) => void }) {
-  const logout = useAuthStore((s) => s.logout)
+  const logout = useEnterpriseLogout()
 
   return (
     <div className="admin-sidebar w-[220px] bg-surface border-r border-border flex flex-col flex-shrink-0 h-screen sticky top-0">
@@ -43,7 +43,7 @@ export function Sidebar({ active, onNav }: { active: string; onNav: (id: string)
           <div className="w-[30px] h-[30px] rounded-full bg-surface3 flex items-center justify-center text-[13px] font-semibold text-muted flex-shrink-0">А</div>
           <div className="flex-1 min-w-0">
             <div className="text-[13px] font-medium truncate">Администратор</div>
-            <button onClick={logout} className="text-[11px] text-muted hover:text-red cursor-pointer bg-transparent border-none">Гарах</button>
+            <button onClick={() => logout.mutate()} className="text-[11px] text-muted hover:text-red cursor-pointer bg-transparent border-none">Гарах</button>
           </div>
         </div>
       </div>

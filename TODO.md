@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Polish contract archive new-folder dialog form sizing and spacing (`frontend/src/components/ContractArchiveWorkspace.tsx`, `frontend/src/index.css`) — dedicated dialog layout uses full-width, taller controls with responsive mobile sizing
+- [x] Eliminate theme and role-based UI flashes during initial load and route transitions (`frontend/index.html`, `frontend/src/store/auth.ts`, `frontend/src/api/enterprise.ts`, `frontend/src/api/enterprise.test.ts`, `frontend/src/store/auth.test.ts`, `frontend/src/App.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
+- [x] Isolate authenticated query/UI state across account switches and enforce role-scoped routes (`frontend/src/api/client.ts`, `frontend/src/api/enterprise.ts`, `frontend/src/App.tsx`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/Sidebar.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/api/client.test.ts`)
 - [x] Deliver contract archive folders, signed-file review, archive RBAC, and archive workspace UI (`backend/app/models/contracts.py`, `backend/app/routers/contracts.py`, `frontend/src/components/ContractArchiveWorkspace.tsx`, `frontend/src/api/enterprise.ts`)
 - [x] Add `legal_counsel` to system role constraints and account-management selectors (`backend/app/core/roles.py`, `backend/app/models/models.py`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/EmployeesPage.tsx`)
 - [x] Add archive migration and backend/frontend regression coverage (`backend/alembic/versions/n1o2p3q4r5s6_contract_archive.py`, `backend/tests/test_contracts_contract.py`, `backend/tests/test_alembic_graph.py`, `frontend/src/components/ContractArchiveWorkspace.test.tsx`)

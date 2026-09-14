@@ -36,6 +36,8 @@ const NAV = [
 ]
 
 const NAV_GROUP_BREAKS = new Set(['/calendar', '/reports', '/analytics', '/administration'])
+const ERP_ROLES = ['admin', 'manager', 'team_lead']
+const PAYROLL_ROLES = ['admin', 'hr']
 
 const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/worktime': 'Ажлын цагийн бүртгэл', '/hr': 'Хүний нөөц', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
@@ -143,7 +145,11 @@ export function EnterpriseShell() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (safeLocalStorage().get('oyuns-theme') as 'light' | 'dark') || 'light')
   const workers = useWorkerDirectory()
   const branding = useBrandingSettings()
-  const erp = useERPMetadata(Boolean(token))
+  const actorResolved = Boolean(actorQuery.data && !actorQuery.isPending && !actorQuery.isFetching)
+  const roles = actorResolved ? actorQuery.data?.roles ?? EMPTY_ROLES : EMPTY_ROLES
+  const canAccessERP = roles.some((role) => ERP_ROLES.includes(role))
+  const canReadERPVisibility = canAccessERP || roles.some((role) => PAYROLL_ROLES.includes(role))
+  const erp = useERPMetadata(Boolean(token && canReadERPVisibility))
   const unreadChat = useChatUnreadCount(Boolean(token))
   const openDirectChat = useOpenDirectConversation()
 
@@ -177,7 +183,6 @@ export function EnterpriseShell() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const roles = actorQuery.data?.roles ?? EMPTY_ROLES
   useEffect(() => {
     if (actorQuery.data) setActor(actorQuery.data)
   }, [actorQuery.data, setActor])
@@ -186,12 +191,18 @@ export function EnterpriseShell() {
   }, [actorQuery.data?.locale, i18n])
   const nav = useMemo(() => {
     const hrItem = NAV.find((item) => item.to === '/hr')
+    const payrollItem = { to: '/erp/payroll', label: 'Payroll', icon: Calculator, roles: [] }
     const base = NAV.filter((item) => item.to !== '/hr' && (!item.roles.length || item.roles.some((role) => roles.includes(role))))
-    const canAccessERP = roles.includes('admin') || Object.values(erp.data?.modules ?? {}).some(Boolean)
-    if (!canAccessERP) return [...base.slice(0, 2), ...(hrItem ? [hrItem] : []), ...base.slice(2)]
+    const showPayroll = Boolean(erp.data?.modules.payroll && roles.some((role) => PAYROLL_ROLES.includes(role)))
+    if (!canAccessERP) {
+      const withHr = [...base.slice(0, 2), ...(hrItem ? [hrItem] : []), ...base.slice(2)]
+      return showPayroll ? [...withHr.slice(0, -1), payrollItem, withHr[withHr.length - 1]] : withHr
+    }
     const withErp = [...base.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, ...(hrItem ? [hrItem] : []), base[base.length - 1]]
-    return erp.data?.modules.payroll ? [...withErp.slice(0, -1), { to: '/erp/payroll', label: 'Payroll', icon: Calculator, roles: [] }, withErp[withErp.length - 1]] : withErp
-  }, [erp.data, roles])
+    return showPayroll
+      ? [...withErp.slice(0, -1), payrollItem, withErp[withErp.length - 1]]
+      : withErp
+  }, [canAccessERP, erp.data, roles])
   const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const workerPerformance = useWorkerPerformance(selectedWorker, periodFromPreset('week'), canReviewWorkers)
   const workerProfile = useWorkerProfile(selectedWorker)

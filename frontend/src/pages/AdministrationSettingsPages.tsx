@@ -15,13 +15,13 @@ import { ERPBuilderPanels } from '../components/ERPBuilderPanels'
 import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
 
 const SETTINGS = [
-  { to: '/administration/workspace', title: 'Logo оруулах', text: 'Лого, light болон dark горим', icon: Settings2 },
-  { to: '/administration/collaboration', title: 'Чек ин тохиргоо', text: 'Даалгавар, check-in болон ажлын хуваарь', icon: UserRoundCog },
-  { to: '/administration/access', title: 'Хандалтын удирдлага', text: 'Ажилтан, Telegram холболт, эрх ба төлөв', icon: ShieldCheck },
-  { to: '/administration/automation', title: 'Автоматжуулалт ба интеграци', text: 'Telegram мэдэгдэл, календарь, онбординг', icon: CalendarClock },
-  { to: '/administration/erp', title: 'ERP модулиуд', text: 'Санхүү, борлуулалт, агуулах болон бусад workflow', icon: Landmark },
-  { to: '/administration/admin-access', title: 'Админ хандалт', text: 'Админ хэрэглэгч, нууц үг болон эрх', icon: KeyRound },
-  { to: '/administration/oyuns', title: 'OYUNS agent', text: 'Компаний өгөгдлийн сан ба агентын сургалт', icon: Bot },
+  { to: '/administration/workspace', title: 'Logo оруулах', text: 'Лого, light болон dark горим', icon: Settings2, roles: ['admin', 'manager'] },
+  { to: '/administration/collaboration', title: 'Чек ин тохиргоо', text: 'Даалгавар, check-in болон ажлын хуваарь', icon: UserRoundCog, roles: ['admin', 'manager', 'team_lead'] },
+  { to: '/administration/access', title: 'Хандалтын удирдлага', text: 'Ажилтан, Telegram холболт, эрх ба төлөв', icon: ShieldCheck, roles: ['admin'] },
+  { to: '/administration/automation', title: 'Автоматжуулалт ба интеграци', text: 'Telegram мэдэгдэл, календарь, онбординг', icon: CalendarClock, roles: ['admin', 'manager', 'team_lead'] },
+  { to: '/administration/erp', title: 'ERP модулиуд', text: 'Санхүү, борлуулалт, агуулах болон бусад workflow', icon: Landmark, roles: ['admin'] },
+  { to: '/administration/admin-access', title: 'Админ хандалт', text: 'Админ хэрэглэгч, нууц үг болон эрх', icon: KeyRound, roles: ['admin'] },
+  { to: '/administration/oyuns', title: 'OYUNS agent', text: 'Компаний өгөгдлийн сан ба агентын сургалт', icon: Bot, roles: ['admin', 'manager'] },
 ]
 
 const TASK_ASSIGNMENT_ROLES = [
@@ -33,10 +33,12 @@ const ACCOUNT_ROLES = [
 ] as const
 
 function SettingsPage({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
+  const settings = SETTINGS.filter((item) => item.roles.some((role) => roles.includes(role)))
   return <div className="settings-page">
     <nav className="settings-subnav" aria-label="Системийн тохиргооны цэс">
       <Link to="/administration" className="settings-back"><ArrowLeft size={15} />Бүх тохиргоо</Link>
-      <div>{SETTINGS.map(({ to, title: itemTitle, icon: Icon }) => <NavLink key={to} to={to}><Icon size={15} /><span>{itemTitle}</span></NavLink>)}</div>
+      <div>{settings.map(({ to, title: itemTitle, icon: Icon }) => <NavLink key={to} to={to}><Icon size={15} /><span>{itemTitle}</span></NavLink>)}</div>
     </nav>
     <div className="view-toolbar settings-page-heading"><div><h2>{title}</h2><p>{description}</p></div></div>
     <div className="settings-content">{children}</div>
@@ -91,7 +93,9 @@ function ERPModuleSettingsPanel() {
 }
 
 export function AdministrationHubPage() {
-  return <div className="settings-overview"><div className="view-toolbar"><div><h2>Системийн тохиргоо</h2><p></p></div><Settings2 /></div><div className="settings-category-grid">{SETTINGS.map(({ to, title, text, icon: Icon }) => <Link to={to} key={to}><Icon /><div><strong>{title}</strong><span>{text}</span></div></Link>)}</div></div>
+  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
+  const settings = SETTINGS.filter((item) => item.roles.some((role) => roles.includes(role)))
+  return <div className="settings-overview"><div className="view-toolbar"><div><h2>Системийн тохиргоо</h2><p></p></div><Settings2 /></div><div className="settings-category-grid">{settings.map(({ to, title, text, icon: Icon }) => <Link to={to} key={to}><Icon /><div><strong>{title}</strong><span>{text}</span></div></Link>)}</div></div>
 }
 
 export function WorkspaceIdentitySettingsPage() {

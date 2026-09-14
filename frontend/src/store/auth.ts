@@ -16,6 +16,7 @@ interface AuthState {
   token: string | null
   expiresAt: number | null
   actor: Actor | null
+  sessionVersion: number
   initialized: boolean
   setToken: (token: string | null) => void
   setSession: (token: string, expiresIn: number) => void
@@ -28,9 +29,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   expiresAt: null,
   actor: null,
+  sessionVersion: 0,
   initialized: false,
   setToken: (token) => set({ token, expiresAt: token ? Date.now() + 14 * 60_000 : null }),
-  setSession: (token, expiresIn) => set({ token, expiresAt: Date.now() + expiresIn * 1000 }),
+  setSession: (token, expiresIn) => set((state) => ({ token, expiresAt: Date.now() + expiresIn * 1000, actor: null, sessionVersion: state.sessionVersion + 1 })),
   setActor: (actor) => set({ actor }),
   setInitialized: (initialized) => set({ initialized }),
   logout: () => set({ token: null, expiresAt: null, actor: null, initialized: true }),

@@ -1,9 +1,11 @@
-import { lazy, Suspense, useEffect } from 'react'
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useRef } from 'react'
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { bootstrapSession } from './api/enterprise'
+import { clearAuthenticatedQueryCache } from './api/client'
+import { bootstrapSession, useActor } from './api/enterprise'
 import { EnterpriseShell } from './components/EnterpriseShell'
 import { useAuthStore } from './store/auth'
+import { useWorkspaceModeStore } from './store/workspaceMode'
 import { LoginPage } from './pages/LoginPage'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordResetPages'
 import { InitialWorkspaceSkeleton } from './components/Loading'
@@ -43,6 +45,20 @@ const TgMiniAppPage = lazy(() => import('./pages/TgMiniAppPage').then((module) =
 const PrivacyPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.PrivacyPage })))
 const TermsPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.TermsPage })))
 
+const MANAGEMENT_ROLES = ['admin', 'manager', 'team_lead']
+const ERP_ROLES = ['admin', 'manager', 'team_lead']
+const PAYROLL_ROLES = ['admin', 'hr']
+
+function RequireRoles({ allowedRoles }: { allowedRoles: string[] }) {
+  const token = useAuthStore((state) => state.token)
+  const actor = useActor(Boolean(token))
+
+  if (!token) return <Navigate to="/" replace />
+  if (actor.isPending || actor.isFetching || !actor.data) return <InitialWorkspaceSkeleton />
+  if (!actor.data.roles.some((role) => allowedRoles.includes(role))) return <Navigate to="/" replace />
+  return <Outlet />
+}
+
 function NativeNotificationBridge() {
   const token = useAuthStore((state) => state.token)
   const queryClient = useQueryClient()
@@ -67,6 +83,16 @@ function NativeNotificationBridge() {
 function AuthenticatedApp() {
   const token = useAuthStore((state) => state.token)
   const initialized = useAuthStore((state) => state.initialized)
+  const queryClient = useQueryClient()
+  const previousToken = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (previousToken.current && !token) {
+      useWorkspaceModeStore.getState().reset()
+      void clearAuthenticatedQueryCache(queryClient)
+    }
+    previousToken.current = token
+  }, [queryClient, token])
 
   useEffect(() => {
     if (!initialized) bootstrapSession()
@@ -94,30 +120,38 @@ function AuthenticatedApp() {
         <Route path="contracts/:publicId" element={<ContractsWorkspacePage />} />
         <Route path="okrs" element={<Navigate to="/plans" replace />} />
         <Route path="analytics" element={<StatsWorkspacePage />} />
-        <Route path="erp" element={<ERPWorkspacePage />} />
-        <Route path="erp/payroll" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/tax-benefits" element={<TaxBenefitsWorkspacePage />} />
-        <Route path="erp/payroll/runs/:runId" element={<Navigate to="/erp/payroll" replace />} />
-        <Route path="erp/payroll/payroll-entries" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/payroll-entries/new" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/payroll-entries/:entryId" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/salary-components" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/payroll-periods" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/salary-structures" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/accounting" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/additional-salaries" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/assignments" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/salary-slips" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/reports/salary-register" element={<PayrollWorkspacePage />} />
-        <Route path="erp/payroll/reports/bank-remittance" element={<PayrollWorkspacePage />} />
-        <Route path="administration" element={<AdministrationHubPage />} />
-        <Route path="administration/workspace" element={<WorkspaceIdentitySettingsPage />} />
-        <Route path="administration/collaboration" element={<CollaborationSettingsPage />} />
-        <Route path="administration/access" element={<AccessControlSettingsPage />} />
-        <Route path="administration/automation" element={<AutomationSettingsPage />} />
-        <Route path="administration/erp" element={<ERPSettingsPage />} />
-        <Route path="administration/admin-access" element={<AdminAccessSettingsPage />} />
-        <Route path="administration/oyuns" element={<OyunsAssistantSettingsPage />} />
+        <Route element={<RequireRoles allowedRoles={ERP_ROLES} />}>
+          <Route path="erp" element={<ERPWorkspacePage />} />
+        </Route>
+        <Route element={<RequireRoles allowedRoles={PAYROLL_ROLES} />}>
+          <Route path="erp/payroll" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/tax-benefits" element={<TaxBenefitsWorkspacePage />} />
+          <Route path="erp/payroll/runs/:runId" element={<Navigate to="/erp/payroll" replace />} />
+          <Route path="erp/payroll/payroll-entries" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/payroll-entries/new" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/payroll-entries/:entryId" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/salary-components" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/payroll-periods" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/salary-structures" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/accounting" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/additional-salaries" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/assignments" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/salary-slips" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/reports/salary-register" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/reports/bank-remittance" element={<PayrollWorkspacePage />} />
+        </Route>
+        <Route element={<RequireRoles allowedRoles={MANAGEMENT_ROLES} />}>
+          <Route path="administration" element={<AdministrationHubPage />} />
+          <Route path="administration/workspace" element={<WorkspaceIdentitySettingsPage />} />
+          <Route path="administration/collaboration" element={<CollaborationSettingsPage />} />
+          <Route path="administration/automation" element={<AutomationSettingsPage />} />
+          <Route path="administration/oyuns" element={<OyunsAssistantSettingsPage />} />
+        </Route>
+        <Route element={<RequireRoles allowedRoles={['admin']} />}>
+          <Route path="administration/access" element={<AccessControlSettingsPage />} />
+          <Route path="administration/erp" element={<ERPSettingsPage />} />
+          <Route path="administration/admin-access" element={<AdminAccessSettingsPage />} />
+        </Route>
         <Route path="profile" element={<ProfilePage />} />
         <Route path="company-files" element={<CompanyFilesPage />} />
         <Route path="chat/:conversationId?" element={<ChatWorkspacePage />} />
