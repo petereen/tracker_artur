@@ -1,4 +1,4 @@
-import { lazy, useEffect, useRef, useState, type ComponentType } from 'react'
+import { Component, lazy, useEffect, useRef, useState, type ComponentType, type ErrorInfo, type ReactNode } from 'react'
 
 export type SkeletonVariant = 'text' | 'card' | 'table-row' | 'calendar-cell' | 'kanban-card' | 'chart' | 'sheet'
 
@@ -72,6 +72,47 @@ export function useDelayedLoading(pending: boolean, { delay = 150, minDuration =
 }
 
 export const useDelayedPending = useDelayedLoading
+
+interface RouteLoadErrorBoundaryProps {
+  children: ReactNode
+}
+
+interface RouteLoadErrorBoundaryState {
+  hasError: boolean
+}
+
+/**
+ * A failed dynamic route import must not turn the whole SPA into a blank page.
+ * Reloading also lets the browser pick up a fresh index.html after a deploy
+ * when an older tab is holding stale chunk references.
+ */
+export class RouteLoadErrorBoundary extends Component<RouteLoadErrorBoundaryProps, RouteLoadErrorBoundaryState> {
+  state: RouteLoadErrorBoundaryState = { hasError: false }
+
+  static getDerivedStateFromError(): RouteLoadErrorBoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('Failed to load a workspace route.', error, info)
+  }
+
+  reload = () => {
+    window.location.reload()
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children
+
+    return <main className="workspace-bootstrap-error" role="alert">
+      <div className="query-region-state query-region-error">
+        <strong>Энэ хуудсыг ачаалж чадсангүй.</strong>
+        <span>Түр зуурын сүлжээний алдаа гарсан байж болно.</span>
+        <button className="secondary-action" type="button" onClick={this.reload}>Дахин ачаалах</button>
+      </div>
+    </main>
+  }
+}
 
 export function lazyWithPreload<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>, { delay = 150, minDuration = 300 } = {}) {
   let promise: Promise<{ default: T }> | undefined

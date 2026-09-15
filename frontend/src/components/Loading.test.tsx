@@ -1,9 +1,14 @@
 import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { InlinePending, QueryRegion, Skeleton, combineQueryRegionStates, toQueryRegionState, useDelayedLoading, type QueryRegionState } from './Loading'
+import type { ReactNode } from 'react'
+import { InlinePending, QueryRegion, RouteLoadErrorBoundary, Skeleton, combineQueryRegionStates, toQueryRegionState, useDelayedLoading, type QueryRegionState } from './Loading'
 
 function Delayed({ pending }: { pending: boolean }) {
   return <div>{useDelayedLoading(pending) ? 'visible' : 'hidden'}</div>
+}
+
+function BrokenRoute(): ReactNode {
+  throw new Error('chunk unavailable')
 }
 
 describe('loading primitives', () => {
@@ -63,5 +68,13 @@ describe('loading primitives', () => {
     expect(screen.queryByText('Live data')).not.toBeInTheDocument()
     screen.getByRole('button', { name: 'Дахин оролдох' }).click()
     expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it('shows a recovery action when a route module fails to render', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(<RouteLoadErrorBoundary><BrokenRoute /></RouteLoadErrorBoundary>)
+    expect(screen.getByRole('alert')).toHaveTextContent('Энэ хуудсыг ачаалж чадсангүй.')
+    expect(screen.getByRole('button', { name: 'Дахин ачаалах' })).toBeInTheDocument()
+    consoleError.mockRestore()
   })
 })

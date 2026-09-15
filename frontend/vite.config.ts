@@ -8,6 +8,32 @@ const callProxyTarget = process.env.VITE_CALL_PROXY_TARGET || 'http://localhost:
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // Keep shared dependencies together so a route transition does not fan
+    // out into dozens of tiny browser requests. This is especially important
+    // for lucide-react, whose tree-shaken icon modules otherwise become one
+    // request per icon in Vite 8/Rolldown output.
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: 'lucide',
+              test: /node_modules[\\/]lucide-react[\\/]/,
+              priority: 20,
+            },
+            {
+              name: 'vendor',
+              test: /node_modules[\\/]/,
+              minShareCount: 2,
+              minSize: 20 * 1024,
+              priority: 10,
+            },
+          ],
+        },
+      },
+    },
+  },
   server: {
     host: true,
     port: 5173,

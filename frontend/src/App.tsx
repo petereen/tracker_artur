@@ -8,7 +8,7 @@ import { useAuthStore } from './store/auth'
 import { useWorkspaceModeStore } from './store/workspaceMode'
 import { LoginPage } from './pages/LoginPage'
 import { ForgotPasswordPage, ResetPasswordPage } from './pages/PasswordResetPages'
-import { InitialWorkspaceSkeleton, lazyWithPreload as lazy } from './components/Loading'
+import { InitialWorkspaceSkeleton, lazyWithPreload as lazy, RouteLoadErrorBoundary } from './components/Loading'
 import { notificationService } from './platform/notifications'
 import { isNativePlatform } from './platform/runtime'
 import { CallProvider } from './components/CallProvider'
@@ -181,17 +181,19 @@ function SessionBootstrapError({ onRetry }: { onRetry: () => void }) {
 export default function App() {
   return (
     <BrowserRouter>
-      <Suspense fallback={<InitialWorkspaceSkeleton />}>
-        <Routes>
-          <Route path="/tg" element={<TgMiniAppPage />} />
-          <Route path="/worktimeqr" element={<WorktimeQrPage />} />
-          <Route path="/privacy" element={<PrivacyPage />} />
-          <Route path="/terms" element={<TermsPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/*" element={<AuthenticatedApp />} />
-        </Routes>
-      </Suspense>
+      <RouteLoadErrorBoundary>
+        <Suspense fallback={<InitialWorkspaceSkeleton />}>
+          <Routes>
+            <Route path="/tg" element={<TgMiniAppPage />} />
+            <Route path="/worktimeqr" element={<WorktimeQrPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/*" element={<AuthenticatedApp />} />
+          </Routes>
+        </Suspense>
+      </RouteLoadErrorBoundary>
     </BrowserRouter>
   )
 }
