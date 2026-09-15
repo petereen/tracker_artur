@@ -65,6 +65,13 @@ def test_contract_archive_models_and_role_key_are_declared():
     assert "manifest_path" in models or "manifest_path" in (ROOT / "app" / "routers" / "contracts.py").read_text()
 
 
+def test_contract_archive_content_disposition_supports_unicode_filenames():
+    source = _router_source()
+    assert "from urllib.parse import quote" in source
+    assert "filename*=UTF-8''" in source
+    assert "_archive_content_disposition(disposition, entry.name)" in source
+
+
 def test_contract_migration_has_tenant_and_round_constraints():
     source = (ROOT / "alembic" / "versions" / "h1i2j3k4l5m6_contract_lifecycle.py").read_text()
     assert "contract_documents" in source

@@ -6,6 +6,7 @@ import mimetypes
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Literal
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
@@ -688,6 +689,11 @@ def _archive_name(value: str) -> str:
     return cleaned[:240]
 
 
+def _archive_content_disposition(disposition: str, filename: str) -> str:
+    """Build a response header that remains valid for Unicode filenames."""
+    return f"{disposition}; filename*=UTF-8''{quote(filename, safe='')}"
+
+
 def _archive_category(value: str | None) -> str:
     return (value or "Бусад").strip()[:240] or "Бусад"
 
@@ -1208,8 +1214,7 @@ async def get_contract_archive_content(entry_id: int, download: bool = False, db
     await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation="downloaded" if download else "previewed", after={"name": entry.name})
     await db.commit()
     disposition = "attachment" if download else "inline"
-    safe_name = entry.name.replace('"', "")
-    return Response(content, media_type=entry.content_type, headers={"Content-Disposition": f'{disposition}; filename="{safe_name}"', "X-Content-Type-Options": "nosniff"})
+    return Response(content, media_type=entry.content_type, headers={"Content-Disposition": _archive_content_disposition(disposition, entry.name), "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/contract-archive/entries/{entry_id}/download")
