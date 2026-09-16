@@ -1,6 +1,15 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [ ] Stabilize ERP accounting and payroll with unified v2 lifecycle, immutable posting, treasury allocations, RBAC, and Docker-only acceptance (`backend/app/erp`, `backend/app/payroll`, `backend/alembic`, `frontend/src`, `backend/tests`, `frontend/e2e`)
+- [x] Add additive accounting metadata, organization accounting settings, payroll ledger seed accounts, and a central posting gate (`backend/app/erp`, `backend/app/models/models.py`, `backend/alembic/versions/f1g2h3i4j5k6_erp_payroll_stabilization.py`)
+- [ ] Consolidate new payroll writes into `payroll/service.py` while preserving legacy/Frappe history and deprecated adapters
+- [x] Implement frozen payroll input/lifecycle, effective-dated worker setup, immutable salary revisions, and explicit payslip release (`backend/app/payroll/service.py`, `backend/app/payroll/router.py`)
+- [x] Implement payment batches, employee allocations, settlement/retry/reversal, bank export logs, and statement reconciliation (`backend/app/payroll/service.py`, `backend/app/payroll/router.py`, `backend/app/models/models.py`)
+- [x] Align payroll capabilities and split payroll/accounting UI into specialized workflows (`backend/app/payroll/router.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/ERPWorkspacePage.tsx`)
+- [ ] Gate Phase 5 Selling, Buying, Stock, Manufacturing, and Assets workflows on reconciled payroll acceptance
+- [ ] Run migration, backend, frontend, and browser acceptance entirely in dependency-complete Docker services
+- [x] Add stabilization contract coverage for migration continuity, frozen lifecycle, treasury resources, and bank-template gating (`backend/tests/test_payroll_stabilization_contract.py`)
 - [ ] Optimize whole workspace performance and responsive behavior (`frontend/src`, `frontend/e2e`, `frontend/scripts`, `frontend/package.json`)
 - [ ] Add compressed bundle and Core Web Vitals budget checks (`frontend/scripts/check-performance-budget.mjs`, `frontend/package.json`)
 - [ ] Defer Sentry, assistant, command bar, notifications, workers, QR scanning, charts, maps, and rich editors until needed (`frontend/src`)

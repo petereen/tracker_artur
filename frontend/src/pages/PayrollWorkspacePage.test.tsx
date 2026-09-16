@@ -4,7 +4,7 @@ import { canManagePayroll, formatPayrollMoney, localDateValue, payrollDocumentSt
 describe('payroll workspace policy helpers', () => {
   it('only grants management affordances to payroll administrators/managers', () => {
     expect(canManagePayroll(['member'])).toBe(false)
-    expect(canManagePayroll(['manager'])).toBe(true)
+    expect(canManagePayroll(['manager'])).toBe(false)
     expect(canManagePayroll(['admin'])).toBe(true)
   })
 

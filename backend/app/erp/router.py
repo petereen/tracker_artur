@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor
 from app.models.models import (
-    ERPAccessRole, ERPAccount, ERPAccountRole, ERPCapability, ERPCustomField, ERPDocument, ERPDocumentLine,
+    ERPAccessRole, ERPAccount, ERPAccountingSettings, ERPAccountRole, ERPCapability, ERPCustomField, ERPDocument, ERPDocumentLine,
     Employee, ERPFormDefinition, ERPMasterRequest, ERPGeneralLedgerEntry, ERPApprovalRule, ERPImportBatch, ERPPaymentAllocation, ERPPostingPeriod, ERPItem, ERPParty, ERPStockLedgerEntry, ERPTeamRole, ERPWarehouse, ERPWorkflowTransition, ERPModuleConfig, ERPUnitOfMeasure, ERPPriceList, ERPPriceListEntry, ERPDiscountTier, ERPReorderRule, ERPCostCenter, ERPTaxTemplate, ERPTaxTemplateRate, ERPInventoryLevel, IdempotencyRecord, Organization, Project, Team, TeamMember, UserAccount,
 )
 from app.services.enterprise_events import record_change
@@ -139,8 +139,20 @@ class AccountInput(BaseModel):
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=240)
     account_type: Literal["asset", "liability", "equity", "income", "expense", "cash", "receivable", "payable", "tax_payable", "tax_receivable", "inventory", "fixed_asset", "wip", "payroll_expense", "payroll_payable"]
+    classification: Literal["asset", "liability", "equity", "income", "expense"] | None = None
+    purpose: str = Field(default="general", min_length=1, max_length=32)
+    currency: str = Field(default="MNT", min_length=3, max_length=3)
     parent_id: int | None = None
     is_group: bool = False
+    is_active: bool = True
+
+
+class AccountingSettingsInput(BaseModel):
+    base_currency: str = Field(default="MNT", min_length=3, max_length=3)
+    fiscal_year_start_month: int = Field(default=1, ge=1, le=12)
+    default_cost_center_id: int | None = None
+    default_bank_account_id: int | None = None
+    conversion_date: date | None = None
 
 
 class UomRequestInput(BaseModel):
@@ -997,16 +1009,53 @@ async def create_warehouse(data: WarehouseInput, db: AsyncSession = Depends(get_
 async def list_accounts(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "accounts", "view")
     rows = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id).order_by(ERPAccount.code))).scalars().all()
-    return [{"id": row.id, "code": row.code, "name": row.name, "account_type": row.account_type, "parent_id": row.parent_id, "is_group": row.is_group} for row in rows]
+    return [{"id": row.id, "code": row.code, "name": row.name, "account_type": row.account_type, "classification": row.classification, "purpose": row.purpose, "currency": row.currency, "parent_id": row.parent_id, "is_group": row.is_group, "is_active": row.is_active} for row in rows]
 
 
 @router.post("/accounting/accounts", status_code=status.HTTP_201_CREATED)
 async def create_account(data: AccountInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "accounts", "create")
-    account = ERPAccount(organization_id=actor.organization_id, **data.model_dump())
+    values = data.model_dump()
+    values["currency"] = values["currency"].upper()
+    values["classification"] = values["classification"] or (values["account_type"] if values["account_type"] in {"asset", "liability", "equity", "income", "expense"} else "asset")
+    if values["parent_id"]:
+        parent = await db.scalar(select(ERPAccount).where(ERPAccount.id == values["parent_id"], ERPAccount.organization_id == actor.organization_id))
+        if not parent:
+            raise HTTPException(status_code=422, detail={"code": "erp_account_parent_invalid"})
+        if not parent.is_group or parent.id == values.get("id"):
+            raise HTTPException(status_code=422, detail={"code": "erp_account_parent_must_be_group"})
+    account = ERPAccount(organization_id=actor.organization_id, **values)
     db.add(account)
     await db.commit()
-    return {"id": account.id, "code": account.code, "name": account.name, "account_type": account.account_type}
+    return {"id": account.id, "code": account.code, "name": account.name, "account_type": account.account_type, "classification": account.classification, "purpose": account.purpose, "currency": account.currency, "is_group": account.is_group, "is_active": account.is_active}
+
+
+@router.get("/accounting/settings")
+async def get_accounting_settings(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "accounts", "view")
+    settings = await db.scalar(select(ERPAccountingSettings).where(ERPAccountingSettings.organization_id == actor.organization_id))
+    if settings is None:
+        await bootstrap_organization(db, actor.organization_id)
+        settings = await db.scalar(select(ERPAccountingSettings).where(ERPAccountingSettings.organization_id == actor.organization_id))
+    return {"id": settings.id if settings else None, "base_currency": settings.base_currency if settings else "MNT", "fiscal_year_start_month": settings.fiscal_year_start_month if settings else 1, "default_cost_center_id": settings.default_cost_center_id if settings else None, "default_bank_account_id": settings.default_bank_account_id if settings else None, "conversion_date": settings.conversion_date.isoformat() if settings and settings.conversion_date else None}
+
+
+@router.put("/accounting/settings")
+async def update_accounting_settings(data: AccountingSettingsInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "accounts", "edit")
+    settings = await db.scalar(select(ERPAccountingSettings).where(ERPAccountingSettings.organization_id == actor.organization_id).with_for_update())
+    if settings is None:
+        settings = ERPAccountingSettings(organization_id=actor.organization_id)
+        db.add(settings)
+    values = data.model_dump()
+    values["base_currency"] = values["base_currency"].upper()
+    if values["default_cost_center_id"] is not None and not await db.scalar(select(ERPCostCenter.id).where(ERPCostCenter.id == values["default_cost_center_id"], ERPCostCenter.organization_id == actor.organization_id, ERPCostCenter.is_active.is_(True))):
+        raise HTTPException(status_code=422, detail={"code": "erp_cost_center_invalid"})
+    if values["default_bank_account_id"] is not None and not await db.scalar(select(ERPAccount.id).where(ERPAccount.id == values["default_bank_account_id"], ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False), ERPAccount.purpose.in_(("bank", "cash")))):
+        raise HTTPException(status_code=422, detail={"code": "erp_bank_account_invalid"})
+    for key, value in values.items(): setattr(settings, key, value)
+    await db.commit(); await db.refresh(settings)
+    return {"id": settings.id, **values}
 
 
 @router.get("/documents/{document_type}")
@@ -1178,9 +1227,16 @@ async def approve_document(document_id: int, db: AsyncSession = Depends(get_db),
         ))
         if not assigned:
             raise HTTPException(status_code=403, detail={"code": "erp_required_approver_role"})
-    document.status = "approved"
+    # Approval of a posting-capable document is a transactional finalization:
+    # the document cannot become approved unless its immutable ledger/stock
+    # movements are created successfully in this same transaction.
+    posting_capable = document.document_type in set(operation_catalog()["operations"])
+    if posting_capable and document.document_type in {"journal_entry", "payment_entry", "sales_invoice", "purchase_invoice", "delivery", "purchase_receipt", "stock_entry", "stock_reconciliation", "asset"}:
+        await post_document(db, document, actor)
+    document.status = "approved" if document.status == "draft" else document.status
     document.workflow_state = "approved"
-    document.version += 1
+    if document.status == "approved":
+        document.version += 1
     await record_change(db, actor=actor, topic="erp", aggregate_type=f"erp_{document.document_type}", aggregate_id=document.id, operation="approved", version=document.version, after={"status": document.status})
     await db.commit()
     return document_out(document)

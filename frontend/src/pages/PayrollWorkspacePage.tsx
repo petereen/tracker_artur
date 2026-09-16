@@ -39,7 +39,7 @@ import {
 } from '../api/enterprise'
 import type { PayrollEntryInput, PayrollStructureInput, PayrollVariableInput } from '../api/enterprise'
 export const formatPayrollMoney = (value: string) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'MNT', maximumFractionDigits: 0 }).format(Number(value || 0))
-export const canManagePayroll = (roles: string[]) => roles.includes('admin') || roles.includes('manager') || roles.includes('hr')
+export const canManagePayroll = (roles: string[]) => roles.includes('admin') || roles.includes('hr')
 export const localDateValue = (value = new Date()) => { const year = value.getFullYear(); const month = String(value.getMonth() + 1).padStart(2, '0'); const day = String(value.getDate()).padStart(2, '0'); return `${year}-${month}-${day}` }
 const errorCode = (error: any, fallback: string) => error?.response?.data?.detail?.code || fallback
 
@@ -47,7 +47,7 @@ function EmptyState({ title, copy, action }: { title: string; copy: string; acti
   return <div className="payroll-empty"><div className="payroll-empty-icon"><FileText size={20} /></div><strong>{title}</strong><p>{copy}</p>{action}</div>
 }
 export function payrollDocumentStatusLabel(status?: string | null) {
-  const labels: Record<string, string> = { draft: 'Ноорог', submitted: 'Илгээсэн', cancelled: 'Цуцалсан', consumed: 'Зарцуулсан', open: 'Нээлттэй', closed: 'Хаасан', active: 'Идэвхтэй', archived: 'Архивласан', unpaid: 'Төлөөгүй', paid: 'Төлсөн' }
+  const labels: Record<string, string> = { draft: 'Ноорог', calculated: 'Бодсон', in_review: 'Шалгалтад', approved: 'Баталсан', posted: 'Бичилт хийсэн', payment_prepared: 'Төлбөр бэлтгэсэн', partially_settled: 'Хэсэгчлэн төлсөн', settled: 'Төлөгдсөн', payslips_released: 'Цалингийн хуудас гаргасан', submitted: 'Илгээсэн', cancelled: 'Цуцалсан', consumed: 'Зарцуулсан', open: 'Нээлттэй', closed: 'Хаасан', active: 'Идэвхтэй', archived: 'Архивласан', unpaid: 'Төлөөгүй', paid: 'Төлсөн' }
   return labels[status || ''] || status?.replaceAll('_', ' ') || 'Тодорхойгүй'
 }
 

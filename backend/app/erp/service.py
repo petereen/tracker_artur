@@ -12,6 +12,7 @@ from app.core.enterprise_deps import ActorContext
 from app.models.models import (
     ERPAccessRole,
     ERPAccount,
+    ERPAccountingSettings,
     ERPAccountRole,
     ERPCapability,
     ERPCustomField,
@@ -47,7 +48,7 @@ ERP_MODULES = {
     "assets_maintenance": "Assets & maintenance",
 }
 MODULE_SETTINGS_KEY = "erp_modules"
-VALID_ACTIONS = frozenset({"view", "create", "edit", "calculate", "review", "approve", "post", "submit", "cancel", "archive", "export", "administer"})
+VALID_ACTIONS = frozenset({"view", "view_salary", "edit_setup", "create", "edit", "calculate", "review", "approve", "post", "pay", "release_slips", "submit", "cancel", "archive", "export", "administer"})
 DOCUMENT_MODULES = {
     "journal_entry": "accounting", "payment_entry": "accounting", "budget": "accounting", "fiscal_period": "accounting",
     "quotation": "selling", "sales_order": "selling", "delivery": "selling", "sales_invoice": "selling",
@@ -77,12 +78,25 @@ REFERENCE_TARGETS = frozenset({"party", "item", "warehouse", "account", "project
 SCOPE_DIMENSIONS = frozenset({"warehouse_ids", "project_ids", "branch_codes"})
 MONEY_QUANTUM = Decimal("0.0001")
 DEFAULT_ACCOUNTS = (
-    ("1000", "Cash", "cash"), ("1100", "Accounts receivable", "receivable"), ("1200", "Inventory", "inventory"),
+    ("1000", "Cash", "cash"), ("1010", "Payroll bank", "cash"),
+    ("1100", "Accounts receivable", "receivable"), ("1200", "Inventory", "inventory"),
     ("1300", "Fixed assets", "fixed_asset"), ("1301", "Work in progress", "wip"),
     ("2000", "Accounts payable", "payable"), ("2100", "Sales tax payable", "tax_payable"),
     ("2200", "Purchase tax receivable", "tax_receivable"), ("2300", "Payroll payable", "payroll_payable"),
-    ("4000", "Sales income", "income"), ("5000", "Operating expenses", "expense"), ("5100", "Payroll expense", "payroll_expense"),
+    ("2310", "Net salary payable", "payroll_payable"), ("2320", "Employee social insurance payable", "payroll_payable"),
+    ("2330", "Employer social insurance payable", "payroll_payable"), ("2340", "PIT payable", "tax_payable"),
+    ("2350", "Employee advance clearing", "receivable"), ("4000", "Sales income", "income"),
+    ("5000", "Operating expenses", "expense"), ("5100", "Salary expense", "payroll_expense"),
+    ("5110", "Employer social insurance expense", "payroll_expense"),
 )
+ACCOUNT_METADATA = {
+    "1000": ("asset", "cash"), "1010": ("asset", "bank"), "1100": ("asset", "receivable"), "1200": ("asset", "inventory"),
+    "1300": ("asset", "fixed_asset"), "1301": ("asset", "wip"), "2000": ("liability", "payable"), "2100": ("liability", "tax"),
+    "2200": ("asset", "tax"), "2300": ("liability", "payroll_payable"), "2310": ("liability", "net_pay_payable"),
+    "2320": ("liability", "employee_shi_payable"), "2330": ("liability", "employer_shi_payable"), "2340": ("liability", "pit_payable"),
+    "2350": ("asset", "advance_clearing"), "4000": ("income", "revenue"), "5000": ("expense", "expense"),
+    "5100": ("expense", "salary_expense"), "5110": ("expense", "employer_shi_expense"),
+}
 ROLE_TEMPLATES = {
     "erp_administrator": ("ERP administrator", [("*", "*")]),
     "erp_accountant": ("Accountant", [("accounts", "*"), ("chart_account", "*"), ("cost_center", "*"), ("tax_template", "*"), ("journal_entry", "*"), ("payment_entry", "*"), ("budget", "*"), ("sales_invoice", "view"), ("purchase_invoice", "view")]),
@@ -348,10 +362,25 @@ async def bootstrap_organization(db: AsyncSession, organization_id: int) -> None
     authority to existing users; admins choose those roles explicitly.
     """
     for code, name, account_type in DEFAULT_ACCOUNTS:
+        classification, purpose = ACCOUNT_METADATA.get(code, ("asset", "general"))
         exists = await db.scalar(select(ERPAccount.id).where(ERPAccount.organization_id == organization_id, ERPAccount.code == code))
         if not exists:
-            db.add(ERPAccount(organization_id=organization_id, code=code, name=name, account_type=account_type))
+            db.add(ERPAccount(organization_id=organization_id, code=code, name=name, account_type=account_type, classification=classification, purpose=purpose, currency="MNT"))
+        else:
+            account = await db.get(ERPAccount, exists)
+            if account and account.purpose == "general":
+                account.classification, account.purpose, account.currency = classification, purpose, "MNT"
     await db.flush()
+    default_center = await db.scalar(select(ERPCostCenter).where(ERPCostCenter.organization_id == organization_id, ERPCostCenter.code == "DEFAULT"))
+    if default_center is None:
+        default_center = ERPCostCenter(organization_id=organization_id, code="DEFAULT", name="Default cost center", is_active=True)
+        db.add(default_center)
+        await db.flush()
+    settings = await db.scalar(select(ERPAccountingSettings).where(ERPAccountingSettings.organization_id == organization_id))
+    if settings is None:
+        db.add(ERPAccountingSettings(organization_id=organization_id, base_currency="MNT", fiscal_year_start_month=1, default_cost_center_id=default_center.id))
+    elif settings.default_cost_center_id is None:
+        settings.default_cost_center_id = default_center.id
     for code, (name, capabilities) in ROLE_TEMPLATES.items():
         role = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.organization_id == organization_id, ERPAccessRole.code == code))
         if role:
@@ -436,11 +465,67 @@ def calculate_lines(lines: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
 
 async def default_account(db: AsyncSession, organization_id: int, account_type: str) -> ERPAccount:
     account = await db.scalar(select(ERPAccount).where(
-        ERPAccount.organization_id == organization_id, ERPAccount.account_type == account_type, ERPAccount.is_group.is_(False)
+        ERPAccount.organization_id == organization_id, ERPAccount.account_type == account_type,
+        ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False)
     ).order_by(ERPAccount.id).limit(1))
     if not account:
         raise HTTPException(status_code=422, detail={"code": "erp_missing_account", "account_type": account_type})
     return account
+
+
+async def validate_posting_gate(
+    db: AsyncSession,
+    organization_id: int,
+    posting_date: date,
+    lines: list[tuple[int, Decimal, Decimal, int | None, str | None]],
+    *,
+    currency: str = "MNT",
+) -> None:
+    """Validate the common accounting invariant before any ledger write."""
+    open_periods = (await db.execute(select(ERPPostingPeriod).where(
+        ERPPostingPeriod.organization_id == organization_id,
+        ERPPostingPeriod.status == "open",
+        ERPPostingPeriod.starts_on <= posting_date,
+        ERPPostingPeriod.ends_on >= posting_date,
+    ).with_for_update())).scalars().all()
+    if len(open_periods) != 1:
+        closed = await db.scalar(select(ERPPostingPeriod.id).where(
+            ERPPostingPeriod.organization_id == organization_id,
+            ERPPostingPeriod.starts_on <= posting_date,
+            ERPPostingPeriod.ends_on >= posting_date,
+            ERPPostingPeriod.status == "closed",
+        ).limit(1))
+        code = "erp_posting_period_closed" if closed and not open_periods else "erp_posting_period_ambiguous" if open_periods else "erp_posting_period_missing"
+        raise HTTPException(status_code=409, detail={"code": code, "posting_date": posting_date.isoformat()})
+    settings = await db.scalar(select(ERPAccountingSettings).where(ERPAccountingSettings.organization_id == organization_id))
+    account_ids = {account_id for account_id, *_ in lines}
+    accounts = {row.id: row for row in (await db.execute(select(ERPAccount).where(
+        ERPAccount.organization_id == organization_id, ERPAccount.id.in_(account_ids)
+    ))).scalars().all()}
+    if len(accounts) != len(account_ids):
+        raise HTTPException(status_code=422, detail={"code": "erp_account_tenant_mismatch", "account_ids": sorted(account_ids - set(accounts))})
+    for account_id, debit, credit, cost_center_id, _memo in lines:
+        account = accounts[account_id]
+        if not account.is_active or account.is_group:
+            raise HTTPException(status_code=422, detail={"code": "erp_account_not_postable", "account_id": account_id})
+        if (account.currency or currency).upper() != currency.upper():
+            raise HTTPException(status_code=422, detail={"code": "erp_account_currency_mismatch", "account_id": account_id, "currency": currency})
+        effective_cost_center_id = cost_center_id or (settings.default_cost_center_id if settings else None)
+        if account.classification in {"expense", "income"} and effective_cost_center_id is None:
+            raise HTTPException(status_code=422, detail={"code": "erp_cost_center_required", "account_id": account_id})
+        if effective_cost_center_id is not None:
+            center = await db.scalar(select(ERPCostCenter).where(
+                ERPCostCenter.id == effective_cost_center_id, ERPCostCenter.organization_id == organization_id,
+                ERPCostCenter.is_active.is_(True)
+            ))
+            if not center:
+                raise HTTPException(status_code=422, detail={"code": "erp_cost_center_invalid", "cost_center_id": effective_cost_center_id})
+        if debit < 0 or credit < 0 or (debit == 0 and credit == 0) or (debit > 0 and credit > 0):
+            raise HTTPException(status_code=422, detail={"code": "erp_invalid_ledger_line", "account_id": account_id})
+    debit_total = sum((debit for _account, debit, _credit, _cc, _memo in lines), Decimal("0"))
+    credit_total = sum((credit for _account, _debit, credit, _cc, _memo in lines), Decimal("0"))
+    if debit_total != credit_total:
+        raise HTTPException(status_code=422, detail={"code": "erp_unbalanced_journal", "debit": str(debit_total), "credit": str(credit_total)})
 
 
 async def assert_open_posting_period(db: AsyncSession, organization_id: int, posting_date: date) -> None:
@@ -523,6 +608,10 @@ async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorCon
         # but all new calculation and posting is owned by app.payroll.
         raise HTTPException(status_code=410, detail={"code": "payroll_use_dedicated_api", "path": "/v1/erp/payroll"})
     await assert_open_posting_period(db, document.organization_id, document.posting_date)
+    already_posted = await db.scalar(select(ERPGeneralLedgerEntry.id).where(ERPGeneralLedgerEntry.document_id == document.id).limit(1))
+    if already_posted:
+        document.status = "submitted"
+        return
     lines = (await db.execute(select(ERPDocumentLine).where(ERPDocumentLine.document_id == document.id))).scalars().all()
     await assert_stock_policy(db, document, lines)
     gl: list[tuple[int, Decimal, Decimal, str | None]] = []
@@ -561,10 +650,13 @@ async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorCon
     elif document.document_type == "asset":
         asset, payable = await default_account(db, document.organization_id, "fixed_asset"), await default_account(db, document.organization_id, "payable")
         gl = [(asset.id, document.grand_total, Decimal("0"), "Asset capitalization"), (payable.id, Decimal("0"), document.grand_total, "Asset payable")]
+    await validate_posting_gate(
+        db, document.organization_id, document.posting_date,
+        [(account_id, debit_amount, credit_amount, (document.payload or {}).get("cost_center_id"), memo)
+         for account_id, debit_amount, credit_amount, memo in gl],
+        currency=document.currency,
+    )
     if gl:
-        debit, credit = sum((entry[1] for entry in gl), Decimal("0")), sum((entry[2] for entry in gl), Decimal("0"))
-        if debit != credit:
-            raise HTTPException(status_code=422, detail={"code": "erp_unbalanced_journal", "debit": str(debit), "credit": str(credit)})
         db.add_all([ERPGeneralLedgerEntry(
             organization_id=document.organization_id, document_id=document.id, account_id=account_id, party_id=document.party_id,
             posting_date=document.posting_date, debit=debit_amount, credit=credit_amount, memo=memo,

@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
+import warnings
 
 from fastapi import HTTPException
 from sqlalchemy import select, or_
@@ -45,7 +46,14 @@ from .schemas import (
     SalaryStructureAssignmentInput,
 )
 from .service import calculate_run, create_employee_profile, ensure_profile_active, post_run
+from app.erp.service import validate_posting_gate
 from .inputs import build_employee_inputs, prepare_recurring_compensation
+
+warnings.warn(
+    "app.payroll.frappe_service is deprecated; new payroll writes must use app.payroll.service",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 def _decimal(value: Any) -> Decimal:
@@ -303,7 +311,7 @@ async def get_employees(db: AsyncSession, actor: ActorContext, run: PayrollRun, 
         if profile.effective_from > run.period_start and not (detail and detail.start_date and profile.effective_from == detail.start_date):
             errors.append({"employee_id": employee.id, "name": employee.name, "code": "payroll_assignment_changed_in_period", "message": "Use separate payroll periods for different salary assignments."})
         if profile.payment_method == "bank":
-            account = await db.scalar(select(EmployeeBankAccount.id).where(EmployeeBankAccount.employee_payroll_profile_id == profile.id, EmployeeBankAccount.is_primary.is_(True), EmployeeBankAccount.valid_from <= run.tax_point_date, (EmployeeBankAccount.valid_to.is_(None) | (EmployeeBankAccount.valid_to >= run.tax_point_date))))
+            account = await db.scalar(select(EmployeeBankAccount.id).where(EmployeeBankAccount.employee_id == employee.id, EmployeeBankAccount.is_primary.is_(True), EmployeeBankAccount.valid_from <= run.tax_point_date, (EmployeeBankAccount.valid_to.is_(None) | (EmployeeBankAccount.valid_to >= run.tax_point_date))))
             if not account:
                 errors.append({"employee_id": employee.id, "name": employee.name, "code": "payroll_bank_account_missing", "message": "Add a primary employee bank account valid on the payment date."})
     employee_ids = list(selected)
@@ -382,10 +390,8 @@ async def submit_salary_slips(db: AsyncSession, actor: ActorContext, run: Payrol
     run.document_status = "submitted"
     run.salary_slips_submitted = True
     run.payment_status = "unpaid"
-    # Reuse the existing ESS publication contract: submitted Frappe-style
-    # slips are immediately visible to employees, while the separate bank
-    # settlement remains unpaid until its Bank Entry is submitted.
-    run.payslips_published_at = now
+    # Payslips are deliberately not published during accrual.  Visibility is
+    # granted only by the explicit release-payslips action after settlement.
     return run
 
 
@@ -435,6 +441,10 @@ async def submit_bank_entry(db: AsyncSession, actor: ActorContext, row: PayrollB
     db.add(document)
     await db.flush()
     amount = _decimal(row.amount)
+    await validate_posting_gate(db, actor.organization_id, row.posting_date, [
+        (payable.id, amount, Decimal("0"), None, f"Salary payable settlement {run.run_number}"),
+        (account.id, Decimal("0"), amount, None, f"Bank salary payment {run.run_number}"),
+    ], currency=row.currency)
     db.add_all([
         ERPGeneralLedgerEntry(organization_id=actor.organization_id, document_id=document.id, account_id=payable.id, posting_date=row.posting_date, debit=amount, credit=Decimal("0"), memo=f"Salary payable settlement {run.run_number}"),
         ERPGeneralLedgerEntry(organization_id=actor.organization_id, document_id=document.id, account_id=account.id, posting_date=row.posting_date, debit=Decimal("0"), credit=amount, memo=f"Bank salary payment {run.run_number}"),
@@ -444,5 +454,7 @@ async def submit_bank_entry(db: AsyncSession, actor: ActorContext, row: PayrollB
     row.submitted_by_account_id = actor.account_id
     row.submitted_at = datetime.now(timezone.utc)
     run.bank_entry_id = row.id
-    run.payment_status = "paid"
+    run.payment_status = "settled"
+    if run.status == "posted":
+        run.status = "settled"
     return row

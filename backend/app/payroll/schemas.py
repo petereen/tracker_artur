@@ -150,9 +150,12 @@ class PayrollRunInput(BaseModel):
     run_type: Literal["advance", "final", "single", "off_cycle"]
     period_start: date
     period_end: date
+    posting_date: date | None = None
     tax_point_date: date
     statutory_profile_id: int | None = None
     employee_ids: list[int] = Field(default_factory=list)
+    attendance_policy: dict[str, Any] = Field(default_factory=dict)
+    cost_center_id: int | None = None
     input_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
     variable_inputs: list[VariablePayInput] = Field(default_factory=list)
 
@@ -169,6 +172,10 @@ class ReconciliationResolutionInput(BaseModel):
 class PayrollApprovalInput(BaseModel):
     stage: Literal["payroll_manager", "hr_director", "finance"] | None = None
     comment: str | None = Field(default=None, max_length=1000)
+
+
+class PayrollReturnInput(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 class PayslipPublicationInput(BaseModel):
@@ -321,6 +328,45 @@ class GetEmployeesInput(BaseModel):
 class BankEntryInput(BaseModel):
     payment_account_id: int | None = None
     posting_date: date | None = None
+
+
+class PaymentAllocationInput(BaseModel):
+    payslip_id: int
+    amount: Decimal = Field(gt=0)
+
+
+class PaymentBatchInput(BaseModel):
+    payment_account_id: int | None = None
+    posting_date: date | None = None
+    allocations: list[PaymentAllocationInput] = Field(default_factory=list)
+    retry_of_batch_id: int | None = None
+
+
+class PaymentSettlementInput(BaseModel):
+    transaction_reference: str = Field(min_length=1, max_length=160)
+    settled_at: date | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class PaymentRejectInput(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class StatementLineInput(BaseModel):
+    transaction_reference: str | None = None
+    transaction_date: date
+    amount: Decimal
+    currency: str = Field(default="MNT", min_length=3, max_length=3)
+    description: str | None = None
+    fee_amount: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class StatementImportInput(BaseModel):
+    payment_account_id: int
+    source_checksum: str = Field(min_length=64, max_length=64)
+    statement_start: date | None = None
+    statement_end: date | None = None
+    lines: list[StatementLineInput] = Field(default_factory=list)
 
 
 class PayrollCancelInput(BaseModel):

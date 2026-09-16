@@ -12,11 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enterprise_deps import ActorContext
 from app.models.models import (
-    Employee, EmployeeBankAccount, EmployeePayrollProfile, ERPAccount, ERPDocument, ERPCostCenter, UserAccount,
+    Employee, EmployeeBankAccount, EmployeePayrollProfile, ERPAccount, ERPDocument, ERPCostCenter, Organization, UserAccount,
     ERPGeneralLedgerEntry, PayrollAdvance, PayrollBankExportProfile, PayrollEmployeeAccumulator,
     PayrollExportArtifact, PayrollPostingProfile, PayrollRun, Payslip, PayslipLineItem,
-    PayrollSalaryComponentMaster, SalaryComponent, SalaryStructure, SalaryStructureVersion, SHIRateTier, PITBracketTier, TaxReliefTier, StatutoryConfigProfile, WorkTimeEntry,
+    PayrollSalaryComponentMaster, PayrollPaymentAllocation, PayrollPaymentBatch, PayrollStatementImport, PayrollStatementLine,
+    SalaryComponent, SalaryStructure, SalaryStructureVersion, SHIRateTier, PITBracketTier, TaxReliefTier, StatutoryConfigProfile, WorkTimeEntry,
 )
+from app.erp.service import validate_posting_gate
 from app.services.secret_box import encrypt_secret
 from .calculator import (
     CalculationInput, ComponentDefinition, LeaveMonth, PITBracket, ReliefTier as CalcReliefTier, SHIRate,
@@ -268,7 +270,8 @@ async def create_salary_structure(db: AsyncSession, actor: ActorContext, data: S
         for item in data.components: _SafeFormula(item.formula)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_formula", "message": str(exc)}) from exc
-    structure = SalaryStructure(organization_id=actor.organization_id, code=data.code, name=data.name, effective_from=data.effective_from, effective_to=data.effective_to, currency=data.currency.upper(), checksum=_hash(data.model_dump(mode="json")), created_by_account_id=actor.account_id)
+    latest_version = await db.scalar(select(func.max(SalaryStructure.version)).where(SalaryStructure.organization_id == actor.organization_id, SalaryStructure.code == data.code)) or 0
+    structure = SalaryStructure(organization_id=actor.organization_id, code=data.code, name=data.name, version=int(latest_version) + 1, effective_from=data.effective_from, effective_to=data.effective_to, currency=data.currency.upper(), checksum=_hash(data.model_dump(mode="json")), created_by_account_id=actor.account_id)
     db.add(structure); await db.flush()
     db.add_all([SalaryComponent(salary_structure_id=structure.id, **item.model_dump()) for item in data.components])
     db.add(SalaryStructureVersion(
@@ -344,8 +347,11 @@ async def create_employee_profile(db: AsyncSession, actor: ActorContext, employe
     structure = await db.scalar(select(SalaryStructure).where(SalaryStructure.id == data.salary_structure_id, SalaryStructure.organization_id == actor.organization_id, SalaryStructure.effective_from <= data.effective_from, (SalaryStructure.effective_to.is_(None) | (SalaryStructure.effective_to >= data.effective_from))))
     if not structure or structure.status not in {"published", "active"}: raise HTTPException(status_code=404, detail="Published salary structure not found")
     existing_profiles = (await db.execute(select(EmployeePayrollProfile).where(EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.employee_id == employee_id))).scalars().all()
-    if any(row.effective_from <= (data.effective_to or date.max) and (row.effective_to is None or row.effective_to >= data.effective_from) for row in existing_profiles):
-        raise HTTPException(status_code=409, detail={"code": "payroll_employee_profile_effective_overlap"})
+    overlaps = [row for row in existing_profiles if row.effective_from <= (data.effective_to or date.max) and (row.effective_to is None or row.effective_to >= data.effective_from)]
+    for prior in overlaps:
+        if prior.effective_from == data.effective_from:
+            raise HTTPException(status_code=409, detail={"code": "payroll_employee_profile_effective_overlap"})
+        prior.effective_to = data.effective_from - timedelta(days=1)
     values = data.model_dump(exclude={"employee_id", "salary_structure_id", "taxpayer_number", "social_insurance_number"})
     profile = EmployeePayrollProfile(organization_id=actor.organization_id, employee_id=employee_id, salary_structure_id=structure.id, **values)
     if data.taxpayer_number: profile.taxpayer_number_ciphertext = encrypt_secret(data.taxpayer_number)
@@ -356,19 +362,24 @@ async def create_employee_profile(db: AsyncSession, actor: ActorContext, employe
 async def create_bank_account(db: AsyncSession, actor: ActorContext, employee_id: int, data: BankAccountInput) -> EmployeeBankAccount:
     _validate_date_range(data.valid_from, data.valid_to)
     profile = await db.scalar(select(EmployeePayrollProfile).where(EmployeePayrollProfile.employee_id == employee_id, EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.effective_from <= data.valid_from, (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= data.valid_from))).order_by(EmployeePayrollProfile.effective_from.desc()).limit(1))
-    if not profile: raise HTTPException(status_code=404, detail="Employee payroll profile not found")
+    employee = await db.scalar(select(Employee).where(Employee.id == employee_id, Employee.organization_id == actor.organization_id))
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
     if data.is_primary:
-        accounts = (await db.execute(select(EmployeeBankAccount).where(EmployeeBankAccount.employee_payroll_profile_id == profile.id))).scalars().all()
+        accounts = (await db.execute(select(EmployeeBankAccount).where(EmployeeBankAccount.employee_id == employee_id))).scalars().all()
         for account in accounts: account.is_primary = False
     normalized_account = "".join(data.account_number.split())
     if len(normalized_account) < 4:
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_bank_account"})
     fingerprint = hashlib.sha256(normalized_account.encode()).hexdigest()
-    account = EmployeeBankAccount(employee_payroll_profile_id=profile.id, bank_code=data.bank_code, account_number_ciphertext=encrypt_secret(normalized_account), account_fingerprint=fingerprint, account_last4=normalized_account[-4:], account_holder_ciphertext=encrypt_secret(data.account_holder.strip()) if data.account_holder else None, is_primary=data.is_primary, valid_from=data.valid_from, valid_to=data.valid_to)
+    account = EmployeeBankAccount(employee_payroll_profile_id=profile.id if profile else None, employee_id=employee_id, bank_code=data.bank_code, account_number_ciphertext=encrypt_secret(normalized_account), account_fingerprint=fingerprint, account_last4=normalized_account[-4:], account_holder_ciphertext=encrypt_secret(data.account_holder.strip()) if data.account_holder else None, is_primary=data.is_primary, valid_from=data.valid_from, valid_to=data.valid_to)
     db.add(account); await db.flush(); return account
 
 
 async def create_run(db: AsyncSession, actor: ActorContext, data: PayrollRunInput) -> PayrollRun:
+    organization = await db.get(Organization, actor.organization_id)
+    if organization and (organization.settings or {}).get("unified_payroll_v2") is False:
+        raise HTTPException(status_code=409, detail={"code": "unified_payroll_v2_disabled"})
     if data.period_end < data.period_start: raise HTTPException(status_code=422, detail={"code": "payroll_invalid_period"})
     profile = await ensure_profile_active(db, data.statutory_profile_id, data.tax_point_date) if data.statutory_profile_id else await resolve_profile(db, actor.organization_id, data.tax_point_date)
     if profile.organization_id != actor.organization_id:
@@ -397,15 +408,18 @@ async def create_run(db: AsyncSession, actor: ActorContext, data: PayrollRunInpu
     approved_entries = list((await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.employee_id.in_(employee_ids), WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status == "approved", WorkTimeEntry.started_at >= datetime.combine(data.period_start, datetime.min.time()), WorkTimeEntry.started_at <= period_end_exclusive))).scalars().all())
     approved_time_ids = [entry.id for entry in approved_entries]
     approved_time_snapshot = [{"id": entry.id, "employee_id": entry.employee_id, "local_work_date": entry.local_work_date.isoformat() if entry.local_work_date else None, "started_at": entry.started_at.isoformat(), "ended_at": entry.ended_at.isoformat() if entry.ended_at else None, "approval_status": entry.approval_status, "hours": str(Decimal(str((entry.ended_at - entry.started_at).total_seconds())) / Decimal("3600")) if entry.ended_at else "0"} for entry in approved_entries]
-    snapshot = {"employee_ids": employee_ids, "overrides": data.input_overrides, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": approved_time_ids, "approved_time_entries": approved_time_snapshot, "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
+    snapshot = {"employee_ids": employee_ids, "overrides": data.input_overrides, "attendance_policy": data.attendance_policy, "posting_date": (data.posting_date or data.tax_point_date).isoformat(), "cost_center_id": data.cost_center_id, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": approved_time_ids, "approved_time_entries": approved_time_snapshot, "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
     config_snapshot = {"profile_id": profile.id, "profile_version": profile.version, "profile_checksum": profile.checksum, "source_references": profile.source_references, "is_example": profile.is_example, "currency": profile.currency, "pit_withholding_method": profile.pit_withholding_method, "rounding_policy": profile.rounding_policy, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier), "leave_policy": profile.leave_policy, "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "exemption_code": row.exemption_code} for row in frozen_shi_rates], "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax)} for row in frozen_pit_brackets], "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "fixed_amount": str(row.fixed_amount), "amount_basis": row.amount_basis, "formula": row.formula} for row in frozen_reliefs]}
-    run = PayrollRun(organization_id=actor.organization_id, run_number=f"PR-{data.period_end:%Y%m}-{datetime.now(timezone.utc).strftime('%H%M%S%f')[:9]}", run_type=data.run_type, period_start=data.period_start, period_end=data.period_end, settlement_key=data.period_end.strftime("%Y-%m"), tax_point_date=data.tax_point_date, statutory_profile_id=profile.id, input_snapshot=snapshot, config_snapshot=config_snapshot, snapshot_checksum=_hash({"input": snapshot, "config": config_snapshot}), created_by_account_id=actor.account_id)
+    run = PayrollRun(organization_id=actor.organization_id, run_number=f"PR-{data.period_end:%Y%m}-{datetime.now(timezone.utc).strftime('%H%M%S%f')[:9]}", run_type=data.run_type, period_start=data.period_start, period_end=data.period_end, settlement_key=data.period_end.strftime("%Y-%m"), tax_point_date=data.tax_point_date, posting_date=data.posting_date or data.tax_point_date, workflow_version="unified_v2", document_status="draft", cost_center_id=data.cost_center_id, statutory_profile_id=profile.id, input_snapshot=snapshot, config_snapshot=config_snapshot, snapshot_checksum=_hash({"input": snapshot, "config": config_snapshot}), created_by_account_id=actor.account_id)
     db.add(run); await db.flush(); return run
 
 
 async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> list[Payslip]:
     if run.organization_id != actor.organization_id: raise HTTPException(status_code=404, detail="Run not found")
-    if run.status not in {"draft", "calculated", "in_review"}: raise HTTPException(status_code=409, detail={"code": "payroll_run_immutable", "status": run.status})
+    # A returned run must be explicitly recalculated from its frozen inputs;
+    # calculated runs may be refreshed, but review/approval is never silently
+    # invalidated by a calculate request.
+    if run.status not in {"draft", "calculated"}: raise HTTPException(status_code=409, detail={"code": "payroll_run_immutable", "status": run.status})
     profile = await ensure_profile_active(db, run.statutory_profile_id, run.tax_point_date)
     await db.execute(delete(Payslip).where(Payslip.payroll_run_id == run.id))
     employee_ids = list((run.input_snapshot or {}).get("employee_ids") or [])
@@ -541,17 +555,17 @@ async def reconcile_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
     profile_by_employee = {row.employee_id: row for row in profiles}
     bank_profile_ids = [row.id for row in profiles if row.payment_method == "bank"]
     bank_accounts = list((await db.execute(select(EmployeeBankAccount).where(
-        EmployeeBankAccount.employee_payroll_profile_id.in_(bank_profile_ids),
+        EmployeeBankAccount.employee_id.in_(employee_ids),
         EmployeeBankAccount.is_primary.is_(True),
         EmployeeBankAccount.valid_from <= run.tax_point_date,
         (EmployeeBankAccount.valid_to.is_(None) | (EmployeeBankAccount.valid_to >= run.tax_point_date)),
     ))).scalars().all()) if bank_profile_ids else []
-    bank_ready_profile_ids = {row.employee_payroll_profile_id for row in bank_accounts}
+    bank_ready_employee_ids = {row.employee_id for row in bank_accounts}
     for slip in slips:
         if Decimal(str(slip.net_pay)) < 0:
             add_issue("negative_net_pay", "error", "Net pay is negative and must be corrected before approval.", slip.employee_id)
         profile = profile_by_employee.get(slip.employee_id)
-        if profile and profile.payment_method == "bank" and profile.id not in bank_ready_profile_ids:
+        if profile and profile.payment_method == "bank" and slip.employee_id not in bank_ready_employee_ids:
             add_issue("missing_bank_details", "error", "The employee has no active primary bank account.", slip.employee_id)
         units = (slip.input_snapshot or {}).get("resolved_units") or {}
         payable_hours = Decimal(str(units.get("payable_hours", 0)))
@@ -610,6 +624,10 @@ async def reconcile_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
 
 
 async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ERPDocument:
+    if run.erp_document_id and run.status in {"posted", "payment_prepared", "partially_settled", "settled", "paid"}:
+        existing = await db.get(ERPDocument, run.erp_document_id)
+        if existing:
+            return existing
     # Legacy runs retain the reconciliation/approval gates.  Frappe-style
     # entries submit calculated salary slips directly, then settle them with a
     # separate Bank Entry document.
@@ -628,11 +646,26 @@ async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ER
     # dedicated clearing account and bank role so the payout is traceable.
     required = {"advance_clearing", "bank"} if is_advance else {"salary_expense", "employer_shi_expense", "employee_shi_payable", "employer_shi_payable", "pit_payable", "net_pay_payable"}
     if not required.issubset(roles): raise HTTPException(status_code=422, detail={"code": "payroll_posting_accounts_incomplete", "missing": sorted(required - set(roles))})
-    accounts = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.id.in_(list(roles.values()))))).scalars().all()
+    accounts = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False), ERPAccount.currency == "MNT", ERPAccount.id.in_(list(roles.values()))))).scalars().all()
     if len(accounts) != len(set(roles.values())): raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_invalid"})
-    run.config_snapshot = {**(run.config_snapshot or {}), "posting_profile_id": posting.id, "bank_debit_account": roles.get("bank")}
+    expected_purposes = {
+        "salary_expense": "salary_expense", "employer_shi_expense": "employer_shi_expense",
+        "employee_shi_payable": "employee_shi_payable", "employer_shi_payable": "employer_shi_payable",
+        "pit_payable": "pit_payable", "net_pay_payable": "net_pay_payable", "advance_clearing": "advance_clearing", "bank": "bank",
+    }
+    account_by_id = {row.id: row for row in accounts}
+    for role, purpose in expected_purposes.items():
+        if role in roles and account_by_id[roles[role]].purpose not in {purpose, "general"}:
+            raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_purpose_invalid", "role": role, "account_id": roles[role], "expected": purpose})
+    frozen_accounting = (run.config_snapshot or {}).get("accounting_snapshot")
+    if frozen_accounting:
+        if frozen_accounting.get("posting_profile_id") != posting.id or frozen_accounting.get("account_roles") != roles:
+            raise HTTPException(status_code=409, detail={"code": "payroll_accounting_snapshot_mismatch"})
+    else:
+        run.config_snapshot = {**(run.config_snapshot or {}), "accounting_snapshot": {"posting_profile_id": posting.id, "account_roles": dict(roles), "posting_date": (run.posting_date or run.tax_point_date).isoformat(), "currency": "MNT", "cost_center_id": run.cost_center_id}}
     await mark_run_benefits_paid(db, run.id)
-    document = ERPDocument(organization_id=actor.organization_id, document_type="payroll_run", number=run.run_number, status="submitted", currency="MNT", posting_date=run.period_end, net_total=run.total_net if is_advance else run.total_gross, tax_total=Decimal("0") if is_advance else run.total_employee_shi + run.total_pit + run.total_employer_shi, grand_total=run.total_net if is_advance else run.total_gross + run.total_employer_shi, outstanding_amount=Decimal("0") if is_advance else run.total_net, payload={"payroll_run_id": run.id, "run_type": run.run_type}, custom={})
+    posting_date = run.posting_date or run.tax_point_date or run.period_end
+    document = ERPDocument(organization_id=actor.organization_id, document_type="payroll_run", number=run.run_number, status="submitted", currency="MNT", posting_date=posting_date, net_total=run.total_net if is_advance else run.total_gross, tax_total=Decimal("0") if is_advance else run.total_employee_shi + run.total_pit + run.total_employer_shi, grand_total=run.total_net if is_advance else run.total_gross + run.total_employer_shi, outstanding_amount=Decimal("0") if is_advance else run.total_net, payload={"payroll_run_id": run.id, "run_type": run.run_type, "cost_center_id": run.cost_center_id}, custom={})
     db.add(document); await db.flush()
     payslips = (await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all()
     total_advance = sum((Decimal(str(row.advance_offset or 0)) for row in payslips), Decimal("0"))
@@ -645,7 +678,7 @@ async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ER
             raise HTTPException(status_code=422, detail={"code": "payroll_component_cost_center_invalid", "cost_center_ids": sorted(cost_center_ids - active_cost_centers)})
     component_account_ids = {item.account_id for item in line_items if item.account_id}
     if component_account_ids - {row.id for row in accounts}:
-        extra_accounts = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.id.in_(list(component_account_ids))))).scalars().all()
+        extra_accounts = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False), ERPAccount.currency == "MNT", ERPAccount.id.in_(list(component_account_ids))))).scalars().all()
         accounts.extend(extra_accounts)
     active_account_ids = {row.id for row in accounts}
     salary_split: dict[tuple[int, int | None], Decimal] = {}
@@ -654,7 +687,7 @@ async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ER
             account_id = item.account_id or roles["salary_expense"]
             if item.account_id and item.account_id not in active_account_ids:
                 raise HTTPException(status_code=422, detail={"code": "payroll_component_account_invalid", "account_id": item.account_id})
-            key = (account_id, item.cost_center_id)
+            key = (account_id, item.cost_center_id or run.cost_center_id)
             salary_split[key] = salary_split.get(key, Decimal("0")) + Decimal(str(item.amount))
         if not salary_split:
             salary_split[(roles["salary_expense"], None)] = Decimal(str(run.total_gross))
@@ -676,7 +709,7 @@ async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ER
     else:
         for (account_id, cost_center_id), amount in salary_split.items():
             entry(account_id, amount, "Payroll gross salary expense", debit_nature=True, cost_center_id=cost_center_id)
-        entry(roles["employer_shi_expense"], run.total_employer_shi, "Employer SHI expense", debit_nature=True)
+        entry(roles["employer_shi_expense"], run.total_employer_shi, "Employer SHI expense", debit_nature=True, cost_center_id=run.cost_center_id)
         fund_totals: dict[str, Decimal] = {}
         for payslip in payslips:
             for fund, amount in ((payslip.calculation_trace or {}).get("shi", {}).get("by_fund", {}) or {}).items():
@@ -702,9 +735,8 @@ async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ER
             if "advance_clearing" not in roles: raise HTTPException(status_code=422, detail={"code": "payroll_advance_clearing_account_missing"})
             entry(roles["net_pay_payable"], total_advance, "Advance offset against net salary payable", debit_nature=True)
             entry(roles["advance_clearing"], total_advance, "Employee advance clearing", debit_nature=False)
-    debit, credit = sum((row[1] for row in lines), Decimal("0")), sum((row[2] for row in lines), Decimal("0"))
-    if debit != credit: raise HTTPException(status_code=422, detail={"code": "payroll_unbalanced_journal", "debit": str(debit), "credit": str(credit)})
-    db.add_all([ERPGeneralLedgerEntry(organization_id=actor.organization_id, document_id=document.id, account_id=account_id, cost_center_id=cost_center_id, posting_date=run.period_end, debit=debit, credit=credit, memo=memo) for account_id, debit, credit, memo, cost_center_id in lines])
+    await validate_posting_gate(db, actor.organization_id, posting_date, lines, currency="MNT")
+    db.add_all([ERPGeneralLedgerEntry(organization_id=actor.organization_id, document_id=document.id, account_id=account_id, cost_center_id=cost_center_id, posting_date=posting_date, debit=debit, credit=credit, memo=memo) for account_id, debit, credit, memo, cost_center_id in lines])
     for payslip in payslips:
         if source_run is not None and source_run.run_type == "advance" and Decimal(str(payslip.net_pay or 0)) < 0:
             source_advances = (await db.execute(select(PayrollAdvance).where(
@@ -777,12 +809,151 @@ def canonical_payout_rows(run: PayrollRun, payslips: list[Payslip], accounts: di
     return rows
 
 
+async def create_payment_batch(db: AsyncSession, actor: ActorContext, run: PayrollRun, data: Any) -> PayrollPaymentBatch:
+    """Prepare employee-level payment allocations without clearing the GL."""
+    if run.organization_id != actor.organization_id or run.status not in {"posted", "payment_prepared", "partially_settled", "settled"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_run_requires_posting"})
+    posting = await db.scalar(select(PayrollPostingProfile).where(
+        PayrollPostingProfile.organization_id == actor.organization_id, PayrollPostingProfile.code == "default", PayrollPostingProfile.is_active.is_(True)
+    ))
+    roles = posting.account_roles if posting else {}
+    payment_account_id = data.payment_account_id or roles.get("bank")
+    payable_account_id = roles.get("net_pay_payable")
+    if not payment_account_id or not payable_account_id:
+        raise HTTPException(status_code=422, detail={"code": "payroll_payment_accounts_incomplete"})
+    accounts = (await db.execute(select(ERPAccount).where(
+        ERPAccount.organization_id == actor.organization_id,
+        ERPAccount.id.in_([payment_account_id, payable_account_id]),
+        ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False), ERPAccount.currency == "MNT",
+    ))).scalars().all()
+    if len(accounts) != 2:
+        raise HTTPException(status_code=422, detail={"code": "payroll_payment_account_invalid"})
+    await _assert_payment_date(db, actor.organization_id, data.posting_date or run.posting_date or run.tax_point_date)
+    slips = {row.id: row for row in (await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all()}
+    requested = list(data.allocations or [])
+    if data.retry_of_batch_id:
+        prior = await db.scalar(select(PayrollPaymentBatch).where(PayrollPaymentBatch.id == data.retry_of_batch_id, PayrollPaymentBatch.organization_id == actor.organization_id))
+        if not prior:
+            raise HTTPException(status_code=404, detail={"code": "payroll_payment_batch_not_found"})
+        rejected = (await db.execute(select(PayrollPaymentAllocation).where(
+            PayrollPaymentAllocation.payment_batch_id == prior.id, PayrollPaymentAllocation.status == "rejected"
+        ))).scalars().all()
+        requested = [{"payslip_id": row.payslip_id, "amount": row.amount} for row in rejected]
+    if not requested:
+        requested = [{"payslip_id": row.id, "amount": row.net_pay} for row in slips.values() if Decimal(str(row.net_pay or 0)) > 0]
+    if not requested:
+        raise HTTPException(status_code=422, detail={"code": "payroll_no_payment_allocations"})
+    seen: set[int] = set()
+    allocations: list[tuple[Payslip, Decimal]] = []
+    for raw in requested:
+        slip_id, amount = int(raw.payslip_id if hasattr(raw, "payslip_id") else raw["payslip_id"]), Decimal(str(raw.amount if hasattr(raw, "amount") else raw["amount"]))
+        slip = slips.get(slip_id)
+        if not slip or slip.id in seen or amount <= 0 or amount > Decimal(str(slip.net_pay)):
+            raise HTTPException(status_code=422, detail={"code": "payroll_payment_allocation_invalid", "payslip_id": slip_id})
+        prior_settled = await db.scalar(select(PayrollPaymentAllocation.id).where(
+            PayrollPaymentAllocation.payslip_id == slip.id, PayrollPaymentAllocation.status.in_(("settled", "bank_submitted"))
+        ))
+        if prior_settled and not data.retry_of_batch_id:
+            raise HTTPException(status_code=409, detail={"code": "payroll_payment_already_submitted", "payslip_id": slip.id})
+        seen.add(slip.id); allocations.append((slip, amount))
+    number = f"PAY-{run.run_number}-{datetime.now(timezone.utc).strftime('%H%M%S%f')[:8]}"
+    batch = PayrollPaymentBatch(
+        organization_id=actor.organization_id, payroll_run_id=run.id, batch_reference=number,
+        payment_account_id=payment_account_id, payable_account_id=payable_account_id,
+        posting_date=data.posting_date or run.posting_date or run.tax_point_date, currency="MNT",
+        status="prepared", retry_of_batch_id=data.retry_of_batch_id, total_amount=sum((amount for _slip, amount in allocations), Decimal("0")),
+        created_by_account_id=actor.account_id,
+    )
+    db.add(batch); await db.flush()
+    db.add_all([PayrollPaymentAllocation(
+        organization_id=actor.organization_id, payment_batch_id=batch.id, payslip_id=slip.id,
+        employee_id=slip.employee_id, amount=amount, status="pending", attempt_number=2 if data.retry_of_batch_id else 1,
+    ) for slip, amount in allocations])
+    run.payment_status = "payment_prepared"
+    if run.status == "posted":
+        run.status = "payment_prepared"
+    return batch
+
+
+async def _assert_payment_date(db: AsyncSession, organization_id: int, posting_date: date) -> None:
+    await validate_posting_gate(db, organization_id, posting_date, [], currency="MNT")
+
+
+async def settle_payment_allocation(db: AsyncSession, actor: ActorContext, allocation_id: int, data: Any) -> PayrollPaymentAllocation:
+    allocation = await db.scalar(select(PayrollPaymentAllocation).where(
+        PayrollPaymentAllocation.id == allocation_id, PayrollPaymentAllocation.organization_id == actor.organization_id
+    ).with_for_update())
+    if not allocation:
+        raise HTTPException(status_code=404, detail={"code": "payroll_payment_allocation_not_found"})
+    if allocation.status == "settled":
+        return allocation
+    if allocation.status not in {"pending", "bank_submitted"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_payment_allocation_not_settleable"})
+    batch = await db.scalar(select(PayrollPaymentBatch).where(PayrollPaymentBatch.id == allocation.payment_batch_id, PayrollPaymentBatch.organization_id == actor.organization_id).with_for_update())
+    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == batch.payroll_run_id, PayrollRun.organization_id == actor.organization_id).with_for_update())
+    reference = str(data.transaction_reference)
+    if allocation.transaction_reference == reference and allocation.erp_document_id:
+        return allocation
+    duplicate = await db.scalar(select(PayrollPaymentAllocation.id).where(
+        PayrollPaymentAllocation.organization_id == actor.organization_id,
+        PayrollPaymentAllocation.transaction_reference == reference,
+        PayrollPaymentAllocation.id != allocation.id,
+    ))
+    if duplicate:
+        raise HTTPException(status_code=409, detail={"code": "payroll_payment_transaction_duplicate", "transaction_reference": reference})
+    payment_date = batch.posting_date
+    document = ERPDocument(
+        organization_id=actor.organization_id, document_type="payroll_payment", number=f"{batch.batch_reference}-{allocation.id}",
+        status="submitted", currency=batch.currency, posting_date=payment_date, net_total=allocation.amount,
+        grand_total=allocation.amount, outstanding_amount=Decimal("0"),
+        payload={"payment_batch_id": batch.id, "payment_allocation_id": allocation.id, "payroll_run_id": run.id, "transaction_reference": reference}, custom={}
+    )
+    db.add(document); await db.flush()
+    await validate_posting_gate(db, actor.organization_id, payment_date, [
+        (batch.payable_account_id, Decimal(str(allocation.amount)), Decimal("0"), None, "Net salary payable settlement"),
+        (batch.payment_account_id, Decimal("0"), Decimal(str(allocation.amount)), None, "Bank salary settlement"),
+    ], currency=batch.currency)
+    db.add_all([
+        ERPGeneralLedgerEntry(organization_id=actor.organization_id, document_id=document.id, account_id=batch.payable_account_id, posting_date=payment_date, debit=allocation.amount, credit=Decimal("0"), memo=f"Salary payable settlement {run.run_number}"),
+        ERPGeneralLedgerEntry(organization_id=actor.organization_id, document_id=document.id, account_id=batch.payment_account_id, posting_date=payment_date, debit=Decimal("0"), credit=allocation.amount, memo=f"Bank salary payment {run.run_number}"),
+    ])
+    allocation.status = "settled"; allocation.transaction_reference = reference; allocation.settled_at = datetime.now(timezone.utc); allocation.settlement_evidence = data.evidence or {}; allocation.erp_document_id = document.id
+    statuses = list((await db.execute(select(PayrollPaymentAllocation.status).where(PayrollPaymentAllocation.payment_batch_id == batch.id))).scalars().all())
+    batch.status = "settled" if statuses and all(status == "settled" for status in statuses) else "partially_settled"
+    if batch.status == "settled": run.payment_status = "settled"; run.status = "settled"
+    else: run.payment_status = "partially_settled"
+    return allocation
+
+
+async def reject_payment_allocation(db: AsyncSession, actor: ActorContext, allocation_id: int, reason: str) -> PayrollPaymentAllocation:
+    allocation = await db.scalar(select(PayrollPaymentAllocation).where(
+        PayrollPaymentAllocation.id == allocation_id, PayrollPaymentAllocation.organization_id == actor.organization_id
+    ).with_for_update())
+    if not allocation:
+        raise HTTPException(status_code=404, detail={"code": "payroll_payment_allocation_not_found"})
+    if allocation.status == "settled":
+        raise HTTPException(status_code=409, detail={"code": "payroll_settled_payment_immutable"})
+    allocation.status = "rejected"; allocation.rejection_reason = reason; allocation.rejected_at = datetime.now(timezone.utc)
+    batch = await db.get(PayrollPaymentBatch, allocation.payment_batch_id)
+    if batch:
+        batch.status = "partially_settled"
+        run = await db.scalar(select(PayrollRun).where(PayrollRun.id == batch.payroll_run_id, PayrollRun.organization_id == actor.organization_id).with_for_update())
+        if run:
+            run.payment_status = "partially_settled"
+            if run.status in {"posted", "payment_prepared"}:
+                run.status = "partially_settled"
+    return allocation
+
+
 async def reverse_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> PayrollRun:
     """Create a negative, linked replacement journal without mutating a post."""
     if run.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Run not found")
     if run.status not in {"posted", "paid"}:
         raise HTTPException(status_code=409, detail={"code": "payroll_run_requires_posted_for_reversal"})
+    settled_payment = await db.scalar(select(PayrollPaymentAllocation.id).join(PayrollPaymentBatch, PayrollPaymentBatch.id == PayrollPaymentAllocation.payment_batch_id).where(PayrollPaymentBatch.payroll_run_id == run.id, PayrollPaymentAllocation.organization_id == actor.organization_id, PayrollPaymentAllocation.status == "settled").limit(1))
+    if settled_payment:
+        raise HTTPException(status_code=409, detail={"code": "payroll_accrual_reversal_requires_payment_reversal"})
     existing = await db.scalar(select(PayrollRun).where(PayrollRun.organization_id == actor.organization_id, PayrollRun.reversal_of_run_id == run.id))
     if existing:
         return existing

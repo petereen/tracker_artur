@@ -2203,6 +2203,11 @@ class ERPAccount(Base):
     code = Column(String(64), nullable=False)
     name = Column(Text, nullable=False)
     account_type = Column(String(32), nullable=False)
+    # `account_type` is retained for historical compatibility.  New writes
+    # use the explicit accounting classification/purpose contract.
+    classification = Column(String(24), nullable=False, server_default="asset", default="asset")
+    purpose = Column(String(32), nullable=False, server_default="general", default="general")
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
     is_group = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
 
@@ -2570,6 +2575,7 @@ class SalaryStructure(Base):
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date)
     currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    source_structure_id = Column(Integer, ForeignKey("salary_structures.id", ondelete="SET NULL"))
     checksum = Column(String(64), nullable=False)
     created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     published_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
@@ -2663,7 +2669,10 @@ class EmployeeBankAccount(Base):
     __table_args__ = (UniqueConstraint("employee_payroll_profile_id", "account_fingerprint", name="uq_payroll_bank_account_fingerprint"),)
 
     id = Column(Integer, primary_key=True)
-    employee_payroll_profile_id = Column(Integer, ForeignKey("employee_payroll_profiles.id", ondelete="CASCADE"), nullable=False)
+    employee_payroll_profile_id = Column(Integer, ForeignKey("employee_payroll_profiles.id", ondelete="SET NULL"), nullable=True)
+    # New payment flows resolve bank details from the organization-owned
+    # Employee record so salary revisions do not orphan payment readiness.
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="RESTRICT"))
     bank_code = Column(String(32), nullable=False)
     account_number_ciphertext = Column(Text, nullable=False)
     account_fingerprint = Column(String(64), nullable=False)
@@ -3071,3 +3080,110 @@ class PayrollBankEntry(Base):
     submitted_at = Column(DateTime(timezone=True))
     created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPAccountingSettings(Base):
+    """Organization-wide accounting controls used by every posting path."""
+
+    __tablename__ = "erp_accounting_settings"
+    __table_args__ = (UniqueConstraint("organization_id", name="uq_erp_accounting_settings_org"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    base_currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    fiscal_year_start_month = Column(Integer, nullable=False, server_default="1", default=1)
+    default_cost_center_id = Column(Integer, ForeignKey("erp_cost_centers.id", ondelete="SET NULL"))
+    default_bank_account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+    conversion_date = Column(Date)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class PayrollPaymentBatch(Base):
+    """Treasury batch whose lines settle individual payroll obligations."""
+
+    __tablename__ = "payroll_payment_batches"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "batch_reference", name="uq_payroll_payment_batch_reference"),
+        Index("ix_payroll_payment_batch_run_status", "payroll_run_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"), nullable=False)
+    batch_reference = Column(String(120), nullable=False)
+    payment_account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="RESTRICT"), nullable=False)
+    payable_account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="RESTRICT"), nullable=False)
+    posting_date = Column(Date, nullable=False)
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    status = Column(String(24), nullable=False, server_default="prepared", default="prepared")
+    retry_of_batch_id = Column(Integer, ForeignKey("payroll_payment_batches.id", ondelete="RESTRICT"))
+    export_artifact_id = Column(Integer, ForeignKey("payroll_export_artifacts.id", ondelete="SET NULL"))
+    bank_reference = Column(String(160))
+    bank_confirmed_at = Column(DateTime(timezone=True))
+    total_amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollPaymentAllocation(Base):
+    """Immutable-attempt payment line for one employee obligation."""
+
+    __tablename__ = "payroll_payment_allocations"
+    __table_args__ = (
+        UniqueConstraint("payment_batch_id", "payslip_id", name="uq_payroll_payment_allocation_slip"),
+        Index("ix_payroll_payment_allocation_status", "payment_batch_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    payment_batch_id = Column(Integer, ForeignKey("payroll_payment_batches.id", ondelete="RESTRICT"), nullable=False)
+    payslip_id = Column(Integer, ForeignKey("payslips.id", ondelete="RESTRICT"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="RESTRICT"), nullable=False)
+    amount = Column(Numeric(20, 4), nullable=False)
+    status = Column(String(24), nullable=False, server_default="pending", default="pending")
+    attempt_number = Column(Integer, nullable=False, server_default="1", default=1)
+    transaction_reference = Column(String(160))
+    submitted_at = Column(DateTime(timezone=True))
+    settled_at = Column(DateTime(timezone=True))
+    rejected_at = Column(DateTime(timezone=True))
+    rejection_reason = Column(Text)
+    settlement_evidence = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    erp_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollStatementImport(Base):
+    __tablename__ = "payroll_statement_imports"
+    __table_args__ = (UniqueConstraint("organization_id", "source_checksum", name="uq_payroll_statement_import_checksum"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    payment_account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="RESTRICT"), nullable=False)
+    source_checksum = Column(String(64), nullable=False)
+    status = Column(String(24), nullable=False, server_default="imported", default="imported")
+    statement_start = Column(Date)
+    statement_end = Column(Date)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollStatementLine(Base):
+    __tablename__ = "payroll_statement_lines"
+    __table_args__ = (
+        UniqueConstraint("statement_import_id", "line_fingerprint", name="uq_payroll_statement_line_fingerprint"),
+        Index("ix_payroll_statement_line_match", "statement_import_id", "match_status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    statement_import_id = Column(Integer, ForeignKey("payroll_statement_imports.id", ondelete="CASCADE"), nullable=False)
+    line_fingerprint = Column(String(64), nullable=False)
+    transaction_reference = Column(String(160))
+    transaction_date = Column(Date, nullable=False)
+    amount = Column(Numeric(20, 4), nullable=False)
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    description = Column(Text)
+    match_status = Column(String(24), nullable=False, server_default="unmatched", default="unmatched")
+    matched_allocation_id = Column(Integer, ForeignKey("payroll_payment_allocations.id", ondelete="SET NULL"))
+    fee_amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    matched_at = Column(DateTime(timezone=True))
