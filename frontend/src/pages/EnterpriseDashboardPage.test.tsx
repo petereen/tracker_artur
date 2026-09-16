@@ -100,12 +100,11 @@ describe("Today work-hour timer", () => {
     vi.useRealTimers();
   });
 
-  it("holds the timer and companion behind the clock loading gate", () => {
+  it("holds the timer behind the clock loading gate", () => {
     mocks.clock.data = undefined;
     const { container, rerender } = renderDashboard();
 
     expect(container.querySelector(".clock-time")).not.toBeInTheDocument();
-    expect(container.querySelector(".today-companion img")).not.toBeInTheDocument();
     expect(container.querySelector(".clock-summary-skeleton")).toBeInTheDocument();
 
     const active = {
@@ -128,7 +127,7 @@ describe("Today work-hour timer", () => {
     rerender(<EnterpriseDashboardPage />);
 
     expect(container.querySelector(".clock-time")).toHaveTextContent("00:00:05");
-    expect(container.querySelector(".today-companion img")).toHaveAttribute("src", "/oyuns-working.gif");
+    expect(container.querySelector(".today-companion")).not.toBeInTheDocument();
   });
 
   it("increments from a stable server sync every second", () => {

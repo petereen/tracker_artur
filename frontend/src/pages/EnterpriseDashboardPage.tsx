@@ -448,15 +448,6 @@ export function EnterpriseDashboardPage() {
       serverClockRef.current = { serverTimeMs, clientTimeMs: Date.now() };
     }
   }, [serverTime]);
-  useEffect(() => {
-    if (!clockReady) return;
-    // Prime both states so a later clock action can switch companions without
-    // introducing a network request during the visible state transition.
-    ["/oyuns-working.gif", "/oyuns-sleeping.gif"].forEach((src) => {
-      const image = new Image();
-      image.src = src;
-    });
-  }, [clockReady]);
   const activeTimerKey = active
     ? `${active.id}:${active.entry_type}:${active.started_at}`
     : null;
@@ -506,11 +497,6 @@ export function EnterpriseDashboardPage() {
   const recoveredClock = Boolean(active && (active.local_work_date !== today || clockNow - new Date(active.started_at).getTime() > 16 * 60 * 60 * 1000));
   const working = active?.entry_type === "work";
   const onBreak = active?.entry_type === "break";
-  const companionSrc = clockReady
-    ? working
-      ? "/oyuns-working.gif"
-      : "/oyuns-sleeping.gif"
-    : null;
   const todayEntries = clock.data?.today_entries ?? [];
   const todayWorkSeconds = todayEntries.reduce((total, entry) => {
     if (entry.entry_type !== "work") return total;
@@ -742,14 +728,6 @@ export function EnterpriseDashboardPage() {
             </>
           )}
         </div>
-        {companionSrc && (
-          <div
-            className={`today-companion ${working ? "working" : "sleeping"}`}
-            aria-hidden="true"
-          >
-            <img src={companionSrc} alt="" />
-          </div>
-        )}
       </section>
       <WorldClockWidget />
       <section className="metrics-grid" aria-label="Гүйцэтгэлийн үзүүлэлт">

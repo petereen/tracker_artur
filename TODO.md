@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Reposition HR directly below Worktime in the enterprise navbar (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/EnterpriseShell.test.tsx`)
+- [x] Remove working/sleeping Today companion GIF animations (`frontend/public/oyuns-working.gif`, `frontend/public/oyuns-sleeping.gif`)
 - [x] Fix contract archive downloads for non-ASCII filenames (`backend/app/routers/contracts.py`, `backend/tests/test_contracts_contract.py`) — RFC 5987 UTF-8 Content-Disposition headers prevent Unicode filenames from causing HTTP 500 responses; focused contract tests and Python syntax checks pass
 - [x] Prevent route-level blank screens caused by resource-starved dynamic imports by consolidating shared Vite/Rolldown dependency chunks, adding a visible reload recovery boundary, and hardening Nginx asset caching/compression (`frontend/vite.config.ts`, `frontend/src/components/Loading.tsx`, `frontend/src/components/Loading.test.tsx`, `frontend/src/App.tsx`, `frontend/nginx.conf`)
 - [x] Fix OpenStreetMap tile access in the Automation map picker by preserving a valid cross-origin referrer (`frontend/src/components/WorktimeMapPicker.tsx`, `frontend/nginx.conf`, `frontend/src/components/WorktimeMapPicker.test.tsx`) — the server policy now sends the app origin cross-origin, map tile images explicitly use `referrerPolicy="origin"`, and focused test/build checks pass

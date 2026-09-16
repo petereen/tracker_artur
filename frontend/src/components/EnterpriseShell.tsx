@@ -204,11 +204,11 @@ export function EnterpriseShell() {
     const payrollItem = { to: '/erp/payroll', label: 'Payroll', icon: Calculator, roles: [] }
     const base = NAV.filter((item) => item.to !== '/hr' && (!item.roles.length || item.roles.some((role) => roles.includes(role))))
     const showPayroll = Boolean(erp.data?.modules.payroll && roles.some((role) => PAYROLL_ROLES.includes(role)))
+    const withHr = base.flatMap((item) => item.to === '/chat' && hrItem ? [hrItem, item] : [item])
     if (!canAccessERP) {
-      const withHr = [...base.slice(0, 2), ...(hrItem ? [hrItem] : []), ...base.slice(2)]
       return showPayroll ? [...withHr.slice(0, -1), payrollItem, withHr[withHr.length - 1]] : withHr
     }
-    const withErp = [...base.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, ...(hrItem ? [hrItem] : []), base[base.length - 1]]
+    const withErp = [...withHr.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, withHr[withHr.length - 1]]
     return showPayroll
       ? [...withErp.slice(0, -1), payrollItem, withErp[withErp.length - 1]]
       : withErp

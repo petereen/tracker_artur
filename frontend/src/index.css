@@ -7122,62 +7122,12 @@ html.capacitor-native .native-boot-error {
   right: calc(50% - 4px);
 }
 
-/* Today companion stays outside the dashboard flow, so interval details remain readable. */
-.today-companion {
-  bottom: 0;
-  height: clamp(130px, 19vw, 230px);
-  pointer-events: none;
-  position: fixed;
-  right: 0;
-  z-index: 2;
-}
 .clock-panel {
   overflow: hidden;
   position: relative;
 }
-.clock-panel .today-companion {
-  bottom: 0;
-  position: absolute;
-  right: 0;
-}
-.clock-panel .today-companion.working {
-  height: 155px;
-  width: 145px;
-}
-.clock-panel .today-companion.sleeping {
-  height: 140px;
-  width: 300px;
-}
 .clock-actions {
   padding-right: clamp(110px, 22%, 170px);
-}
-.today-companion img {
-  display: block;
-  height: 100%;
-  object-fit: contain;
-  object-position: right bottom;
-  width: 100%;
-}
-.clock-panel .today-companion.sleeping img {
-  transform: translateX(65px);
-}
-@media (max-width: 540px) {
-  .today-companion {
-    height: 122px;
-  }
-  .clock-panel .today-companion.working {
-    height: 135px;
-    width: 125px;
-  }
-  .clock-panel .today-companion.sleeping {
-    height: 88px;
-    width: 160px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .today-companion img {
-    animation: none;
-  }
 }
 
 /* Organization file library */
