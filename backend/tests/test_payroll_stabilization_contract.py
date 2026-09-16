@@ -28,3 +28,20 @@ def test_bank_exports_reject_unverified_provisional_templates():
     assert "payroll_bank_template_requires_verified_sample" in router
     assert "PayrollBankExportProfile.is_provisional.is_(False)" in router
 
+
+def test_phase5_migration_and_domain_contracts_are_additive_and_gated():
+    migration = (ROOT / "alembic/versions/g2h3i4j5k6l7_phase5_erp_workflows.py").read_text()
+    service = (ROOT / "app/erp/service.py").read_text()
+    router = (ROOT / "app/erp/router.py").read_text()
+    assert 'down_revision = "f1g2h3i4j5k6"' in migration
+    assert "erp_source_line_allocations" in migration
+    assert "erp_stock_valuation_layers" in migration
+    assert "erp_asset_depreciation_schedules" in migration
+    assert "erp_phase5_immutable" in migration
+    assert "erp_phase5_payroll_acceptance_required" in service
+    assert "erp_source_quantity_overfulfilled" in service
+    assert '"sales_credit_note"' in service and '"purchase_debit_note"' in service
+    assert '"/admin/phase5/acceptance"' in router
+    assert "erp_phase5_payroll_acceptance_required" in router
+    assert '"/manufacturing/boms/{document_id}/snapshots"' in router
+    assert '"/assets/depreciation-schedules"' in router

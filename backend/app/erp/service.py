@@ -29,6 +29,14 @@ from app.models.models import (
     ERPSequence,
     ERPStockLedgerEntry,
     ERPInventoryLevel,
+    ERPWarehouse,
+    ERPSourceLineAllocation,
+    ERPStockValuationLayer,
+    ERPBOMSnapshot,
+    ERPAssetBook,
+    ERPAssetDepreciationSchedule,
+    ERPAssetMaintenanceRecord,
+    ERPAssetDisposal,
     ERPItem,
     Organization,
     TeamMember,
@@ -51,8 +59,8 @@ MODULE_SETTINGS_KEY = "erp_modules"
 VALID_ACTIONS = frozenset({"view", "view_salary", "edit_setup", "create", "edit", "calculate", "review", "approve", "post", "pay", "release_slips", "submit", "cancel", "archive", "export", "administer"})
 DOCUMENT_MODULES = {
     "journal_entry": "accounting", "payment_entry": "accounting", "budget": "accounting", "fiscal_period": "accounting",
-    "quotation": "selling", "sales_order": "selling", "delivery": "selling", "sales_invoice": "selling",
-    "supplier_quotation": "buying", "purchase_order": "buying", "purchase_receipt": "buying", "purchase_invoice": "buying",
+    "quotation": "selling", "sales_order": "selling", "delivery": "selling", "sales_invoice": "selling", "sales_credit_note": "selling",
+    "supplier_quotation": "buying", "purchase_order": "buying", "purchase_receipt": "buying", "purchase_invoice": "buying", "purchase_debit_note": "buying",
     "stock_entry": "stock", "stock_reconciliation": "stock",
     "lead": "crm", "opportunity": "crm",
     "support_ticket": "support", "service_level_agreement": "support",
@@ -80,22 +88,22 @@ MONEY_QUANTUM = Decimal("0.0001")
 DEFAULT_ACCOUNTS = (
     ("1000", "Cash", "cash"), ("1010", "Payroll bank", "cash"),
     ("1100", "Accounts receivable", "receivable"), ("1200", "Inventory", "inventory"),
-    ("1300", "Fixed assets", "fixed_asset"), ("1301", "Work in progress", "wip"),
+    ("1300", "Fixed assets", "fixed_asset"), ("1301", "Work in progress", "wip"), ("1310", "Accumulated depreciation", "fixed_asset"),
     ("2000", "Accounts payable", "payable"), ("2100", "Sales tax payable", "tax_payable"),
     ("2200", "Purchase tax receivable", "tax_receivable"), ("2300", "Payroll payable", "payroll_payable"),
     ("2310", "Net salary payable", "payroll_payable"), ("2320", "Employee social insurance payable", "payroll_payable"),
     ("2330", "Employer social insurance payable", "payroll_payable"), ("2340", "PIT payable", "tax_payable"),
     ("2350", "Employee advance clearing", "receivable"), ("4000", "Sales income", "income"),
-    ("5000", "Operating expenses", "expense"), ("5100", "Salary expense", "payroll_expense"),
+    ("5000", "Operating expenses", "expense"), ("5100", "Salary expense", "payroll_expense"), ("5200", "Depreciation expense", "expense"),
     ("5110", "Employer social insurance expense", "payroll_expense"),
 )
 ACCOUNT_METADATA = {
     "1000": ("asset", "cash"), "1010": ("asset", "bank"), "1100": ("asset", "receivable"), "1200": ("asset", "inventory"),
-    "1300": ("asset", "fixed_asset"), "1301": ("asset", "wip"), "2000": ("liability", "payable"), "2100": ("liability", "tax"),
+    "1300": ("asset", "fixed_asset"), "1301": ("asset", "wip"), "1310": ("asset", "accumulated_depreciation"), "2000": ("liability", "payable"), "2100": ("liability", "tax"),
     "2200": ("asset", "tax"), "2300": ("liability", "payroll_payable"), "2310": ("liability", "net_pay_payable"),
     "2320": ("liability", "employee_shi_payable"), "2330": ("liability", "employer_shi_payable"), "2340": ("liability", "pit_payable"),
     "2350": ("asset", "advance_clearing"), "4000": ("income", "revenue"), "5000": ("expense", "expense"),
-    "5100": ("expense", "salary_expense"), "5110": ("expense", "employer_shi_expense"),
+    "5100": ("expense", "salary_expense"), "5110": ("expense", "employer_shi_expense"), "5200": ("expense", "depreciation_expense"),
 }
 ROLE_TEMPLATES = {
     "erp_administrator": ("ERP administrator", [("*", "*")]),
@@ -132,7 +140,7 @@ def default_workflow() -> dict[str, Any]:
 def operation_catalog() -> dict[str, Any]:
     operations: dict[str, Any] = {}
     for key, module in DOCUMENT_MODULES.items():
-        operations[key] = {"key": key, "kind": "document", "module": module, "label": key.replace("_", " ").title(), "sections": ["header", "line"], "posting_capable": key in {"journal_entry", "payment_entry", "sales_invoice", "purchase_invoice", "delivery", "purchase_receipt", "stock_entry", "stock_reconciliation", "payroll_run", "salary_slip", "asset"}}
+        operations[key] = {"key": key, "kind": "document", "module": module, "label": key.replace("_", " ").title(), "sections": ["header", "line"], "posting_capable": key in {"journal_entry", "payment_entry", "sales_invoice", "sales_credit_note", "purchase_invoice", "purchase_debit_note", "delivery", "purchase_receipt", "stock_entry", "stock_reconciliation", "payroll_run", "salary_slip", "asset"}}
     labels = {
         "party": (None, "Party request"), "item": (None, "Item request"), "supplier": ("buying", "Create supplier / vendor"),
         "purchase_item": ("buying", "Create purchase item"), "supplier_price_list": ("buying", "Create supplier price list"),
@@ -216,6 +224,86 @@ def as_money(value: Decimal | str | int | float) -> Decimal:
 def module_settings(organization_settings: dict[str, Any] | None) -> dict[str, bool]:
     configured = ((organization_settings or {}).get(MODULE_SETTINGS_KEY) or {})
     return {name: bool(configured.get(name, False)) for name in ERP_MODULES}
+
+
+PHASE5_MODULES = {"selling", "buying", "stock", "manufacturing", "assets_maintenance"}
+
+
+async def phase5_gate_status(db: AsyncSession, organization_id: int) -> dict[str, Any]:
+    organization = await db.get(Organization, organization_id)
+    settings = (organization.settings or {}) if organization else {}
+    acceptance = settings.get("phase5_payroll_acceptance") or {}
+    return {"accepted": bool(acceptance.get("reconciled_period_id")), **acceptance}
+
+
+async def require_phase5_gate(db: AsyncSession, organization_id: int, module: str) -> None:
+    """Require the reconciled payroll acceptance gate for enabled Phase 5 modules."""
+    if module not in PHASE5_MODULES:
+        return
+    organization = await db.get(Organization, organization_id)
+    configured = (organization.settings or {}) if organization else {}
+    if not bool((configured.get(MODULE_SETTINGS_KEY) or {}).get(module, False)):
+        return
+    acceptance = configured.get("phase5_payroll_acceptance") or {}
+    if not acceptance.get("reconciled_period_id"):
+        raise HTTPException(status_code=409, detail={"code": "erp_phase5_payroll_acceptance_required", "module": module})
+
+
+async def validate_phase5_chain(db: AsyncSession, document: ERPDocument, lines: list[ERPDocumentLine]) -> None:
+    """Validate source-document chains and freeze source-line quantities."""
+    module = DOCUMENT_MODULES.get(document.document_type)
+    await require_phase5_gate(db, document.organization_id, module or "")
+    if module not in PHASE5_MODULES:
+        return
+    expected_sources = {
+        "sales_order": {"quotation"}, "delivery": {"sales_order"}, "sales_invoice": {"delivery"}, "sales_credit_note": {"sales_invoice"},
+        "purchase_order": {"supplier_quotation"}, "purchase_receipt": {"purchase_order"}, "purchase_invoice": {"purchase_receipt"}, "purchase_debit_note": {"purchase_invoice"},
+    }
+    source_type_set = expected_sources.get(document.document_type)
+    if source_type_set:
+        if not document.source_document_id:
+            raise HTTPException(status_code=422, detail={"code": "erp_source_document_required", "document_type": document.document_type})
+        source = await db.scalar(select(ERPDocument).where(
+            ERPDocument.id == document.source_document_id, ERPDocument.organization_id == document.organization_id,
+        ).with_for_update())
+        if not source or source.document_type not in source_type_set or source.status not in {"submitted", "approved"}:
+            raise HTTPException(status_code=422, detail={"code": "erp_invalid_source_document", "document_type": document.document_type})
+        source_lines = {line.id: line for line in (await db.execute(select(ERPDocumentLine).where(ERPDocumentLine.document_id == source.id))).scalars().all()}
+        if not source_lines and lines:
+            raise HTTPException(status_code=422, detail={"code": "erp_source_lines_required"})
+        for target_line in lines:
+            source_line_id = (target_line.data or {}).get("source_line_id")
+            if source_line_id is None:
+                raise HTTPException(status_code=422, detail={"code": "erp_source_line_required", "target_line_id": target_line.id})
+            try:
+                source_line_id = int(source_line_id)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail={"code": "erp_invalid_source_line", "source_line_id": source_line_id})
+            source_line = source_lines.get(source_line_id)
+            if source_line is None or source_line.item_id != target_line.item_id:
+                raise HTTPException(status_code=422, detail={"code": "erp_invalid_source_line", "source_line_id": source_line_id})
+            allocated = await db.scalar(select(func.coalesce(func.sum(ERPSourceLineAllocation.quantity), 0)).where(
+                ERPSourceLineAllocation.organization_id == document.organization_id,
+                ERPSourceLineAllocation.source_line_id == source_line.id,
+                ERPSourceLineAllocation.target_document_id != document.id,
+            ))
+            requested = Decimal(str(target_line.quantity or 0))
+            if Decimal(str(allocated or 0)) + requested > Decimal(str(source_line.quantity or 0)):
+                raise HTTPException(status_code=409, detail={"code": "erp_source_quantity_overfulfilled", "source_line_id": source_line.id, "available": str(Decimal(str(source_line.quantity or 0)) - Decimal(str(allocated or 0)))})
+            db.add(ERPSourceLineAllocation(
+                organization_id=document.organization_id, source_document_id=source.id, source_line_id=source_line.id,
+                target_document_id=document.id, target_line_id=target_line.id, quantity=requested,
+            ))
+    if document.document_type in {"bill_of_materials", "work_order"}:
+        if document.document_type == "work_order":
+            snapshot_id = (document.payload or {}).get("bom_snapshot_id")
+            if not snapshot_id:
+                raise HTTPException(status_code=422, detail={"code": "erp_approved_bom_snapshot_required"})
+            snapshot = await db.scalar(select(ERPBOMSnapshot).where(ERPBOMSnapshot.id == int(snapshot_id), ERPBOMSnapshot.organization_id == document.organization_id, ERPBOMSnapshot.status == "approved"))
+            if not snapshot:
+                raise HTTPException(status_code=422, detail={"code": "erp_invalid_bom_snapshot"})
+    if document.document_type == "asset" and not (document.payload or {}).get("asset_book_id"):
+        raise HTTPException(status_code=422, detail={"code": "erp_asset_book_required"})
 
 
 async def require_capability(db: AsyncSession, actor: ActorContext, resource: str, action: str) -> None:
@@ -609,10 +697,13 @@ async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorCon
         raise HTTPException(status_code=410, detail={"code": "payroll_use_dedicated_api", "path": "/v1/erp/payroll"})
     await assert_open_posting_period(db, document.organization_id, document.posting_date)
     already_posted = await db.scalar(select(ERPGeneralLedgerEntry.id).where(ERPGeneralLedgerEntry.document_id == document.id).limit(1))
+    if not already_posted:
+        already_posted = await db.scalar(select(ERPStockLedgerEntry.id).where(ERPStockLedgerEntry.document_id == document.id).limit(1))
     if already_posted:
         document.status = "submitted"
         return
     lines = (await db.execute(select(ERPDocumentLine).where(ERPDocumentLine.document_id == document.id))).scalars().all()
+    await validate_phase5_chain(db, document, lines)
     await assert_stock_policy(db, document, lines)
     gl: list[tuple[int, Decimal, Decimal, str | None]] = []
     if document.document_type == "journal_entry":
@@ -630,12 +721,24 @@ async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorCon
         if document.tax_total:
             tax = await default_account(db, document.organization_id, "tax_payable")
             gl.append((tax.id, Decimal("0"), document.tax_total, "Sales tax"))
+    elif document.document_type == "sales_credit_note":
+        receivable, income = await default_account(db, document.organization_id, "receivable"), await default_account(db, document.organization_id, "income")
+        gl = [(income.id, document.net_total, Decimal("0"), "Sales credit note"), (receivable.id, Decimal("0"), document.grand_total, "Customer credit")]
+        if document.tax_total:
+            tax = await default_account(db, document.organization_id, "tax_payable")
+            gl.append((tax.id, document.tax_total, Decimal("0"), "Sales tax reversal"))
     elif document.document_type == "purchase_invoice":
         expense, payable = await default_account(db, document.organization_id, "expense"), await default_account(db, document.organization_id, "payable")
         gl = [(expense.id, document.net_total, Decimal("0"), "Purchase expense"), (payable.id, Decimal("0"), document.grand_total, "Supplier payable")]
         if document.tax_total:
             tax = await default_account(db, document.organization_id, "tax_receivable")
             gl.append((tax.id, document.tax_total, Decimal("0"), "Purchase tax"))
+    elif document.document_type == "purchase_debit_note":
+        expense, payable = await default_account(db, document.organization_id, "expense"), await default_account(db, document.organization_id, "payable")
+        gl = [(payable.id, document.grand_total, Decimal("0"), "Supplier debit note"), (expense.id, Decimal("0"), document.net_total, "Purchase expense reversal")]
+        if document.tax_total:
+            tax = await default_account(db, document.organization_id, "tax_receivable")
+            gl.append((tax.id, Decimal("0"), document.tax_total, "Purchase tax reversal"))
     elif document.document_type == "payment_entry":
         direction = str((document.payload or {}).get("direction", "receive"))
         cash = await default_account(db, document.organization_id, "cash")
@@ -650,6 +753,30 @@ async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorCon
     elif document.document_type == "asset":
         asset, payable = await default_account(db, document.organization_id, "fixed_asset"), await default_account(db, document.organization_id, "payable")
         gl = [(asset.id, document.grand_total, Decimal("0"), "Asset capitalization"), (payable.id, Decimal("0"), document.grand_total, "Asset payable")]
+    elif document.document_type in {"stock_entry", "purchase_receipt", "delivery", "work_order"}:
+        total_value = as_money(sum((Decimal(str(line.amount or 0)) for line in lines), Decimal("0")))
+        if total_value:
+            movement = str((document.payload or {}).get("movement_type", "receipt"))
+            issue = document.document_type == "delivery" or (document.document_type == "stock_entry" and movement == "issue")
+            inventory = await default_account(db, document.organization_id, "inventory")
+            contra = await default_account(db, document.organization_id, "expense" if issue else "payable")
+            if movement == "transfer":
+                gl = [(inventory.id, total_value, Decimal("0"), "Inventory transfer out"), (inventory.id, Decimal("0"), total_value, "Inventory transfer in")]
+            else:
+                gl = [(contra.id, total_value, Decimal("0"), "Stock issue" if issue else "Stock receipt"), (inventory.id, Decimal("0"), total_value, "Inventory movement")] if issue else [(inventory.id, total_value, Decimal("0"), "Inventory receipt"), (contra.id, Decimal("0"), total_value, "Stock receipt")]
+    elif document.document_type == "stock_reconciliation":
+        adjustment = Decimal("0")
+        for line in lines:
+            if not line.item_id or not line.warehouse_id or (line.data or {}).get("actual_quantity") is None:
+                continue
+            current = await stock_balance_for(db, document.organization_id, line.item_id, line.warehouse_id)
+            item = await db.get(ERPItem, line.item_id)
+            adjustment += (Decimal(str((line.data or {}).get("actual_quantity"))) - current) * Decimal(str(item.standard_cost if item else line.rate))
+        if adjustment:
+            inventory = await default_account(db, document.organization_id, "inventory")
+            contra = await default_account(db, document.organization_id, "expense")
+            amount = as_money(abs(adjustment))
+            gl = [(inventory.id, amount, Decimal("0"), "Inventory reconciliation adjustment"), (contra.id, Decimal("0"), amount, "Inventory reconciliation adjustment")] if adjustment > 0 else [(contra.id, amount, Decimal("0"), "Inventory reconciliation loss"), (inventory.id, Decimal("0"), amount, "Inventory reconciliation loss")]
     await validate_posting_gate(
         db, document.organization_id, document.posting_date,
         [(account_id, debit_amount, credit_amount, (document.payload or {}).get("cost_center_id"), memo)
@@ -661,19 +788,24 @@ async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorCon
             organization_id=document.organization_id, document_id=document.id, account_id=account_id, party_id=document.party_id,
             posting_date=document.posting_date, debit=debit_amount, credit=credit_amount, memo=memo,
         ) for account_id, debit_amount, credit_amount, memo in gl])
-    if document.document_type in {"stock_entry", "purchase_receipt", "delivery", "work_order"}:
+    if document.document_type in {"stock_entry", "stock_reconciliation", "purchase_receipt", "delivery", "work_order"}:
         for line in lines:
             if not line.item_id or not line.warehouse_id:
                 continue
             movement = str((document.payload or {}).get("movement_type", "receipt"))
-            direction = -1 if document.document_type == "delivery" or (document.document_type == "stock_entry" and movement == "issue") else 1
-            quantity = line.quantity * direction
+            if document.document_type == "stock_reconciliation":
+                actual_raw = (line.data or {}).get("actual_quantity")
+                if actual_raw is None:
+                    raise HTTPException(status_code=422, detail={"code": "erp_reconciliation_actual_quantity_required", "line_id": line.id})
+                if Decimal(str(actual_raw)) < 0:
+                    raise HTTPException(status_code=422, detail={"code": "erp_reconciliation_quantity_negative", "line_id": line.id})
+                current = await stock_balance_for(db, document.organization_id, line.item_id, line.warehouse_id)
+                quantity = Decimal(str(actual_raw)) - current
+                direction = 1
+            else:
+                direction = -1 if document.document_type == "delivery" or (document.document_type == "stock_entry" and movement in {"issue", "transfer"}) else 1
+                quantity = line.quantity * direction
             item = await db.get(ERPItem, line.item_id)
-            valuation_rate = as_money(item.standard_cost if item else line.rate)
-            db.add(ERPStockLedgerEntry(
-                organization_id=document.organization_id, document_id=document.id, item_id=line.item_id, warehouse_id=line.warehouse_id,
-                posting_date=document.posting_date, quantity_delta=quantity, value_delta=as_money(line.amount * direction), valuation_rate=valuation_rate,
-            ))
             level = await db.scalar(select(ERPInventoryLevel).where(
                 ERPInventoryLevel.organization_id == document.organization_id, ERPInventoryLevel.item_id == line.item_id,
                 ERPInventoryLevel.warehouse_id == line.warehouse_id,
@@ -681,9 +813,45 @@ async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorCon
             if level is None:
                 level = ERPInventoryLevel(organization_id=document.organization_id, item_id=line.item_id, warehouse_id=line.warehouse_id)
                 db.add(level)
+            issue = quantity < 0
+            valuation_rate = as_money((level.valuation_rate if issue and level.valuation_rate else (item.standard_cost if item else line.rate)))
+            movement_value = as_money(abs(quantity) * valuation_rate)
+            db.add(ERPStockLedgerEntry(
+                organization_id=document.organization_id, document_id=document.id, item_id=line.item_id, warehouse_id=line.warehouse_id,
+                posting_date=document.posting_date, quantity_delta=quantity, value_delta=as_money(movement_value * (-1 if quantity < 0 else 1)), valuation_rate=valuation_rate,
+            ))
             level.quantity = level.quantity + quantity
             level.valuation_rate = valuation_rate
             level.inventory_value = as_money(level.quantity * valuation_rate)
+            db.add(ERPStockValuationLayer(
+                organization_id=document.organization_id, document_id=document.id, item_id=line.item_id, warehouse_id=line.warehouse_id,
+                quantity=quantity, remaining_quantity=max(quantity, Decimal("0")), unit_cost=valuation_rate,
+                value=as_money(movement_value * (-1 if quantity < 0 else 1)), valuation_method=(item.valuation_method if item else "moving_average"),
+            ))
+            target_warehouse_id = (line.data or {}).get("target_warehouse_id") if movement == "transfer" else None
+            if target_warehouse_id and int(target_warehouse_id) != line.warehouse_id:
+                target = await db.scalar(select(ERPWarehouse).where(ERPWarehouse.id == int(target_warehouse_id), ERPWarehouse.organization_id == document.organization_id, ERPWarehouse.is_active.is_(True)).with_for_update())
+                if not target:
+                    raise HTTPException(status_code=422, detail={"code": "erp_invalid_transfer_warehouse"})
+                db.add(ERPStockLedgerEntry(
+                    organization_id=document.organization_id, document_id=document.id, item_id=line.item_id, warehouse_id=target.id,
+                    posting_date=document.posting_date, quantity_delta=line.quantity, value_delta=as_money(line.amount), valuation_rate=valuation_rate,
+                ))
+                target_level = await db.scalar(select(ERPInventoryLevel).where(
+                    ERPInventoryLevel.organization_id == document.organization_id, ERPInventoryLevel.item_id == line.item_id,
+                    ERPInventoryLevel.warehouse_id == target.id,
+                ).with_for_update())
+                if target_level is None:
+                    target_level = ERPInventoryLevel(organization_id=document.organization_id, item_id=line.item_id, warehouse_id=target.id)
+                    db.add(target_level)
+                target_level.quantity += line.quantity
+                target_level.valuation_rate = valuation_rate
+                target_level.inventory_value = as_money(target_level.quantity * valuation_rate)
+                db.add(ERPStockValuationLayer(
+                    organization_id=document.organization_id, document_id=document.id, item_id=line.item_id, warehouse_id=target.id,
+                    quantity=line.quantity, remaining_quantity=line.quantity, unit_cost=valuation_rate,
+                    value=as_money(line.amount), valuation_method=(item.valuation_method if item else "moving_average"),
+                ))
     if document.document_type == "payment_entry":
         await apply_payment_allocations(db, document)
     document.status = "submitted"

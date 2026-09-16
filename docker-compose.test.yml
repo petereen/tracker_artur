@@ -1,0 +1,44 @@
+services:
+  db-test:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_DB: sales_tracker_test
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: tracker-test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker -d sales_tracker_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.test.runtime
+    depends_on:
+      db-test:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tracker:tracker-test@db-test:5432/sales_tracker_test
+      SYNC_DATABASE_URL: postgresql+psycopg2://tracker:tracker-test@db-test:5432/sales_tracker_test
+      SECRET_KEY: test-secret
+      BOT_TOKEN: test-token-123:ABC
+      RUN_POSTGRES_TESTS: "1"
+    command: sh -c "alembic upgrade head && pytest -q"
+
+  frontend-test:
+    image: node:22-alpine
+    working_dir: /app/frontend
+    volumes:
+      - ./frontend:/app/frontend
+    command: sh -c "npm ci && npm run test && npm run build"
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.55.0-noble
+    working_dir: /app/frontend
+    volumes:
+      - ./frontend:/app/frontend
+    depends_on:
+      frontend-test:
+        condition: service_completed_successfully
+    command: sh -c "npm ci && npm run test:e2e"

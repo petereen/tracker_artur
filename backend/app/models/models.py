@@ -2193,6 +2193,124 @@ class ERPInventoryLevel(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class ERPSourceLineAllocation(Base):
+    """Immutable quantity allocation from a downstream document to its source line."""
+    __tablename__ = "erp_source_line_allocations"
+    __table_args__ = (
+        UniqueConstraint("target_document_id", "target_line_id", "source_document_id", "source_line_id", name="uq_erp_source_line_allocation"),
+        Index("ix_erp_source_line_allocations_source", "organization_id", "source_document_id", "source_line_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    source_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    source_line_id = Column(Integer, ForeignKey("erp_document_lines.id", ondelete="RESTRICT"), nullable=False)
+    target_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    target_line_id = Column(Integer, ForeignKey("erp_document_lines.id", ondelete="RESTRICT"), nullable=False)
+    quantity = Column(Numeric(18, 6), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPStockValuationLayer(Base):
+    """Append-only FIFO/moving-average valuation layer for stock movements."""
+    __tablename__ = "erp_stock_valuation_layers"
+    __table_args__ = (Index("ix_erp_stock_valuation_layers_balance", "organization_id", "item_id", "warehouse_id", "created_at"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    item_id = Column(Integer, ForeignKey("erp_items.id", ondelete="RESTRICT"), nullable=False)
+    warehouse_id = Column(Integer, ForeignKey("erp_warehouses.id", ondelete="RESTRICT"), nullable=False)
+    quantity = Column(Numeric(18, 6), nullable=False)
+    remaining_quantity = Column(Numeric(18, 6), nullable=False)
+    unit_cost = Column(Numeric(18, 4), nullable=False)
+    value = Column(Numeric(18, 4), nullable=False)
+    valuation_method = Column(String(24), nullable=False, server_default="moving_average", default="moving_average")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPBOMSnapshot(Base):
+    """Frozen, approved BOM revision used by a work order."""
+    __tablename__ = "erp_bom_snapshots"
+    __table_args__ = (UniqueConstraint("organization_id", "bom_document_id", "version", name="uq_erp_bom_snapshot_version"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    bom_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    version = Column(Integer, nullable=False)
+    status = Column(String(24), nullable=False, server_default="approved", default="approved")
+    output_item_id = Column(Integer, ForeignKey("erp_items.id", ondelete="RESTRICT"), nullable=False)
+    output_quantity = Column(Numeric(18, 6), nullable=False)
+    lines = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    operations = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    approved_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPAssetBook(Base):
+    """Asset book policy; changes create a new book instead of rewriting history."""
+    __tablename__ = "erp_asset_books"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_asset_book_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(64), nullable=False)
+    name = Column(Text, nullable=False)
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    depreciation_method = Column(String(24), nullable=False, server_default="straight_line", default="straight_line")
+    useful_life_months = Column(Integer, nullable=False)
+    residual_value = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPAssetDepreciationSchedule(Base):
+    """Immutable schedule rows generated from an asset book."""
+    __tablename__ = "erp_asset_depreciation_schedules"
+    __table_args__ = (UniqueConstraint("asset_document_id", "book_id", "period_date", name="uq_erp_asset_depreciation_period"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    asset_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    book_id = Column(Integer, ForeignKey("erp_asset_books.id", ondelete="RESTRICT"), nullable=False)
+    period_date = Column(Date, nullable=False)
+    depreciation_amount = Column(Numeric(18, 4), nullable=False)
+    accumulated_amount = Column(Numeric(18, 4), nullable=False)
+    status = Column(String(24), nullable=False, server_default="scheduled", default="scheduled")
+    journal_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPAssetMaintenanceRecord(Base):
+    __tablename__ = "erp_asset_maintenance_records"
+    __table_args__ = (Index("ix_erp_asset_maintenance_org_asset_date", "organization_id", "asset_document_id", "scheduled_date"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    asset_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    scheduled_date = Column(Date, nullable=False)
+    description = Column(Text, nullable=False)
+    status = Column(String(24), nullable=False, server_default="planned", default="planned")
+    cost = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ERPAssetDisposal(Base):
+    __tablename__ = "erp_asset_disposals"
+    __table_args__ = (UniqueConstraint("asset_document_id", name="uq_erp_asset_disposal_asset"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    asset_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    disposal_date = Column(Date, nullable=False)
+    proceeds = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
+    reason = Column(Text, nullable=False)
+    journal_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="SET NULL"))
+    reversal_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class ERPAccount(Base):
     __tablename__ = "erp_accounts"
     __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_account_org_code"),)

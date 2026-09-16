@@ -52,6 +52,13 @@ from app.models.models import (  # noqa: F401
     AttendanceLog,
     EmployeeCompensationItem,
     CalendarEntryCollaborator,
+    ERPSourceLineAllocation,
+    ERPStockValuationLayer,
+    ERPBOMSnapshot,
+    ERPAssetBook,
+    ERPAssetDepreciationSchedule,
+    ERPAssetMaintenanceRecord,
+    ERPAssetDisposal,
 )
 from app.models.contracts import (  # noqa: F401
     CONTRACT_DOCUMENT_TYPES,
