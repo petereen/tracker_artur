@@ -648,7 +648,7 @@ async def stock_balance_for(db: AsyncSession, organization_id: int, item_id: int
 
 async def assert_stock_policy(db: AsyncSession, document: ERPDocument, lines: list[ERPDocumentLine]) -> None:
     movement = str((document.payload or {}).get("movement_type", "receipt"))
-    issue = document.document_type == "delivery" or (document.document_type == "stock_entry" and movement == "issue")
+    issue = document.document_type == "delivery" or (document.document_type == "stock_entry" and movement in {"issue", "transfer"})
     if not issue:
         return
     organization = await db.get(Organization, document.organization_id)

@@ -33,6 +33,7 @@
 - [x] Record both sides of warehouse transfers in immutable valuation layers (`backend/app/erp/service.py`)
 - [x] Enforce the payroll acceptance gate at the moment a Phase 5 module is enabled (`backend/app/erp/router.py`)
 - [x] Extend stabilization contracts to cover module-enable gating (`backend/tests/test_payroll_stabilization_contract.py`)
+- [x] Apply negative-stock protection to transfer source warehouses (`backend/app/erp/service.py`)
 - [x] Post disposal derecognition, proceeds, and gain/loss in one balanced journal (`backend/app/erp/router.py`)
 - [x] Preserve immutable depreciation amounts while allowing posted-status/audit linkage updates (`backend/alembic/versions/g2h3i4j5k6l7_phase5_erp_workflows.py`)
 - [x] Add stock and manufacturing specialized workflow guidance alongside the asset setup form (`frontend/src/pages/ERPWorkspacePage.tsx`)
@@ -524,6 +525,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Fix backend startup SyntaxError in the asset-disposal journal route (`backend/app/erp/router.py`)
 - [x] Add manifest-backed compressed bundle reporting, bounded dependency groups, and desktop route intent preloading (`frontend/scripts/check-performance-budget.mjs`, `frontend/vite.config.ts`, `frontend/src/platform/route-preload.ts`)
 - [x] Defer Sentry initialization and optional shell feature modules; load ZXing and contract editor/QR dependencies on demand (`frontend/src/platform/telemetry.ts`, `frontend/src/platform/updater.tsx`, `frontend/src/platform/notifications.ts`, `frontend/src/platform/self-hosted-updater.ts`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/pages/WorktimePage.tsx`, `frontend/src/pages/ContractsWorkspacePage.tsx`)
 - [x] Add abortable task/search/calendar queries with debounced global search and drawer-gated worker polling (`frontend/src/api/enterprise.ts`, `frontend/src/components/GlobalCommandBar.tsx`, `frontend/src/components/EnterpriseShell.tsx`)

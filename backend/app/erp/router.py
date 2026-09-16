@@ -1663,10 +1663,10 @@ async def dispose_asset(data: AssetDisposalInput, db: AsyncSession = Depends(get
         lines.append(ERPDocumentLine(account_id=cash.id, description="Asset disposal proceeds", quantity=1, rate=proceeds, amount=proceeds, data={"debit": str(proceeds), "credit": "0"}, position=0))
     if cost > proceeds:
         loss = as_money(cost - proceeds); expense = await default_account(db, actor.organization_id, "expense")
-        lines.append(ERPDocumentLine(account_id=expense.id, description="Asset disposal loss", quantity=1, rate=loss, amount=loss, data={"debit": str(loss), "credit": "0"}, position=len(lines))
+        lines.append(ERPDocumentLine(account_id=expense.id, description="Asset disposal loss", quantity=1, rate=loss, amount=loss, data={"debit": str(loss), "credit": "0"}, position=len(lines)))
     elif proceeds > cost:
         gain = as_money(proceeds - cost); income = await default_account(db, actor.organization_id, "income")
-        lines.append(ERPDocumentLine(account_id=income.id, description="Asset disposal gain", quantity=1, rate=gain, amount=gain, data={"debit": "0", "credit": str(gain)}, position=len(lines))
+        lines.append(ERPDocumentLine(account_id=income.id, description="Asset disposal gain", quantity=1, rate=gain, amount=gain, data={"debit": "0", "credit": str(gain)}, position=len(lines)))
     if cost:
         lines.append(ERPDocumentLine(account_id=fixed_asset.id, description="Derecognize asset cost", quantity=1, rate=cost, amount=cost, data={"debit": "0", "credit": str(cost)}, position=len(lines)))
     journal = ERPDocument(organization_id=actor.organization_id, document_type="journal_entry", number=await next_number(db, actor.organization_id, "journal_entry"), posting_date=data.disposal_date, currency=asset.currency, payload={"source": "asset_disposal", "disposal_id": row.id})
