@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Download } from "lucide-react";
 import {
   AnalyticsMetric,
@@ -13,8 +13,21 @@ import { HeatmapCalendar } from "../components/HeatmapCalendar";
 import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
 import { QueryRegion, Skeleton, combineQueryRegionStates, toQueryRegionState } from "../components/Loading";
 import { DropdownSelect } from "../components/DropdownSelect";
-import { WorkHourHierarchyChart } from "../components/WorkHourHierarchyChart";
 import { WorktimeExportModal } from "../components/WorktimeExportModal";
+
+const LazyWorkHourHierarchyChart = lazy(() => import('../components/WorkHourHierarchyChart').then((module) => ({ default: module.WorkHourHierarchyChart })))
+
+function DeferredWorkHourChart({ period, employeeId }: { period: { date_from: string; date_to: string }; employeeId?: number }) {
+  const [visible, setVisible] = useState(false)
+  const region = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (visible || !region.current || typeof IntersectionObserver === 'undefined') { if (typeof IntersectionObserver === 'undefined') setVisible(true); return }
+    const observer = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect() } }, { rootMargin: '240px' })
+    observer.observe(region.current)
+    return () => observer.disconnect()
+  }, [visible])
+  return <div ref={region} className="deferred-chart-region">{visible ? <Suspense fallback={<section className="panel work-hour-card"><Skeleton variant="chart" /></section>}><LazyWorkHourHierarchyChart period={period} employeeId={employeeId} /></Suspense> : <section className="panel work-hour-card" aria-label="Ажлын цагийн график"><Skeleton variant="chart" /></section>}</div>
+}
 
 function localDate(value: Date) {
   const offset = value.getTimezoneOffset() * 60_000;
@@ -159,7 +172,7 @@ export function StatsWorkspacePage() {
               </strong>
             </article>
           </section>
-          <WorkHourHierarchyChart period={period} employeeId={employeeId} />
+          <DeferredWorkHourChart period={period} employeeId={employeeId} />
           <section className="panel heatmap-panel">
             <div className="panel-heading">
               <div>

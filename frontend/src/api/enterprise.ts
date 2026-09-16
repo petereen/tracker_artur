@@ -667,13 +667,13 @@ export function useArchiveProject() {
 
 export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; priority?: 1 | 2 | 3; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' | 'delegated' }
 export function useEnterpriseTasks(projectId?: number, period?: Partial<DateRange>, filters: TaskFilters = {}) {
-  return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId, period, filters], queryFn: () => api.get('/v1/tasks', { params: { ...(projectId ? { project_id: projectId } : {}), ...period, ...filters } }).then((response) => response.data) })
+  return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId, period, filters], queryFn: ({ signal }) => api.get('/v1/tasks', { signal, params: { ...(projectId ? { project_id: projectId } : {}), ...period, ...filters } }).then((response) => response.data) })
 }
 export function useEnterpriseTask(id?: number) {
   return useQuery<EnterpriseTask>({ queryKey: ['v1', 'tasks', id], queryFn: () => api.get(`/v1/tasks/${id}`).then((response) => response.data), enabled: Boolean(id) })
 }
 export function useGlobalSearch(query: string) {
-  return useQuery<GlobalSearchResponse>({ queryKey: ['v1', 'search', query], queryFn: () => api.get('/v1/search', { params: { q: query, limit_per_group: 5 } }).then((response) => response.data), enabled: query.trim().length > 0, staleTime: 30_000 })
+  return useQuery<GlobalSearchResponse>({ queryKey: ['v1', 'search', query], queryFn: ({ signal }) => api.get('/v1/search', { signal, params: { q: query, limit_per_group: 5 } }).then((response) => response.data), enabled: query.trim().length > 0, staleTime: 60_000, gcTime: 5 * 60_000 })
 }
 
 export function useDeadlines(enabled = true) {
@@ -903,7 +903,7 @@ export function useCalendarEvents(scope: 'private' | 'corporate', anchor: Date, 
   const queries = useQueries({
     queries: months.map(({ month, period }) => ({
       queryKey: ['v1', 'calendar', scope, employeeId, 'month', month.getFullYear(), month.getMonth()],
-      queryFn: () => api.get('/v1/calendar/events', { params: { scope, ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data),
+      queryFn: ({ signal }) => api.get('/v1/calendar/events', { signal, params: { scope, ...period, ...(employeeId ? { employee_id: employeeId } : {}) } }).then((response) => response.data),
       staleTime: 5 * 60 * 1000,
     })),
   })
@@ -1287,8 +1287,8 @@ export function useChatReceiptDetails(publicId?: string, messageId?: number) {
   return useQuery<ChatReceiptDetail>({ queryKey: ['v1', 'chat', 'receipts', publicId, messageId], queryFn: () => api.get(`/v1/chat/conversations/${publicId}/messages/${messageId}/receipts`).then((response) => response.data), enabled: Boolean(publicId && messageId) })
 }
 
-export function useWorkerDirectory() {
-  return useQuery<WorkerDirectoryItem[]>({ queryKey: ['v1', 'workers'], queryFn: () => api.get('/v1/workers').then((response) => response.data), refetchInterval: 30_000 })
+export function useWorkerDirectory(enabled = true) {
+  return useQuery<WorkerDirectoryItem[]>({ queryKey: ['v1', 'workers'], queryFn: () => api.get('/v1/workers').then((response) => response.data), enabled, refetchInterval: enabled ? 30_000 : false })
 }
 
 export function useWorkerPerformance(employeeId?: number, period?: DateRange, enabled = true) {
@@ -1622,8 +1622,8 @@ export interface NotificationPage {
   next_cursor: number | null
 }
 
-export function useNotifications() {
-  return useQuery<NotificationPage>({ queryKey: ['v1', 'notifications'], queryFn: () => api.get('/v1/notifications').then((response) => response.data) })
+export function useNotifications(enabled = true) {
+  return useQuery<NotificationPage>({ queryKey: ['v1', 'notifications'], queryFn: () => api.get('/v1/notifications').then((response) => response.data), enabled })
 }
 
 export function useReadNotification() {

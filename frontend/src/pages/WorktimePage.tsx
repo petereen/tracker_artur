@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser'
+import type { IScannerControls } from '@zxing/browser'
 import { Camera, CheckCircle2, Clock3, Coffee, Laptop2, LocateFixed, MapPin, RefreshCw, ScanLine, ShieldAlert } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useClock, useWorktimeQrClock } from '../api/enterprise'
@@ -43,10 +43,12 @@ export function WorktimePage() {
   useEffect(() => {
     if (!scanning || !videoRef.current) return
     let cancelled = false
-    const reader = new BrowserQRCodeReader()
     const video = videoRef.current
     const start = async () => {
       try {
+        const { BrowserQRCodeReader } = await import('@zxing/browser')
+        if (cancelled) return
+        const reader = new BrowserQRCodeReader()
         const controls = await reader.decodeFromConstraints({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } }, video, async (result) => {
           if (!result || handledRef.current) return
           handledRef.current = true

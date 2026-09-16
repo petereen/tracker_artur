@@ -9,6 +9,8 @@ const callProxyTarget = process.env.VITE_CALL_PROXY_TARGET || 'http://localhost:
 export default defineConfig({
   plugins: [react()],
   build: {
+    manifest: true,
+    cssMinify: 'lightningcss',
     // Keep shared dependencies together so a route transition does not fan
     // out into dozens of tiny browser requests. This is especially important
     // for lucide-react, whose tree-shaken icon modules otherwise become one
@@ -17,6 +19,36 @@ export default defineConfig({
       output: {
         codeSplitting: {
           groups: [
+            {
+              name: 'react-core',
+              test: /node_modules[\\/](?:react|react-dom|react-router|react-router-dom)[\\/]/,
+              priority: 40,
+            },
+            {
+              name: 'data-core',
+              test: /node_modules[\\/](?:@tanstack|axios|zustand|i18next|react-i18next)[\\/]/,
+              priority: 35,
+            },
+            {
+              name: 'motion',
+              test: /node_modules[\\/]motion[\\/]/,
+              priority: 34,
+            },
+            {
+              name: 'sentry',
+              test: /node_modules[\\/]@sentry[\\/]/,
+              priority: 33,
+            },
+            {
+              name: 'charts',
+              test: /node_modules[\\/]recharts[\\/]/,
+              priority: 32,
+            },
+            {
+              name: 'editor',
+              test: /node_modules[\\/](?:@tiptap|prosemirror)[\\/]/,
+              priority: 31,
+            },
             {
               name: 'lucide',
               test: /node_modules[\\/]lucide-react[\\/]/,

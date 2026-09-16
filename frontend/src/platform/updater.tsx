@@ -2,16 +2,16 @@ import { Component, type ErrorInfo, type ReactNode, useLayoutEffect } from 'reac
 import type { PluginListenerHandle } from '@capacitor/core'
 import { App } from '@capacitor/app'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
-import * as Sentry from '@sentry/react'
 import { isNativePlatform } from './runtime'
 import { checkSelfHostedUpdate } from './self-hosted-updater'
+import { addTelemetryBreadcrumb, captureTelemetryException } from './telemetry'
 
 let listenersPromise: Promise<PluginListenerHandle[]> | null = null
 let readinessPromise: Promise<unknown> | null = null
 let lifecyclePromise: Promise<PluginListenerHandle> | null = null
 
 function recordUpdaterEvent(eventName: string) {
-  Sentry.addBreadcrumb({
+  addTelemetryBreadcrumb({
     category: 'ota.lifecycle',
     message: eventName,
     level: eventName.toLowerCase().includes('failed') ? 'error' : 'info',
@@ -55,7 +55,7 @@ function NativeReadySignal({ children }: { children: ReactNode }) {
       void checkSelfHostedUpdate()
       void attachSelfHostedUpdaterLifecycle()
       timer = window.setInterval(() => void checkSelfHostedUpdate(), 60 * 60 * 1000)
-    }).catch((error) => Sentry.captureException(error))
+    }).catch((error) => captureTelemetryException(error))
     return () => {
       cancelled = true
       if (timer !== undefined) window.clearInterval(timer)
@@ -72,7 +72,7 @@ class BootErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    Sentry.captureException(error, { contexts: { react: { componentStack: info.componentStack } } })
+    captureTelemetryException(error, { react: { componentStack: info.componentStack } })
   }
 
   render() {

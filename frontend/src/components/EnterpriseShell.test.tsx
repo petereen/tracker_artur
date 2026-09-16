@@ -8,13 +8,15 @@ import { EnterpriseShell } from './EnterpriseShell'
 const mocks = vi.hoisted(() => ({
   workers: [] as any[],
   profile: null as any,
+  payrollVisible: false,
+  roles: ['manager'] as string[],
   openDirect: vi.fn(async () => ({ public_id: 'direct-1' })),
 }))
 
 vi.mock('../api/enterprise', () => ({
-  useActor: () => ({ data: { name: 'Manager', email: 'manager@example.com', roles: ['manager'], locale: 'mn', avatar_url: null } }),
+  useActor: () => ({ data: { name: 'Manager', email: 'manager@example.com', roles: mocks.roles, locale: 'mn', avatar_url: null } }),
   useBrandingSettings: () => ({ data: {} }),
-  useERPMetadata: () => ({ data: { modules: {}, module_labels: {}, document_modules: {}, actions: [], currency: 'MNT', custom_fields: [], roles: [], module_visibility_is_not_authorization: true }, isLoading: false }),
+  useERPMetadata: () => ({ data: { modules: { payroll: mocks.payrollVisible }, module_labels: {}, document_modules: {}, actions: [], currency: 'MNT', custom_fields: [], roles: [], module_visibility_is_not_authorization: true }, isLoading: false }),
   useEnterpriseLogout: () => ({ mutate: vi.fn() }),
   useWorkerDirectory: () => ({ data: mocks.workers }),
   useWorkerPerformance: () => ({ data: {} }),
@@ -31,7 +33,7 @@ vi.mock('./OyunsAssistant', () => ({ OyunsAssistant: () => null }))
 vi.mock('./Loading', () => ({ WorkspaceRouteSkeleton: () => null }))
 
 describe('enterprise sidebar', () => {
-  beforeEach(() => { mocks.workers = []; mocks.profile = null; mocks.openDirect.mockClear() })
+  beforeEach(() => { mocks.workers = []; mocks.profile = null; mocks.payrollVisible = false; mocks.roles = ['manager']; mocks.openDirect.mockClear() })
   it('places company files immediately above the profile and logout controls', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
@@ -79,6 +81,15 @@ describe('enterprise sidebar', () => {
     expect(links[8].parentElement).not.toHaveClass('nav-group-break')
     expect(links[9].parentElement).not.toHaveClass('nav-group-break')
     expect(links[10].parentElement).toHaveClass('nav-group-break')
+  })
+
+  it('does not keep ERP active while Payroll is selected', () => {
+    mocks.payrollVisible = true
+    mocks.roles = ['admin']
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/erp/payroll']}><Routes><Route element={<EnterpriseShell />}><Route path="erp/payroll" element={<div>Payroll</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
+    expect(screen.getByRole('link', { name: 'ERP' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: 'Payroll' })).toHaveClass('active')
   })
 
   it('uses a full in-app chat action and an icon-only Telegram squircle for workers', () => {

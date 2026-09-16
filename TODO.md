@@ -1,6 +1,13 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [ ] Optimize whole workspace performance and responsive behavior (`frontend/src`, `frontend/e2e`, `frontend/scripts`, `frontend/package.json`)
+- [ ] Add compressed bundle and Core Web Vitals budget checks (`frontend/scripts/check-performance-budget.mjs`, `frontend/package.json`)
+- [ ] Defer Sentry, assistant, command bar, notifications, workers, QR scanning, charts, maps, and rich editors until needed (`frontend/src`)
+- [ ] Split domain API/query modules and tune React Query freshness, cancellation, and retained data (`frontend/src/api`, `frontend/src/components`, `frontend/src/pages`)
+- [ ] Consolidate responsive shell/styles, focus handling, safe areas, overflow protection, and long-list rendering (`frontend/src/components`, `frontend/src/index.css`)
+- [ ] Add multi-viewport, lazy-boundary, accessibility, and performance regression coverage (`frontend/e2e`, `frontend/src/**/*.test.*`)
+- [x] Prevent the ERP navbar item from appearing active on Payroll routes (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/EnterpriseShell.test.tsx`)
 - [x] Reposition HR directly below Worktime in the enterprise navbar (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/EnterpriseShell.test.tsx`)
 - [x] Remove working/sleeping Today companion GIF animations (`frontend/public/oyuns-working.gif`, `frontend/public/oyuns-sleeping.gif`)
 - [x] Fix contract archive downloads for non-ASCII filenames (`backend/app/routers/contracts.py`, `backend/tests/test_contracts_contract.py`) — RFC 5987 UTF-8 Content-Disposition headers prevent Unicode filenames from causing HTTP 500 responses; focused contract tests and Python syntax checks pass
@@ -480,6 +487,13 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Add manifest-backed compressed bundle reporting, bounded dependency groups, and desktop route intent preloading (`frontend/scripts/check-performance-budget.mjs`, `frontend/vite.config.ts`, `frontend/src/platform/route-preload.ts`)
+- [x] Defer Sentry initialization and optional shell feature modules; load ZXing and contract editor/QR dependencies on demand (`frontend/src/platform/telemetry.ts`, `frontend/src/platform/updater.tsx`, `frontend/src/platform/notifications.ts`, `frontend/src/platform/self-hosted-updater.ts`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/pages/WorktimePage.tsx`, `frontend/src/pages/ContractsWorkspacePage.tsx`)
+- [x] Add abortable task/search/calendar queries with debounced global search and drawer-gated worker polling (`frontend/src/api/enterprise.ts`, `frontend/src/components/GlobalCommandBar.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
+- [x] Add shared responsive overflow, focus, touch, safe-area, and long-list rendering guardrails (`frontend/src/index.css`, `frontend/src/components/EnterpriseShell.tsx`)
+- [x] Preserve notification popover positioning and close behavior after deferring its UI chunk (`frontend/src/components/NotificationCenter.tsx`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
+- [x] Validate the production build, compressed budget report, changed shell tests, and existing mobile workspace Playwright scenarios (`frontend`)
+- [x] Defer analytics chart code behind an intersection-aware reserved region (`frontend/src/pages/StatsWorkspacePage.tsx`)
 - [x] Add normalized QueryRegion state, delayed skeleton timing, retained cross-fade layers, skeleton primitives, and compositor-safe loading CSS (`frontend/src/components/Loading.tsx`, `frontend/src/index.css`)
 - [x] Update loading primitive regression coverage for delayed reveal and minimum visible duration (`frontend/src/components/Loading.test.tsx`)
 - [x] Cover QueryRegion stale-while-revalidate, aria-busy, initial error, and retry behavior (`frontend/src/components/Loading.test.tsx`)

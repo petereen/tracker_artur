@@ -7,6 +7,8 @@
     "dev": "vite",
     "dev:mobile": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc -b && vite build",
+    "performance:budget": "npm run build && node scripts/check-performance-budget.mjs",
+    "performance:budget:strict": "PERF_STRICT_CSS=1 npm run performance:budget",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",

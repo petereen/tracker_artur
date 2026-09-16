@@ -6,6 +6,15 @@ type LocalItem = { id: string; type: 'channel' | 'feature'; title: string; subti
 type Item = LocalItem | GlobalSearchResult
 const RECENT_LIMIT = 8
 
+function useDebouncedValue(value: string, delay = 180) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay)
+    return () => window.clearTimeout(timer)
+  }, [delay, value])
+  return debounced
+}
+
 function formatSize(bytes?: number | null) { if (!bytes) return ''; return bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB` }
 
 export function GlobalCommandBar({ open, onClose, accountId, channels, features, onWorker }: { open: boolean; onClose: () => void; accountId?: number; channels: LocalItem[]; features: LocalItem[]; onWorker: (id: number) => void }) {
@@ -13,7 +22,7 @@ export function GlobalCommandBar({ open, onClose, accountId, channels, features,
   const [active, setActive] = useState(0)
   const input = useRef<HTMLInputElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
-  const deferredQuery = useDeferredValue(query.trim())
+  const deferredQuery = useDeferredValue(useDebouncedValue(query.trim()))
   const search = useGlobalSearch(deferredQuery)
   const storageKey = `oyuns-command-recents:${accountId ?? 'anonymous'}`
   const [recents, setRecents] = useState<string[]>([])

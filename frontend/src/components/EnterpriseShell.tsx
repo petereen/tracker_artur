@@ -1,25 +1,23 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
-import * as Sentry from '@sentry/react'
 import { api } from '../api/client'
 import {
-  BarChart3, BriefcaseBusiness, Calculator, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine, UserRoundCog,
+  BarChart3, Bell, BriefcaseBusiness, Calculator, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine, UserRoundCog,
   FolderArchive, LayoutDashboard, LogOut, Menu, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { acknowledgeChatReceipt, useActor, useBrandingSettings, useChatUnreadCount, useEnterpriseLogout, useERPMetadata, useOpenDirectConversation, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { periodFromPreset } from './TimePeriodFilter'
-import { OyunsAssistant } from './OyunsAssistant'
-import { NotificationCenter } from './NotificationCenter'
 import { WorkspaceModeProvider } from './WorkspaceModeProvider'
 import { WorkspaceModeToggle } from './WorkspaceModeToggle'
 import { WorkspaceRouteSkeleton } from './Loading'
-import { GlobalCommandBar } from './GlobalCommandBar'
 import { getRealtimeUrl, resolvePublicAssetUrl, safeLocalStorage, safeSessionStorage } from '../platform/runtime'
 import { showDesktopChatAlert } from '../platform/chat-notifications'
+import { setTelemetryTag } from '../platform/telemetry'
+import { preloadRoute } from '../platform/route-preload'
 
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
@@ -39,6 +37,9 @@ const NAV = [
 const NAV_GROUP_BREAKS = new Set(['/calendar', '/reports', '/analytics', '/administration'])
 const ERP_ROLES = ['admin', 'manager', 'team_lead']
 const PAYROLL_ROLES = ['admin', 'hr']
+const LazyOyunsAssistant = lazy(() => import('./OyunsAssistant').then((module) => ({ default: module.OyunsAssistant })))
+const LazyGlobalCommandBar = lazy(() => import('./GlobalCommandBar').then((module) => ({ default: module.GlobalCommandBar })))
+const LazyNotificationCenter = lazy(() => import('./NotificationCenter').then((module) => ({ default: module.NotificationCenter })))
 
 const TITLES: Record<string, string> = {
   '/': 'Өнөөдрийн ажлын орон зай', '/worktime': 'Ажлын цагийн бүртгэл', '/hr': 'Хүний нөөц', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
@@ -134,6 +135,7 @@ export function EnterpriseShell() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
+  const [notificationOpen, setNotificationOpen] = useState(false)
   const [workersOpen, setWorkersOpen] = useState(false)
   const [workersToggleY, setWorkersToggleY] = useState(110)
   const [workersDragging, setWorkersDragging] = useState(false)
@@ -144,7 +146,7 @@ export function EnterpriseShell() {
   const [workerSearch, setWorkerSearch] = useState('')
   const [selectedWorker, setSelectedWorker] = useState<number>()
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (safeLocalStorage().get('oyuns-theme') as 'light' | 'dark') || 'light')
-  const workers = useWorkerDirectory()
+  const workers = useWorkerDirectory(workersOpen)
   const branding = useBrandingSettings()
   const actorResolved = Boolean(actorQuery.data)
   const roles = actorResolved ? actorQuery.data?.roles ?? EMPTY_ROLES : EMPTY_ROLES
@@ -156,13 +158,21 @@ export function EnterpriseShell() {
 
   useEffect(() => setMobileOpen(false), [location.pathname])
   useEffect(() => {
+    if (!mobileOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMobileOpen(false) }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', closeOnEscape)
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', closeOnEscape) }
+  }, [mobileOpen])
+  useEffect(() => {
     const normalizedRoute = location.pathname
       .replace(/\/\d+(?=\/|$)/g, '/:id')
       .replace(/\/[^/]+(?=\/print$)/g, '/:publicId')
     const viewport = window.innerWidth < 800 ? 'mobile' : window.innerWidth < 1200 ? 'tablet' : 'desktop'
-    Sentry.setTag('loading.route', normalizedRoute || '/')
-    Sentry.setTag('loading.viewport', viewport)
-    Sentry.setTag('loading.version', 'skeleton-v1')
+    setTelemetryTag('loading.route', normalizedRoute || '/')
+    setTelemetryTag('loading.viewport', viewport)
+    setTelemetryTag('loading.version', 'skeleton-v1')
   }, [location.pathname])
   useEffect(() => {
     if (!workersOpen) return
@@ -281,13 +291,13 @@ export function EnterpriseShell() {
     <WorkspaceModeProvider>
     <RealtimeProvider>
       <div className="workspace-shell">
-        <button className="mobile-menu-button" onClick={() => setMobileOpen(true)} aria-label="Цэс нээх"><Menu /></button>
+        <button className="mobile-menu-button" onClick={() => setMobileOpen(true)} aria-label="Цэс нээх" aria-expanded={mobileOpen}><Menu /></button>
         <aside className={`workspace-sidebar ${mobileOpen ? 'is-open' : ''}`}>
           <div className="sidebar-brand"><img src={logo || (theme === 'dark' ? '/oyuns-aio-logo.png' : '/favicon.png')} alt="OYUNS" /><button onClick={() => setMobileOpen(false)} aria-label="Цэс хаах"><X /></button></div>
           <nav aria-label="Үндсэн цэс">
             {nav.map(({ to, label, icon: Icon }) => (
               <div className={NAV_GROUP_BREAKS.has(to) ? 'nav-group nav-group-break' : 'nav-group'} key={to}>
-                <NavLink to={to} end={to === '/'} className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <NavLink to={to} end={to === '/' || to === '/erp'} onMouseEnter={() => preloadRoute(to)} onFocus={() => preloadRoute(to)} className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                   <Icon size={18} strokeWidth={1.8} aria-hidden /><span>{t(label)}</span>{to === '/chat' && Boolean(unreadChat.data?.unread_count) && <b className="nav-unread-badge" aria-label={`${unreadChat.data?.unread_count} уншаагүй чат`}>{(unreadChat.data?.unread_count ?? 0) > 99 ? '99+' : unreadChat.data?.unread_count}</b>}
                 </NavLink>
               </div>
@@ -308,7 +318,9 @@ export function EnterpriseShell() {
             <div><span className="eyebrow">OYUNS / Workspace</span><h1>{title}</h1></div>
             <div className="header-actions">
               <WorkspaceModeToggle />
-              <NotificationCenter />
+              <button className="notification-trigger" onClick={() => setNotificationOpen(true)} aria-label="Мэдэгдэл" aria-expanded={notificationOpen}>
+                <Bell size={17} />
+              </button>
               <button className="theme-toggle" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={theme === 'light' ? 'Dark mode идэвхжүүлэх' : 'Light mode идэвхжүүлэх'} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
               <button className="search-trigger" onClick={() => setCommandOpen(true)}><Search size={16} /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
               <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>
@@ -329,8 +341,9 @@ export function EnterpriseShell() {
           </button>
         </nav>
         <aside ref={workersDrawerRef} className={`workers-drawer ${workersOpen ? 'open' : ''} ${workersDragging ? 'is-dragging' : ''}`} style={{ '--workers-toggle-y': `${workersToggleY}px` } as React.CSSProperties} aria-label="Ажилтны төлөв"><button ref={workersToggleRef} className="workers-toggle" onPointerDown={handleWorkersPointerDown} onPointerMove={handleWorkersPointerMove} onPointerUp={finishWorkersPointer} onPointerCancel={finishWorkersPointer} onClick={handleWorkersClick} aria-label="Ажилтны жагсаалт нээх"><ChevronLeft /><Users2 /></button><div className="workers-content"><header><div><span className="eyebrow">OYUNS</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)} aria-label="Ажилтны жагсаалт хаах"><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={resolvePublicAssetUrl(worker.avatar_url) || undefined} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Ажлын алба оруулаагүй'}</p><div className="worker-chat-actions"><button className="worker-inapp-chat" disabled={!workerProfile.data?.chat_available || openDirectChat.isPending} onClick={() => selectedWorker && openWorkerChat(selectedWorker)}>Чатлах</button>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer" aria-label="Telegram-аар чатлах" title="Telegram-аар чатлах"><Send size={17} /></a>}</div>{!workerProfile.data?.chat_available && <small className="worker-chat-hint">Workspace хандалт холбосны дараа чатлах боломжтой.</small>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div></aside>
-        <OyunsAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
-        <GlobalCommandBar open={commandOpen} onClose={() => setCommandOpen(false)} accountId={actorQuery.data?.id} channels={commandChannels} features={commandFeatures} onWorker={(id) => { setSelectedWorker(id); setWorkersOpen(true) }} />
+        {assistantOpen && <Suspense fallback={null}><LazyOyunsAssistant open onClose={() => setAssistantOpen(false)} /></Suspense>}
+        {commandOpen && <Suspense fallback={null}><LazyGlobalCommandBar open onClose={() => setCommandOpen(false)} accountId={actorQuery.data?.id} channels={commandChannels} features={commandFeatures} onWorker={(id) => { setSelectedWorker(id); setWorkersOpen(true) }} /></Suspense>}
+        {notificationOpen && <Suspense fallback={null}><LazyNotificationCenter initialOpen standalone onClose={() => setNotificationOpen(false)} /></Suspense>}
       </div>
     </RealtimeProvider>
     </WorkspaceModeProvider>

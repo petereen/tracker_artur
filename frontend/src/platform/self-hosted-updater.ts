@@ -1,6 +1,6 @@
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
-import * as Sentry from '@sentry/react'
 import { getApiBaseUrl, getNativeApiOrigin, isNativePlatform, nativePlatform } from './runtime'
+import { addTelemetryBreadcrumb, captureTelemetryException } from './telemetry'
 
 const APP_ID = 'mn.oyuns.workspace'
 const UPDATE_CHANNEL = import.meta.env.VITE_OTA_CHANNEL === 'staging' ? 'staging' : 'production'
@@ -17,7 +17,7 @@ type UpdateDescriptor = {
 type UpdateCheckResponse = { update: UpdateDescriptor | null }
 
 function record(message: string, level: 'info' | 'warning' | 'error' = 'info') {
-  Sentry.addBreadcrumb({ category: 'ota.self-hosted', message, level })
+  addTelemetryBreadcrumb({ category: 'ota.self-hosted', message, level: level === 'warning' ? 'warning' : level })
 }
 
 function trustedBundleUrl(value: string) {
@@ -66,7 +66,7 @@ export async function checkSelfHostedUpdate(): Promise<void> {
   })()
     .catch((error) => {
       record('updateCheckFailed', 'warning')
-      Sentry.captureException(error)
+      captureTelemetryException(error)
     })
     .finally(() => {
       checkPromise = null

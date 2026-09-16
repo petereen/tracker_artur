@@ -1,9 +1,9 @@
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core'
 import { PushNotifications, type PermissionStatus } from '@capacitor/push-notifications'
-import * as Sentry from '@sentry/react'
 import { api } from '../api/client'
 import { readSecureValue, removeSecureValue, writeSecureValue } from './secure-session'
 import { isNativePlatform, nativePlatform } from './runtime'
+import { addTelemetryBreadcrumb } from './telemetry'
 
 export type NotificationPermissionState = 'prompt' | 'granted' | 'denied' | 'unsupported'
 export type NativePushRegistration = {
@@ -75,7 +75,7 @@ class CapacitorNotificationService implements NotificationService {
     await this.retryPendingRevocation()
     await api.put('/v1/mobile/push-registration', registration)
     await writeSecureValue(REGISTRATION_KEY, JSON.stringify(registration))
-    Sentry.addBreadcrumb({ category: 'native.push', message: 'Push registration synchronized', level: 'info' })
+    addTelemetryBreadcrumb({ category: 'native.push', message: 'Push registration synchronized', level: 'info' })
   }
 
   async initialize() {
@@ -87,7 +87,7 @@ class CapacitorNotificationService implements NotificationService {
             void this.enroll(value).catch(() => this.emit({ type: 'registration-error' }))
           }),
           PushNotifications.addListener('registrationError', () => {
-            Sentry.addBreadcrumb({ category: 'native.push', message: 'Native push registration failed', level: 'error' })
+            addTelemetryBreadcrumb({ category: 'native.push', message: 'Native push registration failed', level: 'error' })
             this.emit({ type: 'registration-error' })
           }),
           PushNotifications.addListener('pushNotificationReceived', () => this.emit({ type: 'received' })),

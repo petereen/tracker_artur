@@ -12,8 +12,8 @@ function relativeTime(value: string) {
   return new Date(value).toLocaleDateString('mn-MN', { month: 'short', day: 'numeric' })
 }
 
-export function NotificationCenter() {
-  const [open, setOpen] = useState(false)
+export function NotificationCenter({ initialOpen = false, standalone = false, onClose }: { initialOpen?: boolean; standalone?: boolean; onClose?: () => void } = {}) {
+  const [open, setOpen] = useState(initialOpen)
   const [priorityOnly, setPriorityOnly] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
@@ -24,26 +24,27 @@ export function NotificationCenter() {
 
   useEffect(() => {
     if (!open) return
-    const close = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    const close = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) { setOpen(false); onClose?.() } }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setOpen(false); onClose?.() } }
     document.addEventListener('mousedown', close)
     document.addEventListener('keydown', escape)
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', escape) }
-  }, [open])
+  }, [onClose, open])
 
   const openItem = async (item: UserNotification) => {
     if (!item.read_at) await readOne.mutateAsync(item.id)
     setOpen(false)
+    onClose?.()
     if (item.target_url) navigate(item.target_url)
   }
 
   const unread = notifications.data?.unread_count ?? 0
   const items = notifications.data?.items ?? []
   const visibleItems = priorityOnly ? items.filter((item) => item.is_priority) : items
-  return <div className="notification-center" ref={root}>
-    <button className="notification-trigger" onClick={() => setOpen((value) => !value)} aria-label={`Мэдэгдэл${unread ? `, ${unread} уншаагүй` : ''}`} aria-expanded={open}>
+  return <div className={`notification-center${standalone ? ' notification-center-standalone' : ''}`} ref={root}>
+    {!standalone && <button className="notification-trigger" onClick={() => setOpen((value) => !value)} aria-label={`Мэдэгдэл${unread ? `, ${unread} уншаагүй` : ''}`} aria-expanded={open}>
       <Bell size={17} />{unread > 0 && <span>{unread > 9 ? '9+' : unread}</span>}
-    </button>
+    </button>}
     {open && <section className="notification-popover" role="dialog" aria-label="Мэдэгдлүүд">
       <header><div><span className="eyebrow">Activity</span><h2>Мэдэгдэл</h2></div>{unread > 0 && <button onClick={() => readAll.mutate()} disabled={readAll.isPending}><CheckCheck size={15} />Бүгдийг унших{readAll.isPending && <InlinePending label="Мэдэгдлүүдийг уншсан болгож байна…" />}</button>}</header>
       <nav className="notification-filters" aria-label="Мэдэгдлийн шүүлтүүр"><button className={!priorityOnly ? 'active' : ''} onClick={() => setPriorityOnly(false)} aria-pressed={!priorityOnly}>Бүгд</button><button className={priorityOnly ? 'active' : ''} onClick={() => setPriorityOnly(true)} aria-pressed={priorityOnly}><Bookmark size={13} />Чухал</button></nav>
