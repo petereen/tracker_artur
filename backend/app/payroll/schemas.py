@@ -217,6 +217,15 @@ class TaxExemptionCategoryInput(BaseModel):
     requires_proof: bool = True
 
 
+class TaxExemptionCategoryUpdateInput(BaseModel):
+    code: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=160)
+    treatment: Literal["tax_deduction", "tax_credit"] = "tax_deduction"
+    annual_limit: Decimal = Field(default=Decimal("0"), ge=0)
+    requires_proof: bool = True
+    is_active: bool = True
+
+
 class TaxDeclarationInput(BaseModel):
     employee_id: int | None = None
     category_id: int

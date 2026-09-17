@@ -29,6 +29,22 @@ def test_bank_exports_reject_unverified_provisional_templates():
     assert "PayrollBankExportProfile.is_provisional.is_(False)" in router
 
 
+def test_setup_hub_contracts_expose_capabilities_and_safe_draft_mutations():
+    router = (ROOT / "app/payroll/router.py").read_text()
+    schemas = (ROOT / "app/payroll/schemas.py").read_text()
+    frontend = (ROOT.parent / "frontend/src/api/enterprise.ts").read_text()
+    assert '"edit_setup"' in router and '"view"' in router and '"approve"' in router
+    assert '"/payroll-periods/{period_id}"' in router
+    assert '"/bank-export-profiles/{profile_id}"' in router
+    assert '"/tax-benefits/exemption-categories/{category_id}"' in router
+    assert "payroll_period_referenced" in router and "payroll_bank_template_immutable" in router
+    assert "TaxExemptionCategoryUpdateInput" in schemas
+    assert "useDeletePayrollComponentMaster" in frontend
+    assert "useUpdatePayrollPeriod" in frontend and "useDeletePayrollPeriod" in frontend
+    assert "useUpdatePayrollBankExportProfile" in frontend and "useDeletePayrollBankExportProfile" in frontend
+    assert "useUpdatePayrollTaxCategory" in frontend
+
+
 def test_phase5_migration_and_domain_contracts_are_additive_and_gated():
     migration = (ROOT / "alembic/versions/g2h3i4j5k6l7_phase5_erp_workflows.py").read_text()
     service = (ROOT / "app/erp/service.py").read_text()

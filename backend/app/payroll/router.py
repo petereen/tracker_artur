@@ -33,7 +33,7 @@ from .schemas import (
     PublishProfileInput, ReliefTierInput, SalaryStructureInput, StatutoryProfileInput,
     BenefitApplicationInput, BenefitApplicationReviewInput, BenefitClaimInput,
     PayslipPublicationInput, PayrollApprovalInput, ProtectedPayslipInput, ReconciliationResolutionInput,
-    ReviewDecisionInput, TaxDeclarationInput, TaxExemptionCategoryInput, TaxProofInput, PayrollReturnInput,
+    ReviewDecisionInput, TaxDeclarationInput, TaxExemptionCategoryInput, TaxExemptionCategoryUpdateInput, TaxProofInput, PayrollReturnInput,
     AdditionalSalaryInput, BankEntryInput, BulkSalaryStructureAssignmentInput, GetEmployeesInput,
     PayrollCancelInput, PayrollEntryInput, PayrollPeriodInput, SalaryComponentMasterInput,
     SalaryStructureAssignmentInput,
@@ -68,7 +68,7 @@ async def payroll_capability(db: AsyncSession, actor: ActorContext, action: str)
 @router.get("/capabilities")
 async def payroll_effective_capabilities(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     """Expose the effective payroll capability set for capability-driven UI."""
-    actions = ("view_salary", "edit_setup", "calculate", "approve", "approve_payroll_manager", "approve_hr_director", "approve_finance", "post", "pay", "release_slips")
+    actions = ("view", "view_salary", "create", "administer", "edit_setup", "calculate", "approve", "review", "approve_payroll_manager", "approve_hr_director", "approve_finance", "post", "pay", "release_slips")
     result: dict[str, bool] = {}
     for action in actions:
         try:
@@ -409,6 +409,18 @@ async def create_tax_exemption_category(data: TaxExemptionCategoryInput, db: Asy
     return {"id": row.id, "code": row.code, "name": row.name, "treatment": row.treatment, "annual_limit": str(row.annual_limit), "requires_proof": row.requires_proof, "is_active": row.is_active}
 
 
+@router.put("/tax-benefits/exemption-categories/{category_id}")
+async def update_tax_exemption_category(category_id: int, data: TaxExemptionCategoryUpdateInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    row = await db.scalar(select(PayrollTaxExemptionCategory).where(PayrollTaxExemptionCategory.id == category_id, PayrollTaxExemptionCategory.organization_id == actor.organization_id).with_for_update())
+    if not row:
+        raise HTTPException(status_code=404, detail="Tax exemption category not found")
+    row.code = data.code; row.name = data.name; row.treatment = data.treatment; row.annual_limit = data.annual_limit; row.requires_proof = data.requires_proof; row.is_active = data.is_active
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="tax_exemption_category", aggregate_id=row.id, operation="updated", after={"code": row.code, "is_active": row.is_active})
+    await db.commit(); await db.refresh(row)
+    return {"id": row.id, "code": row.code, "name": row.name, "treatment": row.treatment, "annual_limit": str(row.annual_limit), "requires_proof": row.requires_proof, "is_active": row.is_active}
+
+
 @router.get("/tax-benefits/declarations")
 async def list_tax_declarations(tax_year: int | None = None, employee_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     scoped_employee = await _employee_scope(db, actor, employee_id)
@@ -631,6 +643,28 @@ async def save_bank_export_profile(data: BankExportProfileInput, db: AsyncSessio
     return {"id": row.id, "bank_code": row.bank_code, "version": row.version, "status": row.status, "format": row.format, "is_provisional": row.is_provisional}
 
 
+@router.put("/bank-export-profiles/{profile_id}")
+async def update_bank_export_profile(profile_id: int, data: BankExportProfileInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    row = await db.scalar(select(PayrollBankExportProfile).where(PayrollBankExportProfile.id == profile_id, PayrollBankExportProfile.organization_id == actor.organization_id).with_for_update())
+    if not row: raise HTTPException(status_code=404, detail="Bank export profile not found")
+    if row.status != "draft": raise HTTPException(status_code=409, detail={"code": "payroll_bank_template_immutable"})
+    for key, value in data.model_dump().items(): setattr(row, key, value)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_bank_export_profile", aggregate_id=row.id, operation="updated", after={"bank_code": row.bank_code, "version": row.version})
+    await db.commit(); await db.refresh(row)
+    return {"id": row.id, "bank_code": row.bank_code, "version": row.version, "status": row.status, "format": row.format, "is_provisional": row.is_provisional}
+
+
+@router.delete("/bank-export-profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_bank_export_profile(profile_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    row = await db.scalar(select(PayrollBankExportProfile).where(PayrollBankExportProfile.id == profile_id, PayrollBankExportProfile.organization_id == actor.organization_id).with_for_update())
+    if not row: raise HTTPException(status_code=404, detail="Bank export profile not found")
+    if row.status != "draft": raise HTTPException(status_code=409, detail={"code": "payroll_bank_template_immutable"})
+    await db.delete(row); await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_bank_export_profile", aggregate_id=profile_id, operation="deleted", after={"profile_id": profile_id}); await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/bank-export-profiles/{profile_id}/publish")
 async def publish_bank_export_profile(profile_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "approve")
@@ -667,6 +701,38 @@ async def create_payroll_period_route(data: PayrollPeriodInput, db: AsyncSession
     await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_period", aggregate_id=row.id, operation="created", after={"code": row.code})
     await db.commit(); await db.refresh(row)
     return period_out(row)
+
+
+@router.put("/payroll-periods/{period_id}")
+async def update_payroll_period_route(period_id: int, data: PayrollPeriodInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    row = await db.scalar(select(PayrollPeriod).where(PayrollPeriod.id == period_id, PayrollPeriod.organization_id == actor.organization_id).with_for_update())
+    if not row: raise HTTPException(status_code=404, detail="Payroll period not found")
+    if row.status != "open": raise HTTPException(status_code=409, detail={"code": "payroll_period_immutable"})
+    linked = await db.scalar(select(PayrollRun.id).where(PayrollRun.payroll_period_id == row.id).limit(1))
+    if linked: raise HTTPException(status_code=409, detail={"code": "payroll_period_referenced"})
+    if data.end_date < data.start_date: raise HTTPException(status_code=422, detail={"code": "payroll_invalid_period"})
+    duplicate = await db.scalar(select(PayrollPeriod.id).where(PayrollPeriod.organization_id == actor.organization_id, PayrollPeriod.code == data.code, PayrollPeriod.id != row.id))
+    if duplicate: raise HTTPException(status_code=409, detail={"code": "payroll_period_exists"})
+    profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == data.statutory_profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
+    if not profile or profile.status not in {"published", "active"} or profile.effective_from > data.start_date or (profile.effective_to and profile.effective_to < data.end_date): raise HTTPException(status_code=404, detail="Statutory profile not found")
+    overlap = await db.scalar(select(PayrollPeriod.id).where(PayrollPeriod.organization_id == actor.organization_id, PayrollPeriod.id != row.id, PayrollPeriod.status == "open", PayrollPeriod.start_date <= data.end_date, PayrollPeriod.end_date >= data.start_date))
+    if overlap: raise HTTPException(status_code=409, detail={"code": "payroll_period_overlap"})
+    row.code = data.code; row.name = data.name; row.start_date = data.start_date; row.end_date = data.end_date; row.tax_year = data.tax_year; row.payroll_frequency = data.payroll_frequency; row.statutory_profile_id = data.statutory_profile_id
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_period", aggregate_id=period_id, operation="updated", after={"code": data.code})
+    await db.commit(); await db.refresh(row); return period_out(row)
+
+
+@router.delete("/payroll-periods/{period_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_payroll_period_route(period_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    row = await db.scalar(select(PayrollPeriod).where(PayrollPeriod.id == period_id, PayrollPeriod.organization_id == actor.organization_id).with_for_update())
+    if not row: raise HTTPException(status_code=404, detail="Payroll period not found")
+    if row.status != "open": raise HTTPException(status_code=409, detail={"code": "payroll_period_immutable"})
+    linked = await db.scalar(select(PayrollRun.id).where(PayrollRun.payroll_period_id == row.id).limit(1))
+    if linked: raise HTTPException(status_code=409, detail={"code": "payroll_period_referenced"})
+    await db.delete(row); await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_period", aggregate_id=period_id, operation="deleted", after={"period_id": period_id}); await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/salary-components")

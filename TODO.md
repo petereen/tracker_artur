@@ -1,6 +1,16 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Clean payroll dashboard and restore an actionable, lifecycle-safe Setup Hub (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`, `backend/app/payroll/router.py`)
+  - [x] Remove payroll-local hero/banner clutter and keep compact operational overview
+  - [x] Add URL-backed six-section Setup Hub with accessible responsive drawers
+    - [x] Scaffold the compact dashboard shell and dedicated Setup Hub component with focus-trapped drawers
+  - [x] Wire setup create/edit/revise/publish/archive/cancel actions to payroll lifecycle APIs
+    - [x] Add explicit period, bank-template, and tax-category lifecycle controls
+  - [x] Add frontend salary-component delete mutation hook
+  - [x] Expose setup capability flags for capability-aware controls
+  - [x] Add guarded payroll period, bank-template, and tax-category setup mutations
+  - [x] Extend capability/API contracts and add focused frontend/backend regression coverage
 - [x] Apply Figma-informed payroll module UI across dashboard, setup, workflow, slips, reports, and ESS (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/components/payroll/PayrollWorkspaceUI.tsx`, `frontend/src/index.css`) — real cancelled-safe KPI/trend aggregation, route-aware tabs with active-tab accessibility coverage, semantic payroll history/payslip tables, responsive OYUNS-token forms/surfaces, and payroll helper/route regression coverage added; focused tests and production build pass
 - [x] Apply Figma-informed ERP workspace visual enhancement to the shell and shared UI primitives (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/ui.tsx`, `frontend/src/index.css`) — OYUNS tokens, compact active navigation rail, normalized shared surfaces/controls, semantic toggle, dense-table overflow protection, and active-route regression coverage added; production build passes and focused shell tests pass
 - [ ] Stabilize ERP accounting and payroll with unified v2 lifecycle, immutable posting, treasury allocations, RBAC, and Docker-only acceptance (`backend/app/erp`, `backend/app/payroll`, `backend/alembic`, `frontend/src`, `backend/tests`, `frontend/e2e`)
