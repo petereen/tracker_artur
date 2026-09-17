@@ -21,6 +21,8 @@ describe('NotificationCenter', () => {
     render(<MemoryRouter><NotificationCenter /></MemoryRouter>)
     fireEvent.click(screen.getByRole('button', { name: /Мэдэгдэл, 1 уншаагүй/ }))
     expect(screen.getByRole('dialog', { name: 'Мэдэгдлүүд' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Мэдэгдлүүд' }).parentElement).toHaveClass('notification-center')
+    expect(screen.getByRole('dialog', { name: 'Мэдэгдлүүд' }).parentElement).not.toHaveClass('notification-center-standalone')
     fireEvent.click(screen.getByRole('button', { name: /Бүгдийг унших/ }))
     expect(readAll).toHaveBeenCalledOnce()
     expect(screen.getByRole('button', { name: 'Чухал гэж тэмдэглэх' })).toBeTruthy()

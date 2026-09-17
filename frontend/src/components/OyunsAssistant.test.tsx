@@ -68,4 +68,11 @@ describe('OYUNS assistant actions', () => {
 
     await waitFor(() => expect(chat).toHaveBeenCalledWith({ text: 'Сайн байна уу', conversation_id: undefined, voice_mode: false }))
   })
+
+  it('renders the assistant inside the shared border glow surface', () => {
+    const { container } = render(<OyunsAssistant open onClose={vi.fn()} />)
+
+    expect(container.querySelector('.assistant-panel-beam')).toBeInTheDocument()
+    expect(container.querySelector('.assistant-panel-beam .assistant-panel')).toBeInTheDocument()
+  })
 })

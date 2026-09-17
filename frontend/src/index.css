@@ -2032,10 +2032,15 @@ a {
   max-width: 390px;
 }
 .sheet-backdrop {
-  background: rgba(0, 0, 0, 0.28);
+  align-items: stretch;
+  background: rgb(11 23 42 / 54%);
+  backdrop-filter: blur(2px);
   display: flex;
   inset: 0;
+  height: 100dvh;
+  min-height: 100dvh;
   justify-content: flex-end;
+  overflow: hidden;
   position: fixed;
   z-index: 70;
 }
@@ -2045,11 +2050,15 @@ a {
   border-left: 1px solid var(--color-border);
   box-shadow: var(--shadow-md);
   box-sizing: border-box;
-  height: 100dvh;
+  align-self: stretch;
+  height: 100%;
   max-width: 540px;
+  max-height: 100%;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 25px;
+  scrollbar-gutter: stable;
   width: min(100%, 540px);
 }
 .sheet-header {
@@ -2063,12 +2072,31 @@ a {
   letter-spacing: -0.025em;
   margin: 4px 0 0;
 }
-.sheet-header button {
-  background: var(--color-surface-3);
-  border: 0;
-  border-radius: 9px;
-  color: var(--color-muted);
-  padding: 7px;
+.sheet-header > button,
+.sheet-header-actions > button:not(.primary-action) {
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text);
+  display: inline-flex;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 40px;
+  padding: 0;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+.sheet-header > button:hover,
+.sheet-header > button:focus-visible,
+.sheet-header-actions > button:not(.primary-action):hover,
+.sheet-header-actions > button:not(.primary-action):focus-visible {
+  background: var(--color-accent-soft);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  color: var(--color-accent);
+}
+.sheet-header > button:active,
+.sheet-header-actions > button:not(.primary-action):active {
+  transform: scale(0.96);
 }
 .task-creator-meta {
   align-items: center;
@@ -2113,6 +2141,17 @@ a {
   display: grid;
   gap: 17px;
   padding-bottom: 24px;
+}
+.sheet-form.task-create-form > .task-submit-action {
+  bottom: 0;
+  box-shadow: 0 -12px 22px color-mix(in srgb, var(--glass-heavy) 88%, transparent);
+  position: sticky;
+  z-index: 2;
+}
+body:has(.sheet-backdrop),
+body:has(.hr-drawer-backdrop),
+body:has(.assistant-backdrop) {
+  overflow: hidden;
 }
 .task-settings-actions {
   display: grid;
@@ -3255,16 +3294,25 @@ a {
 .assistant-panel {
   background: var(--glass-heavy);
   backdrop-filter: blur(28px);
-  border: 1px solid var(--color-border);
+  border: 0;
   border-radius: 18px;
-  bottom: 18px;
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
-  max-height: min(720px, calc(100vh - 36px));
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  width: 100%;
+}
+.assistant-panel-beam {
+  bottom: 18px;
+  height: min(640px, calc(100vh - 36px));
   position: absolute;
   right: 18px;
-  width: min(430px, calc(100vw - 36px));
+  width: min(360px, calc(100vw - 36px));
+}
+.assistant-panel-beam .border-beam-content {
+  height: 100%;
 }
 .assistant-panel > header {
   align-items: center;
@@ -3312,8 +3360,9 @@ a {
 .assistant-messages {
   display: flex;
   flex-direction: column;
+  flex: 1;
   gap: 10px;
-  min-height: 270px;
+  min-height: 0;
   overflow-y: auto;
   padding: 14px;
 }
@@ -3434,6 +3483,15 @@ a {
   background: #dc2626;
   color: #fff;
   animation: assistant-record-pulse 1.25s ease-in-out infinite;
+}
+
+@media (max-width: 620px) {
+  .assistant-panel-beam {
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    height: min(640px, calc(100dvh - 28px - env(safe-area-inset-bottom)));
+    right: 14px;
+    width: calc(100vw - 28px);
+  }
 }
 
 .assistant-audio {
@@ -6357,7 +6415,7 @@ html.capacitor-native .native-boot-error {
     order: 3;
     width: 100%;
   }
-  .notification-popover {
+  .notification-center-standalone .notification-popover {
     position: fixed;
     right: 14px;
     top: 64px;

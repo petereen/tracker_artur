@@ -41,6 +41,8 @@
 - [x] Add stock and manufacturing specialized workflow guidance alongside the asset setup form (`frontend/src/pages/ERPWorkspacePage.tsx`)
 - [x] Add stabilization contract coverage for migration continuity, frozen lifecycle, treasury resources, and bank-template gating (`backend/tests/test_payroll_stabilization_contract.py`)
 - [ ] Optimize whole workspace performance and responsive behavior (`frontend/src`, `frontend/e2e`, `frontend/scripts`, `frontend/package.json`)
+- [x] Anchor the workspace notification popover directly below its header trigger (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/NotificationCenter.tsx`, `frontend/src/index.css`)
+- [x] Resize the top-right OYUNS AI assistant and reuse the chat border glow (`frontend/src/components/OyunsAssistant.tsx`, `frontend/src/components/OyunsAssistant.test.tsx`, `frontend/src/index.css`)
 - [x] Enhance workspace motion and OYUNS Agent chat composer with free Transitions.dev patterns and an ocean border beam (`frontend/src/components/BorderBeam.tsx`, `frontend/src/components/BorderBeam.test.tsx`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/index.css`)
 - [ ] Add compressed bundle and Core Web Vitals budget checks (`frontend/scripts/check-performance-budget.mjs`, `frontend/package.json`)
 - [ ] Defer Sentry, assistant, command bar, notifications, workers, QR scanning, charts, maps, and rich editors until needed (`frontend/src`)
@@ -527,6 +529,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Fix task and shared side-panel overlay contrast, close controls, and panel-local scrolling (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Fix backend startup SyntaxError in the asset-disposal journal route (`backend/app/erp/router.py`)
 - [x] Add manifest-backed compressed bundle reporting, bounded dependency groups, and desktop route intent preloading (`frontend/scripts/check-performance-budget.mjs`, `frontend/vite.config.ts`, `frontend/src/platform/route-preload.ts`)
 - [x] Defer Sentry initialization and optional shell feature modules; load ZXing and contract editor/QR dependencies on demand (`frontend/src/platform/telemetry.ts`, `frontend/src/platform/updater.tsx`, `frontend/src/platform/notifications.ts`, `frontend/src/platform/self-hosted-updater.ts`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/pages/WorktimePage.tsx`, `frontend/src/pages/ContractsWorkspacePage.tsx`)

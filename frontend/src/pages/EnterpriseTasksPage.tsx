@@ -1263,6 +1263,9 @@ export function EnterpriseTasksPage() {
                   <h2>{selected ? selected.title : "Шинэ даалгавар"}</h2>
                 </div>
                 <button
+                  type="button"
+                  className="sheet-close-button"
+                  aria-label="Хаах"
                   onClick={() => {
                     setSelected(null);
                     setCreating(false);
@@ -1284,7 +1287,7 @@ export function EnterpriseTasksPage() {
                   </div>
                 </section>
               )}
-              <form className="sheet-form" onSubmit={selected ? save : submit}>
+              <form className={`sheet-form ${selected ? "task-edit-form" : "task-create-form"}`} onSubmit={selected ? save : submit}>
                 {selected?.parent_task_id ? simplifiedFormFields : formFields}
                 <UserTagPicker label="Хянагч" value={form.reviewer_ids} users={workers.data || []} onChange={(reviewer_ids) => setForm({ ...form, reviewer_ids })} />
                 {selected ? (
@@ -1309,7 +1312,8 @@ export function EnterpriseTasksPage() {
                   </div>
                 ) : (
                   <button
-                    className="primary-action"
+                    type="submit"
+                    className="primary-action task-submit-action"
                     disabled={createTask.isPending}
                   >
                     Үүсгэх
