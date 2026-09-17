@@ -67,6 +67,15 @@ describe('enterprise sidebar', () => {
     expect(chatLinks[0].querySelector('.nav-unread-badge')).toHaveTextContent('3')
   })
 
+  it('exposes the active route semantics used by the compact navigation treatment', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { container } = render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/tasks']}><Routes><Route element={<EnterpriseShell />}><Route path="tasks" element={<div>Tasks</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
+    const active = container.querySelector('.workspace-sidebar .nav-item.active')
+    expect(active).not.toBeNull()
+    expect(active).toHaveAttribute('aria-current', 'page')
+    expect(active?.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+  })
+
   it('keeps HR directly below Worktime and Chat starts the next section', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)

@@ -27,6 +27,7 @@ import {
   useWorkerDirectory,
 } from '../api/enterprise'
 import { formatPayrollMoney } from './PayrollWorkspacePage'
+import { PayrollWorkspaceTabs } from '../components/payroll/PayrollWorkspaceUI'
 
 const errorMessage = (error: any, fallback: string) => error?.response?.data?.detail?.code || fallback
 
@@ -98,6 +99,7 @@ export function TaxBenefitsWorkspacePage() {
 
   return <div className="erp-workspace payroll-workspace tax-benefits-workspace">
     <div className="view-toolbar payroll-toolbar"><div><span className="eyebrow">OYUNS ALL-IN-ONE · PAYROLL</span><h2>Tax &amp; Benefits</h2><p>Frappe-style declarations, proof review, flexible benefits, and income-tax computation adapted for Mongolia payroll.</p></div><div className="payroll-toolbar-actions"><label className="tax-year-picker">Tax year<input type="number" min="2000" max="2200" value={taxYear} onChange={(event) => setTaxYear(Number(event.target.value))} /></label><div className="payroll-toolbar-icon"><Coins size={22} /></div><Link className="secondary-action" to="/erp/payroll">Back to payroll</Link></div></div>
+    <PayrollWorkspaceTabs />
     <div className="erp-settings-notice payroll-notice"><Scale size={16} /><span>Only approved declarations/proofs and benefit claims affect a calculation. Every applied amount and source ID is frozen into the payroll run snapshot.</span></div>
 
     <section className="erp-kpis payroll-kpis"><article className="panel"><small>Exemption declarations</small><strong>{declarations.data?.length || 0}</strong><span className="payroll-kpi-detail">{declarations.data?.filter((row) => row.status === 'submitted').length || 0} awaiting review</span></article><article className="panel"><small>Proof submissions</small><strong>{proofs.data?.length || 0}</strong><span className="payroll-kpi-detail">{proofs.data?.filter((row) => row.status === 'approved').length || 0} approved</span></article><article className="panel"><small>Benefit applications</small><strong>{applications.data?.length || 0}</strong><span className="payroll-kpi-detail">{applications.data?.filter((row) => row.status === 'approved').length || 0} approved</span></article><article className="panel"><small>Benefit claims</small><strong>{claims.data?.length || 0}</strong><span className="payroll-kpi-detail">{claims.data?.filter((row) => row.status === 'paid').length || 0} paid through payroll</span></article></section>

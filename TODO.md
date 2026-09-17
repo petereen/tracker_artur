@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Apply Figma-informed payroll module UI across dashboard, setup, workflow, slips, reports, and ESS (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/components/payroll/PayrollWorkspaceUI.tsx`, `frontend/src/index.css`) — real cancelled-safe KPI/trend aggregation, route-aware tabs with active-tab accessibility coverage, semantic payroll history/payslip tables, responsive OYUNS-token forms/surfaces, and payroll helper/route regression coverage added; focused tests and production build pass
+- [x] Apply Figma-informed ERP workspace visual enhancement to the shell and shared UI primitives (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/ui.tsx`, `frontend/src/index.css`) — OYUNS tokens, compact active navigation rail, normalized shared surfaces/controls, semantic toggle, dense-table overflow protection, and active-route regression coverage added; production build passes and focused shell tests pass
 - [ ] Stabilize ERP accounting and payroll with unified v2 lifecycle, immutable posting, treasury allocations, RBAC, and Docker-only acceptance (`backend/app/erp`, `backend/app/payroll`, `backend/alembic`, `frontend/src`, `backend/tests`, `frontend/e2e`)
 - [x] Add additive accounting metadata, organization accounting settings, payroll ledger seed accounts, and a central posting gate (`backend/app/erp`, `backend/app/models/models.py`, `backend/alembic/versions/f1g2h3i4j5k6_erp_payroll_stabilization.py`)
 - [ ] Consolidate new payroll writes into `payroll/service.py` while preserving legacy/Frappe history and deprecated adapters
