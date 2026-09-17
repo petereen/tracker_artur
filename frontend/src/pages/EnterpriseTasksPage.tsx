@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   DndContext,
   DragEndEvent,
@@ -499,6 +500,7 @@ export function EnterpriseTasksPage() {
     date_to?: string;
   }>({});
   const [conflict, setConflict] = useState<EnterpriseTask | null>(null);
+  const sheetRef = useRef<HTMLElement>(null);
   const [lastMove, setLastMove] = useState<{
     task: EnterpriseTask;
     newVersion: number;
@@ -640,6 +642,11 @@ export function EnterpriseTasksPage() {
   useEffect(() => {
     if (params.get("create") === "1") openCreate();
   }, []);
+  useEffect(() => {
+    if (selected || creating) {
+      if (sheetRef.current) sheetRef.current.scrollTop = 0;
+    }
+  }, [creating, selected?.id]);
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selected) return;
@@ -1234,7 +1241,7 @@ export function EnterpriseTasksPage() {
           </div>
         )}
       </QueryRegion>
-      <AnimatePresence>
+      {createPortal(<AnimatePresence>
         {(selected || creating) && (
           <motion.div
             className="sheet-backdrop"
@@ -1248,6 +1255,7 @@ export function EnterpriseTasksPage() {
             }}
           >
             <motion.aside
+              ref={sheetRef}
               className="detail-sheet"
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
@@ -1336,7 +1344,7 @@ export function EnterpriseTasksPage() {
             </motion.aside>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body)}
     </div>
   );
 }
