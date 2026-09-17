@@ -12,11 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enterprise_deps import ActorContext
 from app.models.models import (
-    Employee, EmployeeBankAccount, EmployeePayrollProfile, ERPAccount, ERPDocument, ERPCostCenter, Organization, UserAccount,
+    AdditionalSalary, Employee, EmployeeBankAccount, EmployeeDetails, EmployeePayrollProfile, ERPAccount, ERPDocument, ERPCostCenter, Organization, UserAccount,
     ERPGeneralLedgerEntry, PayrollAdvance, PayrollBankExportProfile, PayrollEmployeeAccumulator,
     PayrollExportArtifact, PayrollPostingProfile, PayrollRun, Payslip, PayslipLineItem,
-    PayrollSalaryComponentMaster, PayrollPaymentAllocation, PayrollPaymentBatch, PayrollStatementImport, PayrollStatementLine,
-    SalaryComponent, SalaryStructure, SalaryStructureVersion, SHIRateTier, PITBracketTier, TaxReliefTier, StatutoryConfigProfile, WorkTimeEntry,
+    PayrollSalaryComponentMaster, PayrollPaymentAllocation, PayrollPaymentBatch, PayrollPaymentReversal, PayrollStatementImport, PayrollStatementLine,
+    SalaryComponent, SalaryStructure, SalaryStructureVersion, SHIRateTier, PITBracketTier, TaxReliefTier, StatutoryConfigProfile, TimeOff, WorkTimeEntry,
 )
 from app.erp.service import validate_posting_gate
 from app.services.secret_box import encrypt_secret
@@ -26,7 +26,7 @@ from .calculator import (
 )
 from .schemas import (
     BankAccountInput, EmployeePayrollInput, PayrollRunInput, PostingProfileInput,
-    SalaryStructureInput, StatutoryProfileInput,
+    SalaryComponentMasterInput, SalaryStructureInput, StatutoryProfileInput,
 )
 from .tax_benefits import approved_tax_adjustments, grouped_benefit_claims, mark_run_benefits_paid, reserve_benefit_claims
 
@@ -42,6 +42,85 @@ def _profile_payload(data: StatutoryProfileInput) -> dict[str, Any]:
 def _validate_date_range(start: date, end: date | None) -> None:
     if end and end < start:
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_effective_range"})
+
+
+def component_master_out(row: PayrollSalaryComponentMaster) -> dict[str, Any]:
+    return {
+        "id": row.id, "code": row.code, "name": row.name, "description": row.description,
+        "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis,
+        "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject,
+        "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible,
+        "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly),
+        "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact,
+        "payer": row.payer, "account_id": row.account_id, "cost_center_id": row.cost_center_id,
+        "metadata_json": row.metadata_json or {}, "status": row.status, "is_active": row.is_active,
+        "archived_at": row.archived_at.isoformat() if row.archived_at else None,
+    }
+
+
+async def create_component_master(db: AsyncSession, actor: ActorContext, data: SalaryComponentMasterInput) -> PayrollSalaryComponentMaster:
+    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code))
+    if duplicate:
+        raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
+    values = data.model_dump()
+    row = PayrollSalaryComponentMaster(organization_id=actor.organization_id, created_by_account_id=actor.account_id, is_active=True, status="active", **values)
+    db.add(row)
+    await db.flush()
+    return row
+
+
+async def component_master_usage(db: AsyncSession, actor: ActorContext, component_id: int) -> dict[str, Any]:
+    row = await db.scalar(select(PayrollSalaryComponentMaster).where(PayrollSalaryComponentMaster.id == component_id, PayrollSalaryComponentMaster.organization_id == actor.organization_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="Salary component not found")
+    structure_rows = list((await db.execute(select(SalaryComponent.id, SalaryComponent.salary_structure_id).join(SalaryStructure, SalaryStructure.id == SalaryComponent.salary_structure_id).where(SalaryComponent.component_master_id == component_id, SalaryStructure.organization_id == actor.organization_id))).all())
+    additional_rows = list((await db.execute(select(AdditionalSalary.id).where(AdditionalSalary.organization_id == actor.organization_id, AdditionalSalary.salary_component_id == component_id))).scalars().all())
+    line_rows = list((await db.execute(select(PayslipLineItem.id, PayslipLineItem.payslip_id).where(PayslipLineItem.component_master_id == component_id))).all())
+    snapshots: list[int] = []
+    for version in (await db.execute(select(SalaryStructureVersion).join(SalaryStructure, SalaryStructure.id == SalaryStructureVersion.salary_structure_id).where(SalaryStructure.organization_id == actor.organization_id, SalaryStructureVersion.salary_structure_id.in_([item[1] for item in structure_rows] or [-1])))).scalars().all():
+        if any(isinstance(item, dict) and item.get("component_master_id") == component_id for item in (version.component_snapshot or [])):
+            snapshots.append(version.id)
+    references = {
+        "salary_structure": {"count": len(structure_rows), "ids": sorted({int(item[1]) for item in structure_rows})},
+        "salary_structure_version": {"count": len(snapshots), "ids": sorted(snapshots)},
+        "additional_salary": {"count": len(additional_rows), "ids": [int(item) for item in additional_rows]},
+        "payslip_line_item": {"count": len(line_rows), "ids": [int(item[0]) for item in line_rows]},
+    }
+    references.update({"structure_rows": references["salary_structure"], "version_snapshots": references["salary_structure_version"], "historical_payslip_lines": references["payslip_line_item"]})
+    return {"component": component_master_out(row), "references": references, "in_use": any(item["count"] for item in references.values())}
+
+
+async def update_component_master(db: AsyncSession, actor: ActorContext, row: PayrollSalaryComponentMaster, data: SalaryComponentMasterInput) -> PayrollSalaryComponentMaster:
+    if row.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Salary component not found")
+    usage = await component_master_usage(db, actor, row.id)
+    values = data.model_dump()
+    locked = {"code", "component_kind", "formula", "proration_basis", "is_taxable", "is_shi_subject", "is_non_taxable_allowance", "is_leave_average_eligible", "is_flexible_benefit", "max_benefit_amount_yearly", "pay_against_benefit_claim", "only_tax_impact", "payer", "account_id", "cost_center_id"}
+    if usage["in_use"]:
+        changed = [key for key in locked if values.get(key) != getattr(row, key)]
+        if changed:
+            raise HTTPException(status_code=409, detail={"code": "payroll_component_financial_fields_locked", "fields": changed, "usage": usage["references"]})
+    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.id != row.id))
+    if duplicate:
+        raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
+    for key, value in values.items():
+        setattr(row, key, value)
+    row.status = "active" if row.is_active else "archived"
+    return row
+
+
+async def delete_component_master(db: AsyncSession, actor: ActorContext, row: PayrollSalaryComponentMaster) -> None:
+    usage = await component_master_usage(db, actor, row.id)
+    if usage["in_use"]:
+        raise HTTPException(status_code=409, detail={"code": "payroll_component_in_use", "component_id": row.id, "references": usage["references"], "allowed_actions": ["archive", "clone"]})
+    await db.delete(row)
+
+
+async def archive_component_master(db: AsyncSession, actor: ActorContext, row: PayrollSalaryComponentMaster) -> PayrollSalaryComponentMaster:
+    if row.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Salary component not found")
+    row.is_active = False; row.status = "archived"; row.archived_at = datetime.now(timezone.utc)
+    return row
 
 
 async def ensure_profile_active(db: AsyncSession, profile_id: int, tax_point_date: date) -> StatutoryConfigProfile:
@@ -61,6 +140,121 @@ async def resolve_profile(db: AsyncSession, organization_id: int, tax_point_date
     if not profile:
         raise HTTPException(status_code=409, detail={"code": "payroll_no_active_statutory_profile", "tax_point_date": tax_point_date.isoformat()})
     return profile
+
+
+async def preflight_run(db: AsyncSession, actor: ActorContext, data: PayrollRunInput) -> dict[str, Any]:
+    """Validate a run without persisting a draft or mutating payroll inputs."""
+    blockers: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+
+    def issue(code: str, message: str, *, severity: str = "blocker", entity_ids: list[int] | None = None, remediation_url: str | None = None, metadata: dict[str, Any] | None = None) -> None:
+        payload = {"code": code, "severity": severity, "message": message, "affected_entities": entity_ids or [], "entity_ids": entity_ids or [], "metadata": metadata or {}}
+        if remediation_url:
+            payload["remediation_url"] = remediation_url
+        (blockers if severity == "blocker" else warnings).append(payload)
+
+    if data.period_end < data.period_start:
+        issue("payroll_invalid_period", "Period end must be on or after period start.")
+        return {"can_create": False, "employee_ids": [], "employee_count": 0, "blockers": blockers, "warnings": warnings}
+
+    try:
+        profile = await (ensure_profile_active(db, data.statutory_profile_id, data.tax_point_date) if data.statutory_profile_id else resolve_profile(db, actor.organization_id, data.tax_point_date))
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        issue(str(detail.get("code", "payroll_statutory_profile_missing")), "No published statutory profile is effective for this tax point.", remediation_url="/erp/payroll/setup?tab=structures")
+        profile = None
+
+    employee_ids = list(dict.fromkeys(data.employee_ids))
+    if not employee_ids:
+        query = select(Employee.id).where(Employee.organization_id == actor.organization_id, Employee.is_active.is_(True))
+        work_branch = data.employee_filter.get("work_branch")
+        department_id = data.employee_filter.get("department_id")
+        if work_branch:
+            query = query.where(Employee.work_branch == str(work_branch))
+        if department_id:
+            query = query.join(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).where(EmployeeDetails.organization_id == actor.organization_id, EmployeeDetails.department_id == int(department_id))
+        employee_ids = list((await db.execute(query.order_by(Employee.id))).scalars().all())
+    if not employee_ids:
+        issue("payroll_no_employees", "No active employees match this run scope.", remediation_url="/erp/payroll/runs/new")
+
+    profiles = {}
+    if employee_ids:
+        rows = (await db.execute(select(EmployeePayrollProfile).where(
+            EmployeePayrollProfile.organization_id == actor.organization_id,
+            EmployeePayrollProfile.employee_id.in_(employee_ids),
+            EmployeePayrollProfile.effective_from <= data.tax_point_date,
+            (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= data.tax_point_date)),
+        ).order_by(EmployeePayrollProfile.effective_from.desc()))).scalars().all()
+        for row in rows:
+            profiles.setdefault(row.employee_id, row)
+    missing_profiles = sorted(set(employee_ids) - set(profiles))
+    if missing_profiles:
+        issue("payroll_employee_profile_missing", "Employees need an effective payroll profile.", entity_ids=missing_profiles, remediation_url="/erp/payroll/setup?tab=employees")
+
+    structure_ids = {row.salary_structure_id for row in profiles.values()}
+    structures = list((await db.execute(select(SalaryStructure).where(SalaryStructure.organization_id == actor.organization_id, SalaryStructure.id.in_(structure_ids or {-1})))).scalars().all())
+    structure_by_id = {row.id: row for row in structures}
+    missing_structures = sorted({row.salary_structure_id for row in profiles.values() if row.salary_structure_id not in structure_by_id or row.status not in {"published", "active"}})
+    if missing_structures:
+        affected = [employee_id for employee_id, row in profiles.items() if row.salary_structure_id in missing_structures]
+        issue("payroll_salary_structure_missing", "Employees need an effective published salary structure.", entity_ids=affected, remediation_url="/erp/payroll/setup?tab=structures", metadata={"salary_structure_ids": missing_structures})
+    if structure_by_id:
+        component_rows = (await db.execute(select(SalaryComponent).where(SalaryComponent.salary_structure_id.in_(structure_by_id)))).scalars().all()
+        unmapped_structures = sorted({row.salary_structure_id for row in component_rows if row.account_id is None})
+        if unmapped_structures:
+            issue("payroll_component_gl_mapping_missing", "Every active salary component must map to a GL account before a run can be created.", remediation_url="/erp/payroll/setup?tab=accounting", metadata={"salary_structure_ids": unmapped_structures})
+
+        bank_ids = set()
+    if employee_ids:
+        bank_ids = set((await db.execute(select(EmployeeBankAccount.employee_id).where(
+            EmployeeBankAccount.employee_id.in_(employee_ids), EmployeeBankAccount.is_primary.is_(True),
+            EmployeeBankAccount.valid_from <= data.tax_point_date,
+            (EmployeeBankAccount.valid_to.is_(None) | (EmployeeBankAccount.valid_to >= data.tax_point_date)),
+        ))).scalars().all())
+    bank_required = [employee_id for employee_id, profile_row in profiles.items() if profile_row.payment_method == "bank" and employee_id not in bank_ids]
+    if bank_required:
+        issue("payroll_bank_account_missing", "Bank-paid employees need a valid primary bank account.", entity_ids=sorted(bank_required), remediation_url="/erp/payroll/setup?tab=employees")
+
+    if employee_ids:
+        pending_leave = list((await db.execute(select(TimeOff.id).where(
+            TimeOff.employee_id.in_(employee_ids), TimeOff.starts_on <= data.period_end, TimeOff.ends_on >= data.period_start, TimeOff.status.notin_(("approved", "rejected", "cancelled")),
+        ))).scalars().all())
+        if pending_leave:
+            issue("payroll_unapproved_leave", "Leave requests overlapping the run must be approved or rejected.", entity_ids=[int(item) for item in pending_leave], remediation_url="/hr/leave")
+        pending_extra = list((await db.execute(select(AdditionalSalary.id).where(
+            AdditionalSalary.organization_id == actor.organization_id, AdditionalSalary.employee_id.in_(employee_ids), AdditionalSalary.payroll_date >= data.period_start, AdditionalSalary.payroll_date <= data.period_end, AdditionalSalary.status == "draft",
+        ))).scalars().all())
+        if pending_extra:
+            issue("payroll_unapproved_additional_salary", "Additional Salary inputs must be submitted before calculation.", entity_ids=[int(item) for item in pending_extra], remediation_url="/erp/payroll/setup?tab=compensation")
+        pending_time = list((await db.execute(select(WorkTimeEntry.id).where(
+            WorkTimeEntry.employee_id.in_(employee_ids), WorkTimeEntry.entry_type == "work", WorkTimeEntry.started_at >= datetime.combine(data.period_start, datetime.min.time()), WorkTimeEntry.started_at <= datetime.combine(data.period_end, datetime.max.time()), WorkTimeEntry.approval_status != "approved",
+        ))).scalars().all())
+        if pending_time:
+            severity = "blocker" if data.validate_attendance else "warning"
+            issue("payroll_missing_or_unapproved_scans", "Work-time entries are not fully approved for this period.", severity=severity, entity_ids=[int(item) for item in pending_time], remediation_url="/hr/attendance")
+        entries = list((await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.employee_id.in_(employee_ids), WorkTimeEntry.started_at <= datetime.combine(data.period_end, datetime.max.time()), WorkTimeEntry.ended_at.is_not(None), WorkTimeEntry.ended_at >= datetime.combine(data.period_start, datetime.min.time())))).scalars().all())
+        overlap_ids: list[int] = []
+        by_employee: dict[int, list[WorkTimeEntry]] = {}
+        for entry in entries:
+            by_employee.setdefault(entry.employee_id, []).append(entry)
+        for employee_entries in by_employee.values():
+            employee_entries.sort(key=lambda item: item.started_at)
+            for previous, current in zip(employee_entries, employee_entries[1:]):
+                if previous.ended_at and current.started_at < previous.ended_at:
+                    overlap_ids.extend([previous.id, current.id])
+        if overlap_ids:
+            issue("payroll_worktime_overlap", "Overlapping WorkTime entries must be resolved before calculation.", entity_ids=sorted(set(overlap_ids)), remediation_url="/hr/attendance")
+
+    posting = await db.scalar(select(PayrollPostingProfile).where(PayrollPostingProfile.organization_id == actor.organization_id, PayrollPostingProfile.code == "default", PayrollPostingProfile.is_active.is_(True)))
+    required_roles = {"salary_expense", "net_pay_payable", "pit_payable", "employee_shi_payable", "employer_shi_payable"}
+    mapped_roles = set((posting.account_roles if posting else {}).keys())
+    missing_roles = sorted(required_roles - mapped_roles)
+    if missing_roles:
+        issue("payroll_gl_mapping_incomplete", "Default payroll posting profile is missing required account mappings.", remediation_url="/erp/payroll/setup?tab=accounting", metadata={"missing_roles": missing_roles})
+    if profile and profile.is_example:
+        issue("payroll_example_profile", "The statutory profile is an example configuration and requires acknowledgement at calculation.", severity="warning", remediation_url="/erp/payroll/setup?tab=structures")
+
+    return {"can_create": not blockers, "employee_ids": employee_ids, "employee_count": len(employee_ids), "blockers": blockers, "warnings": warnings, "evaluated_at": datetime.now(timezone.utc).isoformat()}
 
 
 async def load_rules(db: AsyncSession, profile: StatutoryConfigProfile, *, insured_category: str = "employee", hazard_class: str = "standard") -> StatutoryRules:
@@ -202,6 +396,30 @@ async def delete_statutory_profile(db: AsyncSession, actor: ActorContext, profil
     await db.flush()
 
 
+async def bump_statutory_profile(db: AsyncSession, actor: ActorContext, profile: StatutoryConfigProfile, effective_from: date) -> StatutoryConfigProfile:
+    if profile.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    rates = (await db.execute(select(SHIRateTier).where(SHIRateTier.profile_id == profile.id).order_by(SHIRateTier.position, SHIRateTier.id))).scalars().all()
+    brackets = (await db.execute(select(PITBracketTier).where(PITBracketTier.profile_id == profile.id).order_by(PITBracketTier.position, PITBracketTier.id))).scalars().all()
+    reliefs = (await db.execute(select(TaxReliefTier).where(TaxReliefTier.profile_id == profile.id).order_by(TaxReliefTier.position, TaxReliefTier.id))).scalars().all()
+    next_version = (await db.scalar(select(func.max(StatutoryConfigProfile.version)).where(StatutoryConfigProfile.organization_id == actor.organization_id, StatutoryConfigProfile.code == profile.code)) or profile.version) + 1
+    data = StatutoryProfileInput.model_validate({
+        "code": profile.code, "version": next_version, "effective_from": effective_from,
+        "effective_to": profile.effective_to, "tax_point_basis": profile.tax_point_basis, "currency": profile.currency,
+        "minimum_wage": profile.minimum_wage, "shi_ceiling_multiplier": profile.shi_ceiling_multiplier,
+        "pit_withholding_method": profile.pit_withholding_method, "rounding_policy": profile.rounding_policy,
+        "leave_policy": profile.leave_policy, "source_references": profile.source_references, "is_example": profile.is_example,
+        "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": row.rate, "base_floor": row.base_floor, "exemption_code": row.exemption_code} for row in rates],
+        "pit_brackets": [{"lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "marginal_rate": row.marginal_rate, "base_tax": row.base_tax, "period_basis": row.period_basis} for row in brackets],
+        "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "fixed_amount": row.fixed_amount, "amount_basis": row.amount_basis, "formula": row.formula} for row in reliefs],
+    })
+    successor = await create_statutory_profile(db, actor, data)
+    profile.superseded_on = effective_from
+    profile.superseded_by_id = successor.id
+    await db.flush()
+    return successor
+
+
 async def publish_profile(db: AsyncSession, actor: ActorContext, profile: StatutoryConfigProfile, acknowledge_example: bool) -> None:
     if profile.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -233,6 +451,7 @@ async def publish_profile(db: AsyncSession, actor: ActorContext, profile: Statut
         StatutoryConfigProfile.organization_id == actor.organization_id,
         StatutoryConfigProfile.id != profile.id,
         StatutoryConfigProfile.status.in_(("published", "active")),
+        (StatutoryConfigProfile.superseded_on.is_(None) | (StatutoryConfigProfile.superseded_on > profile.effective_from)),
     ))).scalars().all()
     if any(row.effective_from <= (profile.effective_to or date.max) and (row.effective_to is None or row.effective_to >= profile.effective_from) for row in others):
         raise HTTPException(status_code=409, detail={"code": "payroll_profile_effective_overlap"})
@@ -327,6 +546,23 @@ async def update_salary_structure(db: AsyncSession, actor: ActorContext, structu
     return structure
 
 
+async def bump_salary_structure(db: AsyncSession, actor: ActorContext, structure: SalaryStructure, effective_from: date, data: SalaryStructureInput | None = None) -> SalaryStructure:
+    if structure.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Salary structure not found")
+    components = (await db.execute(select(SalaryComponent).where(SalaryComponent.salary_structure_id == structure.id).order_by(SalaryComponent.position, SalaryComponent.id))).scalars().all()
+    payload = data or SalaryStructureInput.model_validate({
+        "code": structure.code, "name": structure.name, "effective_from": effective_from, "effective_to": structure.effective_to,
+        "currency": structure.currency,
+        "components": [{"component_master_id": row.component_master_id, "code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": row.max_benefit_amount_yearly, "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id, "metadata_json": row.metadata_json} for row in components],
+    })
+    successor = await create_salary_structure(db, actor, payload)
+    successor.source_structure_id = structure.id
+    structure.superseded_on = effective_from
+    structure.superseded_by_id = successor.id
+    await db.flush()
+    return successor
+
+
 async def delete_salary_structure(db: AsyncSession, actor: ActorContext, structure: SalaryStructure) -> None:
     if structure.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Salary structure not found")
@@ -335,6 +571,9 @@ async def delete_salary_structure(db: AsyncSession, actor: ActorContext, structu
     referenced_profile = await db.scalar(select(EmployeePayrollProfile.id).where(EmployeePayrollProfile.salary_structure_id == structure.id).limit(1))
     if referenced_profile:
         raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_referenced_by_employee"})
+    referenced_payslip = await db.scalar(select(Payslip.id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_profile_snapshot["salary_structure_id"].as_integer() == structure.id).limit(1))
+    if referenced_payslip:
+        raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_referenced_by_payslip", "payslip_id": referenced_payslip})
     await db.delete(structure)
     await db.flush()
 
@@ -380,14 +619,14 @@ async def create_run(db: AsyncSession, actor: ActorContext, data: PayrollRunInpu
     organization = await db.get(Organization, actor.organization_id)
     if organization and (organization.settings or {}).get("unified_payroll_v2") is False:
         raise HTTPException(status_code=409, detail={"code": "unified_payroll_v2_disabled"})
+    preflight = await preflight_run(db, actor, data)
+    if preflight["blockers"]:
+        raise HTTPException(status_code=409, detail={"code": "payroll_preflight_blocked", **preflight})
     if data.period_end < data.period_start: raise HTTPException(status_code=422, detail={"code": "payroll_invalid_period"})
     profile = await ensure_profile_active(db, data.statutory_profile_id, data.tax_point_date) if data.statutory_profile_id else await resolve_profile(db, actor.organization_id, data.tax_point_date)
     if profile.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Statutory profile not found")
-    employee_ids = data.employee_ids
-    if not employee_ids:
-        employee_ids = list((await db.execute(select(EmployeePayrollProfile.employee_id).where(EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.effective_from <= data.tax_point_date, (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= data.tax_point_date))))).scalars().all())
-    employee_ids = list(dict.fromkeys(employee_ids))
+    employee_ids = list(preflight["employee_ids"])
     if not employee_ids: raise HTTPException(status_code=422, detail={"code": "payroll_no_employees"})
     valid_employee_ids = set((await db.execute(select(EmployeePayrollProfile.employee_id).where(
         EmployeePayrollProfile.organization_id == actor.organization_id,
@@ -408,7 +647,7 @@ async def create_run(db: AsyncSession, actor: ActorContext, data: PayrollRunInpu
     approved_entries = list((await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.employee_id.in_(employee_ids), WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status == "approved", WorkTimeEntry.started_at >= datetime.combine(data.period_start, datetime.min.time()), WorkTimeEntry.started_at <= period_end_exclusive))).scalars().all())
     approved_time_ids = [entry.id for entry in approved_entries]
     approved_time_snapshot = [{"id": entry.id, "employee_id": entry.employee_id, "local_work_date": entry.local_work_date.isoformat() if entry.local_work_date else None, "started_at": entry.started_at.isoformat(), "ended_at": entry.ended_at.isoformat() if entry.ended_at else None, "approval_status": entry.approval_status, "hours": str(Decimal(str((entry.ended_at - entry.started_at).total_seconds())) / Decimal("3600")) if entry.ended_at else "0"} for entry in approved_entries]
-    snapshot = {"employee_ids": employee_ids, "overrides": data.input_overrides, "attendance_policy": data.attendance_policy, "posting_date": (data.posting_date or data.tax_point_date).isoformat(), "cost_center_id": data.cost_center_id, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": approved_time_ids, "approved_time_entries": approved_time_snapshot, "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
+    snapshot = {"employee_ids": employee_ids, "employee_filter": data.employee_filter, "overrides": data.input_overrides, "attendance_policy": data.attendance_policy, "validate_attendance": data.validate_attendance, "posting_date": (data.posting_date or data.tax_point_date).isoformat(), "cost_center_id": data.cost_center_id, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": approved_time_ids, "approved_time_entries": approved_time_snapshot, "preflight": preflight, "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
     config_snapshot = {"profile_id": profile.id, "profile_version": profile.version, "profile_checksum": profile.checksum, "source_references": profile.source_references, "is_example": profile.is_example, "currency": profile.currency, "pit_withholding_method": profile.pit_withholding_method, "rounding_policy": profile.rounding_policy, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier), "leave_policy": profile.leave_policy, "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "exemption_code": row.exemption_code} for row in frozen_shi_rates], "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax)} for row in frozen_pit_brackets], "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "fixed_amount": str(row.fixed_amount), "amount_basis": row.amount_basis, "formula": row.formula} for row in frozen_reliefs]}
     run = PayrollRun(organization_id=actor.organization_id, run_number=f"PR-{data.period_end:%Y%m}-{datetime.now(timezone.utc).strftime('%H%M%S%f')[:9]}", run_type=data.run_type, period_start=data.period_start, period_end=data.period_end, settlement_key=data.period_end.strftime("%Y-%m"), tax_point_date=data.tax_point_date, posting_date=data.posting_date or data.tax_point_date, workflow_version="unified_v2", document_status="draft", cost_center_id=data.cost_center_id, statutory_profile_id=profile.id, input_snapshot=snapshot, config_snapshot=config_snapshot, snapshot_checksum=_hash({"input": snapshot, "config": config_snapshot}), created_by_account_id=actor.account_id)
     db.add(run); await db.flush(); return run
@@ -416,10 +655,7 @@ async def create_run(db: AsyncSession, actor: ActorContext, data: PayrollRunInpu
 
 async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> list[Payslip]:
     if run.organization_id != actor.organization_id: raise HTTPException(status_code=404, detail="Run not found")
-    # A returned run must be explicitly recalculated from its frozen inputs;
-    # calculated runs may be refreshed, but review/approval is never silently
-    # invalidated by a calculate request.
-    if run.status not in {"draft", "calculated"}: raise HTTPException(status_code=409, detail={"code": "payroll_run_immutable", "status": run.status})
+    if run.status != "draft": raise HTTPException(status_code=409, detail={"code": "payroll_run_immutable", "status": run.status})
     profile = await ensure_profile_active(db, run.statutory_profile_id, run.tax_point_date)
     await db.execute(delete(Payslip).where(Payslip.payroll_run_id == run.id))
     employee_ids = list((run.input_snapshot or {}).get("employee_ids") or [])
@@ -515,7 +751,7 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
         db.add(payslip); await db.flush()
         component_by_code = {row.code: row for row in components}
         component_by_code.update({f"benefit_claim_{item['component_id']}": next((row for row in components if row.id == item["component_id"]), None) for item in grouped_claims})
-        db.add_all([PayslipLineItem(payslip_id=payslip.id, component_code=line["code"], label=line["label"], component_kind=line["component_kind"], amount=line["amount"], taxable=line["taxable"], shi_subject=line["shi_subject"], payer=line["payer"], formula_snapshot=line["formula"], trace={"position": line["position"], "leave_average_eligible": line.get("leave_average_eligible", False)}, account_id=getattr(component_by_code.get(line["code"]), "account_id", None), cost_center_id=getattr(component_by_code.get(line["code"]), "cost_center_id", None)) for line in calc.lines])
+        db.add_all([PayslipLineItem(payslip_id=payslip.id, component_code=line["code"], component_master_id=getattr(component_by_code.get(line["code"]), "component_master_id", None), label=line["label"], component_kind=line["component_kind"], amount=line["amount"], taxable=line["taxable"], shi_subject=line["shi_subject"], payer=line["payer"], formula_snapshot=line["formula"], trace={"position": line["position"], "leave_average_eligible": line.get("leave_average_eligible", False)}, account_id=getattr(component_by_code.get(line["code"]), "account_id", None), cost_center_id=getattr(component_by_code.get(line["code"]), "cost_center_id", None), position=line["position"]) for line in calc.lines])
         result_rows.append(payslip)
     run.total_gross = sum((row.gross for row in result_rows), Decimal("0")); run.total_employee_shi = sum((row.employee_shi for row in result_rows), Decimal("0")); run.total_employer_shi = sum((row.employer_shi for row in result_rows), Decimal("0")); run.total_pit = sum((row.pit for row in result_rows), Decimal("0")); run.total_net = sum((row.net_pay for row in result_rows), Decimal("0")); run.status = "calculated"; run.reconciliation_snapshot = {}; run.approval_workflow = {}; run.salary_slips_created = True if run.workflow_version == "frappe_v1" else run.salary_slips_created; run.document_status = "draft" if run.workflow_version == "frappe_v1" else run.document_status
     run.snapshot_checksum = _hash({"input": run.input_snapshot, "config": run.config_snapshot, "payslips": [row.snapshot_checksum for row in result_rows]})
@@ -801,6 +1037,35 @@ async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ER
     return document
 
 
+async def posting_preview(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> dict[str, Any]:
+    if run.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status not in {"calculated", "in_review", "approved", "posted", "payment_prepared", "partially_settled", "settled", "payslips_released"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_run_requires_calculation"})
+    posting = await db.scalar(select(PayrollPostingProfile).where(PayrollPostingProfile.organization_id == actor.organization_id, PayrollPostingProfile.code == "default", PayrollPostingProfile.is_active.is_(True)))
+    if not posting:
+        raise HTTPException(status_code=422, detail={"code": "payroll_posting_profile_missing"})
+    roles = posting.account_roles or {}
+    required = {"salary_expense", "employer_shi_expense", "employee_shi_payable", "employer_shi_payable", "pit_payable", "net_pay_payable"}
+    missing = sorted(required - set(roles))
+    if missing:
+        raise HTTPException(status_code=422, detail={"code": "payroll_posting_accounts_incomplete", "missing": missing})
+    slips = list((await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all())
+    total_other = sum((Decimal(str(row.gross or 0)) - Decimal(str(row.employee_shi or 0)) - Decimal(str(row.pit or 0)) - Decimal(str(row.net_pay or 0)) - Decimal(str(row.advance_offset or 0)) for row in slips), Decimal("0"))
+    lines = [
+        {"role": "salary_expense", "account_id": roles["salary_expense"], "debit": str(run.total_gross), "credit": "0", "memo": "Salary expense"},
+        {"role": "employer_shi_expense", "account_id": roles["employer_shi_expense"], "debit": str(run.total_employer_shi), "credit": "0", "memo": "Employer SHI expense"},
+        {"role": "employee_shi_payable", "account_id": roles["employee_shi_payable"], "debit": "0", "credit": str(run.total_employee_shi), "memo": "Employee SHI payable"},
+        {"role": "employer_shi_payable", "account_id": roles["employer_shi_payable"], "debit": "0", "credit": str(run.total_employer_shi), "memo": "Employer SHI payable"},
+        {"role": "pit_payable", "account_id": roles["pit_payable"], "debit": "0", "credit": str(run.total_pit), "memo": "PIT payable"},
+        {"role": "net_pay_payable", "account_id": roles["net_pay_payable"], "debit": "0", "credit": str(run.total_net), "memo": "Net salary payable"},
+    ]
+    if total_other and "other_deductions_payable" in roles:
+        lines.append({"role": "other_deductions_payable", "account_id": roles["other_deductions_payable"], "debit": "0", "credit": str(total_other), "memo": "Other deductions payable"})
+    debit = sum((Decimal(item["debit"]) for item in lines), Decimal("0")); credit = sum((Decimal(item["credit"]) for item in lines), Decimal("0"))
+    return {"run_id": run.id, "currency": "MNT", "lines": lines, "total_debit": str(debit), "total_credit": str(credit), "balanced": debit == credit, "posting_profile_id": posting.id}
+
+
 def canonical_payout_rows(run: PayrollRun, payslips: list[Payslip], accounts: dict[int, EmployeeBankAccount], employees: dict[int, Employee]) -> list[dict[str, Any]]:
     rows = []
     for index, payslip in enumerate(payslips, start=1):
@@ -945,14 +1210,47 @@ async def reject_payment_allocation(db: AsyncSession, actor: ActorContext, alloc
     return allocation
 
 
+async def reverse_payment_allocation(db: AsyncSession, actor: ActorContext, allocation_id: int, data: Any) -> PayrollPaymentReversal:
+    allocation = await db.scalar(select(PayrollPaymentAllocation).where(PayrollPaymentAllocation.id == allocation_id, PayrollPaymentAllocation.organization_id == actor.organization_id).with_for_update())
+    if not allocation:
+        raise HTTPException(status_code=404, detail={"code": "payroll_payment_allocation_not_found"})
+    existing = await db.scalar(select(PayrollPaymentReversal).where(PayrollPaymentReversal.payment_allocation_id == allocation.id, PayrollPaymentReversal.organization_id == actor.organization_id))
+    if existing:
+        return existing
+    if allocation.status != "settled" or not allocation.erp_document_id:
+        raise HTTPException(status_code=409, detail={"code": "payroll_payment_requires_settled_reversal"})
+    batch = await db.scalar(select(PayrollPaymentBatch).where(PayrollPaymentBatch.id == allocation.payment_batch_id, PayrollPaymentBatch.organization_id == actor.organization_id).with_for_update())
+    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == batch.payroll_run_id, PayrollRun.organization_id == actor.organization_id).with_for_update())
+    original = await db.get(ERPDocument, allocation.erp_document_id)
+    if not original:
+        raise HTTPException(status_code=409, detail={"code": "payroll_payment_document_missing"})
+    reversal_doc = ERPDocument(
+        organization_id=actor.organization_id, document_type="payroll_payment_reversal", number=f"REV-{original.number}", status="submitted", currency=original.currency,
+        posting_date=original.posting_date, net_total=-Decimal(str(original.net_total or allocation.amount)), grand_total=-Decimal(str(original.grand_total or allocation.amount)), outstanding_amount=Decimal("0"),
+        payload={"reversal_of_document_id": original.id, "payment_allocation_id": allocation.id, "payroll_run_id": run.id, "transaction_reference": data.transaction_reference}, custom={"reason": data.reason, "evidence": data.evidence or {}},
+    )
+    db.add(reversal_doc); await db.flush()
+    original_lines = list((await db.execute(select(ERPGeneralLedgerEntry).where(ERPGeneralLedgerEntry.document_id == original.id))).scalars().all())
+    for line in original_lines:
+        db.add(ERPGeneralLedgerEntry(organization_id=actor.organization_id, document_id=reversal_doc.id, account_id=line.account_id, cost_center_id=line.cost_center_id, party_id=line.party_id, posting_date=reversal_doc.posting_date, debit=line.credit, credit=line.debit, memo=f"Reversal of {original.number}", reversal_of_id=line.id))
+    record = PayrollPaymentReversal(organization_id=actor.organization_id, payment_allocation_id=allocation.id, original_erp_document_id=original.id, reversal_erp_document_id=reversal_doc.id, reason=data.reason, transaction_reference=data.transaction_reference, evidence=data.evidence or {}, created_by_account_id=actor.account_id)
+    db.add(record)
+    allocation.status = "reversed"; allocation.reversed_at = datetime.now(timezone.utc); allocation.reversed_by_account_id = actor.account_id
+    statuses = list((await db.execute(select(PayrollPaymentAllocation.status).where(PayrollPaymentAllocation.payment_batch_id == batch.id))).scalars().all())
+    if statuses and all(status in {"reversed", "rejected"} for status in statuses):
+        batch.status = "reversed"; run.payment_status = "reversed"
+    await db.flush()
+    return record
+
+
 async def reverse_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> PayrollRun:
     """Create a negative, linked replacement journal without mutating a post."""
     if run.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Run not found")
-    if run.status not in {"posted", "paid"}:
+    if run.status not in {"posted", "payment_prepared", "partially_settled", "settled", "payslips_released", "paid"}:
         raise HTTPException(status_code=409, detail={"code": "payroll_run_requires_posted_for_reversal"})
-    settled_payment = await db.scalar(select(PayrollPaymentAllocation.id).join(PayrollPaymentBatch, PayrollPaymentBatch.id == PayrollPaymentAllocation.payment_batch_id).where(PayrollPaymentBatch.payroll_run_id == run.id, PayrollPaymentAllocation.organization_id == actor.organization_id, PayrollPaymentAllocation.status == "settled").limit(1))
-    if settled_payment:
+    unsettled_payment = await db.scalar(select(PayrollPaymentAllocation.id).join(PayrollPaymentBatch, PayrollPaymentBatch.id == PayrollPaymentAllocation.payment_batch_id).where(PayrollPaymentBatch.payroll_run_id == run.id, PayrollPaymentAllocation.organization_id == actor.organization_id, PayrollPaymentAllocation.status.in_(("settled", "pending", "bank_submitted"))).limit(1))
+    if unsettled_payment:
         raise HTTPException(status_code=409, detail={"code": "payroll_accrual_reversal_requires_payment_reversal"})
     existing = await db.scalar(select(PayrollRun).where(PayrollRun.organization_id == actor.organization_id, PayrollRun.reversal_of_run_id == run.id))
     if existing:
@@ -965,7 +1263,7 @@ async def reverse_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) ->
         period_end=run.period_end,
         settlement_key=run.settlement_key,
         tax_point_date=run.tax_point_date,
-        status="approved",
+        status="approved", workflow_version="unified_v2", document_status="draft",
         reversal_of_run_id=run.id,
         statutory_profile_id=run.statutory_profile_id,
         input_snapshot={"reversal_of_run_id": run.id, "source_snapshot_checksum": run.snapshot_checksum},
@@ -1011,17 +1309,19 @@ async def reverse_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) ->
         db.add(reversal_slip)
         await db.flush()
         source_lines = (await db.execute(select(PayslipLineItem).where(PayslipLineItem.payslip_id == source.id).order_by(PayslipLineItem.position))).scalars().all()
-        db.add_all([PayslipLineItem(payslip_id=reversal_slip.id, component_code=line.component_code, label=line.label, component_kind=line.component_kind, amount=neg(line.amount), taxable=line.taxable, shi_subject=line.shi_subject, payer=line.payer, formula_snapshot=line.formula_snapshot, trace={**(line.trace or {}), "reversal_of_line_id": line.id}, account_id=line.account_id, cost_center_id=line.cost_center_id, position=line.position) for line in source_lines])
-    reversal.snapshot_checksum = _hash({"source": run.snapshot_checksum, "run_id": reversal.id, "payslips": [slip.snapshot_checksum for slip in (await db.execute(select(Payslip).where(Payslip.payroll_run_id == reversal.id))).scalars().all()]})
+        db.add_all([PayslipLineItem(payslip_id=reversal_slip.id, component_master_id=line.component_master_id, component_code=line.component_code, label=line.label, component_kind=line.component_kind, amount=neg(line.amount), taxable=line.taxable, shi_subject=line.shi_subject, payer=line.payer, formula_snapshot=line.formula_snapshot, trace={**(line.trace or {}), "reversal_of_line_id": line.id}, account_id=line.account_id, cost_center_id=line.cost_center_id, position=line.position) for line in source_lines])
+    reversal.snapshot_checksum = _hash({"input": reversal.input_snapshot, "config": reversal.config_snapshot, "payslips": [slip.snapshot_checksum for slip in (await db.execute(select(Payslip).where(Payslip.payroll_run_id == reversal.id))).scalars().all()]})
+    run.status = "reversed"; run.payment_status = "reversed"; run.reversed_at = datetime.now(timezone.utc); run.reversed_by_account_id = actor.account_id
     return reversal
 
 
 async def create_replacement_run(db: AsyncSession, actor: ActorContext, source: PayrollRun, data: PayrollRunInput) -> PayrollRun:
     if source.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Run not found")
-    if source.status not in {"posted", "paid"}:
-        raise HTTPException(status_code=409, detail={"code": "payroll_run_requires_posted_for_replacement"})
+    if source.status not in {"rejected", "posted", "paid", "reversed"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_run_requires_rejected_or_posted_for_replacement"})
     run = await create_run(db, actor, data)
+    run.workflow_version = "unified_v2"
     run.replacement_of_run_id = source.id
     run.input_snapshot = {**(run.input_snapshot or {}), "replacement_of_run_id": source.id}
     run.snapshot_checksum = _hash(run.input_snapshot)

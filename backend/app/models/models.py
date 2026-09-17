@@ -2616,6 +2616,8 @@ class StatutoryConfigProfile(Base):
     status = Column(String(16), nullable=False, server_default="draft", default="draft")
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date)
+    superseded_on = Column(Date)
+    superseded_by_id = Column(Integer, ForeignKey("statutory_config_profiles.id", ondelete="SET NULL"))
     tax_point_basis = Column(String(24), nullable=False, server_default="payment_date", default="payment_date")
     currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
     minimum_wage = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
@@ -2692,6 +2694,8 @@ class SalaryStructure(Base):
     status = Column(String(16), nullable=False, server_default="draft", default="draft")
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date)
+    superseded_on = Column(Date)
+    superseded_by_id = Column(Integer, ForeignKey("salary_structures.id", ondelete="SET NULL"))
     currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
     source_structure_id = Column(Integer, ForeignKey("salary_structures.id", ondelete="SET NULL"))
     checksum = Column(String(64), nullable=False)
@@ -2952,6 +2956,11 @@ class PayrollRun(Base):
     approved_at = Column(DateTime(timezone=True))
     posted_at = Column(DateTime(timezone=True))
     payslips_published_at = Column(DateTime(timezone=True))
+    rejected_at = Column(DateTime(timezone=True))
+    rejected_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    rejection_reason = Column(Text)
+    reversed_at = Column(DateTime(timezone=True))
+    reversed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -2993,6 +3002,7 @@ class PayslipLineItem(Base):
     id = Column(Integer, primary_key=True)
     payslip_id = Column(Integer, ForeignKey("payslips.id", ondelete="CASCADE"), nullable=False)
     component_code = Column(String(80), nullable=False)
+    component_master_id = Column(Integer, ForeignKey("payroll_salary_component_masters.id", ondelete="RESTRICT"))
     label = Column(Text, nullable=False)
     component_kind = Column(String(24), nullable=False)
     amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
@@ -3140,7 +3150,10 @@ class PayrollSalaryComponentMaster(Base):
     account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
     cost_center_id = Column(Integer, ForeignKey("erp_cost_centers.id", ondelete="SET NULL"))
     metadata_json = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    description = Column(Text)
     status = Column(String(16), nullable=False, server_default="active", default="active")
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    archived_at = Column(DateTime(timezone=True))
     source_salary_component_id = Column(Integer, ForeignKey("salary_components.id", ondelete="SET NULL"))
     created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -3267,7 +3280,27 @@ class PayrollPaymentAllocation(Base):
     rejected_at = Column(DateTime(timezone=True))
     rejection_reason = Column(Text)
     settlement_evidence = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    reversed_at = Column(DateTime(timezone=True))
+    reversed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     erp_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollPaymentReversal(Base):
+    """Append-only evidence linking a settled payment to its reversing GL document."""
+
+    __tablename__ = "payroll_payment_reversals"
+    __table_args__ = (UniqueConstraint("payment_allocation_id", name="uq_payroll_payment_reversal_allocation"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    payment_allocation_id = Column(Integer, ForeignKey("payroll_payment_allocations.id", ondelete="RESTRICT"), nullable=False)
+    original_erp_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    reversal_erp_document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
+    reason = Column(Text, nullable=False)
+    transaction_reference = Column(String(160), nullable=False)
+    evidence = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

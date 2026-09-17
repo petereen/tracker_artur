@@ -154,6 +154,8 @@ class PayrollRunInput(BaseModel):
     tax_point_date: date
     statutory_profile_id: int | None = None
     employee_ids: list[int] = Field(default_factory=list)
+    employee_filter: dict[str, str | int | None] = Field(default_factory=dict)
+    validate_attendance: bool = True
     attendance_policy: dict[str, Any] = Field(default_factory=dict)
     cost_center_id: int | None = None
     input_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -176,6 +178,21 @@ class PayrollApprovalInput(BaseModel):
 
 class PayrollReturnInput(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
+
+
+class VersionBumpInput(BaseModel):
+    effective_from: date
+
+
+class PayrollPaymentReversalInput(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+    transaction_reference: str = Field(min_length=1, max_length=160)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class PayrollRunReversalInput(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+    posting_date: date | None = None
 
 
 class PayslipPublicationInput(BaseModel):
@@ -267,6 +284,7 @@ class SalaryComponentMasterInput(BaseModel):
     account_id: int | None = None
     cost_center_id: int | None = None
     metadata_json: dict[str, Any] = Field(default_factory=dict)
+    description: str | None = Field(default=None, max_length=1000)
 
 
 class SalaryStructureAssignmentInput(EmployeePayrollInput):

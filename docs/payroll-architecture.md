@@ -251,3 +251,25 @@ can only read finalized, non-cancelled payslips belonging to their linked
 employee record.
 Export-generation and download events record only masked identifiers and
 checksums; encrypted artifacts expire after a short interval.
+
+## Unified Payroll v2 write path
+
+Unified v2 is the sole payroll execution write path. The Dashboard and Setup
+Hub use `/runs`, `/runs/preflight`, versioned setup resources, payment
+allocations, and contextual reports; the frontend never requests the legacy
+Frappe execution endpoints. A run advances only forward from `draft` through
+calculation, ordered approvals, posting, settlement, and payslip release.
+Calculation freezes the employee/profile/structure/component snapshots,
+attendance and compensation inputs, statutory configuration, totals, and
+checksum. Published structures and statutory profiles are immutable; bump
+version creates an effective-dated successor and records supersession without
+altering the predecessor payload.
+
+Component deletion is dependency-aware through the usage endpoint. Referenced
+financial fields are locked while display names/descriptions remain editable;
+archive or clone is the safe alternative. Payment allocation reversals are
+append-only records linked to the original and reversing ERP documents, and a
+settled accrual cannot be reversed until every settled allocation has evidenced
+reversal. Legacy `/payroll-entries` writes return `410 Gone` with a successor
+`/runs` route. Legacy records remain available only through read-only audit
+list/detail APIs and are excluded from default unified-v2 queries.

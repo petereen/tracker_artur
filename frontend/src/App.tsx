@@ -129,8 +129,10 @@ function AuthenticatedApp() {
         </Route>
         <Route element={<RequireRoles allowedRoles={PAYROLL_ROLES} />}>
           <Route path="erp/payroll" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/setup" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/tax-benefits" element={<TaxBenefitsWorkspacePage />} />
-          <Route path="erp/payroll/runs/:runId" element={<Navigate to="/erp/payroll" replace />} />
+          <Route path="erp/payroll/runs/new" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/runs/:runId" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/payroll-entries" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/payroll-entries/new" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/payroll-entries/:entryId" element={<PayrollWorkspacePage />} />

@@ -5,7 +5,12 @@
 - [x] Apply Figma-informed ERP workspace visual enhancement to the shell and shared UI primitives (`frontend/src/components/EnterpriseShell.tsx`, `frontend/src/components/ui.tsx`, `frontend/src/index.css`) — OYUNS tokens, compact active navigation rail, normalized shared surfaces/controls, semantic toggle, dense-table overflow protection, and active-route regression coverage added; production build passes and focused shell tests pass
 - [ ] Stabilize ERP accounting and payroll with unified v2 lifecycle, immutable posting, treasury allocations, RBAC, and Docker-only acceptance (`backend/app/erp`, `backend/app/payroll`, `backend/alembic`, `frontend/src`, `backend/tests`, `frontend/e2e`)
 - [x] Add additive accounting metadata, organization accounting settings, payroll ledger seed accounts, and a central posting gate (`backend/app/erp`, `backend/app/models/models.py`, `backend/alembic/versions/f1g2h3i4j5k6_erp_payroll_stabilization.py`)
-- [ ] Consolidate new payroll writes into `payroll/service.py` while preserving legacy/Frappe history and deprecated adapters
+- [x] Consolidate new payroll writes into `payroll/service.py` while preserving legacy/Frappe history and deprecated adapters
+- [x] Add unified payroll v2 guardrail migration, component usage/dependency protection, version supersession, and payment reversal audit records
+- [x] Add preflight, frozen forward-only run lifecycle, stage-specific approvals, rejection replacements, posting preview, and legacy-write 410 adapters
+- [x] Replace the legacy payroll workspace with Dashboard, Setup Hub, and routed six-stage `/runs` wizard using unified APIs only
+- [x] Add payroll v2 backend/frontend regression coverage and verify frontend build/static backend contracts
+- [x] Document unified v2 as the sole payroll write path and legacy read-only sunset (`docs/payroll-architecture.md`)
 - [x] Implement frozen payroll input/lifecycle, effective-dated worker setup, immutable salary revisions, and explicit payslip release (`backend/app/payroll/service.py`, `backend/app/payroll/router.py`)
 - [x] Implement payment batches, employee allocations, settlement/retry/reversal, bank export logs, and statement reconciliation (`backend/app/payroll/service.py`, `backend/app/payroll/router.py`, `backend/app/models/models.py`)
 - [x] Align payroll capabilities and split payroll/accounting UI into specialized workflows (`backend/app/payroll/router.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/ERPWorkspacePage.tsx`)
