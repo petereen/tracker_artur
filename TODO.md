@@ -529,7 +529,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
-- [x] Fix task and shared side-panel overlay contrast, close controls, and panel-local scrolling (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
+- [x] Fix task and shared side-panel full-viewport overlay, close controls, and panel-local scrolling by removing the transformed route wrapper (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Fix backend startup SyntaxError in the asset-disposal journal route (`backend/app/erp/router.py`)
 - [x] Add manifest-backed compressed bundle reporting, bounded dependency groups, and desktop route intent preloading (`frontend/scripts/check-performance-budget.mjs`, `frontend/vite.config.ts`, `frontend/src/platform/route-preload.ts`)
 - [x] Defer Sentry initialization and optional shell feature modules; load ZXing and contract editor/QR dependencies on demand (`frontend/src/platform/telemetry.ts`, `frontend/src/platform/updater.tsx`, `frontend/src/platform/notifications.ts`, `frontend/src/platform/self-hosted-updater.ts`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/pages/WorktimePage.tsx`, `frontend/src/pages/ContractsWorkspacePage.tsx`)
