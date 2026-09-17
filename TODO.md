@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Remove redundant Payroll heading copy and let the module fill the available workspace (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/index.css`)
 - [x] Open company knowledge to all authenticated workspace members with read-only member access while keeping OYUNS training admin-only (`frontend/src/App.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/KnowledgePage.tsx`, `frontend/src/pages/KnowledgePage.test.tsx`, `backend/app/routers/knowledge.py`, `backend/tests/test_knowledge_api.py`)
 - [x] Keep OYUNS responses in the user's Mongolian language and expose confirm/reject/edit task-draft actions in Telegram and platform chat (`backend/app/services/assistant_text.py`, `backend/app/services/ai_gateway`, `backend/app/bot/assistant_handlers.py`, `backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/components/OyunsAssistant.tsx`) — frontend focused tests/build pass; keyboard focus/touch sizing is covered; backend syntax and Alembic head checks pass, while dependency-backed pytest is blocked by the local environment
   - [x] Improve Mongolian-vs-Russian detection for ordinary Mongolian Cyrillic
