@@ -725,6 +725,9 @@ class ChatMessage(Base):
     kind = Column(String(12), nullable=False, server_default="text", default="text")
     call_id = Column(UUID(as_uuid=True), ForeignKey("chat_calls.id", ondelete="CASCADE"), unique=True)
     body = Column(Text)
+    # Assistant task previews are action metadata, not executable commands.
+    # The opaque reference is re-authorized by the action endpoint.
+    action = Column(JSONB)
     # References are re-authorized by each reader; this is not a storage-key
     # cache and never grants access by itself.
     company_file_attachments = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
@@ -2623,6 +2626,11 @@ class StatutoryConfigProfile(Base):
     minimum_wage = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
     shi_ceiling_multiplier = Column(Numeric(12, 6), nullable=False, server_default="0", default=0)
     pit_withholding_method = Column(String(24), nullable=False, server_default="ytd_cumulative", default="ytd_cumulative")
+    pit_calculation_mode = Column(String(24), nullable=False, server_default="marginal_tiers", default="marginal_tiers")
+    pit_formula = Column(Text)
+    standard_daily_hours = Column(Numeric(8, 4), nullable=False, server_default="8", default=8)
+    standard_weekly_hours = Column(Numeric(8, 4), nullable=False, server_default="40", default=40)
+    standard_workweek = Column(JSONB, nullable=False, server_default=sa_text("'[1,2,3,4,5]'::jsonb"), default=lambda: [1, 2, 3, 4, 5])
     rounding_policy = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     leave_policy = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     source_references = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
@@ -2637,7 +2645,7 @@ class StatutoryConfigProfile(Base):
 class SHIRateTier(Base):
     __tablename__ = "shi_rate_tiers"
     __table_args__ = (
-        UniqueConstraint("profile_id", "payer", "insurance_fund", "insured_category", "hazard_class", name="uq_payroll_shi_rate_tier"),
+        UniqueConstraint("profile_id", "payer", "insurance_fund", "insured_category", "hazard_class", "position", name="uq_payroll_shi_rate_tier_position"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -2648,6 +2656,12 @@ class SHIRateTier(Base):
     hazard_class = Column(String(16), nullable=False, server_default="standard", default="standard")
     rate = Column(Numeric(12, 8), nullable=False, server_default="0", default=0)
     base_floor = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    lower_bound = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    upper_bound = Column(Numeric(20, 4))
+    calculation_mode = Column(String(24), nullable=False, server_default="flat_percent", default="flat_percent")
+    fixed_amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    base_tax = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    formula = Column(Text)
     base_ceiling_policy = Column(String(24), nullable=False, server_default="profile", default="profile")
     exemption_code = Column(String(64))
     position = Column(Integer, nullable=False, server_default="0", default=0)
@@ -2680,6 +2694,97 @@ class TaxReliefTier(Base):
     amount_basis = Column(String(16), nullable=False, server_default="annual", default="annual")
     formula = Column(Text)
     position = Column(Integer, nullable=False, server_default="0", default=0)
+
+
+class SocialInsuranceContributorType(Base):
+    """Tenant-owned insured-person classification; rates remain profile-versioned."""
+
+    __tablename__ = "payroll_social_insurance_contributor_types"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "code", "effective_from", name="uq_payroll_contributor_type_effective"),
+        Index("ix_payroll_contributor_type_effective", "organization_id", "code", "effective_from", "effective_to"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(32), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text)
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date)
+    source_references = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    status = Column(String(16), nullable=False, server_default="draft", default="draft")
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollWorkPolicy(Base):
+    """Effective work-hour and overtime policy resolved before calculation."""
+
+    __tablename__ = "payroll_work_policies"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "scope_type", "scope_key", "effective_from", name="uq_payroll_work_policy_effective"),
+        Index("ix_payroll_work_policy_effective", "organization_id", "scope_type", "scope_key", "effective_from", "effective_to"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(80), nullable=False)
+    name = Column(Text, nullable=False)
+    scope_type = Column(String(16), nullable=False, server_default="organization", default="organization")
+    scope_key = Column(String(160), nullable=False, server_default="*", default="*")
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date)
+    daily_hours = Column(Numeric(8, 4), nullable=False, server_default="8", default=8)
+    weekly_hours = Column(Numeric(8, 4), nullable=False, server_default="40", default=40)
+    workweek = Column(JSONB, nullable=False, server_default=sa_text("'[1,2,3,4,5]'::jsonb"), default=lambda: [1, 2, 3, 4, 5])
+    overtime_rules = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    stacking_policy = Column(String(24), nullable=False, server_default="exclusive", default="exclusive")
+    status = Column(String(16), nullable=False, server_default="draft", default="draft")
+    source_references = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollFormulaVariable(Base):
+    """Typed, tenant-scoped inputs available to formulas and run previews."""
+
+    __tablename__ = "payroll_formula_variables"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_payroll_formula_variable_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(80), nullable=False)
+    label = Column(Text, nullable=False)
+    data_type = Column(String(16), nullable=False, server_default="decimal", default="decimal")
+    default_value = Column(Text)
+    source = Column(String(24), nullable=False, server_default="manual", default="manual")
+    required = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    minimum = Column(Numeric(20, 4))
+    maximum = Column(Numeric(20, 4))
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollReportTemplate(Base):
+    """Versioned statutory/register output mapping with protected required keys."""
+
+    __tablename__ = "payroll_report_templates"
+    __table_args__ = (UniqueConstraint("organization_id", "kind", "version", name="uq_payroll_report_template_version"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(24), nullable=False)
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    status = Column(String(16), nullable=False, server_default="draft", default="draft")
+    template = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    required_keys = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    source_references = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    checksum = Column(String(64), nullable=False)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    published_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    published_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class SalaryStructure(Base):
@@ -2744,6 +2849,8 @@ class SalaryComponent(Base):
     name = Column(Text, nullable=False)
     component_kind = Column(String(24), nullable=False)
     formula = Column(Text, nullable=False)
+    amount_mode = Column(String(16), nullable=False, server_default="formula", default="formula")
+    percentage_basis = Column(String(80))
     proration_basis = Column(String(24), nullable=False, server_default="none", default="none")
     is_taxable = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     is_shi_subject = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
@@ -3016,6 +3123,29 @@ class PayslipLineItem(Base):
     position = Column(Integer, nullable=False, server_default="0", default=0)
 
 
+class PayslipStatutoryLine(Base):
+    """Normalized fund-level statutory trace retained with each frozen payslip."""
+
+    __tablename__ = "payslip_statutory_lines"
+    __table_args__ = (Index("ix_payroll_payslip_statutory_lines", "payslip_id", "position"),)
+
+    id = Column(Integer, primary_key=True)
+    payslip_id = Column(Integer, ForeignKey("payslips.id", ondelete="CASCADE"), nullable=False)
+    contributor_code = Column(String(32), nullable=False)
+    payer = Column(String(12), nullable=False)
+    insurance_fund = Column(String(32), nullable=False)
+    hazard_class = Column(String(32), nullable=False, server_default="standard", default="standard")
+    calculation_mode = Column(String(24), nullable=False)
+    base = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    lower_bound = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    upper_bound = Column(Numeric(20, 4))
+    rate = Column(Numeric(12, 8), nullable=False, server_default="0", default=0)
+    amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    formula_snapshot = Column(Text)
+    trace = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    position = Column(Integer, nullable=False, server_default="0", default=0)
+
+
 class PayrollEmployeeAccumulator(Base):
     __tablename__ = "payroll_employee_accumulators"
     __table_args__ = (UniqueConstraint("employee_id", "tax_year", "sequence_no", name="uq_payroll_accumulator_sequence"),)
@@ -3137,6 +3267,8 @@ class PayrollSalaryComponentMaster(Base):
     name = Column(Text, nullable=False)
     component_kind = Column(String(24), nullable=False)
     formula = Column(Text, nullable=False)
+    amount_mode = Column(String(16), nullable=False, server_default="formula", default="formula")
+    percentage_basis = Column(String(80))
     proration_basis = Column(String(24), nullable=False, server_default="none", default="none")
     is_taxable = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     is_shi_subject = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)

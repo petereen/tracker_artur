@@ -326,19 +326,9 @@ class AIGateway:
 
     @staticmethod
     def _language_matches(text: str, language: str) -> bool:
-        letters = [char for char in text.casefold() if char.isalpha()]
-        if not letters:
+        if not any(char.isalpha() for char in text or ""):
             return True
-        cyrillic = sum("а" <= char <= "я" or char in "ёъыэ" for char in letters)
-        mongolian = sum(char in "өүңһ" for char in letters)
-        latin = sum("a" <= char <= "z" for char in letters)
-        if language == "mn":
-            return mongolian > 0 or (cyrillic / len(letters) > 0.45 and not any(char in "ёъыэ" for char in letters))
-        if language == "ru":
-            return cyrillic / len(letters) > 0.45 and mongolian == 0
-        if language == "en":
-            return latin / len(letters) > 0.55
-        return True
+        return detect_language(text).value == language
 
     @staticmethod
     def _infer_enterprise_intents(text: str) -> set[str]:

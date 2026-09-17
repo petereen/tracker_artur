@@ -8,6 +8,7 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
@@ -16,10 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.config import settings
-from app.models.models import CompanyKnowledge, JobQueue, KnowledgeDocument, UserAccount
+from app.core.enterprise_deps import ActorContext, actor_from_token
+from app.core.security import decode_token
+from app.models.models import AdminUser, CompanyKnowledge, JobQueue, KnowledgeDocument, UserAccount
 
 router = APIRouter()
 log = logging.getLogger(__name__)
+knowledge_bearer = HTTPBearer()
 
 MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024
 ALLOWED_ATTACHMENT_EXTENSIONS = {
@@ -126,6 +130,27 @@ async def _organization_id(db: AsyncSession, legacy_user) -> int:
     return organization_id
 
 
+async def get_knowledge_reader(
+    credentials: HTTPAuthorizationCredentials = Depends(knowledge_bearer),
+    db: AsyncSession = Depends(get_db),
+) -> ActorContext | AdminUser:
+    """Authenticate all enterprise readers while preserving legacy admin tokens."""
+    payload = decode_token(credentials.credentials)
+    if payload and payload.get("kind") == "enterprise":
+        return await actor_from_token(credentials.credentials, db)
+    return await get_current_user(credentials, db)
+
+
+def _can_manage_knowledge(reader: ActorContext | AdminUser) -> bool:
+    return not isinstance(reader, ActorContext) or reader.has_any_role("admin")
+
+
+async def _reader_organization_id(db: AsyncSession, reader: ActorContext | AdminUser) -> int:
+    if isinstance(reader, ActorContext):
+        return reader.organization_id
+    return await _organization_id(db, reader)
+
+
 def _index_job(entry: CompanyKnowledge) -> JobQueue:
     return JobQueue(job_type="knowledge_index_article", payload={"entry_id": entry.id}, dedup_key=f"knowledge-index-article:{entry.id}:{entry.updated_at.isoformat() if entry.updated_at else 'new'}")
 
@@ -154,12 +179,15 @@ async def _ensure_pending_document(db: AsyncSession, entry: CompanyKnowledge) ->
 @router.get("", response_model=list[KnowledgeOut])
 async def list_knowledge(
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    reader: ActorContext | AdminUser = Depends(get_knowledge_reader),
 ):
-    organization_id = await _organization_id(db, user)
+    organization_id = await _reader_organization_id(db, reader)
+    filters = [CompanyKnowledge.organization_id == organization_id]
+    if not _can_manage_knowledge(reader):
+        filters.append(CompanyKnowledge.is_active.is_(True))
     rows = (
         await db.execute(
-            select(CompanyKnowledge).where(CompanyKnowledge.organization_id == organization_id).order_by(
+            select(CompanyKnowledge).where(*filters).order_by(
                 CompanyKnowledge.is_active.desc(),
                 CompanyKnowledge.updated_at.desc(),
                 CompanyKnowledge.id.desc(),
@@ -269,10 +297,10 @@ async def replace_knowledge_attachment(
 async def download_knowledge_attachment(
     entry_id: int,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user),
+    reader: ActorContext | AdminUser = Depends(get_knowledge_reader),
 ):
     entry = await db.get(CompanyKnowledge, entry_id)
-    if not entry or entry.organization_id != await _organization_id(db, user) or not entry.attachment_stored_name or not entry.attachment_filename:
+    if not entry or entry.organization_id != await _reader_organization_id(db, reader) or (not _can_manage_knowledge(reader) and not entry.is_active) or not entry.attachment_stored_name or not entry.attachment_filename:
         raise HTTPException(status_code=404, detail="knowledge attachment not found")
     path = _attachment_directory() / entry.attachment_stored_name
     if not path.is_file():

@@ -38,6 +38,8 @@ class ComponentDefinition:
     label: str
     component_kind: str  # earning, deduction, employer_cost
     formula: str
+    amount_mode: str = "formula"
+    percentage_basis: str | None = None
     proration_basis: str = "none"  # none, working_days, calendar_days, hours
     taxable: bool = True
     shi_subject: bool = True
@@ -54,6 +56,13 @@ class SHIRate:
     insurance_fund: str
     rate: Decimal
     base_floor: Decimal = ZERO
+    lower_bound: Decimal = ZERO
+    upper_bound: Decimal | None = None
+    calculation_mode: str = "flat_percent"
+    fixed_amount: Decimal = ZERO
+    base_tax: Decimal = ZERO
+    base_ceiling_policy: str = "profile"
+    formula: str | None = None
     exemption_code: str | None = None
 
 
@@ -64,6 +73,7 @@ class PITBracket:
     marginal_rate: Decimal
     base_tax: Decimal = ZERO
     period_basis: str = "annual"
+    formula: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +94,8 @@ class StatutoryRules:
     pit_brackets: tuple[PITBracket, ...] = ()
     relief_tiers: tuple[ReliefTier, ...] = ()
     pit_withholding_method: str = "ytd_cumulative"
+    pit_calculation_mode: str = "marginal_tiers"
+    pit_formula: str | None = None
     periods_per_year: int = 12
     rounding_quantum: Decimal = MONEY_QUANTUM
     leave_policy: Mapping[str, Any] = field(default_factory=dict)
@@ -282,7 +294,13 @@ def evaluate_components(components: Iterable[ComponentDefinition], variables: Ma
     definitions = sorted(tuple(components), key=lambda item: (item.position, item.code))
     by_code = {item.code: item for item in definitions}
     if len(by_code) != len(definitions): raise FormulaError("Duplicate salary component code")
-    compiled = {item.code: _SafeFormula(item.formula) for item in definitions}
+    def canonical_expression(item: ComponentDefinition) -> str:
+        if item.amount_mode == "percentage":
+            basis = item.percentage_basis or "base_salary"
+            return f"({basis}) * ({item.formula})"
+        return item.formula
+
+    compiled = {item.code: _SafeFormula(canonical_expression(item)) for item in definitions}
     state: dict[str, Decimal] = {}
     visiting: set[str] = set()
     done: set[str] = set()
@@ -295,34 +313,99 @@ def evaluate_components(components: Iterable[ComponentDefinition], variables: Ma
         for dependency in expression.dependencies:
             if dependency in by_code: resolve(dependency)
         value = expression.evaluate({**variables, **state}, quantum)
+        if value < ZERO:
+            raise FormulaError(f"Salary component produced a negative amount: {code}")
         value = prorate_amount(value, by_code[code].proration_basis, payable_workdays=payable_workdays, scheduled_workdays=scheduled_workdays, payable_calendar_days=payable_calendar_days, scheduled_calendar_days=scheduled_calendar_days, payable_hours=payable_hours, scheduled_hours=scheduled_hours)
         state[code] = value
         visiting.remove(code); done.add(code)
         return value
 
     for item in definitions: resolve(item.code)
-    return tuple({"code": item.code, "label": item.label, "component_kind": item.component_kind, "amount": state[item.code], "taxable": item.taxable, "shi_subject": item.shi_subject, "non_taxable_allowance": item.non_taxable_allowance, "leave_average_eligible": item.leave_average_eligible, "only_tax_impact": item.only_tax_impact, "payer": item.payer, "formula": item.formula, "position": item.position} for item in definitions)
+    return tuple({"code": item.code, "label": item.label, "component_kind": item.component_kind, "amount": state[item.code], "taxable": item.taxable, "shi_subject": item.shi_subject, "non_taxable_allowance": item.non_taxable_allowance, "leave_average_eligible": item.leave_average_eligible, "only_tax_impact": item.only_tax_impact, "payer": item.payer, "formula": canonical_expression(item), "amount_mode": item.amount_mode, "percentage_basis": item.percentage_basis, "position": item.position} for item in definitions)
 
 
-def compute_shi(subject_gross: Decimal, rules: StatutoryRules, *, prior_month_base: Decimal = ZERO, exemption_codes: frozenset[str] = frozenset()) -> tuple[Decimal, Decimal, Decimal, dict[str, Decimal]]:
+def compute_shi(subject_gross: Decimal, rules: StatutoryRules, *, prior_month_base: Decimal = ZERO, exemption_codes: frozenset[str] = frozenset()) -> tuple[Decimal, Decimal, Decimal, dict[str, Any]]:
     cap = max(ZERO, money(rules.minimum_wage * rules.shi_ceiling_multiplier, rules.rounding_quantum))
     remaining = max(ZERO, cap - money(prior_month_base, rules.rounding_quantum))
-    base = min(max(ZERO, money(subject_gross, rules.rounding_quantum)), remaining)
-    employee = ZERO; employer = ZERO; by_fund: dict[str, Decimal] = {}
+    uncapped_base = max(ZERO, money(subject_gross, rules.rounding_quantum))
+    base = min(uncapped_base, remaining)
+    effective_base = uncapped_base if any(tier.base_ceiling_policy == "none" for tier in rules.shi_rates) else base
+    employee = ZERO; employer = ZERO; by_fund: dict[str, Decimal] = {}; rule_trace: list[dict[str, Any]] = []
     for tier in rules.shi_rates:
         if tier.exemption_code and tier.exemption_code in exemption_codes: continue
-        tier_base = min(cap, max(base, money(tier.base_floor, rules.rounding_quantum))) if base else ZERO
-        amount = money(tier_base * tier.rate, rules.rounding_quantum)
+        ceiling = cap if tier.base_ceiling_policy != "none" else None
+        tier_base = max(uncapped_base if ceiling is None else base, money(tier.base_floor, rules.rounding_quantum)) if (uncapped_base if ceiling is None else base) else ZERO
+        if ceiling is not None:
+            tier_base = min(ceiling, tier_base)
+        mode = tier.calculation_mode or "flat_percent"
+        if mode == "marginal_tiers":
+            upper = tier.upper_bound if tier.upper_bound is not None else tier_base
+            slice_base = max(ZERO, min(tier_base, upper) - tier.lower_bound)
+            amount = money(slice_base * tier.rate, rules.rounding_quantum)
+            trace_base = slice_base
+        elif mode == "band_rate":
+            applies = tier_base >= tier.lower_bound and (tier.upper_bound is None or tier_base <= tier.upper_bound)
+            amount = money(tier_base * tier.rate + tier.base_tax, rules.rounding_quantum) if applies else ZERO
+            trace_base = tier_base if applies else ZERO
+        elif mode == "formula":
+            if not tier.formula:
+                raise FormulaError("SHI formula mode requires a formula")
+            amount = _SafeFormula(tier.formula).evaluate({
+                "base": tier_base, "subject_gross": subject_gross, "rate": tier.rate,
+                "lower_bound": tier.lower_bound, "upper_bound": tier.upper_bound or tier_base,
+                "fixed_amount": tier.fixed_amount, "base_tax": tier.base_tax,
+            }, rules.rounding_quantum)
+            trace_base = tier_base
+        else:
+            amount = money(tier_base * tier.rate + tier.fixed_amount, rules.rounding_quantum)
+            trace_base = tier_base
+        if amount < ZERO:
+            raise FormulaError("Statutory rule produced a negative amount")
         by_fund[f"{tier.payer}:{tier.insurance_fund}"] = by_fund.get(f"{tier.payer}:{tier.insurance_fund}", ZERO) + amount
+        rule_trace.append({"payer": tier.payer, "insurance_fund": tier.insurance_fund, "calculation_mode": mode, "base": str(trace_base), "lower_bound": str(tier.lower_bound), "upper_bound": str(tier.upper_bound) if tier.upper_bound is not None else None, "rate": str(tier.rate), "amount": str(amount), "formula": tier.formula})
         if tier.payer == "employee": employee += amount
         elif tier.payer == "employer": employer += amount
-    return money(base, rules.rounding_quantum), money(employee, rules.rounding_quantum), money(employer, rules.rounding_quantum), {key: money(value, rules.rounding_quantum) for key, value in by_fund.items()}
+    # A marginal tier's base tax is cumulative: apply the base belonging to
+    # the tier containing the base once, rather than adding every tier's
+    # published base tax to the total.
+    marginal_groups: dict[tuple[str, str], list[SHIRate]] = {}
+    for tier in rules.shi_rates:
+        if (tier.calculation_mode or "flat_percent") == "marginal_tiers" and not (tier.exemption_code and tier.exemption_code in exemption_codes):
+            marginal_groups.setdefault((tier.payer, tier.insurance_fund), []).append(tier)
+    for (payer, fund), tiers in marginal_groups.items():
+        containing = next((row for row in sorted(tiers, key=lambda item: item.lower_bound, reverse=True) if effective_base > row.lower_bound), None)
+        if containing and containing.base_tax:
+            key = f"{payer}:{fund}"
+            delta = money(containing.base_tax, rules.rounding_quantum)
+            if delta > ZERO:
+                by_fund[key] = by_fund.get(key, ZERO) + delta
+                if payer == "employee": employee += delta
+                elif payer == "employer": employer += delta
+                for item in rule_trace:
+                    if item["payer"] == payer and item["insurance_fund"] == fund:
+                        item["base_tax"] = str(containing.base_tax)
+                        item["amount"] = str(money(Decimal(item["amount"]) + delta, rules.rounding_quantum))
+                        break
+    return money(effective_base, rules.rounding_quantum), money(employee, rules.rounding_quantum), money(employer, rules.rounding_quantum), {"by_fund": {key: money(value, rules.rounding_quantum) for key, value in by_fund.items()}, "rules": rule_trace}
 
 
-def compute_progressive_pit(income: Decimal, brackets: Iterable[PITBracket]) -> Decimal:
+def compute_progressive_pit(income: Decimal, brackets: Iterable[PITBracket], *, mode: str = "marginal_tiers", formula: str | None = None, quantum: Decimal = MONEY_QUANTUM) -> Decimal:
     income = max(ZERO, income)
     ordered = sorted(tuple(brackets), key=lambda item: item.lower_bound)
     if not ordered: return ZERO
+    if mode == "formula":
+        if not formula:
+            raise FormulaError("PIT formula mode requires a formula")
+        amount = _SafeFormula(formula).evaluate({"income": income}, quantum)
+        if amount < ZERO:
+            raise FormulaError("PIT formula produced a negative amount")
+        return amount
+    if mode == "flat_percent":
+        bracket = ordered[0]
+        return money(income * bracket.marginal_rate + bracket.base_tax, quantum)
+    if mode == "band_rate":
+        bracket = next((item for item in reversed(ordered) if income >= item.lower_bound and (item.upper_bound is None or income <= item.upper_bound)), None)
+        return money(income * bracket.marginal_rate + bracket.base_tax, quantum) if bracket else ZERO
     tax = ZERO
     for bracket in ordered:
         if income <= bracket.lower_bound: continue
@@ -333,7 +416,7 @@ def compute_progressive_pit(income: Decimal, brackets: Iterable[PITBracket]) -> 
     containing = next((item for item in reversed(ordered) if income > item.lower_bound), None)
     if containing and containing.base_tax:
         tax = max(tax, containing.base_tax + max(ZERO, income - containing.lower_bound) * containing.marginal_rate)
-    return money(tax)
+    return money(tax, quantum)
 
 
 def compute_leave_pay(months: Iterable[LeaveMonth], leave_days: Decimal, policy: Mapping[str, Any] | None = None) -> Decimal:
@@ -363,13 +446,15 @@ def _relief_for_income(income: Decimal, eligibilities: frozenset[str], rules: St
                 "upper_bound": tier.upper_bound if tier.upper_bound is not None else income,
                 "fixed_amount": tier.fixed_amount,
             }, rules.rounding_quantum)
+        if candidate < ZERO:
+            raise FormulaError("Relief formula produced a negative amount")
         amount = max(amount, candidate)
     return amount
 
 
 def calculate_payslip(data: CalculationInput, rules: StatutoryRules) -> CalculationResult:
     quantum = rules.rounding_quantum
-    context = {"base_salary": money(data.base_salary, quantum), "payable_workdays": data.payable_workdays, "scheduled_workdays": data.scheduled_workdays, "payable_calendar_days": data.payable_calendar_days, "scheduled_calendar_days": data.scheduled_calendar_days, "payable_hours": data.payable_hours, "scheduled_hours": data.scheduled_hours, **data.context}
+    context = {"base_salary": money(data.base_salary, quantum), "payable_workdays": data.payable_workdays, "scheduled_workdays": data.scheduled_workdays, "payable_calendar_days": data.payable_calendar_days, "scheduled_calendar_days": data.scheduled_calendar_days, "payable_hours": data.payable_hours, "scheduled_hours": data.scheduled_hours, "prior_ytd_gross": data.prior_ytd_gross, "prior_ytd_taxable": data.prior_ytd_taxable, "prior_ytd_pit": data.prior_ytd_pit, "prior_month_shi_base": data.prior_month_shi_base, "minimum_wage": rules.minimum_wage, "shi_ceiling_multiplier": rules.shi_ceiling_multiplier, "periods_per_year": rules.periods_per_year, **data.context}
     lines = list(evaluate_components(data.components, context, quantum=quantum, payable_workdays=data.payable_workdays, scheduled_workdays=data.scheduled_workdays, payable_calendar_days=data.payable_calendar_days, scheduled_calendar_days=data.scheduled_calendar_days, payable_hours=data.payable_hours, scheduled_hours=data.scheduled_hours))
     if data.leave_days > 0:
         leave_amount = compute_leave_pay(data.leave_months, data.leave_days, rules.leave_policy)
@@ -391,14 +476,14 @@ def calculate_payslip(data: CalculationInput, rules: StatutoryRules) -> Calculat
     prior_pit = money(data.prior_ytd_pit, quantum)
     if data.withhold_statutory:
         pit_basis = money(prior_taxable + taxable_income, quantum) if rules.pit_withholding_method == "ytd_cumulative" else taxable_income
-        pit_before_relief_cumulative = compute_progressive_pit(pit_basis, rules.pit_brackets)
+        pit_before_relief_cumulative = compute_progressive_pit(pit_basis, rules.pit_brackets, mode=rules.pit_calculation_mode, formula=rules.pit_formula, quantum=quantum)
         relief_cumulative = min(pit_before_relief_cumulative, _relief_for_income(pit_basis, data.relief_eligibilities, rules) + max(ZERO, data.other_tax_credit))
         pit_cumulative = max(ZERO, pit_before_relief_cumulative - relief_cumulative)
         if rules.pit_withholding_method == "ytd_cumulative":
             pit = max(ZERO, money(pit_cumulative - prior_pit, quantum))
             relief = max(ZERO, money(relief_cumulative - data.prior_ytd_relief, quantum))
         else:
-            pit_before_relief_cumulative = compute_progressive_pit(taxable_income, rules.pit_brackets)
+            pit_before_relief_cumulative = compute_progressive_pit(taxable_income, rules.pit_brackets, mode=rules.pit_calculation_mode, formula=rules.pit_formula, quantum=quantum)
             relief = min(pit_before_relief_cumulative, _relief_for_income(taxable_income, data.relief_eligibilities, rules) + max(ZERO, data.other_tax_credit))
             pit = max(ZERO, money(pit_before_relief_cumulative - relief, quantum))
     else:
@@ -406,12 +491,14 @@ def calculate_payslip(data: CalculationInput, rules: StatutoryRules) -> Calculat
         pit_before_relief_cumulative = relief_cumulative = pit = relief = ZERO
     other_deductions = money(employee_deduction_components + data.other_deductions, quantum)
     net_before_advance = money(gross - employee_shi - pit - other_deductions, quantum)
+    if net_before_advance < ZERO and not data.allow_negative_net:
+        raise FormulaError("Total deductions exceed gross pay; review advances and deductions")
     requested_advance = max(ZERO, money(data.current_advance, quantum))
     advance_offset = min(requested_advance, max(ZERO, net_before_advance)) if not data.allow_negative_net else requested_advance
     unapplied_advance = max(ZERO, requested_advance - advance_offset)
     net_pay = money(net_before_advance - advance_offset, quantum)
     ytd = {"gross": money(data.prior_ytd_gross + (gross if data.withhold_statutory else ZERO), quantum), "taxable": money(prior_taxable + taxable_income, quantum), "pit": money(prior_pit + pit, quantum), "relief": money(data.prior_ytd_relief + relief, quantum), "shi_base": money(data.prior_month_shi_base + shi_base, quantum)}
-    trace = {"formula_context": {key: str(value) for key, value in context.items() if isinstance(value, (Decimal, int, float, str, bool))}, "shi": {"cap": str(money(rules.minimum_wage * rules.shi_ceiling_multiplier, quantum)), "remaining_cap": str(max(ZERO, money(rules.minimum_wage * rules.shi_ceiling_multiplier, quantum) - data.prior_month_shi_base)), "by_fund": {key: str(value) for key, value in shi_by_fund.items()}}, "pit": {"method": rules.pit_withholding_method, "basis": str(pit_basis), "before_relief": str(pit_before_relief_cumulative), "relief": str(relief), "declared_deduction": str(data.other_tax_deductible), "declared_credit": str(data.other_tax_credit), "prior_withheld": str(prior_pit)}, "advance": {"requested": str(requested_advance), "offset": str(advance_offset), "unapplied": str(unapplied_advance)}}
+    trace = {"formula_context": {key: str(value) for key, value in context.items() if isinstance(value, (Decimal, int, float, str, bool))}, "shi": {"cap": str(money(rules.minimum_wage * rules.shi_ceiling_multiplier, quantum)), "remaining_cap": str(max(ZERO, money(rules.minimum_wage * rules.shi_ceiling_multiplier, quantum) - data.prior_month_shi_base)), "by_fund": {key: str(value) for key, value in (shi_by_fund.get("by_fund") or {}).items()}, "rules": shi_by_fund.get("rules") or []}, "pit": {"method": rules.pit_withholding_method, "calculation_mode": rules.pit_calculation_mode, "basis": str(pit_basis), "before_relief": str(pit_before_relief_cumulative), "relief": str(relief), "declared_deduction": str(data.other_tax_deductible), "declared_credit": str(data.other_tax_credit), "prior_withheld": str(prior_pit)}, "advance": {"requested": str(requested_advance), "offset": str(advance_offset), "unapplied": str(unapplied_advance)}}
     return CalculationResult(tuple(lines), gross, taxable_income, shi_subject_gross, shi_base, employee_shi, employer_shi, pit_before_relief_cumulative, relief, pit, advance_offset, unapplied_advance, other_deductions, net_pay, ytd, trace)
 
 

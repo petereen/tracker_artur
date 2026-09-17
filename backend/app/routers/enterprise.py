@@ -3490,6 +3490,13 @@ async def confirm_assistant_action(data: AssistantActionConfirmInput, db: AsyncS
     return result
 
 
+@router.post("/assistant/actions/reject")
+async def reject_assistant_action(data: AssistantActionConfirmInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    result = await enterprise_tools.reject_task_action(db, actor, data.token, channel="web")
+    await db.commit()
+    return result
+
+
 @router.get("/assistant/conversations/{conversation_id}")
 async def assistant_conversation(conversation_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     conversation = await db.get(AssistantConversation, conversation_id)

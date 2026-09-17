@@ -17,20 +17,20 @@ from app.erp.service import require_capability
 from app.models.models import (
     AdditionalSalary, Employee, EmployeeBankAccount, EmployeePayrollProfile, EmployeeBenefitApplication, EmployeeBenefitClaim, ERPAccount,
     EmployeeTaxExemptionDeclaration, EmployeeTaxExemptionProof, PayrollBankExportProfile,
-    PayrollBankEntry, PayrollExportArtifact, PayrollPeriod, PayrollPostingProfile, PayrollRun, PayrollSalaryComponentMaster, Payslip, PayslipLineItem, IdempotencyRecord,
+    PayrollBankEntry, PayrollExportArtifact, PayrollPeriod, PayrollPostingProfile, PayrollRun, PayrollSalaryComponentMaster, Payslip, PayslipLineItem, PayslipStatutoryLine, IdempotencyRecord,
     PayrollPaymentBatch, PayrollPaymentAllocation, PayrollStatementImport, PayrollStatementLine,
     PayrollTaxExemptionCategory,
     SalaryComponent, SalaryStructure, SalaryStructureVersion, SHIRateTier, PITBracketTier, TaxReliefTier,
-    StatutoryConfigProfile,
+    StatutoryConfigProfile, SocialInsuranceContributorType, PayrollWorkPolicy, PayrollFormulaVariable, PayrollReportTemplate, Organization,
 )
 from app.services.enterprise_events import record_change
 from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services.user_notifications import create_notifications
-from .exports import nd7_summary, nd8_rows, render_bank_export, render_protected_payslip, tt11_summary
+from .exports import nd7_summary, nd7a_summary, nd7b_rows, nd8_rows, render_bank_export, render_protected_payslip, render_report_pdf, tt11_summary
 from .schemas import (
     BankAccountInput, BankExportProfileInput, BankExportRequest, CalculateRunInput,
-    EmployeePayrollInput, PayrollRunInput, PITBracketInput, PostingProfileInput,
-    PublishProfileInput, ReliefTierInput, SalaryStructureInput, StatutoryProfileInput,
+    EmployeePayrollInput, PayrollRunInput, SHIRateInput, PITBracketInput, ReliefTierInput, PostingProfileInput,
+    PublishProfileInput, SalaryStructureInput, StatutoryProfileInput,
     BenefitApplicationInput, BenefitApplicationReviewInput, BenefitClaimInput,
     PayslipPublicationInput, PayrollApprovalInput, ProtectedPayslipInput, ReconciliationResolutionInput,
     ReviewDecisionInput, TaxDeclarationInput, TaxExemptionCategoryInput, TaxExemptionCategoryUpdateInput, TaxProofInput, PayrollReturnInput,
@@ -38,6 +38,7 @@ from .schemas import (
     PayrollCancelInput, PayrollEntryInput, PayrollPeriodInput, SalaryComponentMasterInput,
     SalaryStructureAssignmentInput,
     PaymentBatchInput, PaymentSettlementInput, PaymentRejectInput, StatementImportInput, PayrollPaymentReversalInput, PayrollRunReversalInput, VersionBumpInput,
+    ContributorTypeInput, WorkPolicyInput, FormulaValidationInput, FormulaPreviewInput, FormulaVariableInput, StatutorySimulationInput, ReportTemplateInput,
 )
 from .tax_benefits import approved_tax_adjustments, validate_claim_balance
 from .service import (
@@ -47,6 +48,7 @@ from .service import (
     delete_component_master, archive_component_master, component_master_out, component_master_usage, delete_salary_structure, delete_statutory_profile, load_rules, post_run, preflight_run, profile_out, publish_profile, reconcile_run, reverse_run,
     posting_preview, reverse_payment_allocation, update_component_master, update_salary_structure, update_statutory_profile,
 )
+from .calculator import CalculationInput, ComponentDefinition, _SafeFormula, _relief_for_income, calculate_payslip, compute_progressive_pit, compute_shi, money
 from .frappe_service import (
     additional_salary_out, bank_entry_out, cancel_additional_salary,
     create_additional_salary, create_assignment, create_bulk_assignments,
@@ -80,6 +82,329 @@ async def payroll_effective_capabilities(db: AsyncSession = Depends(get_db), act
             else:
                 raise
     return {"capabilities": result}
+
+
+def _contributor_type_out(row: SocialInsuranceContributorType) -> dict[str, Any]:
+    return {"id": row.id, "code": row.code, "name": row.name, "description": row.description, "effective_from": row.effective_from.isoformat(), "effective_to": row.effective_to.isoformat() if row.effective_to else None, "source_references": row.source_references or [], "status": row.status}
+
+
+def _work_policy_out(row: PayrollWorkPolicy) -> dict[str, Any]:
+    return {"id": row.id, "code": row.code, "name": row.name, "scope_type": row.scope_type, "scope_key": row.scope_key, "effective_from": row.effective_from.isoformat(), "effective_to": row.effective_to.isoformat() if row.effective_to else None, "daily_hours": str(row.daily_hours), "weekly_hours": str(row.weekly_hours), "workweek": row.workweek or [], "overtime_rules": row.overtime_rules or {}, "stacking_policy": row.stacking_policy, "source_references": row.source_references or [], "status": row.status}
+
+
+def _report_template_out(row: PayrollReportTemplate) -> dict[str, Any]:
+    return {"id": row.id, "kind": row.kind, "version": row.version, "status": row.status, "template": row.template or {}, "required_keys": row.required_keys or [], "source_references": row.source_references or [], "checksum": row.checksum}
+
+
+@router.get("/statutory-profiles/{profile_id}/contributor-types")
+async def list_payroll_contributor_types(profile_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Statutory profile not found")
+    rows = (await db.execute(select(SocialInsuranceContributorType).where(SocialInsuranceContributorType.organization_id == actor.organization_id, SocialInsuranceContributorType.effective_from <= profile.effective_from, (SocialInsuranceContributorType.effective_to.is_(None) | (SocialInsuranceContributorType.effective_to >= profile.effective_from))).order_by(SocialInsuranceContributorType.code))).scalars().all()
+    return [_contributor_type_out(row) for row in rows]
+
+
+@router.post("/statutory-profiles/{profile_id}/contributor-types", status_code=status.HTTP_201_CREATED)
+async def create_payroll_contributor_type(profile_id: int, data: ContributorTypeInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Statutory profile not found")
+    if data.effective_to and data.effective_to < data.effective_from:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_effective_range", "path": "effective_to", "message": "Effective end date cannot precede the start date.", "remediation": "Choose an end date on or after effective_from."})
+    overlap = await db.scalar(select(SocialInsuranceContributorType.id).where(SocialInsuranceContributorType.organization_id == actor.organization_id, SocialInsuranceContributorType.code == data.code, SocialInsuranceContributorType.effective_from <= (data.effective_to or date.max), (SocialInsuranceContributorType.effective_to.is_(None) | (SocialInsuranceContributorType.effective_to >= data.effective_from))).limit(1))
+    if overlap:
+        raise HTTPException(status_code=409, detail={"code": "payroll_contributor_type_effective_overlap", "path": "effective_from", "message": "Another contributor type version overlaps this effective range.", "remediation": "Use a non-overlapping effective range for this contributor code."})
+    row = SocialInsuranceContributorType(organization_id=actor.organization_id, created_by_account_id=actor.account_id, status="draft", **data.model_dump(exclude={"status"}))
+    db.add(row); await db.commit(); await db.refresh(row)
+    return _contributor_type_out(row)
+
+
+@router.post("/statutory-profiles/{profile_id}/contributor-types/{contributor_type_id}/publish")
+async def publish_payroll_contributor_type(profile_id: int, contributor_type_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "approve")
+    profile = await db.scalar(select(StatutoryConfigProfile.id).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Statutory profile not found")
+    row = await db.scalar(select(SocialInsuranceContributorType).where(SocialInsuranceContributorType.id == contributor_type_id, SocialInsuranceContributorType.organization_id == actor.organization_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="Contributor type not found")
+    if not row.source_references:
+        raise HTTPException(status_code=422, detail={"code": "payroll_contributor_type_source_required", "path": "source_references", "remediation": "Attach the authoritative statutory source before publication."})
+    row.status = "active"
+    await db.commit(); await db.refresh(row)
+    return _contributor_type_out(row)
+
+
+async def _profile_rule_rows(db: AsyncSession, actor: ActorContext, profile_id: int, model: Any) -> list[Any]:
+    profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Statutory profile not found")
+    return list((await db.execute(select(model).where(model.profile_id == profile_id).order_by(model.position, model.id))).scalars().all())
+
+
+async def _draft_payroll_profile(db: AsyncSession, actor: ActorContext, profile_id: int) -> StatutoryConfigProfile:
+    profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id).with_for_update())
+    if not profile:
+        raise HTTPException(status_code=404, detail="Statutory profile not found")
+    if profile.status in {"published", "active"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_profile_immutable", "path": "profile_id", "message": "Published profiles are immutable.", "remediation": "Create an effective-dated successor profile."})
+    return profile
+
+
+@router.get("/statutory-profiles/{profile_id}/shi-rules")
+async def list_payroll_shi_rules(profile_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    rows = await _profile_rule_rows(db, actor, profile_id, SHIRateTier)
+    return [{"id": row.id, "payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "calculation_mode": row.calculation_mode, "fixed_amount": str(row.fixed_amount), "base_tax": str(row.base_tax), "base_ceiling_policy": getattr(row, "base_ceiling_policy", "profile"), "formula": row.formula, "exemption_code": row.exemption_code, "position": row.position} for row in rows]
+
+
+@router.post("/statutory-profiles/{profile_id}/shi-rules", status_code=status.HTTP_201_CREATED)
+async def add_payroll_shi_rule(profile_id: int, data: SHIRateInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    await _draft_payroll_profile(db, actor, profile_id)
+    if data.upper_bound is not None and data.upper_bound <= data.lower_bound:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_tier", "path": "upper_bound", "message": "Upper bound must be greater than lower bound.", "remediation": "Correct the tier bounds."})
+    if data.calculation_mode == "formula":
+        try:
+            _SafeFormula(data.formula or "")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_formula", "path": "formula", "message": str(exc), "remediation": "Use the safe formula DSL."}) from exc
+    duplicate = await db.scalar(select(SHIRateTier.id).where(SHIRateTier.profile_id == profile_id, SHIRateTier.payer == data.payer, SHIRateTier.insurance_fund == data.insurance_fund, SHIRateTier.insured_category == data.insured_category, SHIRateTier.hazard_class == data.hazard_class, SHIRateTier.position == data.position))
+    if duplicate:
+        raise HTTPException(status_code=409, detail={"code": "payroll_shi_rule_position_exists", "path": "position", "message": "Another SHI rule uses this position for the same contributor/fund/hazard combination.", "remediation": "Choose another position or edit the existing rule."})
+    row = SHIRateTier(profile_id=profile_id, **data.model_dump())
+    db.add(row); await db.commit(); await db.refresh(row)
+    return {"id": row.id, **{key: value for key, value in data.model_dump().items()}}
+
+
+@router.get("/statutory-profiles/{profile_id}/pit-rules")
+async def list_payroll_pit_rules(profile_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    rows = await _profile_rule_rows(db, actor, profile_id, PITBracketTier)
+    return [{"id": row.id, "period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax), "position": row.position} for row in rows]
+
+
+@router.post("/statutory-profiles/{profile_id}/pit-rules", status_code=status.HTTP_201_CREATED)
+async def add_payroll_pit_rule(profile_id: int, data: PITBracketInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    await _draft_payroll_profile(db, actor, profile_id)
+    if data.upper_bound is not None and data.upper_bound <= data.lower_bound:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_pit_bracket", "path": "upper_bound", "message": "Upper bound must be greater than lower bound.", "remediation": "Correct the bracket bounds."})
+    duplicate = await db.scalar(select(PITBracketTier.id).where(PITBracketTier.profile_id == profile_id, PITBracketTier.period_basis == data.period_basis, PITBracketTier.position == data.position))
+    if duplicate:
+        raise HTTPException(status_code=409, detail={"code": "payroll_pit_rule_position_exists", "path": "position", "message": "Another PIT bracket uses this position for the period basis.", "remediation": "Choose another position or edit the existing bracket."})
+    row = PITBracketTier(profile_id=profile_id, **data.model_dump())
+    db.add(row); await db.commit(); await db.refresh(row)
+    return {"id": row.id, **{key: value for key, value in data.model_dump().items()}}
+
+
+@router.get("/statutory-profiles/{profile_id}/relief-rules")
+async def list_payroll_relief_rules(profile_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    rows = await _profile_rule_rows(db, actor, profile_id, TaxReliefTier)
+    return [{"id": row.id, "eligibility_code": row.eligibility_code, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "fixed_amount": str(row.fixed_amount), "amount_basis": row.amount_basis, "formula": row.formula, "position": row.position} for row in rows]
+
+
+@router.post("/statutory-profiles/{profile_id}/relief-rules", status_code=status.HTTP_201_CREATED)
+async def add_payroll_relief_rule(profile_id: int, data: ReliefTierInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    await _draft_payroll_profile(db, actor, profile_id)
+    if data.upper_bound is not None and data.upper_bound <= data.lower_bound:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_relief_tier", "path": "upper_bound", "message": "Upper bound must be greater than lower bound.", "remediation": "Correct the relief tier bounds."})
+    if data.formula:
+        try:
+            _SafeFormula(data.formula)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_relief_formula", "path": "formula", "message": str(exc), "remediation": "Use the safe formula DSL."}) from exc
+    duplicate = await db.scalar(select(TaxReliefTier.id).where(TaxReliefTier.profile_id == profile_id, TaxReliefTier.eligibility_code == data.eligibility_code, TaxReliefTier.position == data.position))
+    if duplicate:
+        raise HTTPException(status_code=409, detail={"code": "payroll_relief_rule_position_exists", "path": "position", "message": "Another relief tier uses this position for the eligibility code.", "remediation": "Choose another position or edit the existing tier."})
+    row = TaxReliefTier(profile_id=profile_id, **data.model_dump())
+    db.add(row); await db.commit(); await db.refresh(row)
+    return {"id": row.id, **{key: value for key, value in data.model_dump().items()}}
+
+
+@router.get("/work-policies")
+async def list_payroll_work_policies(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    rows = (await db.execute(select(PayrollWorkPolicy).where(PayrollWorkPolicy.organization_id == actor.organization_id).order_by(PayrollWorkPolicy.effective_from.desc(), PayrollWorkPolicy.id.desc()))).scalars().all()
+    return [_work_policy_out(row) for row in rows]
+
+
+@router.post("/work-policies", status_code=status.HTTP_201_CREATED)
+async def create_payroll_work_policy(data: WorkPolicyInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    if data.effective_to and data.effective_to < data.effective_from:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_effective_range", "path": "effective_to", "message": "Effective end date cannot precede the start date.", "remediation": "Choose an end date on or after effective_from."})
+    if sorted(set(data.workweek)) != data.workweek or any(day < 1 or day > 7 for day in data.workweek):
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_workweek", "path": "workweek", "message": "Workweek values must be unique ISO weekdays from 1 to 7.", "remediation": "Enter a sorted list such as [1, 2, 3, 4, 5]."})
+    overlap = await db.scalar(select(PayrollWorkPolicy.id).where(PayrollWorkPolicy.organization_id == actor.organization_id, PayrollWorkPolicy.scope_type == data.scope_type, PayrollWorkPolicy.scope_key == data.scope_key, PayrollWorkPolicy.effective_from <= (data.effective_to or date.max), (PayrollWorkPolicy.effective_to.is_(None) | (PayrollWorkPolicy.effective_to >= data.effective_from))).limit(1))
+    if overlap:
+        raise HTTPException(status_code=409, detail={"code": "payroll_work_policy_effective_overlap", "path": "effective_from", "message": "Another policy overlaps this effective range.", "remediation": "Use a non-overlapping date or revise the existing draft."})
+    row = PayrollWorkPolicy(organization_id=actor.organization_id, created_by_account_id=actor.account_id, status="draft", **data.model_dump())
+    db.add(row); await db.commit(); await db.refresh(row)
+    return _work_policy_out(row)
+
+
+@router.post("/formulas/validate")
+async def validate_payroll_formula(data: FormulaValidationInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    try:
+        formula = _SafeFormula(data.formula)
+        unknown = sorted(formula.dependencies - set(data.variables))
+        return {"valid": not unknown, "dependencies": sorted(formula.dependencies), "unknown_variables": unknown, "message": "Formula is valid" if not unknown else "Provide values for every referenced variable."}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "payroll_formula_invalid", "path": "formula", "message": str(exc), "remediation": "Use only allowlisted arithmetic, comparisons, and min/max/abs/round_money/if_else functions."}) from exc
+
+
+@router.post("/formula-context/preview")
+async def preview_payroll_formula(data: FormulaPreviewInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    try:
+        compiled = _SafeFormula(data.formula)
+        value = compiled.evaluate(data.context, data.quantum)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "payroll_formula_preview_failed", "path": "formula", "message": str(exc), "remediation": "Correct the formula or provide finite values for every referenced variable."}) from exc
+    return {"value": str(value), "dependencies": sorted(compiled.dependencies), "context": {key: str(value) for key, value in data.context.items()}}
+
+
+@router.get("/formula-context")
+async def list_payroll_formula_variables(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    rows = (await db.execute(select(PayrollFormulaVariable).where(PayrollFormulaVariable.organization_id == actor.organization_id, PayrollFormulaVariable.is_active.is_(True)).order_by(PayrollFormulaVariable.code))).scalars().all()
+    return [{"id": row.id, "code": row.code, "label": row.label, "data_type": row.data_type, "default_value": row.default_value, "source": row.source, "required": row.required, "minimum": str(row.minimum) if row.minimum is not None else None, "maximum": str(row.maximum) if row.maximum is not None else None} for row in rows]
+
+
+@router.post("/formula-context", status_code=status.HTTP_201_CREATED)
+async def create_payroll_formula_variable(data: FormulaVariableInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    if data.minimum is not None and data.maximum is not None and data.maximum < data.minimum:
+        raise HTTPException(status_code=422, detail={"code": "payroll_formula_variable_range_invalid", "path": "maximum", "message": "Maximum must be greater than or equal to minimum.", "remediation": "Correct the allowed variable range."})
+    if data.data_type in {"decimal", "integer"} and data.default_value is not None:
+        try:
+            default = Decimal(data.default_value)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_formula_variable_default_invalid", "path": "default_value", "message": "The default must be a finite number for a numeric variable.", "remediation": "Use a decimal or integer value."}) from exc
+        if not default.is_finite() or (data.data_type == "integer" and default != default.to_integral_value()):
+            raise HTTPException(status_code=422, detail={"code": "payroll_formula_variable_default_invalid", "path": "default_value", "message": "The numeric default has the wrong type or is not finite.", "remediation": "Use a finite decimal or whole-number default."})
+        if data.minimum is not None and default < data.minimum or data.maximum is not None and default > data.maximum:
+            raise HTTPException(status_code=422, detail={"code": "payroll_formula_variable_default_out_of_range", "path": "default_value", "message": "The default is outside the allowed range.", "remediation": "Adjust the default or widen the minimum/maximum range."})
+    duplicate = await db.scalar(select(PayrollFormulaVariable.id).where(PayrollFormulaVariable.organization_id == actor.organization_id, PayrollFormulaVariable.code == data.code))
+    if duplicate:
+        raise HTTPException(status_code=409, detail={"code": "payroll_formula_variable_exists", "path": "code"})
+    row = PayrollFormulaVariable(organization_id=actor.organization_id, **data.model_dump())
+    db.add(row); await db.commit(); await db.refresh(row)
+    return {"id": row.id, "code": row.code, "label": row.label, "data_type": row.data_type, "default_value": row.default_value, "source": row.source, "required": row.required, "minimum": str(row.minimum) if row.minimum is not None else None, "maximum": str(row.maximum) if row.maximum is not None else None}
+
+
+@router.post("/statutory-profiles/{profile_id}/simulate")
+async def simulate_payroll_statutory_rules(profile_id: int, data: StatutorySimulationInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
+    if not profile:
+        raise HTTPException(status_code=404, detail="Statutory profile not found")
+    rules = await load_rules(db, profile, insured_category=data.insured_category, hazard_class=data.hazard_class)
+    if data.components:
+        definitions = tuple(ComponentDefinition(code=str(item["code"]), label=str(item.get("label", item["code"])), component_kind=str(item.get("component_kind", "earning")), formula=str(item.get("formula", "0")), amount_mode=str(item.get("amount_mode", "formula")), percentage_basis=item.get("percentage_basis"), taxable=bool(item.get("taxable", True)), shi_subject=bool(item.get("shi_subject", True)), non_taxable_allowance=bool(item.get("non_taxable_allowance", False)), payer=str(item.get("payer", "employee")), position=int(item.get("position", index))) for index, item in enumerate(data.components))
+        try:
+            calc = calculate_payslip(CalculationInput(base_salary=data.base_salary, context=data.context, components=definitions, other_deductions=data.other_deductions, relief_eligibilities=frozenset(data.relief_eligibilities), exemption_codes=frozenset(data.exemption_codes), prior_month_shi_base=data.prior_month_shi_base), rules)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_simulation_invalid", "path": "components", "message": str(exc), "remediation": "Correct the formula, dependency, or deduction inputs before previewing."}) from exc
+        shi_base, employee_shi, employer_shi = calc.shi_base, calc.employee_shi, calc.employer_shi
+        shi_trace = (calc.trace.get("shi") or {})
+        pit, relief, net = calc.pit_before_relief, calc.relief, calc.net_pay
+        components = [{"code": line["code"], "label": line["label"], "amount": str(line["amount"]), "formula": line["formula"], "kind": line["component_kind"]} for line in calc.lines]
+    else:
+        components = []
+        try:
+            shi_base, employee_shi, employer_shi, shi_trace = compute_shi(data.shi_subject_gross, rules, prior_month_base=data.prior_month_shi_base, exemption_codes=frozenset(data.exemption_codes))
+            pit = compute_progressive_pit(data.taxable_income, rules.pit_brackets, mode=rules.pit_calculation_mode, formula=rules.pit_formula, quantum=rules.rounding_quantum)
+            relief = min(pit, _relief_for_income(data.taxable_income, frozenset(data.relief_eligibilities), rules))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_simulation_invalid", "path": "taxable_income", "message": str(exc), "remediation": "Correct the statutory formula or preview inputs."}) from exc
+        net = data.taxable_income - employee_shi - pit + relief - data.other_deductions
+        if net < Decimal("0"):
+            raise HTTPException(status_code=422, detail={"code": "payroll_negative_net_preview", "path": "other_deductions", "message": "The preview would produce negative net pay.", "remediation": "Reduce deductions or record the excess advance for carry-forward."})
+    taxable_preview = calc.taxable_income if data.components else data.taxable_income
+    ladder = [{"step": "shi_base", "amount": str(shi_base)}, {"step": "employee_shi", "amount": str(employee_shi)}, {"step": "employer_shi", "amount": str(employer_shi)}, {"step": "taxable_income", "amount": str(taxable_preview)}, {"step": "pit_before_relief", "amount": str(pit)}, {"step": "pit_relief", "amount": str(relief)}, {"step": "net_pay_preview", "amount": str(net)}]
+    return {"profile_id": profile.id, "calculation_mode": {"pit": rules.pit_calculation_mode, "shi": sorted({row.calculation_mode for row in rules.shi_rates})}, "components": components, "deductions": {"employee_shi": str(employee_shi), "pit": str(max(Decimal("0"), pit - relief)), "other": str(data.other_deductions), "total": str(employee_shi + max(Decimal("0"), pit - relief) + data.other_deductions)}, "net_pay": str(net), "ladder": ladder, "calculation_ladder": ladder, "shi": {"by_fund": {key: str(value) for key, value in (shi_trace.get("by_fund") or {}).items()}, "rules": shi_trace.get("rules") or []}, "pit_before_relief": str(pit), "pit_relief": str(relief)}
+
+
+@router.get("/report-templates")
+async def list_payroll_report_templates(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    rows = (await db.execute(select(PayrollReportTemplate).where(PayrollReportTemplate.organization_id == actor.organization_id).order_by(PayrollReportTemplate.kind, PayrollReportTemplate.version.desc()))).scalars().all()
+    return [_report_template_out(row) for row in rows]
+
+
+@router.post("/report-templates", status_code=status.HTTP_201_CREATED)
+async def create_payroll_report_template(data: ReportTemplateInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    duplicate = await db.scalar(select(PayrollReportTemplate.id).where(PayrollReportTemplate.organization_id == actor.organization_id, PayrollReportTemplate.kind == data.kind, PayrollReportTemplate.version == data.version))
+    if duplicate:
+        raise HTTPException(status_code=409, detail={"code": "payroll_report_template_version_exists", "path": "version", "remediation": "Choose the next available version."})
+    columns = {item.get("key") for item in (data.template.get("columns") or []) if isinstance(item, dict)}
+    missing = sorted(set(data.required_keys) - columns)
+    if missing:
+        raise HTTPException(status_code=422, detail={"code": "payroll_report_template_required_keys_missing", "path": "template.columns", "missing": missing})
+    checksum = hashlib.sha256(json.dumps(data.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    row = PayrollReportTemplate(organization_id=actor.organization_id, created_by_account_id=actor.account_id, checksum=checksum, **data.model_dump())
+    db.add(row); await db.commit(); await db.refresh(row)
+    return _report_template_out(row)
+
+
+@router.put("/report-templates/{template_id}")
+async def update_payroll_report_template(template_id: int, data: ReportTemplateInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    row = await db.scalar(select(PayrollReportTemplate).where(PayrollReportTemplate.id == template_id, PayrollReportTemplate.organization_id == actor.organization_id).with_for_update())
+    if not row:
+        raise HTTPException(status_code=404, detail="Report template not found")
+    if row.status != "draft":
+        raise HTTPException(status_code=409, detail={"code": "payroll_report_template_immutable", "remediation": "Create a successor version instead of editing a published template."})
+    duplicate = await db.scalar(select(PayrollReportTemplate.id).where(PayrollReportTemplate.organization_id == actor.organization_id, PayrollReportTemplate.kind == data.kind, PayrollReportTemplate.version == data.version, PayrollReportTemplate.id != row.id))
+    if duplicate:
+        raise HTTPException(status_code=409, detail={"code": "payroll_report_template_version_exists", "path": "version", "remediation": "Choose the next available version."})
+    columns = {item.get("key") for item in (data.template.get("columns") or []) if isinstance(item, dict)}
+    missing = sorted(set(data.required_keys) - columns)
+    if missing:
+        raise HTTPException(status_code=422, detail={"code": "payroll_report_template_required_keys_missing", "path": "template.columns", "missing": missing})
+    payload = data.model_dump(mode="json")
+    row.kind = data.kind; row.version = data.version; row.template = data.template; row.required_keys = data.required_keys; row.source_references = data.source_references
+    row.checksum = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    await db.commit(); await db.refresh(row)
+    return _report_template_out(row)
+
+
+@router.post("/work-policies/{policy_id}/publish")
+async def publish_payroll_work_policy(policy_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "approve")
+    row = await db.scalar(select(PayrollWorkPolicy).where(PayrollWorkPolicy.id == policy_id, PayrollWorkPolicy.organization_id == actor.organization_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="Work policy not found")
+    if not row.source_references:
+        raise HTTPException(status_code=422, detail={"code": "payroll_work_policy_source_required", "path": "source_references", "remediation": "Attach the authoritative labor-law source before publication."})
+    overlap = await db.scalar(select(PayrollWorkPolicy.id).where(PayrollWorkPolicy.organization_id == actor.organization_id, PayrollWorkPolicy.id != row.id, PayrollWorkPolicy.scope_type == row.scope_type, PayrollWorkPolicy.scope_key == row.scope_key, PayrollWorkPolicy.status.in_(("active", "published")), PayrollWorkPolicy.effective_from <= (row.effective_to or date.max), (PayrollWorkPolicy.effective_to.is_(None) | (PayrollWorkPolicy.effective_to >= row.effective_from))).limit(1))
+    if overlap:
+        raise HTTPException(status_code=409, detail={"code": "payroll_work_policy_effective_overlap", "path": "effective_from", "remediation": "Close or supersede the existing effective policy first."})
+    row.status = "active"
+    await db.commit(); await db.refresh(row)
+    return _work_policy_out(row)
+
+
+@router.post("/report-templates/{template_id}/publish")
+async def publish_payroll_report_template(template_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "approve")
+    row = await db.scalar(select(PayrollReportTemplate).where(PayrollReportTemplate.id == template_id, PayrollReportTemplate.organization_id == actor.organization_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="Report template not found")
+    if not row.source_references:
+        raise HTTPException(status_code=422, detail={"code": "payroll_report_template_source_required", "path": "source_references", "remediation": "Attach the authoritative statutory/report source before publication."})
+    row.status = "published"; row.published_by_account_id = actor.account_id; row.published_at = datetime.now(timezone.utc)
+    await db.commit(); await db.refresh(row)
+    return _report_template_out(row)
 
 
 def _is_payroll_admin(actor: ActorContext) -> bool:
@@ -118,9 +443,10 @@ def _run_out(run: PayrollRun) -> dict[str, Any]:
     return {"id": run.id, "run_number": run.run_number, "run_type": run.run_type, "period_start": run.period_start.isoformat(), "period_end": run.period_end.isoformat(), "settlement_key": run.settlement_key, "tax_point_date": run.tax_point_date.isoformat(), "status": run.status, "workflow_version": run.workflow_version, "document_status": run.document_status, "payroll_frequency": run.payroll_frequency, "posting_date": run.posting_date.isoformat() if run.posting_date else None, "employee_filter": run.employee_filter or snapshot.get("employee_filter") or {}, "employee_ids": list(snapshot.get("employee_ids") or []), "employee_selection": snapshot.get("employee_selection"), "employee_validation_errors": list(snapshot.get("employee_validation_errors") or []), "validate_attendance": snapshot.get("validate_attendance", True), "attendance_policy": snapshot.get("attendance_policy") or {}, "salary_slips_created": run.salary_slips_created, "salary_slips_submitted": run.salary_slips_submitted, "payment_status": run.payment_status, "payment_account_id": run.payment_account_id, "cost_center_id": run.cost_center_id, "payroll_period_id": run.payroll_period_id, "bank_entry_id": run.bank_entry_id, "reversal_of_run_id": run.reversal_of_run_id, "replacement_of_run_id": run.replacement_of_run_id, "statutory_profile_id": run.statutory_profile_id, "posting_profile_id": run.posting_profile_id, "erp_document_id": run.erp_document_id, "total_gross": str(run.total_gross), "total_employee_shi": str(run.total_employee_shi), "total_employer_shi": str(run.total_employer_shi), "total_pit": str(run.total_pit), "total_net": str(run.total_net), "snapshot_checksum": run.snapshot_checksum, "reconciliation": run.reconciliation_snapshot or {}, "approval_workflow": run.approval_workflow or {}, "approved_at": run.approved_at.isoformat() if run.approved_at else None, "posted_at": run.posted_at.isoformat() if run.posted_at else None, "payslips_published_at": run.payslips_published_at.isoformat() if run.payslips_published_at else None, "rejected_at": run.rejected_at.isoformat() if run.rejected_at else None, "rejection_reason": run.rejection_reason, "reversed_at": run.reversed_at.isoformat() if run.reversed_at else None}
 
 
-def _slip_out(slip: Payslip, lines: list[PayslipLineItem] | None = None) -> dict[str, Any]:
+def _slip_out(slip: Payslip, lines: list[PayslipLineItem] | None = None, statutory_lines: list[PayslipStatutoryLine] | None = None) -> dict[str, Any]:
     result = {"id": slip.id, "payroll_run_id": slip.payroll_run_id, "employee_id": slip.employee_id, "document_status": slip.document_status, "submitted_at": slip.submitted_at.isoformat() if slip.submitted_at else None, "published_at": slip.published_at.isoformat() if slip.published_at else None, "cancelled_at": slip.cancelled_at.isoformat() if slip.cancelled_at else None, "gross": str(slip.gross), "taxable_income": str(slip.taxable_income), "shi_subject_gross": str(slip.shi_subject_gross), "shi_base": str(slip.shi_base), "employee_shi": str(slip.employee_shi), "employer_shi": str(slip.employer_shi), "pit": str(slip.pit), "pit_relief": str(slip.pit_relief), "advance_offset": str(slip.advance_offset), "net_pay": str(slip.net_pay), "snapshot_checksum": slip.snapshot_checksum, "ytd": slip.ytd_snapshot, "trace": slip.calculation_trace}
     if lines is not None: result["lines"] = [{"code": row.component_code, "component_master_id": row.component_master_id, "label": row.label, "kind": row.component_kind, "amount": str(row.amount), "taxable": row.taxable, "shi_subject": row.shi_subject, "payer": row.payer, "formula": row.formula_snapshot, "trace": row.trace} for row in lines]
+    if statutory_lines is not None: result["statutory_lines"] = [{"contributor_code": row.contributor_code, "payer": row.payer, "insurance_fund": row.insurance_fund, "hazard_class": row.hazard_class, "calculation_mode": row.calculation_mode, "base": str(row.base), "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "rate": str(row.rate), "amount": str(row.amount), "formula": row.formula_snapshot, "trace": row.trace} for row in statutory_lines]
     return result
 
 
@@ -224,7 +550,7 @@ async def list_salary_structures(db: AsyncSession = Depends(get_db), actor: Acto
     result = []
     for structure in structures:
         components = (await db.execute(select(SalaryComponent).where(SalaryComponent.salary_structure_id == structure.id).order_by(SalaryComponent.position))).scalars().all()
-        result.append({"id": structure.id, "code": structure.code, "name": structure.name, "version": structure.version, "status": structure.status, "effective_from": structure.effective_from.isoformat(), "effective_to": structure.effective_to.isoformat() if structure.effective_to else None, "currency": structure.currency, "checksum": structure.checksum, "source_structure_id": structure.source_structure_id, "components": [{"id": row.id, "component_master_id": row.component_master_id, "code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly), "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components]})
+        result.append({"id": structure.id, "code": structure.code, "name": structure.name, "version": structure.version, "status": structure.status, "effective_from": structure.effective_from.isoformat(), "effective_to": structure.effective_to.isoformat() if structure.effective_to else None, "currency": structure.currency, "checksum": structure.checksum, "source_structure_id": structure.source_structure_id, "components": [{"id": row.id, "component_master_id": row.component_master_id, "code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "amount_mode": row.amount_mode, "percentage_basis": row.percentage_basis, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly), "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components]})
     return result
 
 
@@ -245,6 +571,18 @@ async def publish_structure(structure_id: int, db: AsyncSession = Depends(get_db
     if structure.status in {"published", "active"}: raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_already_published"})
     components = (await db.execute(select(SalaryComponent).where(SalaryComponent.salary_structure_id == structure.id))).scalars().all()
     if not components: raise HTTPException(status_code=422, detail={"code": "payroll_salary_components_required"})
+    component_codes = {row.code for row in components}
+    builtin_variables = {"base_salary", "payable_workdays", "scheduled_workdays", "payable_calendar_days", "scheduled_calendar_days", "payable_hours", "scheduled_hours", "prior_ytd_gross", "prior_ytd_taxable", "prior_ytd_pit", "prior_month_shi_base", "minimum_wage", "shi_ceiling_multiplier", "periods_per_year", "overtime_hours", "weekday_overtime_hours", "rest_day_overtime_hours", "public_holiday_overtime_hours", "night_overtime_hours"}
+    configured_variables = set((await db.execute(select(PayrollFormulaVariable.code).where(PayrollFormulaVariable.organization_id == actor.organization_id, PayrollFormulaVariable.is_active.is_(True)))).scalars().all())
+    for row in components:
+        expression = row.formula if row.amount_mode != "percentage" else f"({row.percentage_basis or 'base_salary'}) * ({row.formula})"
+        try:
+            compiled = _SafeFormula(expression)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_formula", "path": f"components.{row.code}.formula", "message": str(exc), "remediation": "Correct the formula using the safe formula editor."}) from exc
+        unknown = sorted(compiled.dependencies - builtin_variables - component_codes - configured_variables)
+        if unknown:
+            raise HTTPException(status_code=422, detail={"code": "payroll_formula_unknown_variable", "path": f"components.{row.code}.formula", "message": f"Unknown formula variable(s): {', '.join(unknown)}", "remediation": "Define the variable in Formula context or correct the expression."})
     others = (await db.execute(select(SalaryStructure).where(SalaryStructure.organization_id == actor.organization_id, SalaryStructure.id != structure.id, SalaryStructure.code == structure.code, SalaryStructure.status.in_(("published", "active")), (SalaryStructure.superseded_on.is_(None) | (SalaryStructure.superseded_on > structure.effective_from))))).scalars().all()
     if any(row.effective_from <= (structure.effective_to or date.max) and (row.effective_to is None or row.effective_to >= structure.effective_from) for row in others):
         raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_effective_overlap"})
@@ -1055,13 +1393,29 @@ async def list_salary_slips(run_id: int | None = None, status_filter: str | None
 
 
 @router.get("/reports/salary-register")
-async def salary_register_report(run_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    await payroll_capability(db, actor, "view")
+async def salary_register_report(run_id: int | None = None, report_format: Literal["json", "csv", "xlsx", "pdf"] = Query(default="json", alias="format"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "export" if report_format != "json" else "view")
     query = select(Payslip, PayrollRun).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, PayrollRun.workflow_version.in_(("frappe_v1", "unified_v2")))
     if run_id is not None:
         query = query.where(Payslip.payroll_run_id == run_id)
     rows = (await db.execute(query.order_by(Payslip.employee_id))).all()
-    return [{"salary_slip_id": slip.id, "payroll_entry_id": run.id, "payroll_entry_number": run.run_number, "employee_id": slip.employee_id, "gross": str(slip.gross), "employee_shi": str(slip.employee_shi), "employer_shi": str(slip.employer_shi), "pit": str(slip.pit), "net_pay": str(slip.net_pay), "status": slip.document_status} for slip, run in rows]
+    payload = [{"salary_slip_id": slip.id, "payroll_entry_id": run.id, "payroll_entry_number": run.run_number, "employee_id": slip.employee_id, "gross": str(slip.gross), "taxable_income": str(slip.taxable_income), "employee_shi": str(slip.employee_shi), "employer_shi": str(slip.employer_shi), "pit": str(slip.pit), "net_pay": str(slip.net_pay), "status": slip.document_status} for slip, run in rows]
+    if report_format == "json":
+        return payload
+    template = await db.scalar(select(PayrollReportTemplate).where(PayrollReportTemplate.organization_id == actor.organization_id, PayrollReportTemplate.kind == "salary_register", PayrollReportTemplate.status == "published").order_by(PayrollReportTemplate.version.desc()).limit(1))
+    columns = (template.template or {}).get("columns") if template else None
+    columns = columns or [{"key": key, "header": key} for key in (list(payload[0].keys()) if payload else [])]
+    required = set((template.required_keys if template else []) or [])
+    configured = {column.get("key") for column in columns if isinstance(column, dict)}
+    if required - configured:
+        raise HTTPException(status_code=409, detail={"code": "payroll_report_template_invalid", "path": "template.columns", "missing": sorted(required - configured), "message": "Required register fields cannot be removed.", "remediation": "Restore the required columns in the published report template."})
+    if report_format == "pdf":
+        filename, content = "salary-register.pdf", render_report_pdf(payload, columns)
+        media_type = "application/pdf"
+    else:
+        filename, content = render_bank_export(payload, {"columns": columns, "filename": f"salary-register.{report_format}"}, report_format)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if report_format == "xlsx" else "text/csv; charset=utf-8"
+    return Response(content=content, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/reports/bank-remittance")
@@ -1117,7 +1471,10 @@ async def calculate_payroll_run(run_id: int, data: CalculateRunInput = Calculate
     run = await db.scalar(select(PayrollRun).where(PayrollRun.id == run_id, PayrollRun.organization_id == actor.organization_id).with_for_update())
     if not run: raise HTTPException(status_code=404, detail="Payroll run not found")
     if run.config_snapshot.get("is_example") and not data.acknowledge_example: raise HTTPException(status_code=409, detail={"code": "payroll_example_profile_requires_acknowledgement"})
-    await calculate_run(db, actor, run)
+    try:
+        await calculate_run(db, actor, run)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "payroll_calculation_invalid", "path": "run", "message": str(exc), "remediation": "Review the formula trace, statutory tiers, work policy, and deductions before recalculating."}) from exc
     await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_run", aggregate_id=run.id, operation="calculated", after={"status": run.status, "total_gross": str(run.total_gross), "total_net": str(run.total_net), "snapshot_checksum": run.snapshot_checksum})
     await db.commit(); await db.refresh(run); return _run_out(run)
 
@@ -1443,7 +1800,7 @@ async def get_run_payslips(run_id: int, db: AsyncSession = Depends(get_db), acto
     run = await db.scalar(select(PayrollRun).where(PayrollRun.id == run_id, PayrollRun.organization_id == actor.organization_id))
     if not run: raise HTTPException(status_code=404, detail="Payroll run not found")
     slips = (await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id).order_by(Payslip.employee_id))).scalars().all()
-    return [_slip_out(row, list((await db.execute(select(PayslipLineItem).where(PayslipLineItem.payslip_id == row.id).order_by(PayslipLineItem.position))).scalars().all())) for row in slips]
+    return [_slip_out(row, list((await db.execute(select(PayslipLineItem).where(PayslipLineItem.payslip_id == row.id).order_by(PayslipLineItem.position))).scalars().all()), list((await db.execute(select(PayslipStatutoryLine).where(PayslipStatutoryLine.payslip_id == row.id).order_by(PayslipStatutoryLine.position))).scalars().all())) for row in slips]
 
 
 @router.get("/me/payslips")
@@ -1461,7 +1818,8 @@ async def download_my_payslip(payslip_id: int, db: AsyncSession = Depends(get_db
     if not slip:
         raise HTTPException(status_code=404, detail="Payslip not found")
     lines = list((await db.execute(select(PayslipLineItem).where(PayslipLineItem.payslip_id == slip.id).order_by(PayslipLineItem.position))).scalars().all())
-    payload = json.dumps(_slip_out(slip, lines), ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    statutory_lines = list((await db.execute(select(PayslipStatutoryLine).where(PayslipStatutoryLine.payslip_id == slip.id).order_by(PayslipStatutoryLine.position))).scalars().all())
+    payload = json.dumps(_slip_out(slip, lines, statutory_lines), ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     await record_change(db, actor=actor, topic="payroll", aggregate_type="payslip", aggregate_id=slip.id, operation="self_downloaded", after={"payroll_run_id": slip.payroll_run_id, "checksum": slip.snapshot_checksum})
     await db.commit()
     return Response(content=payload, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="payslip-{slip.id}.json"', "X-Payslip-Checksum": slip.snapshot_checksum})
@@ -1590,7 +1948,7 @@ async def download_payroll_export(artifact_id: int, db: AsyncSession = Depends(g
 
 
 @router.get("/runs/{run_id}/reports/{report_kind}")
-async def payroll_report(run_id: int, report_kind: str, report_format: Literal["json", "csv", "xlsx"] = Query(default="json", alias="format"), tt11_period: Literal["run", "quarter", "annual"] = Query(default="run", alias="period"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def payroll_report(run_id: int, report_kind: str, report_format: Literal["json", "csv", "xlsx", "pdf"] = Query(default="json", alias="format"), tt11_period: Literal["run", "quarter", "annual"] = Query(default="run", alias="period"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "export")
     run = await db.scalar(select(PayrollRun).where(PayrollRun.id == run_id, PayrollRun.organization_id == actor.organization_id))
     if not run: raise HTTPException(status_code=404, detail="Payroll run not found")
@@ -1619,8 +1977,15 @@ async def payroll_report(run_id: int, report_kind: str, report_format: Literal["
         resolved_units = input_snapshot.get("resolved_units") or {}
         pit_trace = (row.calculation_trace or {}).get("pit") or {}
         shi_trace = (row.calculation_trace or {}).get("shi") or {}
-        payload.append({"employee_id": row.employee_id, "insured_code": profile_snapshot.get("insured_code"), "payable_days": str(override.get("payable_workdays", resolved_units.get("payable_workdays", "0"))), "gross": str(row.gross), "shi_subject_gross": str(row.shi_subject_gross), "taxable_income": str(row.taxable_income), "shi_base": str(row.shi_base), "employee_shi": str(row.employee_shi), "employer_shi": str(row.employer_shi), "shi_by_fund": shi_trace.get("by_fund") or {}, "pit_before_relief": str(pit_trace.get("before_relief", "0")), "pit": str(row.pit), "pit_relief": str(row.pit_relief), "net_pay": str(row.net_pay)})
-    if report_kind == "nd7":
+        payload.append({"employee_id": row.employee_id, "insured_code": profile_snapshot.get("insured_code"), "payable_days": str(override.get("payable_workdays", resolved_units.get("payable_workdays", "0"))), "gross": str(row.gross), "shi_subject_gross": str(row.shi_subject_gross), "taxable_income": str(row.taxable_income), "shi_base": str(row.shi_base), "employee_shi": str(row.employee_shi), "employer_shi": str(row.employer_shi), "shi_by_fund": shi_trace.get("by_fund") or {}, "shi_rules": shi_trace.get("rules") or [], "pit_before_relief": str(pit_trace.get("before_relief", "0")), "pit": str(row.pit), "pit_relief": str(row.pit_relief), "net_pay": str(row.net_pay)})
+    if report_kind == "nd7a":
+        organization = await db.get(Organization, actor.organization_id)
+        result: dict[str, Any] = {"run": _run_out(run), "report": nd7a_summary(payload, {"organization_id": actor.organization_id, "organization_name": organization.name if organization else None, "currency": organization.base_currency if organization else "MNT"})}
+        export_rows = [result["report"]["employer"]]
+    elif report_kind == "nd7b":
+        result = {"run": _run_out(run), "rows": nd7b_rows(payload)}
+        export_rows = result["rows"]
+    elif report_kind == "nd7":
         result: dict[str, Any] = {"run": _run_out(run), "summary": nd7_summary(payload)}
         export_rows = [result["summary"]]
     elif report_kind == "nd8":
@@ -1633,7 +1998,16 @@ async def payroll_report(run_id: int, report_kind: str, report_format: Literal["
         raise HTTPException(status_code=404, detail="Unknown payroll report")
     if report_format == "json":
         return result
-    columns = [{"key": key, "header": key} for key in (list(export_rows[0].keys()) if export_rows else [])]
-    filename, content = render_bank_export(export_rows, {"columns": columns, "filename": f"{report_kind}-{run.settlement_key}.{report_format}"}, report_format)
-    media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if report_format == "xlsx" else "text/csv; charset=utf-8"
+    template = await db.scalar(select(PayrollReportTemplate).where(PayrollReportTemplate.organization_id == actor.organization_id, PayrollReportTemplate.kind == report_kind, PayrollReportTemplate.status == "published").order_by(PayrollReportTemplate.version.desc()).limit(1))
+    columns = (template.template or {}).get("columns") if template else None
+    columns = columns or [{"key": key, "header": key} for key in (list(export_rows[0].keys()) if export_rows else [])]
+    required = set((template.required_keys if template else []) or [])
+    configured = {column.get("key") for column in columns if isinstance(column, dict)}
+    if required - configured:
+        raise HTTPException(status_code=409, detail={"code": "payroll_report_template_invalid", "missing": sorted(required - configured), "remediation": "Restore required statutory columns before exporting."})
+    if report_format == "pdf":
+        filename, content = f"{report_kind}-{run.settlement_key}.pdf", render_report_pdf(export_rows, columns)
+    else:
+        filename, content = render_bank_export(export_rows, {"columns": columns, "filename": f"{report_kind}-{run.settlement_key}.{report_format}"}, report_format)
+    media_type = "application/pdf" if report_format == "pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if report_format == "xlsx" else "text/csv; charset=utf-8"
     return Response(content=content, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'})

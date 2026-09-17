@@ -276,6 +276,7 @@ async def _send_oyuns_reply(
     text = history[-1]["content"]
     routed_actor = actor
     routed = None
+    pending_action = None
     try:
         from dataclasses import replace
         routed_actor = replace(actor, channel="web", detected_language=detect_language(text).value)
@@ -289,11 +290,15 @@ async def _send_oyuns_reply(
     if routed:
         for tool_result in routed.tool_results:
             delivery_rows.extend(tool_result.get("deliveries", []))
+            action_data = tool_result.get("data", {}).get("pending_action")
+            pending_action = action_data or pending_action
+    action = {"type": "task_action_preview", "payload": pending_action} if pending_action else None
     response = ChatMessage(
         conversation_id=conversation.id,
         sender_account_id=agent.id,
         client_nonce=uuid.uuid4(),
         body=answer[:4000],
+        action=action,
         company_file_attachments=enterprise_tools.attachment_metadata(delivery_rows),
     )
     db.add(response)
@@ -478,6 +483,7 @@ async def _message_out(db: AsyncSession, message: ChatMessage, actor: ActorConte
         "body": None if message.deleted_at else message.body,
         "kind": message.kind,
         "call": call_out,
+        "action": None if message.deleted_at else message.action,
         "attachments": attachments,
         "company_file_attachments": company_file_attachments,
         "reply_to_message_id": message.reply_to_message_id,

@@ -21,7 +21,7 @@ const SETTINGS = [
   { to: '/administration/automation', title: 'Автоматжуулалт ба интеграци', text: 'Telegram мэдэгдэл, календарь, онбординг', icon: CalendarClock, roles: ['admin', 'manager', 'team_lead'] },
   { to: '/administration/erp', title: 'ERP модулиуд', text: 'Санхүү, борлуулалт, агуулах болон бусад workflow', icon: Landmark, roles: ['admin'] },
   { to: '/administration/admin-access', title: 'Админ хандалт', text: 'Админ хэрэглэгч, нууц үг болон эрх', icon: KeyRound, roles: ['admin'] },
-  { to: '/administration/oyuns', title: 'OYUNS agent', text: 'Компаний өгөгдлийн сан ба агентын сургалт', icon: Bot, roles: ['admin', 'manager'] },
+  { to: '/administration/oyuns', title: 'OYUNS agent', text: 'Компаний өгөгдлийн сан ба агентын сургалт', icon: Bot, roles: ['admin', 'manager', 'team_lead', 'hr', 'member', 'contractor', 'client_auditor', 'legal_counsel'] },
 ]
 
 const TASK_ASSIGNMENT_ROLES = [
@@ -262,8 +262,10 @@ export function AdminAccessSettingsPage() {
 }
 
 export function OyunsAssistantSettingsPage() {
+  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
+  const canManageAgent = roles.includes('admin')
   return <SettingsPage title="OYUNS agent" description="Агентын ашиглах компаний өгөгдлийн санг хянах болон хөгжүүлэх">
     <section className="settings-embedded"><div className="settings-embedded-heading"><BookOpen /><div><h3>Компаний өгөгдлийн сан</h3><p>OYUNS-ийн баталгаатай эх сурвалжууд.</p></div></div><KnowledgePage /></section>
-    <section className="settings-embedded"><div className="settings-embedded-heading"><Code2 /><div><h3>OYUNS сургалт</h3><p>Тодорхойгүй хүсэлтийг review хийж, ойлголт нэмнэ.</p></div></div><DeveloperPage /></section>
+    {canManageAgent && <section className="settings-embedded"><div className="settings-embedded-heading"><Code2 /><div><h3>OYUNS сургалт</h3><p>Тодорхойгүй хүсэлтийг review хийж, ойлголт нэмнэ.</p></div></div><DeveloperPage /></section>}
   </SettingsPage>
 }

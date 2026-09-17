@@ -27,6 +27,7 @@ from pydantic import (
 )
 
 from app.services.knowledge_service import tokenize_search_terms
+from app.services.assistant_text import detect_language as detect_shared_language
 from app.services.task_parser import is_scheduled_task as _is_scheduled_task
 
 log = logging.getLogger(__name__)
@@ -904,15 +905,9 @@ _INFORMATION_QUESTION_RE = re.compile(
 
 
 def detect_language(text: str) -> AssistantLanguage:
-    if _MN_HINT_RE.search(text or ""):
-        return AssistantLanguage.MN
-    if _MN_LATIN_HINT_RE.search(text or ""):
-        return AssistantLanguage.MN
-    if _CYRILLIC_RE.search(text or ""):
-        return AssistantLanguage.RU
-    if re.search(r"[A-Za-z]", text or ""):
-        return AssistantLanguage.EN
-    return AssistantLanguage.MN
+    # Keep the compatibility API aligned with the shared transport detector.
+    # The old local check treated overlapping Cyrillic as Russian.
+    return AssistantLanguage(detect_shared_language(text).value)
 
 
 def is_worker_directory_query(text: str) -> bool:

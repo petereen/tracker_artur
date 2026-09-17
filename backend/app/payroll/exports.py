@@ -132,6 +132,25 @@ def render_protected_payslip(lines: Iterable[str], password: str) -> bytes:
     return output.getvalue()
 
 
+def render_report_pdf(rows: Iterable[Mapping[str, Any]], columns: Iterable[Mapping[str, Any]]) -> bytes:
+    """Small deterministic print/PDF renderer for statutory previews."""
+    columns = list(columns)
+    lines = [" | ".join(str(column.get("header", column.get("key", ""))) for column in columns)]
+    lines.extend(" | ".join(str(row.get(column.get("key"), "")) for column in columns) for row in rows)
+    escaped_lines = []
+    for line in lines[:70]:
+        safe = str(line).encode("latin-1", "replace").decode("latin-1").replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")[:180]
+        escaped_lines.append(f"({safe}) Tj 0 -12 Td")
+    stream = ("BT /F1 8 Tf 36 806 Td " + " ".join(escaped_lines) + " ET").encode("latin-1")
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>", b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"]
+    raw = io.BytesIO(); raw.write(b"%PDF-1.4\n"); offsets = [0]
+    for index, obj in enumerate(objects, start=1): offsets.append(raw.tell()); raw.write(f"{index} 0 obj\n".encode() + obj + b"\nendobj\n")
+    xref = raw.tell(); raw.write(f"xref\n0 {len(objects) + 1}\n".encode()); raw.write(b"0000000000 65535 f \n")
+    for offset in offsets[1:]: raw.write(f"{offset:010d} 00000 n \n".encode())
+    raw.write(f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode())
+    return raw.getvalue()
+
+
 def nd7_summary(payslips: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     payslips = list(payslips)
     totals = defaultdict(lambda: Decimal("0"))
@@ -144,6 +163,24 @@ def nd7_summary(payslips: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         for fund, amount in (slip.get("shi_by_fund") or {}).items():
             fund_totals[str(fund)] += Decimal(str(amount))
     return {key: str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) for key, value in totals.items()} | {"employee_count": len(payslips), "fund_breakdown": {key: str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) for key, value in fund_totals.items()}}
+
+
+def nd7a_summary(payslips: Iterable[Mapping[str, Any]], company: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Employer-facing НД-7А payload; totals are derived from frozen payslips."""
+    return {"company": dict(company or {}), "employer": nd7_summary(payslips)}
+
+
+def nd7b_rows(payslips: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, str], dict[str, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
+    for slip in payslips:
+        for fund, amount in (slip.get("shi_by_fund") or {}).items():
+            payer, _, fund_code = str(fund).partition(":")
+            key = (str(slip.get("insured_code") or ""), payer, fund_code)
+            grouped[key]["amount"] += Decimal(str(amount))
+        for rule in slip.get("shi_rules") or []:
+            key = (str(slip.get("insured_code") or ""), str(rule.get("payer") or ""), str(rule.get("insurance_fund") or ""))
+            grouped[key]["shi_base"] += Decimal(str(rule.get("base", 0)))
+    return [{"contributor_code": key[0], "payer": key[1], "insurance_fund": key[2], "shi_base": str(value.get("shi_base", Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)), "amount": str(value.get("amount", Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))} for key, value in sorted(grouped.items())]
 
 
 def nd8_rows(payslips: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:

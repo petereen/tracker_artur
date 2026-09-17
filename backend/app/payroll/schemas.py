@@ -14,7 +14,15 @@ class SHIRateInput(BaseModel):
     hazard_class: str = Field(default="standard", max_length=16)
     rate: Decimal = Field(ge=0, le=1)
     base_floor: Decimal = Field(default=Decimal("0"), ge=0)
+    lower_bound: Decimal = Field(default=Decimal("0"), ge=0)
+    upper_bound: Decimal | None = Field(default=None, gt=0)
+    calculation_mode: Literal["flat_percent", "marginal_tiers", "band_rate", "formula"] = "flat_percent"
+    fixed_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    base_tax: Decimal = Field(default=Decimal("0"), ge=0)
+    base_ceiling_policy: Literal["profile", "none"] = "profile"
+    formula: str | None = Field(default=None, max_length=1000)
     exemption_code: str | None = Field(default=None, max_length=64)
+    position: int = Field(default=0, ge=0)
 
 
 class PITBracketInput(BaseModel):
@@ -23,6 +31,7 @@ class PITBracketInput(BaseModel):
     marginal_rate: Decimal = Field(ge=0, le=1)
     base_tax: Decimal = Field(default=Decimal("0"), ge=0)
     period_basis: Literal["monthly", "annual", "period"] = "annual"
+    position: int = Field(default=0, ge=0)
 
 
 class ReliefTierInput(BaseModel):
@@ -32,6 +41,7 @@ class ReliefTierInput(BaseModel):
     fixed_amount: Decimal = Field(ge=0)
     amount_basis: Literal["monthly", "annual", "period"] = "annual"
     formula: str | None = None
+    position: int = Field(default=0, ge=0)
 
 
 class StatutoryProfileInput(BaseModel):
@@ -44,6 +54,11 @@ class StatutoryProfileInput(BaseModel):
     minimum_wage: Decimal = Field(ge=0)
     shi_ceiling_multiplier: Decimal = Field(ge=0)
     pit_withholding_method: Literal["ytd_cumulative", "isolated_period"] = "ytd_cumulative"
+    pit_calculation_mode: Literal["flat_percent", "marginal_tiers", "band_rate", "formula"] = "marginal_tiers"
+    pit_formula: str | None = Field(default=None, max_length=1000)
+    standard_daily_hours: Decimal = Field(default=Decimal("8"), gt=0, le=24)
+    standard_weekly_hours: Decimal = Field(default=Decimal("40"), gt=0, le=168)
+    standard_workweek: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5], min_length=1, max_length=7)
     rounding_policy: dict[str, Any] = Field(default_factory=dict)
     leave_policy: dict[str, Any] = Field(default_factory=lambda: {"lookback_months": 12, "missing_history_fallback": "error"})
     source_references: list[str] = Field(default_factory=list)
@@ -65,6 +80,8 @@ class SalaryComponentInput(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     component_kind: Literal["earning", "deduction", "employer_cost"]
     formula: str = Field(min_length=1, max_length=1000)
+    amount_mode: Literal["fixed", "percentage", "formula"] = "formula"
+    percentage_basis: str | None = Field(default=None, max_length=80)
     proration_basis: Literal["none", "working_days", "calendar_days", "hours"] = "none"
     is_taxable: bool = True
     is_shi_subject: bool = True
@@ -79,6 +96,75 @@ class SalaryComponentInput(BaseModel):
     account_id: int | None = None
     cost_center_id: int | None = None
     metadata_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class ContributorTypeInput(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=240)
+    description: str | None = Field(default=None, max_length=2000)
+    effective_from: date
+    effective_to: date | None = None
+    source_references: list[str] = Field(default_factory=list)
+    status: Literal["draft", "active", "archived"] = "draft"
+
+
+class WorkPolicyInput(BaseModel):
+    code: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=160)
+    scope_type: Literal["organization", "job_title", "employee"] = "organization"
+    scope_key: str = Field(default="*", max_length=160)
+    effective_from: date
+    effective_to: date | None = None
+    daily_hours: Decimal = Field(gt=0, le=24)
+    weekly_hours: Decimal = Field(gt=0, le=168)
+    workweek: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5], min_length=1, max_length=7)
+    overtime_rules: dict[str, Any] = Field(default_factory=dict)
+    stacking_policy: Literal["exclusive", "stack"] = "exclusive"
+    source_references: list[str] = Field(default_factory=list)
+
+
+class FormulaValidationInput(BaseModel):
+    formula: str = Field(min_length=1, max_length=1000)
+    variables: dict[str, Decimal | int | float | str | bool] = Field(default_factory=dict)
+
+
+class FormulaPreviewInput(BaseModel):
+    formula: str = Field(min_length=1, max_length=1000)
+    context: dict[str, Decimal | int | float | str | bool] = Field(default_factory=dict)
+    quantum: Decimal = Field(default=Decimal("0.01"), gt=0)
+
+
+class FormulaVariableInput(BaseModel):
+    code: str = Field(min_length=1, max_length=80, pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(min_length=1, max_length=200)
+    data_type: Literal["decimal", "integer", "boolean", "text"] = "decimal"
+    default_value: str | None = None
+    source: Literal["manual", "attendance", "leave", "ytd", "statutory"] = "manual"
+    required: bool = False
+    minimum: Decimal | None = None
+    maximum: Decimal | None = None
+
+
+class StatutorySimulationInput(BaseModel):
+    base_salary: Decimal = Field(default=Decimal("0"), ge=0)
+    taxable_income: Decimal = Field(ge=0)
+    shi_subject_gross: Decimal = Field(ge=0)
+    components: list[dict[str, Any]] = Field(default_factory=list)
+    context: dict[str, Decimal | int | float | str | bool] = Field(default_factory=dict)
+    other_deductions: Decimal = Field(default=Decimal("0"), ge=0)
+    insured_category: str = Field(default="employee", max_length=32)
+    hazard_class: str = Field(default="standard", max_length=32)
+    prior_month_shi_base: Decimal = Field(default=Decimal("0"), ge=0)
+    relief_eligibilities: list[str] = Field(default_factory=list)
+    exemption_codes: list[str] = Field(default_factory=list)
+
+
+class ReportTemplateInput(BaseModel):
+    kind: Literal["salary_register", "nd7a", "nd7b", "nd8", "tt11"]
+    version: int = Field(default=1, ge=1)
+    template: dict[str, Any] = Field(default_factory=dict)
+    required_keys: list[str] = Field(default_factory=list)
+    source_references: list[str] = Field(default_factory=list)
 
 
 class SalaryStructureInput(BaseModel):
@@ -280,6 +366,8 @@ class SalaryComponentMasterInput(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     component_kind: Literal["earning", "deduction", "employer_cost"]
     formula: str = Field(min_length=1, max_length=1000)
+    amount_mode: Literal["fixed", "percentage", "formula"] = "formula"
+    percentage_basis: str | None = Field(default=None, max_length=80)
     proration_basis: Literal["none", "working_days", "calendar_days", "hours"] = "none"
     is_taxable: bool = True
     is_shi_subject: bool = True

@@ -3,7 +3,8 @@ from pydantic import ValidationError
 
 from fastapi import HTTPException
 
-from app.routers.knowledge import KnowledgeCreate, KnowledgeUpdate, _safe_attachment_filename
+from app.core.enterprise_deps import build_actor_context
+from app.routers.knowledge import KnowledgeCreate, KnowledgeUpdate, _can_manage_knowledge, _safe_attachment_filename
 
 
 def test_knowledge_create_strips_fields():
@@ -46,3 +47,24 @@ def test_knowledge_attachment_rejects_unsupported_file_type():
     with pytest.raises(HTTPException) as exc:
         _safe_attachment_filename("unsafe.exe")
     assert exc.value.status_code == 415
+
+
+def test_company_knowledge_reader_access_is_read_only_for_members():
+    member = build_actor_context(
+        account_id=7,
+        organization_id=1,
+        employee_id=7,
+        email="member@example.com",
+        locale="mn",
+        roles=frozenset({"member"}),
+    )
+    admin = build_actor_context(
+        account_id=8,
+        organization_id=1,
+        employee_id=8,
+        email="admin@example.com",
+        locale="mn",
+        roles=frozenset({"admin"}),
+    )
+    assert _can_manage_knowledge(member) is False
+    assert _can_manage_knowledge(admin) is True

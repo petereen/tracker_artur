@@ -12,6 +12,7 @@ import {
   useUpdateKnowledge,
 } from '../api/hooks'
 import { api } from '../api/client'
+import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 
 const EMPTY_FORM: KnowledgeInput = {
   title: '',
@@ -21,6 +22,8 @@ const EMPTY_FORM: KnowledgeInput = {
 }
 
 export function KnowledgePage() {
+  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
+  const canManageKnowledge = roles.includes('admin')
   const { data: entries = [], isLoading } = useKnowledge()
   const create = useCreateKnowledge()
   const createWithAttachment = useCreateKnowledgeWithAttachment()
@@ -124,10 +127,12 @@ export function KnowledgePage() {
     <div>
       <PageHeader
         title="Компаний өгөгдлийн сан"
-        sub="OYUNS agent-ын хариултад ашиглах бодлого, журам, FAQ болон заавар"
+        sub={canManageKnowledge ? 'OYUNS agent-ын хариултад ашиглах бодлого, журам, FAQ болон заавар' : 'Байгууллагын баталгаатай бодлого, журам, FAQ болон зааврыг харах'}
       >
-        <Btn variant="primary" onClick={openCreate}>+ Мэдээлэл нэмэх</Btn>
+        {canManageKnowledge && <Btn variant="primary" onClick={openCreate}>+ Мэдээлэл нэмэх</Btn>}
       </PageHeader>
+
+      {!canManageKnowledge && <p className="text-sm text-muted mb-4">Та компаний өгөгдлийн санг зөвхөн харах эрхтэй.</p>}
 
       <div className="max-w-[760px] mb-5">
         <Input
@@ -174,11 +179,11 @@ export function KnowledgePage() {
                   Шинэчилсэн: {new Date(entry.updated_at).toLocaleString()}
                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Toggle checked={entry.is_active} onChange={(value) => toggleActive(entry, value)} />
-                <Btn onClick={() => openEdit(entry)}>Засах</Btn>
-                <Btn variant="danger" onClick={() => confirmDelete(entry)}>Устгах</Btn>
-              </div>
+              {canManageKnowledge && <div className="flex items-center gap-2 flex-shrink-0">
+                  <Toggle checked={entry.is_active} onChange={(value) => toggleActive(entry, value)} />
+                  <Btn onClick={() => openEdit(entry)}>Засах</Btn>
+                  <Btn variant="danger" onClick={() => confirmDelete(entry)}>Устгах</Btn>
+                </div>}
             </div>
           </Card>
         ))}

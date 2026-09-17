@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -16,7 +17,8 @@ from app.models.models import (
     ERPGeneralLedgerEntry, PayrollAdvance, PayrollBankExportProfile, PayrollEmployeeAccumulator,
     PayrollExportArtifact, PayrollPostingProfile, PayrollRun, Payslip, PayslipLineItem,
     PayrollSalaryComponentMaster, PayrollPaymentAllocation, PayrollPaymentBatch, PayrollPaymentReversal, PayrollStatementImport, PayrollStatementLine,
-    SalaryComponent, SalaryStructure, SalaryStructureVersion, SHIRateTier, PITBracketTier, TaxReliefTier, StatutoryConfigProfile, TimeOff, WorkTimeEntry,
+    SalaryComponent, SalaryStructure, SalaryStructureVersion, SHIRateTier, PITBracketTier, TaxReliefTier, StatutoryConfigProfile, SocialInsuranceContributorType, PayrollWorkPolicy, TimeOff, WorkTimeEntry,
+    PayslipStatutoryLine,
 )
 from app.erp.service import validate_posting_gate
 from app.services.secret_box import encrypt_secret
@@ -44,10 +46,109 @@ def _validate_date_range(start: date, end: date | None) -> None:
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_effective_range"})
 
 
+def _validate_rule_modes(data: StatutoryProfileInput) -> None:
+    if sorted(set(data.standard_workweek)) != data.standard_workweek or any(day < 1 or day > 7 for day in data.standard_workweek):
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_workweek", "path": "standard_workweek", "message": "Weekdays must be unique ISO values from 1 to 7."})
+    for index, rule in enumerate(data.shi_rates):
+        if rule.upper_bound is not None and rule.upper_bound <= rule.lower_bound:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_tier", "path": f"shi_rates[{index}]"})
+        if rule.calculation_mode == "formula":
+            try:
+                _SafeFormula(rule.formula or "")
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_formula", "path": f"shi_rates[{index}].formula", "message": str(exc)}) from exc
+    if data.pit_calculation_mode == "formula":
+        try:
+            _SafeFormula(data.pit_formula or "")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_pit_formula", "path": "pit_formula", "message": str(exc)}) from exc
+    grouped: dict[tuple[str, str, str, str], list[Any]] = {}
+    for rule in data.shi_rates:
+        grouped.setdefault((rule.payer, rule.insurance_fund, rule.insured_category, rule.hazard_class), []).append(rule)
+    for key, rows in grouped.items():
+        modes = {row.calculation_mode for row in rows}
+        if "marginal_tiers" in modes:
+            ordered = sorted(rows, key=lambda row: row.lower_bound)
+            if ordered[0].lower_bound != 0:
+                raise HTTPException(status_code=422, detail={"code": "payroll_shi_tier_gap", "path": "shi_rates", "message": f"Marginal SHI tiers for {key} must start at zero."})
+            previous: Decimal | None = None
+            for row in ordered:
+                if previous is not None and row.lower_bound != previous:
+                    raise HTTPException(status_code=422, detail={"code": "payroll_shi_tier_gap", "path": "shi_rates", "message": f"Marginal SHI tiers for {key} contain a gap or overlap."})
+                previous = row.upper_bound
+            if previous is not None:
+                raise HTTPException(status_code=422, detail={"code": "payroll_shi_tier_unbounded_required", "path": "shi_rates", "message": f"Marginal SHI tiers for {key} need an open-ended final tier."})
+    for index, bracket in enumerate(data.pit_brackets):
+        if bracket.upper_bound is not None and bracket.upper_bound <= bracket.lower_bound:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_pit_bracket", "path": f"pit_brackets[{index}]"})
+    if data.pit_calculation_mode == "marginal_tiers":
+        for basis in {bracket.period_basis for bracket in data.pit_brackets}:
+            ordered = sorted((bracket for bracket in data.pit_brackets if bracket.period_basis == basis), key=lambda row: row.lower_bound)
+            if ordered and ordered[0].lower_bound != 0:
+                raise HTTPException(status_code=422, detail={"code": "payroll_pit_tier_gap", "path": "pit_brackets", "message": f"{basis} PIT tiers must start at zero.", "remediation": "Add a zero-based first tier."})
+            previous: Decimal | None = None
+            for row in ordered:
+                if previous is not None and row.lower_bound != previous:
+                    raise HTTPException(status_code=422, detail={"code": "payroll_pit_tier_gap", "path": "pit_brackets", "message": f"{basis} PIT tiers contain a gap or overlap.", "remediation": "Make each lower bound equal the prior upper bound."})
+                previous = row.upper_bound
+            if ordered and previous is not None:
+                raise HTTPException(status_code=422, detail={"code": "payroll_pit_tier_unbounded_required", "path": "pit_brackets", "message": f"{basis} PIT tiers need an open-ended final tier.", "remediation": "Leave the final upper bound empty."})
+
+
+def _validate_persisted_tiers(profile: StatutoryConfigProfile, rates: list[SHIRateTier], brackets: list[PITBracketTier]) -> None:
+    """Apply the same gap/overlap checks when calculating or publishing old rows."""
+    grouped: dict[tuple[str, str, str, str], list[SHIRateTier]] = {}
+    for row in rates:
+        if getattr(row, "base_ceiling_policy", "profile") not in {"profile", "none"}:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_cap_policy", "path": "shi_rates", "message": "SHI cap policy must be profile or none.", "remediation": "Choose a supported cap policy."})
+        if Decimal(str(row.rate)) < 0 or Decimal(str(row.base_floor)) < 0 or Decimal(str(row.fixed_amount)) < 0 or Decimal(str(row.base_tax)) < 0:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_rule", "path": "shi_rates", "message": "Rates, floors, and fixed/base amounts cannot be negative.", "remediation": "Correct the rule before calculating or publishing."})
+        if row.upper_bound is not None and Decimal(str(row.upper_bound)) <= Decimal(str(row.lower_bound)):
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_tier", "path": "shi_rates", "message": "Every upper bound must be greater than its lower bound.", "remediation": "Correct the tier bounds."})
+        grouped.setdefault((row.payer, row.insurance_fund, row.insured_category, row.hazard_class), []).append(row)
+    for key, rows in grouped.items():
+        modes = {row.calculation_mode or "flat_percent" for row in rows}
+        if "marginal_tiers" not in modes:
+            continue
+        if modes != {"marginal_tiers"}:
+            raise HTTPException(status_code=422, detail={"code": "payroll_mixed_shi_modes", "path": "shi_rates", "message": f"SHI rules for {key} must use one calculation mode.", "remediation": "Split the contributor/fund/hazard combination into a separate rule set."})
+        ordered = sorted(rows, key=lambda row: Decimal(str(row.lower_bound)))
+        if Decimal(str(ordered[0].lower_bound)) != 0:
+            raise HTTPException(status_code=422, detail={"code": "payroll_shi_tier_gap", "path": "shi_rates", "message": f"Marginal SHI tiers for {key} must start at zero.", "remediation": "Add a zero-based first tier."})
+        previous: Decimal | None = None
+        for row in ordered:
+            lower = Decimal(str(row.lower_bound))
+            if previous is not None and lower != previous:
+                raise HTTPException(status_code=422, detail={"code": "payroll_shi_tier_gap", "path": "shi_rates", "message": f"Marginal SHI tiers for {key} contain a gap or overlap.", "remediation": "Make each lower bound equal the prior upper bound."})
+            previous = Decimal(str(row.upper_bound)) if row.upper_bound is not None else None
+        if previous is not None:
+            raise HTTPException(status_code=422, detail={"code": "payroll_shi_tier_unbounded_required", "path": "shi_rates", "message": f"Marginal SHI tiers for {key} need an open-ended final tier.", "remediation": "Leave the final upper bound empty."})
+    if profile.pit_calculation_mode != "marginal_tiers":
+        return
+    for basis in {row.period_basis for row in brackets}:
+        ordered = sorted((row for row in brackets if row.period_basis == basis), key=lambda row: Decimal(str(row.lower_bound)))
+        if not ordered:
+            continue
+        if Decimal(str(ordered[0].lower_bound)) != 0:
+            raise HTTPException(status_code=422, detail={"code": "payroll_pit_tier_gap", "path": "pit_brackets", "message": f"{basis} PIT tiers must start at zero.", "remediation": "Add a zero-based first tier."})
+        previous: Decimal | None = None
+        for row in ordered:
+            lower = Decimal(str(row.lower_bound))
+            if Decimal(str(row.marginal_rate)) < 0 or Decimal(str(row.base_tax)) < 0:
+                raise HTTPException(status_code=422, detail={"code": "payroll_invalid_pit_bracket", "path": "pit_brackets", "message": "PIT rates and base tax cannot be negative.", "remediation": "Correct the bracket before calculating or publishing."})
+            if row.upper_bound is not None and Decimal(str(row.upper_bound)) <= lower:
+                raise HTTPException(status_code=422, detail={"code": "payroll_invalid_pit_bracket", "path": "pit_brackets", "message": "Every upper bound must be greater than its lower bound.", "remediation": "Correct the bracket bounds."})
+            if previous is not None and lower != previous:
+                raise HTTPException(status_code=422, detail={"code": "payroll_pit_tier_gap", "path": "pit_brackets", "message": f"{basis} PIT tiers contain a gap or overlap.", "remediation": "Make each lower bound equal the prior upper bound."})
+            previous = Decimal(str(row.upper_bound)) if row.upper_bound is not None else None
+        if previous is not None:
+            raise HTTPException(status_code=422, detail={"code": "payroll_pit_tier_unbounded_required", "path": "pit_brackets", "message": f"{basis} PIT tiers need an open-ended final tier.", "remediation": "Leave the final upper bound empty."})
+
+
 def component_master_out(row: PayrollSalaryComponentMaster) -> dict[str, Any]:
     return {
         "id": row.id, "code": row.code, "name": row.name, "description": row.description,
-        "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis,
+        "component_kind": row.component_kind, "formula": row.formula, "amount_mode": row.amount_mode, "percentage_basis": row.percentage_basis, "proration_basis": row.proration_basis,
         "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject,
         "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible,
         "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly),
@@ -62,6 +163,11 @@ async def create_component_master(db: AsyncSession, actor: ActorContext, data: S
     duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code))
     if duplicate:
         raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
+    expression = data.formula if data.amount_mode != "percentage" else f"({data.percentage_basis or 'base_salary'}) * ({data.formula})"
+    try:
+        _SafeFormula(expression)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_formula", "path": "formula", "message": str(exc), "remediation": "Correct the formula using the safe formula editor."}) from exc
     values = data.model_dump()
     row = PayrollSalaryComponentMaster(organization_id=actor.organization_id, created_by_account_id=actor.account_id, is_active=True, status="active", **values)
     db.add(row)
@@ -95,7 +201,7 @@ async def update_component_master(db: AsyncSession, actor: ActorContext, row: Pa
         raise HTTPException(status_code=404, detail="Salary component not found")
     usage = await component_master_usage(db, actor, row.id)
     values = data.model_dump()
-    locked = {"code", "component_kind", "formula", "proration_basis", "is_taxable", "is_shi_subject", "is_non_taxable_allowance", "is_leave_average_eligible", "is_flexible_benefit", "max_benefit_amount_yearly", "pay_against_benefit_claim", "only_tax_impact", "payer", "account_id", "cost_center_id"}
+    locked = {"code", "component_kind", "formula", "amount_mode", "percentage_basis", "proration_basis", "is_taxable", "is_shi_subject", "is_non_taxable_allowance", "is_leave_average_eligible", "is_flexible_benefit", "max_benefit_amount_yearly", "pay_against_benefit_claim", "only_tax_impact", "payer", "account_id", "cost_center_id"}
     if usage["in_use"]:
         changed = [key for key in locked if values.get(key) != getattr(row, key)]
         if changed:
@@ -103,6 +209,11 @@ async def update_component_master(db: AsyncSession, actor: ActorContext, row: Pa
     duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.id != row.id))
     if duplicate:
         raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
+    expression = data.formula if data.amount_mode != "percentage" else f"({data.percentage_basis or 'base_salary'}) * ({data.formula})"
+    try:
+        _SafeFormula(expression)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_formula", "path": "formula", "message": str(exc), "remediation": "Correct the formula using the safe formula editor."}) from exc
     for key, value in values.items():
         setattr(row, key, value)
     row.status = "active" if row.is_active else "archived"
@@ -257,9 +368,19 @@ async def preflight_run(db: AsyncSession, actor: ActorContext, data: PayrollRunI
     return {"can_create": not blockers, "employee_ids": employee_ids, "employee_count": len(employee_ids), "blockers": blockers, "warnings": warnings, "evaluated_at": datetime.now(timezone.utc).isoformat()}
 
 
-async def load_rules(db: AsyncSession, profile: StatutoryConfigProfile, *, insured_category: str = "employee", hazard_class: str = "standard") -> StatutoryRules:
+async def load_rules(db: AsyncSession, profile: StatutoryConfigProfile, *, insured_category: str = "employee", hazard_class: str = "standard", effective_date: date | None = None) -> StatutoryRules:
+    tax_point = effective_date or profile.effective_from
+    contributor_master_exists = await db.scalar(select(SocialInsuranceContributorType.id).where(SocialInsuranceContributorType.organization_id == profile.organization_id).limit(1))
+    if contributor_master_exists:
+        contributor = await db.scalar(select(SocialInsuranceContributorType.id).where(SocialInsuranceContributorType.organization_id == profile.organization_id, SocialInsuranceContributorType.code == insured_category, SocialInsuranceContributorType.status == "active", SocialInsuranceContributorType.effective_from <= tax_point, (SocialInsuranceContributorType.effective_to.is_(None) | (SocialInsuranceContributorType.effective_to >= tax_point))).limit(1))
+        if not contributor:
+            raise HTTPException(status_code=422, detail={"code": "payroll_contributor_type_invalid", "path": "insured_category", "message": f"Contributor code {insured_category!r} is not active for the statutory profile effective date.", "remediation": "Publish the contributor type or correct the employee payroll profile."})
     shi_rows = (await db.execute(select(SHIRateTier).where(SHIRateTier.profile_id == profile.id, SHIRateTier.insured_category == insured_category, SHIRateTier.hazard_class == hazard_class).order_by(SHIRateTier.position, SHIRateTier.id))).scalars().all()
-    pit_candidates = (await db.execute(select(PITBracketTier).where(PITBracketTier.profile_id == profile.id).order_by(PITBracketTier.position, PITBracketTier.id))).scalars().all()
+    if not shi_rows:
+        raise HTTPException(status_code=422, detail={"code": "payroll_missing_contributor_rules", "path": "shi_rates", "message": f"No SHI rules match contributor category {insured_category!r} and hazard class {hazard_class!r}.", "remediation": "Add an effective SHI rule for this contributor/hazard combination or correct the employee profile."})
+    all_brackets = list((await db.execute(select(PITBracketTier).where(PITBracketTier.profile_id == profile.id).order_by(PITBracketTier.position, PITBracketTier.id))).scalars().all())
+    _validate_persisted_tiers(profile, list(shi_rows), all_brackets)
+    pit_candidates = all_brackets
     # A profile may retain annual, monthly, and period brackets for audit or
     # alternate withholding methods. Never mix bases in one calculation.
     preferred_basis = "annual" if profile.pit_withholding_method == "ytd_cumulative" else "monthly"
@@ -273,13 +394,34 @@ async def load_rules(db: AsyncSession, profile: StatutoryConfigProfile, *, insur
     relief_rows = [row for row in relief_candidates if row.amount_basis == selected_relief_basis]
     return StatutoryRules(
         minimum_wage=Decimal(str(profile.minimum_wage)), shi_ceiling_multiplier=Decimal(str(profile.shi_ceiling_multiplier)),
-        shi_rates=tuple(SHIRate(payer=row.payer, insurance_fund=row.insurance_fund, rate=Decimal(str(row.rate)), base_floor=Decimal(str(row.base_floor)), exemption_code=row.exemption_code) for row in shi_rows),
-        pit_brackets=tuple(PITBracket(lower_bound=Decimal(str(row.lower_bound)), upper_bound=Decimal(str(row.upper_bound)) if row.upper_bound is not None else None, marginal_rate=Decimal(str(row.marginal_rate)), base_tax=Decimal(str(row.base_tax)), period_basis=row.period_basis) for row in pit_rows),
+        shi_rates=tuple(SHIRate(payer=row.payer, insurance_fund=row.insurance_fund, rate=Decimal(str(row.rate)), base_floor=Decimal(str(row.base_floor)), lower_bound=Decimal(str(row.lower_bound)), upper_bound=Decimal(str(row.upper_bound)) if row.upper_bound is not None else None, calculation_mode=row.calculation_mode, fixed_amount=Decimal(str(row.fixed_amount)), base_tax=Decimal(str(row.base_tax)), base_ceiling_policy=getattr(row, "base_ceiling_policy", "profile"), formula=row.formula, exemption_code=row.exemption_code) for row in shi_rows),
+        pit_brackets=tuple(PITBracket(lower_bound=Decimal(str(row.lower_bound)), upper_bound=Decimal(str(row.upper_bound)) if row.upper_bound is not None else None, marginal_rate=Decimal(str(row.marginal_rate)), base_tax=Decimal(str(row.base_tax)), period_basis=row.period_basis, formula=getattr(row, "formula", None)) for row in pit_rows),
         relief_tiers=tuple(CalcReliefTier(eligibility_code=row.eligibility_code, lower_bound=Decimal(str(row.lower_bound)), upper_bound=Decimal(str(row.upper_bound)) if row.upper_bound is not None else None, fixed_amount=Decimal(str(row.fixed_amount)), amount_basis=row.amount_basis, formula=row.formula) for row in relief_rows),
         pit_withholding_method=profile.pit_withholding_method,
+        pit_calculation_mode=profile.pit_calculation_mode,
+        pit_formula=profile.pit_formula,
         rounding_quantum=Decimal(str((profile.rounding_policy or {}).get("quantum", "0.01"))),
         leave_policy=profile.leave_policy or {"lookback_months": 12, "missing_history_fallback": "error"},
     )
+
+
+async def resolve_work_policy(db: AsyncSession, organization_id: int, employee_id: int, tax_point: date, *, job_title: str | None = None) -> PayrollWorkPolicy | None:
+    """Resolve employee → job title → organization policy at the tax point."""
+    candidates = [("employee", str(employee_id)), ("job_title", job_title), ("organization", "*")]
+    for scope_type, scope_key in candidates:
+        if not scope_key:
+            continue
+        policy = await db.scalar(select(PayrollWorkPolicy).where(
+            PayrollWorkPolicy.organization_id == organization_id,
+            PayrollWorkPolicy.scope_type == scope_type,
+            PayrollWorkPolicy.scope_key == scope_key,
+            PayrollWorkPolicy.status.in_(("active", "published")),
+            PayrollWorkPolicy.effective_from <= tax_point,
+            (PayrollWorkPolicy.effective_to.is_(None) | (PayrollWorkPolicy.effective_to >= tax_point)),
+        ).order_by(PayrollWorkPolicy.effective_from.desc(), PayrollWorkPolicy.id.desc()).limit(1))
+        if policy:
+            return policy
+    return None
 
 
 def profile_out(profile: StatutoryConfigProfile, *, rates: list[SHIRateTier] | None = None, brackets: list[PITBracketTier] | None = None, reliefs: list[TaxReliefTier] | None = None) -> dict[str, Any]:
@@ -287,10 +429,10 @@ def profile_out(profile: StatutoryConfigProfile, *, rates: list[SHIRateTier] | N
         "id": profile.id, "organization_id": profile.organization_id, "code": profile.code, "jurisdiction": profile.jurisdiction,
         "version": profile.version, "status": profile.status, "effective_from": profile.effective_from.isoformat(), "effective_to": profile.effective_to.isoformat() if profile.effective_to else None,
         "tax_point_basis": profile.tax_point_basis, "currency": profile.currency, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier),
-        "pit_withholding_method": profile.pit_withholding_method, "rounding_policy": profile.rounding_policy, "leave_policy": profile.leave_policy,
+        "pit_withholding_method": profile.pit_withholding_method, "pit_calculation_mode": profile.pit_calculation_mode, "pit_formula": profile.pit_formula, "standard_daily_hours": str(profile.standard_daily_hours), "standard_weekly_hours": str(profile.standard_weekly_hours), "standard_workweek": profile.standard_workweek, "rounding_policy": profile.rounding_policy, "leave_policy": profile.leave_policy,
         "source_references": profile.source_references, "is_example": profile.is_example, "checksum": profile.checksum,
-        "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "exemption_code": row.exemption_code} for row in (rates or [])],
-        "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax)} for row in (brackets or [])],
+        "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "calculation_mode": row.calculation_mode, "fixed_amount": str(row.fixed_amount), "base_tax": str(row.base_tax), "base_ceiling_policy": getattr(row, "base_ceiling_policy", "profile"), "formula": row.formula, "exemption_code": row.exemption_code} for row in (rates or [])],
+        "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax), "formula": getattr(row, "formula", None)} for row in (brackets or [])],
         "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "fixed_amount": str(row.fixed_amount), "amount_basis": row.amount_basis, "formula": row.formula} for row in (reliefs or [])],
     }
 
@@ -305,6 +447,7 @@ async def create_statutory_profile(db: AsyncSession, actor: ActorContext, data: 
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_rounding_quantum"}) from exc
     if quantum <= 0:
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_rounding_quantum"})
+    _validate_rule_modes(data)
     for bracket in data.pit_brackets:
         if bracket.upper_bound is not None and bracket.upper_bound <= bracket.lower_bound:
             raise HTTPException(status_code=422, detail={"code": "payroll_invalid_pit_bracket"})
@@ -329,9 +472,9 @@ async def create_statutory_profile(db: AsyncSession, actor: ActorContext, data: 
     payload["currency"] = data.currency.upper()
     profile = StatutoryConfigProfile(organization_id=actor.organization_id, **payload, checksum=_hash(data.model_dump(mode="json")), created_by_account_id=actor.account_id)
     db.add(profile); await db.flush()
-    db.add_all([SHIRateTier(profile_id=profile.id, **row.model_dump()) for row in data.shi_rates])
-    db.add_all([PITBracketTier(profile_id=profile.id, **row.model_dump()) for row in data.pit_brackets])
-    db.add_all([TaxReliefTier(profile_id=profile.id, **row.model_dump()) for row in data.relief_tiers])
+    db.add_all([SHIRateTier(profile_id=profile.id, **{**row.model_dump(), "position": row.position if row.position else index}) for index, row in enumerate(data.shi_rates)])
+    db.add_all([PITBracketTier(profile_id=profile.id, **{**row.model_dump(), "position": row.position if row.position else index}) for index, row in enumerate(data.pit_brackets)])
+    db.add_all([TaxReliefTier(profile_id=profile.id, **{**row.model_dump(), "position": row.position if row.position else index}) for index, row in enumerate(data.relief_tiers)])
     return profile
 
 
@@ -350,6 +493,7 @@ async def update_statutory_profile(db: AsyncSession, actor: ActorContext, profil
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_rounding_quantum"}) from exc
     if quantum <= 0:
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_rounding_quantum"})
+    _validate_rule_modes(data)
     for bracket in data.pit_brackets:
         if bracket.upper_bound is not None and bracket.upper_bound <= bracket.lower_bound:
             raise HTTPException(status_code=422, detail={"code": "payroll_invalid_pit_bracket"})
@@ -377,9 +521,9 @@ async def update_statutory_profile(db: AsyncSession, actor: ActorContext, profil
     await db.execute(delete(SHIRateTier).where(SHIRateTier.profile_id == profile.id))
     await db.execute(delete(PITBracketTier).where(PITBracketTier.profile_id == profile.id))
     await db.execute(delete(TaxReliefTier).where(TaxReliefTier.profile_id == profile.id))
-    db.add_all([SHIRateTier(profile_id=profile.id, **row.model_dump()) for row in data.shi_rates])
-    db.add_all([PITBracketTier(profile_id=profile.id, **row.model_dump()) for row in data.pit_brackets])
-    db.add_all([TaxReliefTier(profile_id=profile.id, **row.model_dump()) for row in data.relief_tiers])
+    db.add_all([SHIRateTier(profile_id=profile.id, **{**row.model_dump(), "position": row.position if row.position else index}) for index, row in enumerate(data.shi_rates)])
+    db.add_all([PITBracketTier(profile_id=profile.id, **{**row.model_dump(), "position": row.position if row.position else index}) for index, row in enumerate(data.pit_brackets)])
+    db.add_all([TaxReliefTier(profile_id=profile.id, **{**row.model_dump(), "position": row.position if row.position else index}) for index, row in enumerate(data.relief_tiers)])
     await db.flush()
     return profile
 
@@ -407,10 +551,10 @@ async def bump_statutory_profile(db: AsyncSession, actor: ActorContext, profile:
         "code": profile.code, "version": next_version, "effective_from": effective_from,
         "effective_to": profile.effective_to, "tax_point_basis": profile.tax_point_basis, "currency": profile.currency,
         "minimum_wage": profile.minimum_wage, "shi_ceiling_multiplier": profile.shi_ceiling_multiplier,
-        "pit_withholding_method": profile.pit_withholding_method, "rounding_policy": profile.rounding_policy,
+        "pit_withholding_method": profile.pit_withholding_method, "pit_calculation_mode": profile.pit_calculation_mode, "pit_formula": profile.pit_formula, "standard_daily_hours": profile.standard_daily_hours, "standard_weekly_hours": profile.standard_weekly_hours, "standard_workweek": profile.standard_workweek, "rounding_policy": profile.rounding_policy,
         "leave_policy": profile.leave_policy, "source_references": profile.source_references, "is_example": profile.is_example,
-        "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": row.rate, "base_floor": row.base_floor, "exemption_code": row.exemption_code} for row in rates],
-        "pit_brackets": [{"lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "marginal_rate": row.marginal_rate, "base_tax": row.base_tax, "period_basis": row.period_basis} for row in brackets],
+        "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": row.rate, "base_floor": row.base_floor, "lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "calculation_mode": row.calculation_mode, "fixed_amount": row.fixed_amount, "base_tax": row.base_tax, "base_ceiling_policy": getattr(row, "base_ceiling_policy", "profile"), "formula": row.formula, "exemption_code": row.exemption_code} for row in rates],
+        "pit_brackets": [{"lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "marginal_rate": row.marginal_rate, "base_tax": row.base_tax, "period_basis": row.period_basis, "formula": getattr(row, "formula", None)} for row in brackets],
         "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "fixed_amount": row.fixed_amount, "amount_basis": row.amount_basis, "formula": row.formula} for row in reliefs],
     })
     successor = await create_statutory_profile(db, actor, data)
@@ -427,11 +571,28 @@ async def publish_profile(db: AsyncSession, actor: ActorContext, profile: Statut
         raise HTTPException(status_code=409, detail={"code": "payroll_profile_already_published"})
     if profile.is_example and not acknowledge_example:
         raise HTTPException(status_code=409, detail={"code": "payroll_example_profile_requires_acknowledgement"})
+    if not profile.source_references:
+        raise HTTPException(status_code=422, detail={"code": "payroll_source_reference_required", "path": "source_references", "message": "Published statutory profiles must cite an authoritative source.", "remediation": "Add the current Legalinfo law/resolution reference and obtain accountant approval."})
     rates = (await db.execute(select(SHIRateTier).where(SHIRateTier.profile_id == profile.id))).scalars().all()
     brackets = (await db.execute(select(PITBracketTier).where(PITBracketTier.profile_id == profile.id).order_by(PITBracketTier.position))).scalars().all()
     reliefs = (await db.execute(select(TaxReliefTier).where(TaxReliefTier.profile_id == profile.id).order_by(TaxReliefTier.position))).scalars().all()
-    if not rates or not brackets:
+    if not rates or (profile.pit_calculation_mode != "formula" and not brackets):
         raise HTTPException(status_code=422, detail={"code": "payroll_profile_rules_incomplete"})
+    _validate_persisted_tiers(profile, list(rates), list(brackets))
+    if any(row.calculation_mode == "formula" and not row.formula for row in rates):
+        raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_formula", "message": "Every formula-mode SHI rule needs a formula."})
+    if any(row.calculation_mode == "formula" for row in rates):
+        try:
+            for row in rates:
+                if row.formula:
+                    _SafeFormula(row.formula)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_formula", "message": str(exc)}) from exc
+    if profile.pit_calculation_mode == "formula":
+        try:
+            _SafeFormula(profile.pit_formula or "")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_invalid_pit_formula", "path": "pit_formula", "message": str(exc)}) from exc
     for basis in {bracket.period_basis for bracket in brackets}:
         ordered = sorted((bracket for bracket in brackets if bracket.period_basis == basis), key=lambda bracket: Decimal(str(bracket.lower_bound)))
         previous_upper: Decimal | None = None
@@ -458,7 +619,7 @@ async def publish_profile(db: AsyncSession, actor: ActorContext, profile: Statut
     # Recompute the digest from the complete published rule set.  This turns
     # the seeded zero checksum into a real snapshot checksum only after an
     # administrator has explicitly reviewed and published the example.
-    profile.checksum = _hash({"profile": {"code": profile.code, "version": profile.version, "effective_from": profile.effective_from, "effective_to": profile.effective_to, "currency": profile.currency, "minimum_wage": profile.minimum_wage, "shi_ceiling_multiplier": profile.shi_ceiling_multiplier, "pit_withholding_method": profile.pit_withholding_method, "rounding_policy": profile.rounding_policy, "leave_policy": profile.leave_policy, "source_references": profile.source_references}, "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": row.rate, "base_floor": row.base_floor, "exemption_code": row.exemption_code} for row in rates], "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "marginal_rate": row.marginal_rate, "base_tax": row.base_tax} for row in brackets], "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "fixed_amount": row.fixed_amount, "amount_basis": row.amount_basis, "formula": row.formula} for row in reliefs]})
+    profile.checksum = _hash({"profile": {"code": profile.code, "version": profile.version, "effective_from": profile.effective_from, "effective_to": profile.effective_to, "currency": profile.currency, "minimum_wage": profile.minimum_wage, "shi_ceiling_multiplier": profile.shi_ceiling_multiplier, "pit_withholding_method": profile.pit_withholding_method, "pit_calculation_mode": profile.pit_calculation_mode, "pit_formula": profile.pit_formula, "standard_daily_hours": profile.standard_daily_hours, "standard_weekly_hours": profile.standard_weekly_hours, "standard_workweek": profile.standard_workweek, "rounding_policy": profile.rounding_policy, "leave_policy": profile.leave_policy, "source_references": profile.source_references}, "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": row.rate, "base_floor": row.base_floor, "lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "calculation_mode": row.calculation_mode, "fixed_amount": row.fixed_amount, "base_tax": row.base_tax, "base_ceiling_policy": getattr(row, "base_ceiling_policy", "profile"), "formula": row.formula, "exemption_code": row.exemption_code} for row in rates], "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "marginal_rate": row.marginal_rate, "base_tax": row.base_tax, "formula": getattr(row, "formula", None)} for row in brackets], "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": row.lower_bound, "upper_bound": row.upper_bound, "fixed_amount": row.fixed_amount, "amount_basis": row.amount_basis, "formula": row.formula} for row in reliefs]})
     profile.status = "published"; profile.approved_by_account_id = actor.account_id; profile.approved_at = datetime.now(timezone.utc)
 
 
@@ -553,7 +714,7 @@ async def bump_salary_structure(db: AsyncSession, actor: ActorContext, structure
     payload = data or SalaryStructureInput.model_validate({
         "code": structure.code, "name": structure.name, "effective_from": effective_from, "effective_to": structure.effective_to,
         "currency": structure.currency,
-        "components": [{"component_master_id": row.component_master_id, "code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": row.max_benefit_amount_yearly, "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id, "metadata_json": row.metadata_json} for row in components],
+        "components": [{"component_master_id": row.component_master_id, "code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "amount_mode": row.amount_mode, "percentage_basis": row.percentage_basis, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": row.max_benefit_amount_yearly, "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id, "metadata_json": row.metadata_json} for row in components],
     })
     successor = await create_salary_structure(db, actor, payload)
     successor.source_structure_id = structure.id
@@ -640,15 +801,19 @@ async def create_run(db: AsyncSession, actor: ActorContext, data: PayrollRunInpu
     variable_employee_ids = {row.employee_id for row in data.variable_inputs}
     if variable_employee_ids - set(employee_ids):
         raise HTTPException(status_code=422, detail={"code": "payroll_variable_input_employee_not_in_run", "employee_ids": sorted(variable_employee_ids - set(employee_ids))})
+    for employee_key, override in data.input_overrides.items():
+        if override and not str(override.get("reason") or "").strip():
+            raise HTTPException(status_code=422, detail={"code": "payroll_manual_override_reason_required", "path": f"input_overrides.{employee_key}.reason", "message": "Manual payroll overrides must include an explanation.", "remediation": "Add reason to the override; it will be frozen in the run snapshot."})
     frozen_shi_rates = (await db.execute(select(SHIRateTier).where(SHIRateTier.profile_id == profile.id).order_by(SHIRateTier.position, SHIRateTier.id))).scalars().all()
     frozen_pit_brackets = (await db.execute(select(PITBracketTier).where(PITBracketTier.profile_id == profile.id).order_by(PITBracketTier.position, PITBracketTier.id))).scalars().all()
     frozen_reliefs = (await db.execute(select(TaxReliefTier).where(TaxReliefTier.profile_id == profile.id).order_by(TaxReliefTier.position, TaxReliefTier.id))).scalars().all()
+    frozen_work_policies = (await db.execute(select(PayrollWorkPolicy).where(PayrollWorkPolicy.organization_id == actor.organization_id, PayrollWorkPolicy.status.in_(("active", "published")), PayrollWorkPolicy.effective_from <= data.tax_point_date, (PayrollWorkPolicy.effective_to.is_(None) | (PayrollWorkPolicy.effective_to >= data.tax_point_date))).order_by(PayrollWorkPolicy.scope_type, PayrollWorkPolicy.scope_key, PayrollWorkPolicy.effective_from.desc()))).scalars().all()
     period_end_exclusive = datetime.combine(data.period_end, datetime.max.time())
     approved_entries = list((await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.employee_id.in_(employee_ids), WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status == "approved", WorkTimeEntry.started_at >= datetime.combine(data.period_start, datetime.min.time()), WorkTimeEntry.started_at <= period_end_exclusive))).scalars().all())
     approved_time_ids = [entry.id for entry in approved_entries]
     approved_time_snapshot = [{"id": entry.id, "employee_id": entry.employee_id, "local_work_date": entry.local_work_date.isoformat() if entry.local_work_date else None, "started_at": entry.started_at.isoformat(), "ended_at": entry.ended_at.isoformat() if entry.ended_at else None, "approval_status": entry.approval_status, "hours": str(Decimal(str((entry.ended_at - entry.started_at).total_seconds())) / Decimal("3600")) if entry.ended_at else "0"} for entry in approved_entries]
     snapshot = {"employee_ids": employee_ids, "employee_filter": data.employee_filter, "overrides": data.input_overrides, "attendance_policy": data.attendance_policy, "validate_attendance": data.validate_attendance, "posting_date": (data.posting_date or data.tax_point_date).isoformat(), "cost_center_id": data.cost_center_id, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": approved_time_ids, "approved_time_entries": approved_time_snapshot, "preflight": preflight, "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
-    config_snapshot = {"profile_id": profile.id, "profile_version": profile.version, "profile_checksum": profile.checksum, "source_references": profile.source_references, "is_example": profile.is_example, "currency": profile.currency, "pit_withholding_method": profile.pit_withholding_method, "rounding_policy": profile.rounding_policy, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier), "leave_policy": profile.leave_policy, "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "exemption_code": row.exemption_code} for row in frozen_shi_rates], "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax)} for row in frozen_pit_brackets], "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "fixed_amount": str(row.fixed_amount), "amount_basis": row.amount_basis, "formula": row.formula} for row in frozen_reliefs]}
+    config_snapshot = {"profile_id": profile.id, "profile_version": profile.version, "profile_checksum": profile.checksum, "source_references": profile.source_references, "is_example": profile.is_example, "currency": profile.currency, "pit_withholding_method": profile.pit_withholding_method, "pit_calculation_mode": profile.pit_calculation_mode, "pit_formula": profile.pit_formula, "standard_daily_hours": str(profile.standard_daily_hours), "standard_weekly_hours": str(profile.standard_weekly_hours), "standard_workweek": profile.standard_workweek, "rounding_policy": profile.rounding_policy, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier), "leave_policy": profile.leave_policy, "work_policies": [{"id": row.id, "scope_type": row.scope_type, "scope_key": row.scope_key, "code": row.code, "daily_hours": str(row.daily_hours), "weekly_hours": str(row.weekly_hours), "workweek": row.workweek, "overtime_rules": row.overtime_rules, "stacking_policy": row.stacking_policy} for row in frozen_work_policies], "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "calculation_mode": row.calculation_mode, "fixed_amount": str(row.fixed_amount), "base_tax": str(row.base_tax), "base_ceiling_policy": getattr(row, "base_ceiling_policy", "profile"), "formula": row.formula, "exemption_code": row.exemption_code} for row in frozen_shi_rates], "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax), "formula": getattr(row, "formula", None)} for row in frozen_pit_brackets], "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "fixed_amount": str(row.fixed_amount), "amount_basis": row.amount_basis, "formula": row.formula} for row in frozen_reliefs]}
     run = PayrollRun(organization_id=actor.organization_id, run_number=f"PR-{data.period_end:%Y%m}-{datetime.now(timezone.utc).strftime('%H%M%S%f')[:9]}", run_type=data.run_type, period_start=data.period_start, period_end=data.period_end, settlement_key=data.period_end.strftime("%Y-%m"), tax_point_date=data.tax_point_date, posting_date=data.posting_date or data.tax_point_date, workflow_version="unified_v2", document_status="draft", cost_center_id=data.cost_center_id, statutory_profile_id=profile.id, input_snapshot=snapshot, config_snapshot=config_snapshot, snapshot_checksum=_hash({"input": snapshot, "config": config_snapshot}), created_by_account_id=actor.account_id)
     db.add(run); await db.flush(); return run
 
@@ -667,8 +832,20 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
         # off-cycle runs are calculated concurrently.
         employee_profile = await db.scalar(select(EmployeePayrollProfile).where(EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.employee_id == employee_id, EmployeePayrollProfile.effective_from <= run.period_end, (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= run.period_start))).order_by(EmployeePayrollProfile.effective_from.desc()).limit(1).with_for_update())
         if not employee_profile: raise HTTPException(status_code=422, detail={"code": "payroll_employee_profile_missing", "employee_id": employee_id})
+        employee_row = await db.scalar(select(Employee).where(Employee.id == employee_id, Employee.organization_id == actor.organization_id))
+        frozen_policies = (run.config_snapshot or {}).get("work_policies") or []
+        work_policy = None
+        if frozen_policies:
+            policy_keys = [("employee", str(employee_id)), ("job_title", employee_row.job_title if employee_row else None), ("organization", "*")]
+            for scope_type, scope_key in policy_keys:
+                candidate = next((item for item in frozen_policies if item.get("scope_type") == scope_type and item.get("scope_key") == scope_key), None)
+                if candidate:
+                    work_policy = SimpleNamespace(**candidate)
+                    break
+        if work_policy is None:
+            work_policy = await resolve_work_policy(db, actor.organization_id, employee_id, run.tax_point_date, job_title=employee_row.job_title if employee_row else None)
         structure = await db.get(SalaryStructure, employee_profile.salary_structure_id)
-        rules = await load_rules(db, profile, insured_category=employee_profile.insured_category, hazard_class=employee_profile.hazard_class)
+        rules = await load_rules(db, profile, insured_category=employee_profile.insured_category, hazard_class=employee_profile.hazard_class, effective_date=run.tax_point_date)
         components = (await db.execute(select(SalaryComponent).where(SalaryComponent.salary_structure_id == structure.id).order_by(SalaryComponent.position, SalaryComponent.id))).scalars().all()
         prior = await db.execute(select(func.coalesce(func.sum(Payslip.gross), 0), func.coalesce(func.sum(Payslip.taxable_income), 0), func.coalesce(func.sum(Payslip.pit), 0)).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.tax_point_date >= date(run.tax_point_date.year, 1, 1), PayrollRun.tax_point_date < date(run.tax_point_date.year + 1, 1, 1), PayrollRun.status.in_(("posted", "paid")), PayrollRun.tax_point_date <= run.tax_point_date, PayrollRun.run_type != "advance", PayrollRun.id != run.id))
         prior_gross, prior_taxable, prior_pit = prior.one()
@@ -708,13 +885,34 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
             approved_entries = (await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.id.in_((run.input_snapshot or {}).get("approved_time_entry_ids") or []), WorkTimeEntry.employee_id == employee_id, WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status == "approved"))).scalars().all()
             approved_dates = {entry.local_work_date or entry.started_at.date() for entry in approved_entries}
             approved_hours = sum((Decimal(str((entry.ended_at - entry.started_at).total_seconds())) / Decimal("3600") for entry in approved_entries if entry.ended_at is not None), Decimal("0"))
-        scheduled_workdays = sum(1 for offset in range((run.period_end - run.period_start).days + 1) if (run.period_start + timedelta(days=offset)).weekday() < 5)
+        workweek = set((work_policy.workweek if work_policy else (run.config_snapshot or {}).get("standard_workweek") or [1, 2, 3, 4, 5]))
+        scheduled_workdays = sum(1 for offset in range((run.period_end - run.period_start).days + 1) if (run.period_start + timedelta(days=offset)).isoweekday() in workweek)
         unpaid_leave_days = Decimal(str(override.get("unpaid_leave_days", 0)))
         default_payable_workdays = Decimal(str(len(approved_dates))) if approved_dates else max(Decimal("0"), Decimal(str(scheduled_workdays)) - unpaid_leave_days)
         payable_workdays = Decimal(str(override.get("payable_workdays", default_payable_workdays)))
         scheduled_workdays_value = Decimal(str(override.get("scheduled_workdays", scheduled_workdays)))
         payable_hours = Decimal(str(override.get("payable_hours", approved_hours)))
-        scheduled_hours = Decimal(str(override.get("scheduled_hours", approved_hours if approved_hours > 0 else scheduled_workdays_value * Decimal("8"))))
+        daily_hours = Decimal(str(work_policy.daily_hours if work_policy else profile.standard_daily_hours))
+        scheduled_hours = Decimal(str(override.get("scheduled_hours", approved_hours if approved_hours > 0 else scheduled_workdays_value * daily_hours)))
+        overtime_hours = max(Decimal("0"), payable_hours - scheduled_hours)
+        weekday_overtime = rest_day_overtime = public_holiday_overtime = night_overtime = Decimal("0")
+        public_holidays = set((run.input_snapshot or {}).get("attendance_policy", {}).get("public_holidays") or [])
+        if frozen_time_entries:
+            for entry in frozen_time_entries:
+                if int(entry.get("employee_id", -1)) != employee_id:
+                    continue
+                hours = Decimal(str(entry.get("hours", 0)))
+                work_date = date.fromisoformat(str(entry["local_work_date"])) if entry.get("local_work_date") else datetime.fromisoformat(str(entry["started_at"])).date()
+                started = datetime.fromisoformat(str(entry["started_at"]))
+                if work_date.isoformat() in public_holidays:
+                    public_holiday_overtime += hours
+                elif work_date.isoweekday() in workweek:
+                    weekday_overtime += hours
+                else:
+                    rest_day_overtime += hours
+                if started.hour >= 22 or started.hour < 6:
+                    night_overtime += hours
+        overtime_context = {"overtime_hours": overtime_hours, "weekday_overtime_hours": min(overtime_hours, weekday_overtime), "rest_day_overtime_hours": min(overtime_hours, rest_day_overtime), "public_holiday_overtime_hours": min(overtime_hours, public_holiday_overtime), "night_overtime_hours": min(overtime_hours, night_overtime)}
         leave_month_payload = override.get("leave_months")
         if leave_month_payload is None:
             lookback_months = int((rules.leave_policy or {}).get("lookback_months", 12))
@@ -739,19 +937,50 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
         benefit_claims = await reserve_benefit_claims(db, run=run, employee_id=employee_id)
         grouped_claims = grouped_benefit_claims(benefit_claims)
         benefit_context = {f"benefit_claim_amount_{item['component_id']}": item["amount"] for item in grouped_claims}
-        base_defs = [ComponentDefinition(code=row.code, label=row.name, component_kind=row.component_kind, formula=row.formula, proration_basis=row.proration_basis, taxable=row.is_taxable, shi_subject=row.is_shi_subject, non_taxable_allowance=row.is_non_taxable_allowance, leave_average_eligible=row.is_leave_average_eligible, only_tax_impact=row.only_tax_impact, payer=row.payer, position=row.position) for row in components if not (row.is_flexible_benefit and row.pay_against_benefit_claim)]
+        base_defs = [ComponentDefinition(code=row.code, label=row.name, component_kind=row.component_kind, formula=row.formula, amount_mode=row.amount_mode, percentage_basis=row.percentage_basis, proration_basis=row.proration_basis, taxable=row.is_taxable, shi_subject=row.is_shi_subject, non_taxable_allowance=row.is_non_taxable_allowance, leave_average_eligible=row.is_leave_average_eligible, only_tax_impact=row.only_tax_impact, payer=row.payer, position=row.position) for row in components if not (row.is_flexible_benefit and row.pay_against_benefit_claim)]
         benefit_defs = [ComponentDefinition(code=f"benefit_claim_{item['component_id']}", label=item["component_name"], component_kind="earning", formula=f"benefit_claim_amount_{item['component_id']}", taxable=item["taxable"], shi_subject=item["shi_subject"], non_taxable_allowance=item["non_taxable_allowance"], leave_average_eligible=False, only_tax_impact=item["only_tax_impact"], payer="employee", position=len(components) + index) for index, item in enumerate(grouped_claims)]
         employee_variable_inputs = [item for item in ((run.input_snapshot or {}).get("variable_inputs") or []) if int(item.get("employee_id", -1)) == employee_id]
         variable_defs = [ComponentDefinition(code=f"variable_{index}_{item['code']}", label=item["label"], component_kind=item["component_kind"], formula=str(item["amount"]), taxable=bool(item.get("taxable", True)), shi_subject=bool(item.get("shi_subject", True)), non_taxable_allowance=not bool(item.get("taxable", True)), leave_average_eligible=False, payer="employee", position=len(components) + len(benefit_defs) + index) for index, item in enumerate(employee_variable_inputs)]
-        defs = tuple(base_defs + benefit_defs + variable_defs)
-        calc = calculate_payslip(CalculationInput(base_salary=Decimal(str(override.get("base_salary", employee_profile.base_salary))), payable_workdays=payable_workdays, scheduled_workdays=scheduled_workdays_value, payable_calendar_days=Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1))), scheduled_calendar_days=Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1))), payable_hours=payable_hours, scheduled_hours=scheduled_hours, context={**context, **benefit_context}, components=defs, prior_ytd_gross=Decimal(str(prior_gross or 0)), prior_ytd_taxable=Decimal(str(prior_taxable or 0)), prior_ytd_pit=Decimal(str(prior_pit or 0)), prior_ytd_relief=Decimal(str(prior_relief or 0)), prior_month_shi_base=Decimal(str(prior_month_base or 0)), current_advance=current_advance if run.run_type != "advance" else Decimal("0"), other_tax_deductible=Decimal(str(override.get("other_tax_deductible", 0))) + declared_deduction, other_tax_credit=declared_credit, other_deductions=Decimal(str(override.get("other_deductions", 0))), relief_eligibilities=frozenset(employee_profile.tax_relief_eligibility or []), leave_months=leave_months, leave_days=Decimal(str(override.get("leave_days", 0))), exemption_codes=frozenset((employee_profile.exemption_flags or {}).get("shi", [])), withhold_statutory=run.run_type != "advance"))
-        profile_snapshot = {"employee_id": employee_id, "base_salary": str(employee_profile.base_salary), "salary_structure_id": structure.id, "salary_structure_version": structure.version, "salary_structure_checksum": structure.checksum, "components": [{"code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly), "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components], "insured_category": employee_profile.insured_category, "hazard_class": employee_profile.hazard_class, "residency_status": employee_profile.residency_status, "tax_relief_eligibility": employee_profile.tax_relief_eligibility, "exemption_flags": employee_profile.exemption_flags, "insured_code": employee_profile.insured_category}
-        input_snapshot = {"override": override, "variable_inputs": employee_variable_inputs, "profile_id": employee_profile.id, "advance_ids": [row.id for row in advance_rows], "unapplied_advance": str(unapplied_advance), "current_advance": str(current_advance), "tax_adjustments": {**tax_adjustments, "deduction": str(tax_adjustments["deduction"]), "credit": str(tax_adjustments["credit"]), "applied_deduction": str(declared_deduction), "applied_credit": str(declared_credit)}, "benefit_claims": benefit_claims, "resolved_units": {"payable_workdays": str(payable_workdays), "scheduled_workdays": str(scheduled_workdays_value), "payable_calendar_days": str(Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1)))), "scheduled_calendar_days": str(Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1)))), "payable_hours": str(payable_hours), "scheduled_hours": str(scheduled_hours)}}
+        overtime_defs: list[ComponentDefinition] = []
+        overtime_rules = (work_policy.overtime_rules if work_policy else {}) or {}
+        premium_candidates = [("weekday_overtime_hours", "weekday", "Weekday overtime"), ("rest_day_overtime_hours", "rest_day", "Rest-day overtime"), ("public_holiday_overtime_hours", "public_holiday", "Public-holiday overtime"), ("night_overtime_hours", "night", "Night overtime")]
+        if (work_policy.stacking_policy if work_policy else "exclusive") == "exclusive":
+            available = []
+            for hours_code, rule_code, label in premium_candidates:
+                raw_multiplier = overtime_rules.get(rule_code)
+                if raw_multiplier in (None, "", 0, "0"):
+                    continue
+                try:
+                    multiplier_value = Decimal(str(raw_multiplier))
+                except Exception as exc:
+                    raise HTTPException(status_code=422, detail={"code": "payroll_invalid_overtime_multiplier", "path": f"work_policy.overtime_rules.{rule_code}"}) from exc
+                if multiplier_value < 0:
+                    raise HTTPException(status_code=422, detail={"code": "payroll_invalid_overtime_multiplier", "path": f"work_policy.overtime_rules.{rule_code}"})
+                if Decimal(str(overtime_context.get(hours_code, 0))) > 0:
+                    available.append((hours_code, rule_code, label, multiplier_value))
+            premium_candidates = [(hours_code, rule_code, label) for hours_code, rule_code, label, _ in sorted(available, key=lambda item: item[3], reverse=True)[:1]]
+        for index, (hours_code, rule_code, label) in enumerate(premium_candidates):
+            multiplier = overtime_rules.get(rule_code)
+            if multiplier in (None, "", 0, "0"):
+                continue
+            try:
+                multiplier_decimal = Decimal(str(multiplier))
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail={"code": "payroll_invalid_overtime_multiplier", "path": f"work_policy.overtime_rules.{rule_code}"}) from exc
+            if multiplier_decimal < 0:
+                raise HTTPException(status_code=422, detail={"code": "payroll_invalid_overtime_multiplier", "path": f"work_policy.overtime_rules.{rule_code}"})
+            overtime_defs.append(ComponentDefinition(code=f"overtime_{rule_code}", label=label, component_kind="earning", formula=f"if_else(scheduled_hours > 0, {hours_code} * base_salary / scheduled_hours * {multiplier_decimal}, 0)", taxable=True, shi_subject=True, leave_average_eligible=False, payer="employee", position=len(components) + len(benefit_defs) + len(variable_defs) + index))
+        defs = tuple(base_defs + benefit_defs + variable_defs + overtime_defs)
+        calc = calculate_payslip(CalculationInput(base_salary=Decimal(str(override.get("base_salary", employee_profile.base_salary))), payable_workdays=payable_workdays, scheduled_workdays=scheduled_workdays_value, payable_calendar_days=Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1))), scheduled_calendar_days=Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1))), payable_hours=payable_hours, scheduled_hours=scheduled_hours, context={**context, **overtime_context, **benefit_context}, components=defs, prior_ytd_gross=Decimal(str(prior_gross or 0)), prior_ytd_taxable=Decimal(str(prior_taxable or 0)), prior_ytd_pit=Decimal(str(prior_pit or 0)), prior_ytd_relief=Decimal(str(prior_relief or 0)), prior_month_shi_base=Decimal(str(prior_month_base or 0)), current_advance=current_advance if run.run_type != "advance" else Decimal("0"), other_tax_deductible=Decimal(str(override.get("other_tax_deductible", 0))) + declared_deduction, other_tax_credit=declared_credit, other_deductions=Decimal(str(override.get("other_deductions", 0))), relief_eligibilities=frozenset(employee_profile.tax_relief_eligibility or []), leave_months=leave_months, leave_days=Decimal(str(override.get("leave_days", 0))), exemption_codes=frozenset((employee_profile.exemption_flags or {}).get("shi", [])), withhold_statutory=run.run_type != "advance"))
+        profile_snapshot = {"employee_id": employee_id, "base_salary": str(employee_profile.base_salary), "salary_structure_id": structure.id, "salary_structure_version": structure.version, "salary_structure_checksum": structure.checksum, "components": [{"code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "amount_mode": row.amount_mode, "percentage_basis": row.percentage_basis, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly), "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components], "insured_category": employee_profile.insured_category, "hazard_class": employee_profile.hazard_class, "residency_status": employee_profile.residency_status, "tax_relief_eligibility": employee_profile.tax_relief_eligibility, "exemption_flags": employee_profile.exemption_flags, "insured_code": employee_profile.insured_category}
+        input_snapshot = {"override": override, "variable_inputs": employee_variable_inputs, "profile_id": employee_profile.id, "advance_ids": [row.id for row in advance_rows], "unapplied_advance": str(unapplied_advance), "current_advance": str(current_advance), "tax_adjustments": {**tax_adjustments, "deduction": str(tax_adjustments["deduction"]), "credit": str(tax_adjustments["credit"]), "applied_deduction": str(declared_deduction), "applied_credit": str(declared_credit)}, "benefit_claims": benefit_claims, "work_policy": {"id": work_policy.id, "code": work_policy.code, "daily_hours": str(work_policy.daily_hours), "weekly_hours": str(work_policy.weekly_hours), "workweek": work_policy.workweek, "overtime_rules": work_policy.overtime_rules, "stacking_policy": work_policy.stacking_policy} if work_policy else {"daily_hours": str(profile.standard_daily_hours), "weekly_hours": str(profile.standard_weekly_hours), "workweek": sorted(workweek)}, "resolved_units": {"payable_workdays": str(payable_workdays), "scheduled_workdays": str(scheduled_workdays_value), "payable_calendar_days": str(Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1)))), "scheduled_calendar_days": str(Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1)))), "payable_hours": str(payable_hours), "scheduled_hours": str(scheduled_hours), "overtime_hours": str(overtime_hours)}}
         payslip = Payslip(payroll_run_id=run.id, organization_id=actor.organization_id, employee_id=employee_id, document_status="draft", employee_profile_snapshot=profile_snapshot, input_snapshot=input_snapshot, calculation_trace=calc.trace, ytd_snapshot={key: str(value) for key, value in calc.ytd.items()}, gross=calc.gross, taxable_income=calc.taxable_income, shi_subject_gross=calc.shi_subject_gross, shi_base=calc.shi_base, employee_shi=calc.employee_shi, employer_shi=calc.employer_shi, pit=calc.pit, pit_relief=calc.relief, advance_offset=calc.advance_offset, net_pay=calc.net_pay, snapshot_checksum=snapshot_checksum({"profile": profile_snapshot, "input": input_snapshot, "result": calc.trace, "gross": str(calc.gross), "taxable_income": str(calc.taxable_income), "net": str(calc.net_pay)}))
         db.add(payslip); await db.flush()
         component_by_code = {row.code: row for row in components}
         component_by_code.update({f"benefit_claim_{item['component_id']}": next((row for row in components if row.id == item["component_id"]), None) for item in grouped_claims})
         db.add_all([PayslipLineItem(payslip_id=payslip.id, component_code=line["code"], component_master_id=getattr(component_by_code.get(line["code"]), "component_master_id", None), label=line["label"], component_kind=line["component_kind"], amount=line["amount"], taxable=line["taxable"], shi_subject=line["shi_subject"], payer=line["payer"], formula_snapshot=line["formula"], trace={"position": line["position"], "leave_average_eligible": line.get("leave_average_eligible", False)}, account_id=getattr(component_by_code.get(line["code"]), "account_id", None), cost_center_id=getattr(component_by_code.get(line["code"]), "cost_center_id", None), position=line["position"]) for line in calc.lines])
+        statutory_rules = (calc.trace.get("shi") or {}).get("rules") or []
+        db.add_all([PayslipStatutoryLine(payslip_id=payslip.id, contributor_code=employee_profile.insured_category, payer=item.get("payer", "employee"), insurance_fund=item.get("insurance_fund", "unknown"), hazard_class=employee_profile.hazard_class, calculation_mode=item.get("calculation_mode", "flat_percent"), base=Decimal(str(item.get("base", 0))), lower_bound=Decimal(str(item.get("lower_bound", 0))), upper_bound=Decimal(str(item["upper_bound"])) if item.get("upper_bound") is not None else None, rate=Decimal(str(item.get("rate", 0))), amount=Decimal(str(item.get("amount", 0))), formula_snapshot=item.get("formula"), trace=item, position=index) for index, item in enumerate(statutory_rules)])
         result_rows.append(payslip)
     run.total_gross = sum((row.gross for row in result_rows), Decimal("0")); run.total_employee_shi = sum((row.employee_shi for row in result_rows), Decimal("0")); run.total_employer_shi = sum((row.employer_shi for row in result_rows), Decimal("0")); run.total_pit = sum((row.pit for row in result_rows), Decimal("0")); run.total_net = sum((row.net_pay for row in result_rows), Decimal("0")); run.status = "calculated"; run.reconciliation_snapshot = {}; run.approval_workflow = {}; run.salary_slips_created = True if run.workflow_version == "frappe_v1" else run.salary_slips_created; run.document_status = "draft" if run.workflow_version == "frappe_v1" else run.document_status
     run.snapshot_checksum = _hash({"input": run.input_snapshot, "config": run.config_snapshot, "payslips": [row.snapshot_checksum for row in result_rows]})

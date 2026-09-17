@@ -974,6 +974,8 @@ async def prepare_task_creation(db: AsyncSession, actor: ActorContext, data: Ass
 async def _confirm_task_creation(db: AsyncSession, actor: ActorContext, action: AssistantPendingAction, *, channel: str) -> dict:
     if action.consumed_at:
         stored = (action.payload or {}).get("_result")
+        if stored and stored.get("execution_status") == "rejected":
+            return _result("denied", {"reason": "This task draft was rejected"})
         return _result("ok", {**(stored or {}), "replayed": True}) if stored else _result("denied", {"reason": "Action is unavailable or expired"})
     if action.expires_at <= datetime.now(timezone.utc):
         return _result("denied", {"reason": "Action is unavailable or expired"})
@@ -1090,6 +1092,8 @@ async def confirm_task_update(db: AsyncSession, actor: ActorContext, token: str,
         return await _confirm_task_creation(db, actor, action, channel=channel)
     if action.consumed_at:
         stored = (action.payload or {}).get("_result")
+        if stored and stored.get("execution_status") == "rejected":
+            return _result("denied", {"reason": "This task draft was rejected"})
         return _result("ok", {**(stored or {}), "replayed": True}) if stored else _result("denied", {"reason": "Action is unavailable or expired"})
     if action.expires_at <= now:
         return _result("denied", {"reason": "Action is unavailable or expired"})
@@ -1113,6 +1117,42 @@ async def confirm_task_update(db: AsyncSession, actor: ActorContext, token: str,
     task.version += 1; action.consumed_at = now
     result_data = {"task_id": str(task.public_id), "version": task.version, "updated": {key: value for key, value in action.payload.items() if key != "_result"}, "execution_status": "applied"}
     action.payload = {**action.payload, "_result": result_data}
+    return _result("ok", result_data)
+
+
+async def reject_task_action(db: AsyncSession, actor: ActorContext, token: str, *, channel: str) -> dict:
+    """Consume a pending task draft without applying its mutation."""
+    if token.startswith("mcpact_"):
+        try:
+            from app.services.mcp.references import resolve_action_reference
+            token = resolve_action_reference(actor, token, channel=channel)
+        except ValueError:
+            return _result("denied", {"reason": "Action is unavailable or expired"})
+    claims = decode_action_preview_token(token)
+    if not claims or "assistant.preview" not in (actor.permissions or permissions_for_roles(actor.roles)):
+        return _result("denied", {"reason": "Action is unavailable or expired"})
+    action = await db.scalar(
+        select(AssistantPendingAction)
+        .where(AssistantPendingAction.token_hash == hashlib.sha256(token.encode()).hexdigest())
+        .with_for_update()
+    )
+    if not action or str(action.id) != str(claims.get("action_id")) or action.account_id != actor.account_id or action.organization_id != actor.organization_id or action.channel != channel:
+        return _result("denied", {"reason": "Action is unavailable or expired"})
+    original_payload = {key: value for key, value in (action.payload or {}).items() if key != "_result"}
+    payload_digest = _action_payload_digest(original_payload)
+    if claims.get("digest_prefix") != payload_digest[:12] or not verify_action_preview_token(token, payload_digest=payload_digest, account_id=actor.account_id, organization_id=actor.organization_id, channel=channel):
+        return _result("denied", {"reason": "Action is unavailable or expired"})
+    if action.consumed_at:
+        stored = (action.payload or {}).get("_result")
+        if stored and stored.get("execution_status") == "rejected":
+            return _result("ok", {**stored, "replayed": True})
+        return _result("denied", {"reason": "Action is unavailable or expired"})
+    now = datetime.now(timezone.utc)
+    if action.expires_at <= now:
+        return _result("denied", {"reason": "Action is unavailable or expired"})
+    result_data = {"execution_status": "rejected", "task_id": str(action.task_id) if action.task_id else None}
+    action.consumed_at = now
+    action.payload = {**original_payload, "_result": result_data}
     return _result("ok", result_data)
 
 

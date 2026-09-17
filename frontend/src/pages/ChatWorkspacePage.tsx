@@ -9,7 +9,7 @@ import toast from 'react-hot-toast'
 import {
   cancelChatUpload, ChatAttachment, ChatConversation, ChatConversationFilter, ChatIdentity, ChatMessage, CompanyFileChatAttachment, downloadChatAttachment, downloadCompanyFileChatAttachment, uploadChatAttachment, useAcknowledgeChat, useAddChatMembers, useChatContacts,
   useChatConversation, useChatConversations, useChatMessageContext, useChatMessages, useChatReceiptDetails, useCreateChatGroup,
-  useDeleteChatMessage, useEditChatMessage, useForwardChatMessage, useLeaveChatGroup, useOpenDirectConversation, usePinChatMessage, useReactChatMessage, useRemoveChatMember, useRenameChatGroup, useSendChatMessage, useStarChatMessage, useChatSearch, useChatThread, useUpdateChatConversationPreferences,
+  useConfirmAssistantAction, useDeleteChatMessage, useEditChatMessage, useForwardChatMessage, useLeaveChatGroup, useOpenDirectConversation, usePinChatMessage, useReactChatMessage, useRemoveChatMember, useRenameChatGroup, useRejectAssistantAction, useSendChatMessage, useStarChatMessage, useChatSearch, useChatThread, useUpdateChatConversationPreferences,
 } from '../api/enterprise'
 import { resolvePublicAssetUrl, safeLocalStorage } from '../platform/runtime'
 import { ChatCallHeader } from '../components/ChatCallHeader'
@@ -455,6 +455,37 @@ function ForwardDialog({ message, conversations, onClose, onForward }: { message
   return <div className="chat-modal-backdrop"><section ref={modalRef} className="chat-modal" role="dialog" aria-modal="true" aria-label="Мессеж дамжуулах"><header><div><span className="eyebrow">FORWARD</span><h2>Мессеж дамжуулах</h2></div><button className="chat-icon-button" onClick={onClose}><X /></button></header><div className="chat-contact-list">{conversations.map((conversation) => <button key={conversation.public_id} onClick={() => setSelected((items) => items.includes(conversation.public_id) ? items.filter((id) => id !== conversation.public_id) : items.length < 10 ? [...items, conversation.public_id] : items)}><Avatar conversation={conversation} /><span><strong>{conversation.title}</strong><small>{conversation.kind === 'group' ? `${conversation.member_count} гишүүн` : 'Шууд чат'}</small></span><i className={`chat-check ${selected.includes(conversation.public_id) ? 'selected' : ''}`}>{selected.includes(conversation.public_id) && <Check />}</i></button>)}</div><footer><span>{selected.length} сонгосон</span><button className="chat-primary-button" disabled={!selected.length} onClick={() => onForward(selected)}><Forward /> Дамжуулах</button></footer></section></div>
 }
 
+function ChatTaskDraftActions({
+  action,
+  status,
+  busy,
+  onConfirm,
+  onReject,
+  onEdit,
+}: {
+  action: NonNullable<ChatMessage['action']>
+  status?: 'confirmed' | 'rejected'
+  busy: boolean
+  onConfirm: () => void
+  onReject: () => void
+  onEdit: () => void
+}) {
+  if (status) return <div className={`chat-task-draft-status ${status}`}>{status === 'confirmed' ? '✅ Даалгавар үүслээ' : '❌ Ноорог цуцлагдлаа'}</div>
+  const payload = action.payload
+  const title = payload.title || payload.task_id || 'Даалгавар'
+  const kind = payload.action_type === 'update_task' ? 'Даалгаврын өөрчлөлт' : payload.action_type === 'delegate_task' ? 'Өөр ажилтанд оноох шинэ даалгавар' : 'Шинэ даалгавар'
+  return <section className="chat-task-draft" aria-label="Даалгаврын ноорог үйлдлүүд">
+    <span>Баталгаажуулах ноорог</span>
+    <strong>{title}</strong>
+    <small>{kind}</small>
+    <div>
+      <button type="button" className="confirm" onClick={onConfirm} disabled={busy}>✅ Баталгаажуулах</button>
+      <button type="button" className="reject" onClick={onReject} disabled={busy}>❌ Татгалзах</button>
+      <button type="button" className="edit" onClick={onEdit} disabled={busy}>✏️ Засах</button>
+    </div>
+  </section>
+}
+
 export function ChatWorkspacePage() {
   const { conversationId } = useParams()
   const navigate = useNavigate()
@@ -471,6 +502,7 @@ export function ChatWorkspacePage() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [threadRootId, setThreadRootId] = useState<number>()
   const [actionMessageId, setActionMessageId] = useState<number>()
+  const [resolvedDraftActions, setResolvedDraftActions] = useState<Record<number, 'confirmed' | 'rejected'>>({})
   const [replyingTo, setReplyingTo] = useState<ChatMessage>()
   const [forwardMessage, setForwardMessage] = useState<ChatMessage>()
   const [uploads, setUploads] = useState<PendingUpload[]>([])
@@ -504,6 +536,8 @@ export function ChatWorkspacePage() {
   const star = useStarChatMessage(conversationId)
   const pinMessage = usePinChatMessage(conversationId)
   const forward = useForwardChatMessage(conversationId)
+  const confirmAssistantAction = useConfirmAssistantAction()
+  const rejectAssistantAction = useRejectAssistantAction()
   const preferences = useUpdateChatConversationPreferences(conversationId)
   const orderedMessages = useMemo(() => context.data?.items?.length ? context.data.items : [...(messages.data?.pages ?? [])].reverse().flatMap((page) => page.items), [context.data?.items, messages.data?.pages])
   const isAgentConversation = Boolean(conversation.data?.members.some((member) => member.is_agent))
@@ -640,6 +674,34 @@ export function ChatWorkspacePage() {
     if (body?.trim() && body.trim() !== message.body) edit.mutate({ messageId: message.id, body: body.trim() })
     setActionMessageId(undefined)
   }
+  const actionToken = (message: ChatMessage) => message.action?.payload.action_reference || message.action?.payload.token
+  const confirmDraft = async (message: ChatMessage) => {
+    const token = actionToken(message)
+    if (!token) return
+    try {
+      const result = await confirmAssistantAction.mutateAsync(token)
+      if (result?.status !== 'ok') throw new Error(result?.data?.reason || 'Үйлдэл боломжгүй байна')
+      setResolvedDraftActions((current) => ({ ...current, [message.id]: 'confirmed' }))
+      toast.success('Даалгавар үүслээ')
+    } catch (error: any) { toast.error(error?.message || 'Даалгавар үүссэнгүй') }
+  }
+  const rejectDraft = async (message: ChatMessage) => {
+    const token = actionToken(message)
+    if (!token) return
+    try {
+      const result = await rejectAssistantAction.mutateAsync(token)
+      if (result?.status !== 'ok') throw new Error(result?.data?.reason || 'Үйлдэл боломжгүй байна')
+      setResolvedDraftActions((current) => ({ ...current, [message.id]: 'rejected' }))
+      toast.success('Ноорог цуцлагдлаа')
+    } catch (error: any) { toast.error(error?.message || 'Ноорог цуцлагдсангүй') }
+  }
+  const editDraft = (message: ChatMessage) => {
+    const title = message.action?.payload.title || ''
+    setReplyingTo(message)
+    setDraft(`Нооргийг засах${title ? `: “${title}”` : ''}. `)
+    setActionMessageId(undefined)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
   const forwardTo = (ids: string[]) => {
     if (!forwardMessage) return
     forward.mutate({ messageId: forwardMessage.id, destinations: ids.map((conversation_public_id) => ({ conversation_public_id, client_nonce: crypto.randomUUID() })) }, { onSuccess: () => { toast.success('Мессеж дамжууллаа'); setForwardMessage(undefined) } })
@@ -677,7 +739,7 @@ export function ChatWorkspacePage() {
           {!orderedMessages.length && !messages.isLoading && <div className="chat-thread-empty"><MessageCircle /><strong>Чат бичиж харилцан яриагаа эхлүүлээрэй</strong><span>Энд илгээсэн мессежүүд зөвхөн оролцогчдод харагдана.</span></div>}
           {orderedMessages.map((message, index) => message.kind === 'call' ? <CallHistoryMessage key={`${message.id}-${message.client_nonce}`} message={message} /> : <article id={message.id > 0 ? `chat-message-${message.id}` : undefined} key={`${message.id}-${message.client_nonce}`} className={`chat-message ${message.is_mine ? 'mine' : 'theirs'} ${message.status === 'failed' ? 'send-failed' : ''} ${highlightId === message.id ? 'highlighted' : ''}`} style={{ '--chat-message-delay': `${Math.min(index, 7) * 22}ms` } as React.CSSProperties} onContextMenu={(event) => { if (message.id > 0 && !message.is_deleted) { event.preventDefault(); setActionMessageId(message.id) } }}>
             {!message.is_mine && <Avatar identity={message.sender} />}
-            <div className="chat-message-content"><div className="chat-bubble">{!message.is_mine && conversation.data.kind === 'group' && <strong>{message.sender?.name}</strong>}{message.forwarded_sender_name && <small className="chat-forwarded"><Forward /> {message.forwarded_sender_name}-с дамжуулсан</small>}{message.reply_preview && <button className="chat-reply-preview" onClick={() => setThreadRootId(message.thread_root_message_id || message.reply_preview!.id)}><strong>{message.reply_preview.sender_name}</strong><span>{message.reply_preview.is_deleted ? 'Устгасан мессеж' : message.reply_preview.body || 'Хавсралт'}</span></button>}{message.is_deleted ? <p className="chat-deleted-message">Энэ мессеж устгагдсан</p> : <>{message.body && <p>{message.body}</p>}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((attachment) => <ChatAttachmentView key={attachment.public_id} conversationId={conversationId} attachment={attachment} />)}</div> : null}{message.company_file_attachments?.length ? <div className="chat-attachments">{message.company_file_attachments.map((attachment) => <CompanyFileAttachmentView key={attachment.item_id} attachment={attachment} />)}</div> : null}</>} </div>
+            <div className="chat-message-content"><div className="chat-bubble">{!message.is_mine && conversation.data.kind === 'group' && <strong>{message.sender?.name}</strong>}{message.forwarded_sender_name && <small className="chat-forwarded"><Forward /> {message.forwarded_sender_name}-с дамжуулсан</small>}{message.reply_preview && <button className="chat-reply-preview" onClick={() => setThreadRootId(message.thread_root_message_id || message.reply_preview!.id)}><strong>{message.reply_preview.sender_name}</strong><span>{message.reply_preview.is_deleted ? 'Устгасан мессеж' : message.reply_preview.body || 'Хавсралт'}</span></button>}{message.is_deleted ? <p className="chat-deleted-message">Энэ мессеж устгагдсан</p> : <>{message.body && <p>{message.body}</p>}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((attachment) => <ChatAttachmentView key={attachment.public_id} conversationId={conversationId} attachment={attachment} />)}</div> : null}{message.company_file_attachments?.length ? <div className="chat-attachments">{message.company_file_attachments.map((attachment) => <CompanyFileAttachmentView key={attachment.item_id} attachment={attachment} />)}</div> : null}{message.action?.type === 'task_action_preview' && <ChatTaskDraftActions action={message.action} status={resolvedDraftActions[message.id]} busy={confirmAssistantAction.isPending || rejectAssistantAction.isPending} onConfirm={() => void confirmDraft(message)} onReject={() => void rejectDraft(message)} onEdit={() => editDraft(message)} />}</>} </div>
               {!!message.reactions?.length && <div className="chat-reaction-row">{message.reactions.map((reaction) => <button key={reaction.emoji} className={reaction.reacted ? 'active' : ''} onClick={() => react.mutate({ messageId: message.id, emoji: reaction.emoji, remove: reaction.reacted })}>{reaction.emoji} <span>{reaction.count}</span></button>)}</div>}
               <footer><time>{formatTimestamp(message.created_at)}{message.edited_at ? ' · зассан' : ''}</time>{message.is_pinned && <Pin size={11} fill="currentColor" />}{message.is_starred && <Star size={11} fill="currentColor" />}{message.thread_reply_count > 0 && <button onClick={() => setThreadRootId(message.thread_root_message_id || message.id)}>{message.thread_reply_count} хариулт</button>}{message.is_mine && <button disabled={message.id < 1} onClick={() => message.id > 0 && setReceiptMessageId(message.id)}><ReceiptLabel message={message} /></button>}{message.status === 'failed' && message.body && <button className="chat-retry" onClick={() => submit(message.body, message.client_nonce)}>Дахин илгээх</button>}</footer>
               {message.id > 0 && !message.is_deleted && <div className="chat-message-actions"><button ref={(element) => { actionButtonRefs.current[message.id] = element }} onClick={() => setActionMessageId(actionMessageId === message.id ? undefined : message.id)} aria-label="Мессежийн үйлдэл"><MoreHorizontal /></button>{actionMessageId === message.id && <ChatActionMenu anchorRef={{ current: actionButtonRefs.current[message.id] }} boundsRef={threadPaneRef} onClose={() => setActionMessageId(undefined)}><div className="chat-quick-reactions">{['👍', '❤️', '😂', '🎉', '😮', '😢'].map((emoji) => <button key={emoji} onClick={() => react.mutate({ messageId: message.id, emoji, remove: message.reactions?.some((item) => item.emoji === emoji && item.reacted) })}>{emoji}</button>)}</div><button onClick={() => { setReplyingTo(message); setActionMessageId(undefined); textareaRef.current?.focus() }}><Reply />Хариулах</button>{message.thread_root_message_id == null && <button onClick={() => { setThreadRootId(message.id); setActionMessageId(undefined) }}><MessageCircle />Thread нээх</button>}{message.capabilities?.can_edit && <button onClick={() => editMessage(message)}><Pencil />Засах</button>}<button onClick={() => { setForwardMessage(message); setActionMessageId(undefined) }}><Forward />Дамжуулах</button><button onClick={() => pinMessage.mutate({ messageId: message.id, pinned: !message.is_pinned }, { onSuccess: () => setActionMessageId(undefined) })}><Pin />{message.is_pinned ? 'Салгах' : 'Тогтоох'}</button><button onClick={() => star.mutate({ messageId: message.id, starred: !message.is_starred }, { onSuccess: () => setActionMessageId(undefined) })}><Star />{message.is_starred ? 'Star болиулах' : 'Star'}</button><button onClick={() => { setReceiptMessageId(message.id); setActionMessageId(undefined) }}><Info />Мэдээлэл</button><button className="danger" onClick={() => remove.mutate({ messageId: message.id, scope: 'self' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Өөрөөс устгах</button>{message.capabilities?.can_delete_everyone && <button className="danger" onClick={() => window.confirm('Бүх хүнээс устгах уу?') && remove.mutate({ messageId: message.id, scope: 'everyone' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Бүгдээс устгах</button>}</ChatActionMenu>}</div>}

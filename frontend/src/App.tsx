@@ -151,8 +151,8 @@ function AuthenticatedApp() {
           <Route path="administration/workspace" element={<WorkspaceIdentitySettingsPage />} />
           <Route path="administration/collaboration" element={<CollaborationSettingsPage />} />
           <Route path="administration/automation" element={<AutomationSettingsPage />} />
-          <Route path="administration/oyuns" element={<OyunsAssistantSettingsPage />} />
         </Route>
+        <Route path="administration/oyuns" element={<OyunsAssistantSettingsPage />} />
         <Route element={<RequireRoles allowedRoles={['admin']} />}>
           <Route path="administration/access" element={<AccessControlSettingsPage />} />
           <Route path="administration/erp" element={<ERPSettingsPage />} />

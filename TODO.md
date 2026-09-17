@@ -1,6 +1,22 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Open company knowledge to all authenticated workspace members with read-only member access while keeping OYUNS training admin-only (`frontend/src/App.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/KnowledgePage.tsx`, `frontend/src/pages/KnowledgePage.test.tsx`, `backend/app/routers/knowledge.py`, `backend/tests/test_knowledge_api.py`)
+- [x] Keep OYUNS responses in the user's Mongolian language and expose confirm/reject/edit task-draft actions in Telegram and platform chat (`backend/app/services/assistant_text.py`, `backend/app/services/ai_gateway`, `backend/app/bot/assistant_handlers.py`, `backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/components/OyunsAssistant.tsx`) — frontend focused tests/build pass; keyboard focus/touch sizing is covered; backend syntax and Alembic head checks pass, while dependency-backed pytest is blocked by the local environment
+  - [x] Improve Mongolian-vs-Russian detection for ordinary Mongolian Cyrillic
+  - [x] Persist and render task-draft actions in platform chat
+  - [x] Add secure reject and edit handling to Telegram and web draft controls
+  - [x] Add focused backend/frontend regression coverage
+- [x] Reposition and compact the OYUNS AI assistant in the bottom-right corner with the animated ocean gradient border (`frontend/src/components/OyunsAssistant.tsx`, `frontend/src/components/OyunsAssistant.test.tsx`, `frontend/src/index.css`)
+- [ ] Implement configurable Mongolia payroll rules, formula studio, work-time premiums, and statutory report templates (`backend/app/payroll`, `backend/app/models/models.py`, `backend/alembic/versions`, `frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/api/enterprise.ts`, `backend/tests`, `frontend/src`)
+  - [x] Add effective-dated contributor/rule/work-policy persistence and compatibility migration
+  - [x] Add flat, marginal-tier, band-rate, and safe advanced formula calculation modes with simulation
+  - [x] Replace statutory JSON setup with guided rule editors and live calculation trace
+  - [x] Add normalized statutory payslip lines and НД-7А/7Б/8 + ТТ-11 template outputs
+  - [x] Add explicit SHI cap policy, negative-formula guards, and tax-point contributor validation
+  - [x] Add editable report/bank column templates with immutable published versions
+  - [x] Add focused backend and frontend regression coverage
+  - [ ] Run dependency-complete Docker migration and Playwright acceptance
 - [x] Clean payroll dashboard and restore an actionable, lifecycle-safe Setup Hub (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`, `backend/app/payroll/router.py`)
   - [x] Remove payroll-local hero/banner clutter and keep compact operational overview
   - [x] Add URL-backed six-section Setup Hub with accessible responsive drawers
@@ -544,6 +560,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Open company knowledge to all authenticated workspace members with read-only member access while keeping OYUNS training admin-only (`frontend/src/App.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/KnowledgePage.tsx`, `frontend/src/pages/KnowledgePage.test.tsx`, `backend/app/routers/knowledge.py`, `backend/tests/test_knowledge_api.py`)
 - [x] Fix task and shared side-panel full-viewport overlay, close controls, and panel-local scrolling with body-level rendering and native scroll reset (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Fix backend startup SyntaxError in the asset-disposal journal route (`backend/app/erp/router.py`)
 - [x] Add manifest-backed compressed bundle reporting, bounded dependency groups, and desktop route intent preloading (`frontend/scripts/check-performance-budget.mjs`, `frontend/vite.config.ts`, `frontend/src/platform/route-preload.ts`)

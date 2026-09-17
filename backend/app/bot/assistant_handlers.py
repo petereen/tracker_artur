@@ -268,7 +268,11 @@ async def _enterprise_route(
                 callback_token = None
         else:
             callback_token = legacy_token
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Баталгаажуулах" if detected == "mn" else "Confirm task", callback_data=callback_token)]]) if callback_token else None
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Баталгаажуулах" if detected == "mn" else "✅ Confirm", callback_data=f"ac:{callback_token}"),
+            InlineKeyboardButton(text="❌ Татгалзах" if detected == "mn" else "❌ Reject", callback_data=f"ar:{callback_token}"),
+            InlineKeyboardButton(text="✏️ Засах" if detected == "mn" else "✏️ Edit", callback_data=f"ae:{callback_token}"),
+        ]]) if callback_token else None
         await _answer(message, result["answer"], reply_markup=keyboard, parse_mode=None)
         protected_links = [delivery.get("url") for delivery in result.get("deliveries", []) if delivery.get("kind") == "authenticated_link" and delivery.get("url")]
         if protected_links:
@@ -696,22 +700,48 @@ async def route_and_respond(
 @router.callback_query(F.data.startswith("assistant-confirm:"))
 @router.callback_query(F.data.startswith("ap1."))
 @router.callback_query(F.data.startswith("ap2."))
+@router.callback_query(F.data.startswith("ac:"))
+@router.callback_query(F.data.startswith("ar:"))
+@router.callback_query(F.data.startswith("ae:"))
 async def confirm_enterprise_task_update(callback: CallbackQuery, tg_id: str | None = None):
-    token = (callback.data or "").split(":", 1)[-1]
+    data = callback.data or ""
+    operation = "confirm"
+    if data.startswith("ar:"):
+        operation = "reject"
+    elif data.startswith("ae:"):
+        operation = "edit"
+    token = data.split(":", 1)[-1]
     if not tg_id:
         await callback.answer("Access unavailable", show_alert=True); return
     async with AsyncSessionLocal() as db:
         actor = await actor_from_telegram_id(tg_id, db)
         if not actor:
             await callback.answer("Link an enterprise account first", show_alert=True); return
-        result = await enterprise_tools.confirm_task_update(db, actor, token, channel="telegram")
+        if operation == "edit":
+            result = None
+        elif operation == "reject":
+            result = await enterprise_tools.reject_task_action(db, actor, token, channel="telegram")
+        else:
+            result = await enterprise_tools.confirm_task_update(db, actor, token, channel="telegram")
         await db.commit()
+    if operation == "edit":
+        await callback.answer("Ноорогийг засахын тулд доорх зааврын дагуу хариу бичнэ үү.")
+        if callback.message:
+            await callback.message.answer("✏️ Даалгаврын ноорогийг засахын тулд энэ мессежид reply хийж өөрчлөлтөө бичнэ үү. Жишээ: “гарчгийг Борлуулалтын тайлан болго”.")
+        return
+    assert result is not None
     outcome = result.get("data", {}).get("created") or result.get("data", {}).get("updated")
-    success_text = "Task created" if result.get("data", {}).get("created") else "Task updated"
+    if operation == "reject":
+        success_text = "Ноорог татгалзагдлаа"
+    else:
+        success_text = "Task created" if result.get("data", {}).get("created") else "Task updated"
     await callback.answer(success_text if result["status"] == "ok" else result["data"].get("reason", "Action unavailable"), show_alert=result["status"] != "ok")
     if callback.message and result["status"] == "ok":
         title = outcome.get("title") if isinstance(outcome, dict) else None
-        await callback.message.answer(("Task created: " + title) if result.get("data", {}).get("created") and title else success_text + ".")
+        if operation == "reject":
+            await callback.message.answer("❌ Даалгаврын ноорог үүсгэлгүй цуцаллаа.")
+        else:
+            await callback.message.answer(("Task created: " + title) if result.get("data", {}).get("created") and title else success_text + ".")
 
 
 @router.message(StateFilter(None, TaskDraft.confirming), F.voice)

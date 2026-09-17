@@ -3,11 +3,11 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePage } from './ChatWorkspacePage'
 
-const mocks = vi.hoisted(() => ({ send: vi.fn(), acknowledge: vi.fn(), createGroup: vi.fn(), openDirect: vi.fn() }))
+const mocks = vi.hoisted(() => ({ send: vi.fn(), acknowledge: vi.fn(), createGroup: vi.fn(), openDirect: vi.fn(), confirmDraft: vi.fn(), rejectDraft: vi.fn() }))
 
 const member = { account_id: 2, employee_id: 2, name: 'Ану', email: 'anu@example.com', avatar_url: null, is_online: true, last_seen_at: new Date().toISOString(), role: 'member' as const }
 const conversation = { id: 9, public_id: 'c1', kind: 'direct' as const, title: 'Ану', avatar_urls: [], presence: 'online' as const, members: [member], member_count: 2, can_manage: false, last_message: { id: 12, body: 'Сайн байна уу?', sender_account_id: 2, sender_name: 'Ану', created_at: new Date().toISOString() }, unread_count: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
-const incoming = { id: 12, conversation_id: 9, sender: member, sender_account_id: 2, client_nonce: crypto.randomUUID(), body: 'Сайн байна уу?', created_at: new Date().toISOString(), is_mine: false, status: null, receipts: { total: 0, delivered: 0, read: 0 } }
+const incoming = { id: 12, conversation_id: 9, sender: member, sender_account_id: 2, client_nonce: crypto.randomUUID(), body: 'Сайн байна уу?', action: { type: 'task_action_preview' as const, payload: { action_reference: 'mcpact-test-reference', title: 'Тайлан бэлдэх', action_type: 'create_task' } }, created_at: new Date().toISOString(), is_mine: false, status: null, receipts: { total: 0, delivered: 0, read: 0 } }
 const outgoing = { id: 13, conversation_id: 9, sender: { ...member, account_id: 1, name: 'Manager' }, sender_account_id: 1, client_nonce: crypto.randomUUID(), body: 'Сайн, сайн.', created_at: new Date().toISOString(), is_mine: true, status: 'read' as const, receipts: { total: 1, delivered: 1, read: 1 } }
 const callHistory = { id: 14, conversation_id: 9, sender: null, sender_account_id: null, client_nonce: crypto.randomUUID(), body: null, kind: 'call' as const, call: { call_id: crypto.randomUUID(), call_type: 'audio' as const, outcome: 'completed' as const, duration_seconds: 225, direction: 'incoming' as const, caller_name: 'Ану', callee_name: 'Manager', started_at: new Date().toISOString(), ended_at: new Date().toISOString() }, created_at: new Date().toISOString(), is_mine: false, status: null, receipts: { total: 0, delivered: 0, read: 0 } }
 
@@ -17,6 +17,8 @@ vi.mock('../api/enterprise', () => ({
   useChatMessages: () => ({ data: { pages: [{ items: [incoming, outgoing, callHistory], next_before_id: null }] }, hasNextPage: false, isLoading: false, isFetchingNextPage: false, fetchNextPage: vi.fn() }),
   useChatMessageContext: () => ({ data: undefined }),
   useSendChatMessage: () => ({ mutate: mocks.send, isPending: false }),
+  useConfirmAssistantAction: () => ({ mutateAsync: mocks.confirmDraft, isPending: false }),
+  useRejectAssistantAction: () => ({ mutateAsync: mocks.rejectDraft, isPending: false }),
   useAcknowledgeChat: () => ({ mutate: mocks.acknowledge }),
   useChatContacts: () => ({ data: [member] }),
   useOpenDirectConversation: () => ({ mutateAsync: mocks.openDirect, isPending: false }),
@@ -52,7 +54,7 @@ function renderChat() {
 
 describe('chat workspace', () => {
   beforeEach(() => {
-    mocks.send.mockClear(); mocks.acknowledge.mockClear()
+    mocks.send.mockClear(); mocks.acknowledge.mockClear(); mocks.confirmDraft.mockReset(); mocks.rejectDraft.mockReset()
     window.matchMedia = vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })
     Element.prototype.scrollTo = vi.fn()
   })
@@ -75,6 +77,14 @@ describe('chat workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /Уншсан/ }))
     expect(screen.getByRole('dialog', { name: 'Мессежийн төлөв' })).toBeInTheDocument()
     expect(screen.getByText('Уншсан ·', { exact: false })).toBeInTheDocument()
+  })
+
+  it('renders task-draft confirm, reject, and edit controls in platform chat', () => {
+    renderChat()
+    expect(screen.getByRole('button', { name: '✅ Баталгаажуулах' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '❌ Татгалзах' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '✏️ Засах' }))
+    expect(screen.getByRole('textbox', { name: 'Мессеж' })).toHaveValue('Нооргийг засах: “Тайлан бэлдэх”. ')
   })
 
   it('exposes a persistent desktop conversation-pane toggle', () => {

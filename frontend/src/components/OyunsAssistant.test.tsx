@@ -7,6 +7,7 @@ const { chat, confirm, download } = vi.hoisted(() => ({ chat: vi.fn(), confirm: 
 vi.mock('../api/enterprise', () => ({
   useAssistantChat: () => ({ mutateAsync: chat, isPending: false }),
   useConfirmAssistantAction: () => ({ mutateAsync: confirm, isPending: false }),
+  useRejectAssistantAction: () => ({ mutateAsync: vi.fn(), isPending: false }),
   downloadAssistantAttachment: download,
   transcribeAssistantVoice: vi.fn(),
   synthesizeAssistantSpeech: vi.fn().mockResolvedValue(undefined),
@@ -34,6 +35,8 @@ describe('OYUNS assistant actions', () => {
     fireEvent.change(screen.getByPlaceholderText('Компаний журам, миний ажил, эсвэл даалгаврын талаар асуу…'), { target: { value: 'Create an access review task' } })
     fireEvent.submit(screen.getByRole('button', { name: 'Илгээх' }).parentElement!)
 
+    expect(await screen.findByRole('button', { name: '❌ Татгалзах' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '✏️ Засах' })).toBeInTheDocument()
     const confirmButton = await screen.findByRole('button', { name: 'ERP-д үүсгэх' })
     fireEvent.click(confirmButton)
 
@@ -74,5 +77,7 @@ describe('OYUNS assistant actions', () => {
 
     expect(container.querySelector('.assistant-panel-beam')).toBeInTheDocument()
     expect(container.querySelector('.assistant-panel-beam .assistant-panel')).toBeInTheDocument()
+    expect(container.querySelector('.assistant-panel-beam')).toHaveAttribute('data-color', 'ocean')
+    expect(container.querySelector('.assistant-panel-beam .border-beam-line')).toBeInTheDocument()
   })
 })
