@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bot, BookOpen, Boxes, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, KeyRound, Landmark, LocateFixed, MapPin, MonitorUp, Settings2, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, X } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useDeleteManagedAccount, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
+import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useDeleteManagedAccount, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useHolidaySettings, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useSetHolidayCountry, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { EmployeesPage } from './EmployeesPage'
 import { QuestionsPage } from './QuestionsPage'
@@ -170,9 +170,21 @@ export function CollaborationSettingsPage() {
   return <SettingsPage categoryId="workflows" activeTab="/administration/workflows/worktime" title="Ажлын цаг ба процесс">
     <SettingsSection title="Check-in асуултууд" icon={ClipboardList} className="settings-embedded"><QuestionsPage /></SettingsSection>
     <SettingsSection title="Ажилтны хуваарь" icon={CalendarDays} className="settings-embedded"><SchedulePage /></SettingsSection>
+    <WorktimeHolidayPanel />
     <WorktimeQrKioskPanel />
     <WorktimeGeofencePanel />
   </SettingsPage>
+}
+
+function WorktimeHolidayPanel() {
+  const holidaySettings = useHolidaySettings()
+  const setCountry = useSetHolidayCountry()
+  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
+  const canEdit = roles.includes('admin')
+
+  return <SettingsSection title="Нийтийн амралтын өдөр" icon={CalendarDays} className="settings-embedded worktime-holiday-admin">
+    {holidaySettings.isError ? <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />Амралтын өдрийн тохиргоог ачаалж чадсангүй.</div> : <div className="worktime-holiday-setting"><div><strong>Амралт: {holidaySettings.data?.country || 'MN'}</strong><p>Календарьт харуулах нийтийн амралтын өдрийн улсыг сонгоно.</p></div><select aria-label="Амралтын өдрийн улс" value={holidaySettings.data?.country || 'MN'} onChange={(event) => setCountry.mutate(event.target.value)} disabled={!canEdit || holidaySettings.isLoading || setCountry.isPending}>{holidaySettings.data?.countries.map((country) => <option key={country.countryCode} value={country.countryCode}>{country.name}</option>)}</select></div>}
+  </SettingsSection>
 }
 
 function WorktimeQrKioskPanel() {

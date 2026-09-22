@@ -10,11 +10,10 @@ export default {
         accent: 'var(--color-accent)', 'accent-dim': 'var(--color-accent-soft)', green: 'var(--color-green)',
         'green-dim': 'var(--color-green-soft)', yellow: 'var(--color-amber)', 'yellow-dim': 'var(--color-amber-soft)',
         red: 'var(--color-red)', 'red-dim': 'var(--color-red-soft)', purple: 'var(--color-purple)',
-        orange: 'var(--color-orange)', panel: 'var(--color-panel)',
       },
       fontFamily: {
-        sans: ['Montserrat', 'sans-serif'],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        sans: ['system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', 'monospace'],
       },
       fontSize: { base: '14px' },
     },

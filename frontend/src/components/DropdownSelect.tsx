@@ -34,8 +34,6 @@ export function DropdownSelect({
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const listboxId = useId()
-  const triggerId = `${listboxId}-trigger`
-  const labelId = `${listboxId}-label`
   const selected = options.find((option) => option.value === value)
 
   useEffect(() => {
@@ -77,15 +75,13 @@ export function DropdownSelect({
 
   return (
     <div ref={rootRef} className={`dropdown-select ${fullWidth ? 'dropdown-select-full' : ''} ${className}`}>
-      {label && <label id={labelId} htmlFor={triggerId} className="dropdown-select-label">{label}{required && <span aria-hidden="true"> *</span>}</label>}
+      {label && <span className="dropdown-select-label">{label}</span>}
       <button
         ref={triggerRef}
-        id={triggerId}
         type="button"
         className="dropdown-select-trigger"
         disabled={disabled}
-        aria-label={ariaLabel || undefined}
-        aria-labelledby={ariaLabel ? undefined : label ? labelId : undefined}
+        aria-label={ariaLabel || label}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
@@ -97,7 +93,7 @@ export function DropdownSelect({
         <ChevronDown aria-hidden="true" size={16} strokeWidth={2.25} className={`dropdown-select-chevron ${open ? 'is-open' : ''}`} />
       </button>
       {open && (
-        <div id={listboxId} className="dropdown-select-menu rounded-xl p-1.5 mt-2" role="listbox" aria-label={ariaLabel || label}>
+        <div id={listboxId} className="dropdown-select-menu bg-white shadow-xl rounded-xl p-1.5 mt-2" role="listbox" aria-label={ariaLabel || label}>
           {options.map((option) => (
             <button
               key={option.value}
