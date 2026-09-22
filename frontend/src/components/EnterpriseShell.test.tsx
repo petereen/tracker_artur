@@ -59,6 +59,13 @@ describe('enterprise sidebar', () => {
     expect(tabbar?.querySelector('.nav-unread-badge')).toHaveTextContent('3')
   })
 
+  it('provides a keyboard skip link to the workspace main region', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
+    expect(screen.getByRole('link', { name: 'Үндсэн хэсэг рүү очих' })).toHaveAttribute('href', '#workspace-main')
+    expect(screen.getByRole('main')).toHaveAttribute('id', 'workspace-main')
+  })
+
   it('shows Chat in the main navigation with an unread badge', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)

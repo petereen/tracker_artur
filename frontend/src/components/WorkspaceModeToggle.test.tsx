@@ -23,7 +23,7 @@ describe('WorkspaceModeToggle', () => {
     render(<WorkspaceModeToggle />)
     const toggle = screen.getByRole('switch', { name: 'Switch workspace mode' })
     expect(toggle).toHaveAttribute('aria-checked', 'true')
-    expect(toggle).toHaveTextContent('Manager Mode')
+    expect(toggle).toHaveTextContent('Менежер харагдац')
     fireEvent.click(toggle)
     expect(state.setMode).toHaveBeenCalledWith('member')
   })

@@ -7,17 +7,17 @@ const DOMAIN = 'erp.oyuns.mn'
 
 function LegalShell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-200">
-      <div className="max-w-2xl mx-auto px-5 py-8">
-        <a href="/" className="text-sky-400 text-sm">← Нүүр хуудас</a>
-        <h1 className="text-2xl font-bold text-white mt-4 mb-1">{title}</h1>
-        <div className="text-xs text-gray-500 mb-6">Сүүлд шинэчилсэн: {UPDATED}</div>
-        <div className="space-y-4 text-[14px] leading-relaxed [&_h2]:text-white [&_h2]:font-semibold [&_h2]:mt-6 [&_h2]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_a]:text-sky-400">
+    <div className="legal-shell">
+      <div className="legal-container">
+        <a href="/" className="legal-back-link">← Нүүр хуудас</a>
+        <h1 className="legal-title">{title}</h1>
+        <div className="legal-meta">Сүүлд шинэчилсэн: {UPDATED}</div>
+        <div className="legal-body">
           {children}
         </div>
-        <div className="mt-10 flex gap-4 text-sm">
-          <a href="/privacy" className="text-sky-400">Нууцлалын бодлого</a>
-          <a href="/terms" className="text-sky-400">Үйлчилгээний нөхцөл</a>
+        <div className="legal-footer">
+          <a href="/privacy">Нууцлалын бодлого</a>
+          <a href="/terms">Үйлчилгээний нөхцөл</a>
         </div>
       </div>
     </div>

@@ -213,7 +213,7 @@ export function EnterpriseShell() {
     const hrItem = NAV.find((item) => item.to === '/hr')
     const payrollItem = { to: '/erp/payroll', label: 'Payroll', icon: Calculator, roles: [] }
     const base = NAV.filter((item) => item.to !== '/hr' && (!item.roles.length || item.roles.some((role) => roles.includes(role))))
-    const showPayroll = Boolean(erp.data?.modules.payroll && roles.some((role) => PAYROLL_ROLES.includes(role)))
+    const showPayroll = Boolean(erp.data?.modules?.payroll && roles.some((role) => PAYROLL_ROLES.includes(role)))
     const withHr = base.flatMap((item) => item.to === '/chat' && hrItem ? [hrItem, item] : [item])
     if (!canAccessERP) {
       return showPayroll ? [...withHr.slice(0, -1), payrollItem, withHr[withHr.length - 1]] : withHr
@@ -291,6 +291,7 @@ export function EnterpriseShell() {
     <WorkspaceModeProvider>
     <RealtimeProvider>
       <div className="workspace-shell">
+        <a className="skip-link" href="#workspace-main">Үндсэн хэсэг рүү очих</a>
         <button className="mobile-menu-button" onClick={() => setMobileOpen(true)} aria-label="Цэс нээх" aria-expanded={mobileOpen}><Menu /></button>
         <aside className={`workspace-sidebar ${mobileOpen ? 'is-open' : ''}`}>
           <div className="sidebar-brand"><img src={logo || (theme === 'dark' ? '/oyuns-aio-logo.png' : '/favicon.png')} alt="OYUNS" /><button onClick={() => setMobileOpen(false)} aria-label="Цэс хаах"><X /></button></div>
@@ -313,15 +314,15 @@ export function EnterpriseShell() {
           </div>
         </aside>
         {mobileOpen && <button className="sidebar-scrim" onClick={() => setMobileOpen(false)} aria-label="Цэс хаах" />}
-        <main className="workspace-main">
+        <main id="workspace-main" className="workspace-main">
           <header className="workspace-header">
             <h1>{title}</h1>
             <div className="header-actions">
               <WorkspaceModeToggle />
               <Suspense fallback={null}><LazyNotificationCenter /></Suspense>
               <button className="theme-toggle" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={theme === 'light' ? 'Dark mode идэвхжүүлэх' : 'Light mode идэвхжүүлэх'} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
-              <button className="search-trigger" onClick={() => setCommandOpen(true)}><Search size={16} /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
-              <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>
+              <button className="search-trigger" type="button" aria-label={t('action.search')} onClick={() => setCommandOpen(true)}><Search size={16} aria-hidden="true" /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
+              <button className="ai-trigger" type="button" aria-label="OYUNS AI нээх" onClick={() => setAssistantOpen(true)}><Sparkles size={16} aria-hidden="true" /> OYUNS</button>
             </div>
           </header>
           <div className={`workspace-content ${location.pathname.startsWith('/chat') ? 'chat-route-content' : ''}`}><Suspense fallback={<WorkspaceRouteSkeleton pathname={location.pathname} />}><Outlet /></Suspense></div>

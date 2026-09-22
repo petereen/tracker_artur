@@ -133,12 +133,6 @@ export function ProfilePage() {
   };
   return (
     <div className="profile-page">
-      <div className="view-toolbar">
-        <div>
-          <h2>Миний профайл</h2>
-          <p>Хувийн болон ажлын мэдээллээ удирдана.</p>
-        </div>
-      </div>
       <div className="profile-grid">
         <section className="panel profile-card">
           <div className="profile-avatar">

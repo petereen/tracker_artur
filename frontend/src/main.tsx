@@ -8,6 +8,7 @@ import { NativeBootBoundary } from './platform/updater'
 import { installNativeTelegramAuth } from './platform/telegram-auth'
 import { startTelemetry } from './platform/telemetry'
 import './index.css'
+import './styles/oyuns-overhaul.css'
 import './i18n'
 
 initializeRuntimeClass()
@@ -22,7 +23,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <NativeBootBoundary><App /></NativeBootBoundary>
-      <Toaster position="top-right" toastOptions={{ style: { background: '#161B22', color: '#E6EDF3', border: '1px solid #30363D' } }} />
+      <Toaster position="top-right" toastOptions={{ className: 'oyuns-toast' }} />
     </QueryClientProvider>
   </StrictMode>,
 )

@@ -4,7 +4,7 @@ import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Down
 import { Link } from 'react-router-dom'
 import { downloadHRAttendanceCsv, useActor, usePayrollComponentMasters, useAddHRCompensation, useBulkUpdateHRAttendance, useCreateHREmployee, useDecideHRLeave, useHRCompensation, useHRDepartments, useHRAttendance, useHREmployees, useHRLeaveBalances, useHRLeaveRequests, useRegenerateHRInvite, useRevokeHRInvite, useSetHRLeaveBalance, useSubmitHRLeave, useUpdateHRAttendance, useUpdateHRLeave } from '../api/enterprise'
 import type { HRAttendanceItem, HREmployee, HRLeaveRequest } from '../api/enterprise'
-import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
+import { Badge, Btn, Card, Input, Modal, Select } from '../components/ui'
 
 type Tab = 'directory' | 'leave' | 'attendance' | 'payroll'
 const monthNow = () => new Date().toISOString().slice(0, 7)
@@ -40,9 +40,7 @@ export function HRWorkspacePage() {
   const visibleTabs = isHR ? (['directory', 'leave', 'attendance', 'payroll'] as Tab[]) : isManager ? (['directory', 'leave', 'attendance'] as Tab[]) : (['directory', 'leave', 'attendance'] as Tab[])
   const navLabels: Record<Tab, string> = { directory: 'Ажилтны лавлах', leave: 'Чөлөө', attendance: 'Ирц', payroll: 'Цалин' }
   return <div className="hr-workspace">
-    <PageHeader title="Хүний нөөц" sub="Ажилтан, чөлөө, ирц ба цалингийн нэгдсэн орон зай">
-      {isHR && <Btn variant="primary" onClick={() => setShowAdd(true)}><UserPlus size={15} />Ажилтан нэмэх</Btn>}
-    </PageHeader>
+    {isHR && <div className="flex justify-end"><Btn variant="primary" onClick={() => setShowAdd(true)}><UserPlus size={15} />Ажилтан нэмэх</Btn></div>}
     <nav className="hr-tabs" aria-label="HR sections">{visibleTabs.map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{navLabels[item]}</button>)}</nav>
     {tab === 'directory' && <Directory employees={employees.data?.items || []} departments={departments.data || []} search={search} setSearch={setSearch} department={department} setDepartment={setDepartment} onSelect={setSelected} />}
     {tab === 'leave' && <LeavePanel isHR={isHR} isManager={isManager} balances={balances.data || []} requests={leave.data || []} employees={employees.data?.items || []} />}

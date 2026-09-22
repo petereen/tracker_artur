@@ -1,6 +1,15 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [ ] Execute the OYUNS frontend visual and UX overhaul without changing workflows, state, validation, APIs, or routes (`frontend/index.html`, `frontend/tailwind.config.js`, `frontend/src/components`, `frontend/src/pages`, `frontend/src/index.css`)
+  - [x] Consolidate OYUNS tokens, Montserrat loading, typography, spacing, radii, responsive containers, and theme-safe aliases
+  - [x] Normalize shared UI primitives, shell navigation/header, focus states, touch targets, and mobile safe areas
+  - [x] Harden shell metadata rendering for incomplete bootstrap payloads and honor reduced-motion preferences in login surfaces
+  - [x] Apply shared surfaces, controls, hierarchy, and responsive treatment across authenticated and public route families
+  - [x] Add focused primitive/shell tests and multi-viewport responsive browser coverage
+  - [ ] Extract remaining route CSS from the critical bundle to bring strict critical-CSS gzip below 48 KiB (current build: 66.2 KiB)
+- [x] Move Contract Archive storage actions into the storage box and convert folder/upload/delete actions to icon-only controls (`frontend/src/components/ContractArchiveWorkspace.tsx`, `frontend/src/index.css`)
+- [x] Remove Contract Archive, HR, and Profile introductory header copy (`frontend/src/components/ContractArchiveWorkspace.tsx`, `frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/pages/ProfilePage.tsx`, `frontend/src/index.css`)
 - [x] Create a repo-local OYUNS minimal product-design skill adapted from the supplied Codex brief and current frontend tokens (`docs/skills/oyuns-minimal-design/SKILL.md`)
 - [x] Move Worktime QR kiosk settings into Ажлын цаг ба процесс and make administration settings cards/forms use the full available width (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/ManagerSettingsPage.tsx`, `frontend/src/index.css`) — reset the Calendar action’s mobile grid placement so it remains compact and aligned
 - [x] Start administration settings sections collapsed by default (`frontend/src/pages/AdministrationSettingsPages.tsx`)

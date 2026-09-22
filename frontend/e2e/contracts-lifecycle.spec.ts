@@ -33,7 +33,7 @@ test('contract lifecycle reaches signed and stamped archive', async ({ page }) =
   })
 
   await page.goto('/contracts')
-  await expect(page.getByRole('heading', { name: 'Гэрээ', level: 2 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Гэрээ', level: 1 })).toBeVisible()
   await page.getByRole('button', { name: /Шинэ баримт бичиг/ }).click()
   await page.getByLabel('Гарчиг / сэдэв').fill('Туршилтын үйлчилгээний гэрээ')
   await page.locator('.contract-editor .ProseMirror').fill('Гэрээний нөхцөл')
