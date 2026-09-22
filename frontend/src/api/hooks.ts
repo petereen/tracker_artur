@@ -84,6 +84,7 @@ export function useDeleteEmployee() {
       qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
       toast.success('Устгагдлаа')
     },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Ажилтан устгагдсангүй'),
   })
 }
 

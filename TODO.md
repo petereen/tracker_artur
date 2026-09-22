@@ -1,6 +1,8 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Expand payroll setup view to use the full available workspace width (`frontend/src/index.css`)
+- [x] Make every employee row removable, including employees without a linked access account (`frontend/src/pages/EmployeesPage.tsx`, `frontend/src/api/hooks.ts`)
 - [x] Default the Analytics tab to a 30-day time period (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/pages/StatsWorkspacePage.test.tsx`)
 - [x] Fix permanent deletion of managed users when contract review history references the account (`backend/alembic/versions/k6l7m8n9o0_allow_managed_account_deletion.py`, `backend/tests/test_account_deletion_migration.py`)
 - [x] Keep the calendar event creation sidepanel above the sticky workspace header (`frontend/src/index.css`)
