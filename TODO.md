@@ -1,7 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
-- [x] Remove redundant headers and explanatory copy from every payroll settings tab while preserving tab actions (`frontend/src/pages/PayrollSetupHub.tsx`)
+- [x] Remove redundant headers and explanatory copy from every payroll settings tab while preserving tab actions (`frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/index.css`)
 - [x] Expose the guarded delete action for payroll salary components in the component list (frontend/src/pages/PayrollSetupHub.tsx)
 - [x] Expand payroll setup view to use the full available workspace width (`frontend/src/index.css`)
 - [x] Make every employee row removable, including employees without a linked access account (`frontend/src/pages/EmployeesPage.tsx`, `frontend/src/api/hooks.ts`)
