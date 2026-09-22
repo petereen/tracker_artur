@@ -113,7 +113,7 @@ function Field({ label, children, hint }: { label: string; children: ReactNode; 
 }
 
 function SectionHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
-  return <div className="payroll-setup-section-header"><div><span className="payroll-v2-kicker">{eyebrow}</span><h2>{title}</h2><p>{description}</p></div>{action}</div>
+  return action ? <div className="payroll-setup-toolbar payroll-setup-actions-only">{action}</div> : null
 }
 
 function EmployeesTab({ canEdit }: { canEdit: boolean }) {
