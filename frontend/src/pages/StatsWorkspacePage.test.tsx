@@ -19,7 +19,7 @@ vi.mock('../components/WorktimeExportModal', () => ({ WorktimeExportModal: () =>
 vi.mock('../components/WorkHourHierarchyChart', () => ({ WorkHourHierarchyChart: () => <div /> }))
 vi.mock('../components/KpiDrilldownCard', () => ({ KpiDrilldownCard: () => <div /> }))
 vi.mock('../components/HeatmapCalendar', () => ({ HeatmapCalendar: () => <div /> }))
-vi.mock('../components/TimePeriodFilter', () => ({ TimePeriodFilter: () => <div /> }))
+vi.mock('../components/TimePeriodFilter', () => ({ TimePeriodFilter: (props: { preset: string; period: { date_from: string; date_to: string } }) => <div data-testid="time-period-filter" data-preset={props.preset} data-from={props.period.date_from} data-to={props.period.date_to} /> }))
 
 describe('Stats worktime export access', () => {
   beforeEach(() => { mocks.roles = [] })
@@ -52,5 +52,15 @@ describe('Stats worktime export access', () => {
     mocks.roles = ['admin']
     render(<StatsWorkspacePage />)
     expect(screen.getByRole('button', { name: /Ажилтан сонгох/i })).toHaveTextContent('Байгууллагын нийлбэр')
+  })
+
+  it('defaults analytics to the 30-day period', () => {
+    render(<StatsWorkspacePage />)
+    const filter = screen.getByTestId('time-period-filter')
+    const from = new Date(`${filter.getAttribute('data-from')}T12:00:00`)
+    const to = new Date(`${filter.getAttribute('data-to')}T12:00:00`)
+
+    expect(filter).toHaveAttribute('data-preset', 'month')
+    expect(Math.round((to.getTime() - from.getTime()) / 86_400_000) + 1).toBe(30)
   })
 })

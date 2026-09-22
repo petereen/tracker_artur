@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Default the Analytics tab to a 30-day time period (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/pages/StatsWorkspacePage.test.tsx`)
+- [x] Fix permanent deletion of managed users when contract review history references the account (`backend/alembic/versions/k6l7m8n9o0_allow_managed_account_deletion.py`, `backend/tests/test_account_deletion_migration.py`)
+- [x] Keep the calendar event creation sidepanel above the sticky workspace header (`frontend/src/index.css`)
 - [x] Move the calendar holiday-country setting into Worktime & Processes administration (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/CalendarWorkspacePage.tsx`)
 - [x] Add spacing and overflow protection between the workspace mode label and switch (`frontend/src/index.css`)
 - [x] Refine calendar toolbar hierarchy and remove the holiday-country control (`frontend/src/pages/CalendarWorkspacePage.tsx`, `frontend/src/index.css`)
@@ -591,6 +594,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Default the Analytics tab to a 30-day time period (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/pages/StatsWorkspacePage.test.tsx`)
 - [x] Fix the unified Payroll v2 component-master backfill so PostgreSQL can run the migration (`backend/alembic/versions/a1b2c3d4e5f6_unified_payroll_v2.py`, `backend/tests/test_payroll_v2_contract.py`)
 - [x] Fix payroll setup sidepanel layering so drawer headers and close buttons render above the sticky workspace header (`frontend/src/pages/PayrollSetupHub.tsx`)
 - [x] Open company knowledge to all authenticated workspace members with read-only member access while keeping OYUNS training admin-only (`frontend/src/App.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/KnowledgePage.tsx`, `frontend/src/pages/KnowledgePage.test.tsx`, `backend/app/routers/knowledge.py`, `backend/tests/test_knowledge_api.py`)

@@ -2041,7 +2041,7 @@ a {
   justify-content: flex-end;
   overflow: hidden;
   position: fixed;
-  z-index: 70;
+  z-index: 1000;
 }
 .detail-sheet {
   background: var(--glass-heavy);

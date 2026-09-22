@@ -38,7 +38,7 @@ export function StatsWorkspacePage() {
   const end = useMemo(() => new Date(), []);
   const start = useMemo(() => {
     const value = new Date(end);
-    value.setDate(value.getDate() - 364);
+    value.setDate(value.getDate() - 29);
     return value;
   }, [end]);
   const [period, setPeriod] = useState({
@@ -47,7 +47,7 @@ export function StatsWorkspacePage() {
   });
   const [preset, setPreset] = useState<
     "custom" | "today" | "week" | "month" | "quarter"
-  >("custom");
+  >("month");
   const [metric, setMetric] = useState<AnalyticsMetric>("utilization");
   const actor = useAuthStore((state) => state.actor);
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES);

@@ -41,8 +41,8 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
     tabs: [{ to: '/administration/integrations/overview', label: 'Интеграци ба төхөөрөмж' }],
   },
   {
-    id: 'ai', to: '/administration/ai/knowledge', label: 'OYUNS AI ба мэдлэг', icon: Bot, roles: ['admin', 'manager', 'team_lead', 'hr', 'member', 'contractor', 'client_auditor', 'legal_counsel'],
-    tabs: [{ to: '/administration/ai/knowledge', label: 'Мэдлэг ба агент' }],
+    id: 'ai', to: '/administration/ai/knowledge', label: 'OYUNS AI ба сургалт', icon: Bot, roles: ['admin', 'manager', 'team_lead', 'hr', 'member', 'contractor', 'client_auditor', 'legal_counsel'],
+    tabs: [{ to: '/administration/ai/knowledge', label: 'Сургалт ба агент' }],
   },
   {
     id: 'security', to: '/administration/security/authentication', label: 'Систем ба аюулгүй байдал', icon: KeyRound, roles: ['admin'],
@@ -334,7 +334,7 @@ export function AdminAccessSettingsPage() {
 export function OyunsAssistantSettingsPage() {
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const canManageAgent = roles.includes('admin')
-  return <SettingsPage categoryId="ai" activeTab="/administration/ai/knowledge" title="OYUNS AI ба мэдлэг">
+  return <SettingsPage categoryId="ai" activeTab="/administration/ai/knowledge" title="OYUNS AI ба сургалт">
     <SettingsSection title="Компанийн өгөгдлийн сан" icon={BookOpen} className="settings-embedded"><KnowledgePage /></SettingsSection>
     {canManageAgent && <SettingsSection title="OYUNS сургалт" icon={Code2} className="settings-embedded"><DeveloperPage /></SettingsSection>}
   </SettingsPage>

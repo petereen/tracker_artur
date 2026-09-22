@@ -56,7 +56,7 @@ const TITLES: Record<string, string> = {
   '/administration/people/permissions': 'Үүрэг ба эрх / Roles & Permissions',
   '/administration/integrations/overview': 'Интеграци ба төхөөрөмж / Integrations & Devices',
   '/administration/security/authentication': 'Нэвтрэлт ба админ / Authentication & Admin',
-  '/administration/ai/knowledge': 'OYUNS AI ба мэдлэг / OYUNS AI & Knowledge',
+  '/administration/ai/knowledge': 'OYUNS AI ба сургалт / OYUNS AI & Knowledge',
   '/profile': 'Миний профайл',
   '/company-files': 'Компаний файлууд',
 }
