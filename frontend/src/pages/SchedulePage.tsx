@@ -36,7 +36,7 @@ export function SchedulePage() {
 
   return (
     <div>
-      <PageHeader title="Хуваарь" sub="Ажилтан бүрийн хувийн хуваарь" />
+      <PageHeader title="Хуваарь" />
       <div className="grid grid-cols-[220px_1fr] gap-4">
         <Card className="!p-0 overflow-hidden self-start">
           {employees.map((e: any) => (

@@ -1070,6 +1070,33 @@ async def update_account(
     return AccountOut(id=account.id, email=account.email, employee_id=account.employee_id, locale=account.locale, roles=roles, status=account.status, telegram_id=employee.telegram_id if employee else None)
 
 
+@router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    account_id: int,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(require_roles("admin")),
+):
+    account = await db.get(UserAccount, account_id, with_for_update=True)
+    if not account or account.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if account.id == actor.account_id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    if "admin" in (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all():
+        active_admins = await db.scalar(
+            select(func.count()).select_from(RoleAssignment).join(UserAccount, UserAccount.id == RoleAssignment.account_id).where(
+                RoleAssignment.role == "admin",
+                RoleAssignment.account_id != account.id,
+                UserAccount.organization_id == actor.organization_id,
+                UserAccount.status == "active",
+            )
+        )
+        if not active_admins:
+            raise HTTPException(status_code=400, detail="At least one active administrator is required")
+    await db.delete(account)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/accounts/invite", response_model=AccountOut, status_code=status.HTTP_201_CREATED)
 async def invite_account(
     data: AccountInvite,

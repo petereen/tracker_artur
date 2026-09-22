@@ -16,6 +16,9 @@ from app.services.enterprise_tools import (
     _chunks,
     attachment_metadata,
     _offline_route,
+    _is_personal_meeting_task,
+    _is_self_meeting_task,
+    _meeting_description,
     is_high_confidence_request,
     extract_content,
     tool_specs,
@@ -75,6 +78,23 @@ def test_governed_tool_inputs_cover_the_public_contract():
         DelegateTaskInput(title="Prepare access review")
     with pytest.raises(ValidationError):
         AssistantTaskInput(title="Task", organization_id=1)
+
+
+def test_meeting_attendees_do_not_become_delegated_task_assignees():
+    meeting = AssistantTaskInput(
+        title="Хурал",
+        description="Маргааш 17 цагаас оффист Анужин менежертэй хуралтай",
+        assignee="self",
+        participants=["Анужин менежер"],
+    )
+    assert _is_self_meeting_task(meeting, action_type="create_task") is True
+    assert _is_self_meeting_task(meeting, action_type="delegate_task") is False
+    named_assignee = meeting.model_copy(update={"assignee": "Анужин менежер"})
+    assert _is_personal_meeting_task(named_assignee) is True
+    assert _meeting_description(meeting) == (
+        "Маргааш 17 цагаас оффист Анужин менежертэй хуралтай\n"
+        "Оролцогчид: Анужин менежер"
+    )
 
 
 def test_text_extraction_produces_safe_locations_and_overlap_chunks():

@@ -309,7 +309,7 @@ async def send_reminder(employee_id: int, num: int):
     from datetime import date as d
     from sqlalchemy import select
     from app.models.models import Employee, SurveySession
-    from app.bot.db import canonical_checkin_complete, get_session
+    from app.bot.db import canonical_checkin_complete, get_manager_settings, get_session
     from app.services import work_report_service
 
     bot = _make_bot()
@@ -329,6 +329,9 @@ async def send_reminder(employee_id: int, num: int):
             ).scalars().first()
             telegram_id = emp.telegram_id
             timezone_name = emp.timezone
+            daily_report_reminders_enabled = getattr(get_manager_settings(), "daily_report_reminders_enabled", True)
+        if not daily_report_reminders_enabled:
+            return
         checkin_complete = canonical_checkin_complete(employee_id, local_day) or sess is None
         report_complete = not work_report_service.report_needs_submission(employee_id, "daily", local_day)
         missing = []

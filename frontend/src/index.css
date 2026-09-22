@@ -4053,6 +4053,124 @@ body:has(.assistant-backdrop) {
   box-shadow: none;
 }
 
+/* Settings sections use one quiet, collapsible surface throughout the admin area. */
+.settings-page .settings-section {
+  background: var(--settings-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  display: block;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  width: 100%;
+}
+
+.settings-page .settings-section-summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  list-style: none;
+  min-height: 64px;
+  padding: 14px var(--settings-card-padding);
+  user-select: none;
+}
+
+.settings-page .settings-section-summary::-webkit-details-marker { display: none; }
+.settings-page .settings-section-summary::marker { content: ''; }
+.settings-page .settings-section-summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -3px; }
+
+.settings-page .settings-section-icon {
+  background: var(--color-accent-soft);
+  border-radius: 10px;
+  color: var(--color-accent);
+  flex: 0 0 auto;
+  padding: 9px;
+  height: 38px;
+  width: 38px;
+}
+
+.settings-page .settings-section-title {
+  color: var(--color-text);
+  flex: 1;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  min-width: 0;
+}
+
+.settings-page .settings-section-chevron {
+  color: var(--color-muted);
+  flex: 0 0 auto;
+  transition: transform 160ms var(--ease-out), color 160ms ease;
+}
+
+.settings-page .settings-section-summary:hover .settings-section-chevron { color: var(--color-accent); }
+.settings-page .settings-section[open] .settings-section-chevron { transform: rotate(180deg); }
+
+.settings-page .settings-section[open] > .settings-section-summary {
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.settings-page .settings-section-body {
+  min-width: 0;
+  padding: var(--settings-card-padding);
+}
+
+.settings-page .settings-section-body > .panel,
+.settings-page .settings-section-body > .workspace-card {
+  box-shadow: none;
+}
+
+.settings-page .settings-row-actions {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.settings-page .settings-icon-action {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--color-muted);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.settings-page .settings-icon-action:hover,
+.settings-page .settings-icon-action:focus-visible {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  outline: none;
+}
+
+.settings-page .settings-icon-action.danger:hover,
+.settings-page .settings-icon-action.danger:focus-visible {
+  background: var(--color-red-soft);
+  color: var(--color-red);
+}
+
+.settings-page .settings-icon-action:disabled { cursor: not-allowed; opacity: 0.45; }
+
+@media (max-width: 720px) {
+  .settings-page .settings-section-summary,
+  .settings-page .settings-section-body { padding-left: var(--space-5); padding-right: var(--space-5); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-page .settings-section-chevron,
+  .settings-page .settings-icon-action { transition: none; }
+}
+
 @media (max-width: 720px) {
   .settings-content > .settings-embedded {
     padding: var(--space-5);
@@ -7518,17 +7636,10 @@ html.capacitor-native .native-boot-error {
   gap: 16px;
   min-width: 0;
 }
-.company-files-heading {
-  gap: 16px;
-}
-.company-files-heading p {
-  color: var(--color-muted);
-  font-size: 0.78rem;
-  margin: 6px 0 0;
-}
 .company-files-primary-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 .company-files-primary-actions button {
@@ -7953,7 +8064,6 @@ html.capacitor-native .native-boot-error {
   justify-content: flex-end;
 }
 @media (max-width: 760px) {
-  .company-files-heading,
   .company-files-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -11863,6 +11973,13 @@ html.capacitor-native .native-boot-error {
 .payroll-compact-nav a { border-bottom: 2px solid transparent; color: var(--color-muted, #768197); font-size: 12px; padding: 0 2px 10px; text-decoration: none; }
 .payroll-compact-nav a:hover, .payroll-compact-nav a.active { border-color: #2d62ec; color: #2d62ec; }
 .payroll-v2-metric-grid.compact { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 28px; }
+.payroll-overview-panel { background: var(--color-surface, #fff); border: 1px solid var(--color-border, #e2e7ef); border-radius: 16px; padding: 20px; }
+.payroll-overview-panel-active { border-color: color-mix(in srgb, #2d62ec 22%, var(--color-border, #e2e7ef)); background: linear-gradient(180deg, color-mix(in srgb, #2d62ec 4%, var(--color-surface, #fff)), var(--color-surface, #fff)); }
+.payroll-overview-panel .payroll-v2-section-head { margin-bottom: 16px; }
+.payroll-overview-panel .payroll-v2-section-head h2 { margin-top: 0; }
+.payroll-overview-panel-active .payroll-v2-active-grid { align-items: stretch; min-height: 230px; }
+.payroll-overview-panel-active .payroll-v2-empty { align-content: center; box-sizing: border-box; grid-column: 1 / -1; min-height: 230px; width: 100%; }
+.payroll-overview-panel-history .payroll-v2-table-wrap { border-color: var(--color-border, #e2e7ef); }
 .payroll-v2-button.danger { background: #fff3f5; border-color: #ffd0d7; color: #a9213b; }
 .payroll-v2-button.compact { font-size: 10px; min-height: 28px; padding: 5px 8px; }
 .payroll-setup-toolbar { align-items: center; display: flex; gap: 12px; justify-content: space-between; margin: 16px 0 12px; }
@@ -11897,4 +12014,4 @@ html.capacitor-native .native-boot-error {
 .payroll-setup-scrim { align-items: stretch; background: rgb(11 23 42 / 30%); display: flex; inset: 0; justify-content: flex-end; position: fixed; z-index: 80; }.payroll-setup-drawer { background: var(--color-surface, #fff); box-shadow: -18px 0 50px rgb(11 23 42 / 18%); display: flex; flex-direction: column; max-width: 520px; width: 100%; }.payroll-setup-drawer > header { align-items: flex-start; border-bottom: 1px solid var(--color-border, #e2e7ef); display: flex; justify-content: space-between; padding: 22px 24px 17px; }.payroll-setup-drawer h2 { color: var(--color-text, #231f20); font-size: 19px; letter-spacing: -.03em; margin: 5px 0 0; }.payroll-setup-drawer-body { overflow: auto; padding: 22px 24px 30px; }.payroll-setup-drawer-intro { align-items: center; background: #f6f8ff; border: 1px solid #dce5ff; border-radius: 11px; display: flex; gap: 10px; margin-bottom: 20px; padding: 12px; }.payroll-setup-drawer-intro strong, .payroll-setup-drawer-intro small { display: block; }.payroll-setup-drawer-intro strong { font-size: 12px; }.payroll-setup-drawer-intro small { color: var(--color-muted, #768197); font-size: 10px; margin-top: 3px; }.payroll-setup-dependency { display: grid; gap: 10px; }.payroll-setup-dependency > div { border-bottom: 1px solid var(--color-border, #edf0f4); display: flex; justify-content: space-between; padding: 8px 0; }.payroll-setup-dependency p { color: var(--color-muted, #768197); font-size: 11px; line-height: 1.6; }
 .payroll-setup-stat-grid { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 16px; }.payroll-setup-stat-grid div { background: var(--color-surface2, #f6f7fb); border-radius: 9px; display: grid; gap: 5px; padding: 10px; }.payroll-setup-stat-grid span { color: var(--color-muted, #768197); font-size: 9px; }.payroll-setup-stat-grid strong { font-size: 16px; }
 @media (max-width: 800px) { .payroll-compact-header, .payroll-compact-toolbar, .payroll-setup-section-header { align-items: flex-start; flex-direction: column; }.payroll-compact-actions { width: 100%; }.payroll-v2-metric-grid.compact, .payroll-setup-two-column { grid-template-columns: 1fr; }.payroll-setup-grid { grid-template-columns: 1fr 1fr; }.payroll-setup-toolbar { align-items: stretch; flex-direction: column; }.payroll-setup-search { max-width: none; }.payroll-setup-count { align-self: flex-end; }.payroll-setup-drawer { max-width: none; }.payroll-setup-drawer-body { padding-bottom: calc(30px + env(safe-area-inset-bottom)); } }
-@media (max-width: 500px) { .payroll-compact-actions .payroll-v2-button { flex: 1; justify-content: center; }.payroll-compact-nav { gap: 14px; }.payroll-setup-grid, .payroll-setup-toggle-grid { grid-template-columns: 1fr; }.payroll-setup-panel { padding: 17px; }.payroll-setup-row { align-items: flex-start; }.payroll-setup-row-actions { flex-wrap: wrap; justify-content: flex-end; }.payroll-setup-status { font-size: 9px; }.payroll-setup-drawer > header, .payroll-setup-drawer-body { padding-left: 17px; padding-right: 17px; } }
+@media (max-width: 500px) { .payroll-compact-actions .payroll-v2-button { flex: 1; justify-content: center; }.payroll-compact-nav { gap: 14px; }.payroll-overview-panel { padding: 16px; }.payroll-setup-grid, .payroll-setup-toggle-grid { grid-template-columns: 1fr; }.payroll-setup-panel { padding: 17px; }.payroll-setup-row { align-items: flex-start; }.payroll-setup-row-actions { flex-wrap: wrap; justify-content: flex-end; }.payroll-setup-status { font-size: 9px; }.payroll-setup-drawer > header, .payroll-setup-drawer-body { padding-left: 17px; padding-right: 17px; } }

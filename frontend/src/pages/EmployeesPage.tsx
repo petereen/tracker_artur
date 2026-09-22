@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
+import { Check, KeyRound, Pencil, Trash2, UserCheck, UserRoundX, X } from 'lucide-react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 import { useEmployees, useCreateEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
-import { useCreateManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
+import { useCreateManagedAccount, useDeleteManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
 import { ReportDetailModal } from '../components/ReportDetailModal'
 
 const TZ_OPTIONS = [
@@ -52,6 +53,7 @@ export function EmployeesPage() {
   const accounts = useManagedAccounts()
   const createAccount = useCreateManagedAccount()
   const updateAccount = useUpdateManagedAccount()
+  const deleteAccount = useDeleteManagedAccount()
 
   const [search, setSearch] = useState('')
   // null = закрыто, { id: null } = создание, { id: number } = редактирование
@@ -153,6 +155,11 @@ export function EmployeesPage() {
     const account = accountFor(emp)
     if (account) updateAccount.mutate({ id: account.id, status: account.status === 'disabled' ? 'active' : 'disabled' })
   }
+  const removeAccess = (emp: any) => {
+    const account = accountFor(emp)
+    if (!account || !window.confirm(`${emp.name}-ийн хандалтыг устгах уу?`)) return
+    deleteAccount.mutate(account.id)
+  }
   const setPerformanceQuickRange = (days: number, key: 'day' | 'week' | 'month') => {
     const start = new Date()
     start.setDate(start.getDate() - days + 1)
@@ -161,7 +168,7 @@ export function EmployeesPage() {
 
   return (
     <div>
-      <PageHeader title="Ажилтнууд" sub={`${employees.filter((e: any) => e.is_active).length} идэвхтэй · нийт ${employees.length}`}>
+      <PageHeader title="Ажилтнууд">
         <Btn variant="primary" onClick={openCreate}>+ Нэмэх</Btn>
       </PageHeader>
 
@@ -201,10 +208,10 @@ export function EmployeesPage() {
                 <td className="px-4 py-3 text-muted text-xs">{e.timezone}</td>
                 <td className="px-4 py-3"><Badge color={e.is_active ? 'green' : 'muted'}>{e.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge></td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-1.5" onClick={(event) => event.stopPropagation()}>
-                    <Btn variant="ghost" onClick={() => openEdit(e)}>Засах</Btn>
-                    {accountFor(e) && <><Btn variant="ghost" onClick={() => changeAccessPassword(e)}>Нууц үг</Btn><Btn variant="ghost" onClick={() => toggleAccountStatus(e)}>{accountFor(e)?.status === 'disabled' ? 'Хандалт идэвхжүүлэх' : 'Хандалт хаах'}</Btn></>}
-                    <Btn variant={e.is_active ? 'danger' : 'ghost'} onClick={() => toggle(e)}>{e.is_active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}</Btn>
+                  <div className="settings-row-actions" onClick={(event) => event.stopPropagation()}>
+                    <button type="button" className="settings-icon-action" onClick={() => openEdit(e)} aria-label={`${e.name} засах`} title="Засах"><Pencil size={16} /></button>
+                    {accountFor(e) && <><button type="button" className="settings-icon-action" onClick={() => changeAccessPassword(e)} aria-label={`${e.name} нууц үг солих`} title="Нууц үг солих"><KeyRound size={16} /></button><button type="button" className="settings-icon-action" onClick={() => toggleAccountStatus(e)} aria-label={`${e.name} хандалт ${accountFor(e)?.status === 'disabled' ? 'идэвхжүүлэх' : 'хаах'}`} title={accountFor(e)?.status === 'disabled' ? 'Хандалт идэвхжүүлэх' : 'Хандалт хаах'}>{accountFor(e)?.status === 'disabled' ? <UserCheck size={16} /> : <UserRoundX size={16} />}</button><button type="button" className="settings-icon-action danger" onClick={() => removeAccess(e)} aria-label={`${e.name} хандалт устгах`} title="Хандалт устгах"><Trash2 size={16} /></button></>}
+                    <button type="button" className="settings-icon-action" onClick={() => toggle(e)} aria-label={`${e.name} ${e.is_active ? 'идэвхгүй болгох' : 'идэвхжүүлэх'}`} title={e.is_active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}>{e.is_active ? <X size={16} /> : <Check size={16} />}</button>
                   </div>
                 </td>
               </tr>

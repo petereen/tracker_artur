@@ -30,7 +30,7 @@ export function OnboardingPage() {
 
   return (
     <div>
-      <PageHeader title="Танилцуулга" sub="Мэндчилгээний загвар ба зөөлөн эхлэл" />
+      <PageHeader title="Танилцуулга" />
       <div className="grid grid-cols-2 gap-4">
         <div className="flex flex-col gap-4">
           <Card>

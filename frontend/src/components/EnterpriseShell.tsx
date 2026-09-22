@@ -47,7 +47,7 @@ const TITLES: Record<string, string> = {
   '/chat': 'Чат',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо', '/contracts/archive': 'Гэрээний архив',
   '/erp': 'ERP үйл ажиллагаа',
-  '/erp/payroll': 'Монгол цалингийн тооцоо',
+  '/erp/payroll': 'Цалингийн тооцоо',
   '/erp/payroll/tax-benefits': 'Татвар ба хангамж',
   '/administration/organization/profile': 'Байгууллагын профайл / Company Profile',
   '/administration/organization/modules': 'Модуль ба боломжууд / Modules & Features',
@@ -315,7 +315,7 @@ export function EnterpriseShell() {
         {mobileOpen && <button className="sidebar-scrim" onClick={() => setMobileOpen(false)} aria-label="Цэс хаах" />}
         <main className="workspace-main">
           <header className="workspace-header">
-            <div><span className="eyebrow">OYUNS / Workspace</span><h1>{title}</h1></div>
+            <h1>{title}</h1>
             <div className="header-actions">
               <WorkspaceModeToggle />
               <Suspense fallback={null}><LazyNotificationCenter /></Suspense>

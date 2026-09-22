@@ -64,7 +64,7 @@ export function QuestionsPage() {
 
   return (
     <div>
-      <PageHeader title="Асуултууд" sub="Оройн чек-иний үндсэн асуултууд">
+      <PageHeader title="Асуултууд">
         <Btn variant="primary" onClick={openCreate}>+ Асуулт нэмэх</Btn>
       </PageHeader>
 

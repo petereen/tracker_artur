@@ -47,7 +47,6 @@ export function AdminAccessPanel() {
   return <>
     <Card>
       <div className="font-semibold text-[15px] mb-1">Админ хандалт</div>
-      <div className="text-xs text-muted mb-4">Энд нэмсэн и-мэйл болон нууц үгээр админ самбарт нэвтэрнэ.</div>
       <div className="flex flex-col gap-3">
         {adminUsers.map((user) => (
           <div key={user.id} className="flex items-center justify-between gap-3 rounded-lg bg-surface2 px-3 py-2">
@@ -65,7 +64,6 @@ export function AdminAccessPanel() {
 
     <Card>
       <div className="font-semibold text-[15px] mb-1">Миний нууц үг</div>
-      <div className="text-xs text-muted mb-4">Шинэ нууц үг хамгийн багадаа 8 тэмдэгт байна.</div>
       <div className="grid grid-cols-3 gap-3 items-end">
         <Input label="Одоогийн нууц үг" value={passwordForm.current_password} onChange={(v) => setPasswordForm((p) => ({ ...p, current_password: v }))} type="password" fullWidth />
         <Input label="Шинэ нууц үг" value={passwordForm.new_password} onChange={(v) => setPasswordForm((p) => ({ ...p, new_password: v }))} type="password" fullWidth />
@@ -117,7 +115,7 @@ export function ManagerSettingsPage() {
 
   return (
     <div>
-      <PageHeader title="Удирдлагын телеграм мэдэгдлийн тохиргоо" sub="Telegram холболт ба мэдэгдлийн тохиргоо" />
+      <PageHeader title="Удирдлагын телеграм мэдэгдлийн тохиргоо" />
       <div className="flex flex-col gap-4 max-w-[700px]">
         <Card>
           <div className="font-semibold text-[15px] mb-4">Telegram</div>

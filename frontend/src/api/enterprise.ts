@@ -438,6 +438,18 @@ export function useUpdateManagedAccount() {
   })
 }
 
+export function useDeleteManagedAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/v1/auth/accounts/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['v1', 'accounts'] })
+      toast.success('Хэрэглэгч устгагдлаа')
+    },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Хэрэглэгч устгагдсангүй'),
+  })
+}
+
 export function useInviteAccount() {
   return useMutation({
     mutationFn: (input: { email: string; employee_id?: number; locale: string; roles: string[] }) => api.post('/v1/auth/accounts/invite', input).then((response) => response.data),

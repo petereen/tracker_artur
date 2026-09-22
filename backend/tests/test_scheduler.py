@@ -65,6 +65,53 @@ def test_work_time_end_reminders_have_distinct_daily_notification_slots():
     assert first != second
 
 
+def test_daily_report_reminder_respects_manager_setting(monkeypatch):
+    from app.bot import scheduler
+
+    employee = SimpleNamespace(id=7, telegram_id="123", timezone="Asia/Ulaanbaatar")
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return None
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, _model, _employee_id):
+            return employee
+
+        def execute(self, _query):
+            return Result()
+
+    class FakeBot:
+        def __init__(self):
+            self.messages = []
+            self.session = self
+
+        async def send_message(self, recipient, message):
+            self.messages.append((recipient, message))
+
+        async def close(self):
+            pass
+
+    bot = FakeBot()
+    monkeypatch.setattr("app.bot.db.get_session", lambda: FakeSession())
+    monkeypatch.setattr("app.bot.db.get_manager_settings", lambda: SimpleNamespace(daily_report_reminders_enabled=False))
+    monkeypatch.setattr(scheduler, "_make_bot", lambda: bot)
+
+    import asyncio
+    asyncio.run(scheduler.send_reminder(employee.id, 1))
+
+    assert bot.messages == []
+
+
 def test_birthday_greeting_matches_calendar_february_29_fallback():
     assert _birthday_occurs_on_day(date(1992, 2, 29), date(2026, 2, 28)) is True
     assert _birthday_occurs_on_day(date(1992, 2, 29), date(2028, 2, 28)) is False

@@ -191,6 +191,40 @@ class DelegateTaskInput(AssistantTaskInput):
     assignee: str = Field(min_length=1, max_length=200)
 
 
+_MEETING_TEXT_RE = re.compile(r"\b(хурал\w*|уулзалт\w*|meeting|event)\b", re.IGNORECASE)
+_PERSONAL_MEETING_RE = re.compile(r"(хуралтай|уулзалттай|meeting with|бид\s*2|хамт)", re.IGNORECASE)
+
+
+def _is_personal_meeting_task(data: AssistantTaskInput) -> bool:
+    """Recognize a user's own meeting statement, including named attendees."""
+    text = " ".join(filter(None, [data.title, data.description]))
+    return bool(_MEETING_TEXT_RE.search(text) and _PERSONAL_MEETING_RE.search(text))
+
+
+def _is_self_meeting_task(data: AssistantTaskInput, *, action_type: str) -> bool:
+    """Recognize a meeting reminder that belongs to the requester.
+
+    A named attendee is not automatically a delegated task assignee.  The
+    calendar/task boundary is important here: assigning work to another
+    employee requires assignment authority, while recording one's own meeting
+    reminder must remain available to ordinary employees.
+    """
+    if action_type != "create_task":
+        return False
+    if data.assignee and data.assignee.casefold() not in {"self", "me", "myself", "би", "өөрөө", "надад", "өөртөө"}:
+        return False
+    return _is_personal_meeting_task(data)
+
+
+def _meeting_description(data: AssistantTaskInput) -> str | None:
+    """Keep attendee names as context without turning them into assignees."""
+    if not data.participants:
+        return data.description
+    attendees = ", ".join(data.participants)
+    note = f"Оролцогчид: {attendees}"
+    return f"{data.description}\n{note}" if data.description else note
+
+
 INPUT_MODELS = {
     "file_search_tool": FileSearchInput,
     "get_stats_tool": StatsInput,
@@ -851,11 +885,18 @@ async def _resolve_project_reference(db: AsyncSession, actor: ActorContext, refe
 
 
 async def _resolve_task_action_payload(db: AsyncSession, actor: ActorContext, data: AssistantTaskInput, *, action_type: str) -> dict:
+    if _is_personal_meeting_task(data):
+        # A meeting with a named attendee is still the requester's reminder;
+        # the attendee must not silently become a delegated task assignee.
+        action_type = "create_task"
+        data = data.model_copy(update={"assignee": "self"})
     assignee_id = await _resolve_employee_reference(db, actor, data.assignee, required=action_type == "delegate_task")
     if action_type == "delegate_task" and assignee_id == actor.employee_id:
         raise ValueError("Delegation must target another employee")
+    self_meeting = _is_self_meeting_task(data, action_type=action_type)
+    participants = [] if self_meeting else (data.participants or [])
     participant_ids: list[int] = []
-    for participant in data.participants or []:
+    for participant in participants:
         participant_id = await _resolve_employee_reference(db, actor, participant, required=True)
         if participant_id not in participant_ids:
             participant_ids.append(participant_id)
@@ -867,7 +908,7 @@ async def _resolve_task_action_payload(db: AsyncSession, actor: ActorContext, da
     project_id = await _resolve_project_reference(db, actor, data.project_ref)
     payload = {
         "title": data.title,
-        "description": data.description,
+        "description": _meeting_description(data) if self_meeting else data.description,
         "assignee_id": assignee_id,
         "assignee_ids": participant_ids or ([assignee_id] if assignee_id else []),
         "reviewer_id": reviewer_id,

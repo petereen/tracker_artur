@@ -127,7 +127,6 @@ export function KnowledgePage() {
     <div>
       <PageHeader
         title="Компаний өгөгдлийн сан"
-        sub={canManageKnowledge ? 'OYUNS agent-ын хариултад ашиглах бодлого, журам, FAQ болон заавар' : 'Байгууллагын баталгаатай бодлого, журам, FAQ болон зааврыг харах'}
       >
         {canManageKnowledge && <Btn variant="primary" onClick={openCreate}>+ Мэдээлэл нэмэх</Btn>}
       </PageHeader>

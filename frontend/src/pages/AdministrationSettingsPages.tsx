@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, BookOpen, Boxes, Building2, CalendarClock, CalendarDays, ClipboardList, Code2, KeyRound, Landmark, LocateFixed, MapPin, MonitorUp, Settings2, ShieldCheck, UserPlus, UserRoundCog, Users2 } from 'lucide-react'
+import { ArrowLeft, Bot, BookOpen, Boxes, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, KeyRound, Landmark, LocateFixed, MapPin, MonitorUp, Settings2, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, X } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
+import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useDeleteManagedAccount, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { EmployeesPage } from './EmployeesPage'
 import { QuestionsPage } from './QuestionsPage'
@@ -14,45 +14,39 @@ import { DeveloperPage } from './DeveloperPage'
 import { ERPBuilderPanels } from '../components/ERPBuilderPanels'
 import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
 
-type SettingsTab = { to: string; label: string; english: string; roles?: string[] }
-type SettingsCategory = { id: string; to: string; label: string; english: string; description: string; icon: typeof Settings2; roles: string[]; tabs: SettingsTab[] }
+type SettingsTab = { to: string; label: string; roles?: string[] }
+type SettingsCategory = { id: string; to: string; label: string; icon: typeof Settings2; roles: string[]; tabs: SettingsTab[] }
 
 const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
-    id: 'organization', to: '/administration/organization/profile', label: 'Байгууллага', english: 'Organization',
-    description: 'Профайл, брэндинг, бүсчлэл ба модулийн харагдац', icon: Building2, roles: ['admin', 'manager'],
+    id: 'organization', to: '/administration/organization/profile', label: 'Байгууллага', icon: Building2, roles: ['admin', 'manager'],
     tabs: [
-      { to: '/administration/organization/profile', label: 'Профайл ба брэндинг', english: 'Profile & Branding', roles: ['admin', 'manager'] },
-      { to: '/administration/organization/modules', label: 'Модуль ба боломжууд', english: 'Modules & Features', roles: ['admin'] },
+      { to: '/administration/organization/profile', label: 'Профайл ба брэндинг', roles: ['admin', 'manager'] },
+      { to: '/administration/organization/modules', label: 'Модуль ба боломжууд', roles: ['admin'] },
     ],
   },
   {
-    id: 'people', to: '/administration/people/users', label: 'Хэрэглэгч ба эрх', english: 'People & Access',
-    description: 'Ажилтан, account, role ба процессын эрх', icon: Users2, roles: ['admin', 'manager'],
+    id: 'people', to: '/administration/people/users', label: 'Хэрэглэгч ба эрх', icon: Users2, roles: ['admin', 'manager'],
     tabs: [
-      { to: '/administration/people/users', label: 'Ажилтан ба хэрэглэгч', english: 'Employees & Users', roles: ['admin'] },
-      { to: '/administration/people/permissions', label: 'Үүрэг ба эрх', english: 'Roles & Permissions', roles: ['admin', 'manager'] },
+      { to: '/administration/people/users', label: 'Ажилтан ба хэрэглэгч', roles: ['admin'] },
+      { to: '/administration/people/permissions', label: 'Үүрэг ба эрх', roles: ['admin', 'manager'] },
     ],
   },
   {
-    id: 'workflows', to: '/administration/workflows/worktime', label: 'Ажлын цаг ба процесс', english: 'Worktime & Processes',
-    description: 'Хуваарь, check-in, байршил ба ажлын урсгал', icon: UserRoundCog, roles: ['admin', 'manager', 'team_lead'],
-    tabs: [{ to: '/administration/workflows/worktime', label: 'Ажлын цаг ба check-in', english: 'Worktime & Check-in' }],
+    id: 'workflows', to: '/administration/workflows/worktime', label: 'Ажлын цаг ба процесс', icon: UserRoundCog, roles: ['admin', 'manager', 'team_lead'],
+    tabs: [{ to: '/administration/workflows/worktime', label: 'Ажлын цаг ба check-in' }],
   },
   {
-    id: 'integrations', to: '/administration/integrations/overview', label: 'Автоматжуулалт ба интеграци', english: 'Automation & Integrations',
-    description: 'Мэдэгдэл, календарь, Telegram ба төхөөрөмж', icon: CalendarClock, roles: ['admin', 'manager', 'team_lead'],
-    tabs: [{ to: '/administration/integrations/overview', label: 'Интеграци ба төхөөрөмж', english: 'Integrations & Devices' }],
+    id: 'integrations', to: '/administration/integrations/overview', label: 'Автоматжуулалт ба интеграци', icon: CalendarClock, roles: ['admin', 'manager', 'team_lead'],
+    tabs: [{ to: '/administration/integrations/overview', label: 'Интеграци ба төхөөрөмж' }],
   },
   {
-    id: 'ai', to: '/administration/ai/knowledge', label: 'OYUNS AI ба мэдлэг', english: 'OYUNS AI & Knowledge',
-    description: 'Компанийн мэдлэг, агентын сургалт ба зан төлөв', icon: Bot, roles: ['admin', 'manager', 'team_lead', 'hr', 'member', 'contractor', 'client_auditor', 'legal_counsel'],
-    tabs: [{ to: '/administration/ai/knowledge', label: 'Мэдлэг ба агент', english: 'Knowledge & Agent' }],
+    id: 'ai', to: '/administration/ai/knowledge', label: 'OYUNS AI ба мэдлэг', icon: Bot, roles: ['admin', 'manager', 'team_lead', 'hr', 'member', 'contractor', 'client_auditor', 'legal_counsel'],
+    tabs: [{ to: '/administration/ai/knowledge', label: 'Мэдлэг ба агент' }],
   },
   {
-    id: 'security', to: '/administration/security/authentication', label: 'Систем ба аюулгүй байдал', english: 'System & Security',
-    description: 'Нэвтрэлт, админ account ба системийн хяналт', icon: KeyRound, roles: ['admin'],
-    tabs: [{ to: '/administration/security/authentication', label: 'Нэвтрэлт ба админ', english: 'Authentication & Admin' }],
+    id: 'security', to: '/administration/security/authentication', label: 'Систем ба аюулгүй байдал', icon: KeyRound, roles: ['admin'],
+    tabs: [{ to: '/administration/security/authentication', label: 'Нэвтрэлт ба админ' }],
   },
 ]
 
@@ -60,6 +54,17 @@ const SETTINGS = SETTINGS_CATEGORIES
 
 function firstAllowedSettingsPath(category: SettingsCategory, roles: string[]) {
   return category.tabs.find((tab) => !tab.roles || tab.roles.some((role) => roles.includes(role)))?.to || category.to
+}
+
+function SettingsSection({ title, icon: Icon, children, className = '', defaultOpen = true }: { title: string; icon: typeof Settings2; children: ReactNode; className?: string; defaultOpen?: boolean }) {
+  return <details className={`settings-section ${className}`} open={defaultOpen} data-slot="settings-section">
+    <summary className="settings-section-summary" data-slot="settings-section-summary">
+      <Icon className="settings-section-icon" size={18} />
+      <span className="settings-section-title">{title}</span>
+      <ChevronDown className="settings-section-chevron" size={18} aria-hidden="true" />
+    </summary>
+    <div className="settings-section-body">{children}</div>
+  </details>
 }
 
 const TASK_ASSIGNMENT_ROLES = [
@@ -70,21 +75,20 @@ const ACCOUNT_ROLES = [
   ...TASK_ASSIGNMENT_ROLES.slice(0, 6), ['legal_counsel', 'Хуульч'], ['admin', 'Admin'],
 ] as const
 
-function SettingsPage({ title, description, categoryId, activeTab, children }: { title: string; description: string; categoryId: string; activeTab: string; children: ReactNode }) {
+function SettingsPage({ title, categoryId, activeTab, children }: { title: string; categoryId: string; activeTab: string; children: ReactNode }) {
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const settings = SETTINGS.filter((item) => item.roles.some((role) => roles.includes(role)))
   const category = SETTINGS_CATEGORIES.find((item) => item.id === categoryId) || SETTINGS_CATEGORIES[0]
   const tabs = category.tabs.filter((item) => !item.roles || item.roles.some((role) => roles.includes(role)))
   return <div className="settings-page">
     <div className="settings-layout">
-      <aside className="settings-sidebar" aria-label="Админ тохиргооны ангилал / Admin settings categories">
-        <Link to="/administration" className="settings-back"><ArrowLeft size={15} /><span>Бүх тохиргоо</span><small>All settings</small></Link>
-        <div className="settings-sidebar-label">АДМИН ТОХИРГОО <span>ADMIN SETTINGS</span></div>
-        <nav className="settings-category-nav">{settings.map((item) => <NavLink key={item.id} to={firstAllowedSettingsPath(item, roles)} className={item.id === category.id ? 'active' : undefined}><item.icon size={17} /><span><strong>{item.label}</strong><small>{item.english}</small></span></NavLink>)}</nav>
+      <aside className="settings-sidebar" aria-label="Админ тохиргооны ангилал">
+        <Link to="/administration" className="settings-back"><ArrowLeft size={15} /><span>Бүх тохиргоо</span></Link>
+        <nav className="settings-category-nav">{settings.map((item) => <NavLink key={item.id} to={firstAllowedSettingsPath(item, roles)} className={item.id === category.id ? 'active' : undefined}><item.icon size={17} /><span><strong>{item.label}</strong></span></NavLink>)}</nav>
       </aside>
       <main className="settings-main">
-        <div className="view-toolbar settings-page-heading"><div><span className="settings-category-kicker">{category.label} / {category.english}</span><h2>{title}</h2><p>{description}</p></div><Settings2 /></div>
-        <nav className="settings-tab-nav" aria-label={`${category.label} tabs`}><span className="settings-tab-label">{category.label}</span>{tabs.map((tab) => <NavLink key={tab.to} to={tab.to} className={tab.to === activeTab ? 'active' : undefined}><span>{tab.label}</span><small>{tab.english}</small></NavLink>)}</nav>
+        <div className="view-toolbar settings-page-heading"><div><h2>{title}</h2></div><Settings2 /></div>
+        <nav className="settings-tab-nav" aria-label={`${category.label} tabs`}>{tabs.map((tab) => <NavLink key={tab.to} to={tab.to} className={tab.to === activeTab ? 'active' : undefined}><span>{tab.label}</span></NavLink>)}</nav>
         <div className="settings-content">{children}</div>
       </main>
     </div>
@@ -102,10 +106,10 @@ function BrandingSettingsPanel() {
   const select = (theme: 'light' | 'dark', source: string) => {
     if (source !== 'uploaded') update.mutate({ theme, source: source as 'legacy-aio' | 'legacy-icon' | 'default' })
   }
-  return <section className="branding-settings panel"><div className="panel-heading"><div><span className="eyebrow">Workspace identity</span><h2>Лого ба theme</h2><p>Light болон dark горимд тусдаа лого сонгох эсвэл шинэ зураг байршуулна.</p></div><Settings2 /></div><div className="branding-grid">{(['light', 'dark'] as const).map((theme) => {
+  return <SettingsSection title="Лого ба theme" icon={Settings2} className="branding-settings panel"><div className="branding-grid">{(['light', 'dark'] as const).map((theme) => {
     const logo = theme === 'light' ? branding.data?.light_logo : branding.data?.dark_logo
     return <article className={`branding-card ${theme}`} key={theme}><div className="branding-preview"><img src={logo || '/favicon.png'} alt={`${theme} logo preview`} /></div><div className="branding-card-body"><strong>{theme === 'light' ? 'Light mode' : 'Dark mode'}</strong><select aria-label={`${theme} logo сонгох`} value={sourceFor(theme)} onChange={(event) => select(theme, event.target.value)} disabled={branding.isLoading || update.isPending}><option value="default">Автомат legacy</option>{branding.data?.legacy_options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}{sourceFor(theme) === 'uploaded' && <option value="uploaded">Uploaded logo</option>}</select><label className="secondary-action compact branding-upload"><span>Шинэ зураг сонгох</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) upload.mutate({ theme, file }); event.currentTarget.value = '' }} disabled={upload.isPending} /></label></div></article>
-  })}</div></section>
+  })}</div></SettingsSection>
 }
 
 function ERPModuleSettingsPanel() {
@@ -121,11 +125,10 @@ function ERPModuleSettingsPanel() {
     })
   }
 
-  if (metadata.isLoading) return <section className="account-admin panel"><p>ERP тохиргоог уншиж байна…</p></section>
-  if (metadata.isError || !metadata.data) return <section className="account-admin panel"><div className="panel-heading"><div><span className="eyebrow">Configurable ERP</span><h2>ERP үйлчилгээ холбогдсонгүй</h2><p>ERP migration болон backend service ажиллаж байгаа эсэхийг шалгана уу.</p></div><Landmark /></div></section>
+  if (metadata.isLoading) return <SettingsSection title="ERP модулиуд" icon={Boxes} className="account-admin panel"><p>ERP тохиргоог уншиж байна…</p></SettingsSection>
+  if (metadata.isError || !metadata.data) return <SettingsSection title="ERP үйлчилгээ холбогдсонгүй" icon={Landmark} className="account-admin panel"><p>ERP тохиргоог ачаалж чадсангүй.</p></SettingsSection>
 
-  return <section className="account-admin panel erp-admin-panel">
-    <div className="panel-heading"><div><span className="eyebrow">Configurable ERP</span><h2>ERP модулиуд</h2><p>Эндээс байгууллагадаа хэрэгтэй workflow-уудыг асаана. Visibility нь permission/security control биш.</p></div><Boxes /></div>
+  return <SettingsSection title="ERP модулиуд" icon={Boxes} className="account-admin panel erp-admin-panel">
     <div className="erp-module-grid" aria-label="ERP module visibility">
       {modules.map((module) => {
         const enabled = metadata.data.modules[module]
@@ -135,38 +138,38 @@ function ERPModuleSettingsPanel() {
     </div>
     <p className="erp-settings-notice"><ShieldCheck size={15} /> API, posting, audit болон integrations нь capability-ээр хамгаалагдсан хэвээр.</p>
     <Link className="secondary-action compact erp-admin-open" to="/erp">ERP workspace нээх</Link>
-  </section>
+  </SettingsSection>
 }
 
 export function AdministrationHubPage() {
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const settings = SETTINGS.filter((item) => item.roles.some((role) => roles.includes(role)))
-  return <div className="settings-overview"><div className="view-toolbar"><div><span className="settings-category-kicker">ADMIN SETTINGS / АДМИН ТОХИРГОО</span><h2>Системийн тохиргоо / Admin Settings</h2><p>Байгууллага, хүмүүс, ажлын урсгал болон интеграцийн тохиргоог нэг дор удирдана.</p></div><Settings2 /></div><div className="settings-category-grid">{settings.map((item) => <Link to={firstAllowedSettingsPath(item, roles)} key={item.id}><item.icon /><div><strong>{item.label}</strong><span>{item.english}</span><p>{item.description}</p></div></Link>)}</div></div>
+  return <div className="settings-overview"><div className="settings-category-grid">{settings.map((item) => <Link to={firstAllowedSettingsPath(item, roles)} key={item.id}><item.icon /><div><strong>{item.label}</strong></div></Link>)}</div></div>
 }
 
 export function WorkspaceIdentitySettingsPage() {
-  return <SettingsPage categoryId="organization" activeTab="/administration/organization/profile" title="Байгууллагын профайл / Company Profile" description="Байгууллагын нэршил, лого болон ажлын орон зайн харагдах байдлыг удирдана."><BrandingSettingsPanel /></SettingsPage>
+  return <SettingsPage categoryId="organization" activeTab="/administration/organization/profile" title="Байгууллагын профайл"><BrandingSettingsPanel /></SettingsPage>
 }
 
 export function ERPSettingsPage() {
-  return <SettingsPage categoryId="organization" activeTab="/administration/organization/modules" title="Модуль ба боломжууд / Modules & Features" description="Байгууллагадаа ашиглах ERP модулиудын харагдацыг удирдана."><ERPModuleSettingsPanel /></SettingsPage>
+  return <SettingsPage categoryId="organization" activeTab="/administration/organization/modules" title="Модуль ба боломжууд"><ERPModuleSettingsPanel /></SettingsPage>
 }
 
 function TaskAssignmentPermissionsPanel() {
   const permissions = usePermissionSettings()
   const updatePermissions = useUpdatePermissionSettings()
-  return <section className="account-admin panel"><div className="panel-heading"><div><span className="eyebrow">Workflow permissions / Процессын эрх</span><h2>Даалгавар оноох эрх / Task Assignment</h2><p>Сонгосон role-той хэрэглэгч бусад ажилтанд даалгавар өгч болох эсэхийг тохируулна.</p></div><UserRoundCog /></div><fieldset className="role-editor"><legend>Даалгавар оноож болох role / Roles allowed to assign</legend>{TASK_ASSIGNMENT_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={permissions.data?.task_assignment_roles.includes(value) ?? true} onChange={() => { const current = permissions.data?.task_assignment_roles ?? TASK_ASSIGNMENT_ROLES.map(([name]) => name); updatePermissions.mutate(current.includes(value) ? current.filter((item) => item !== value) : [...current, value]) }} disabled={updatePermissions.isPending} /><span>{label}</span></label>)}</fieldset></section>
+  return <SettingsSection title="Даалгавар оноох эрх" icon={UserRoundCog} className="account-admin panel"><fieldset className="role-editor"><legend>Даалгавар оноож болох role</legend>{TASK_ASSIGNMENT_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={permissions.data?.task_assignment_roles.includes(value) ?? true} onChange={() => { const current = permissions.data?.task_assignment_roles ?? TASK_ASSIGNMENT_ROLES.map(([name]) => name); updatePermissions.mutate(current.includes(value) ? current.filter((item) => item !== value) : [...current, value]) }} disabled={updatePermissions.isPending} /><span>{label}</span></label>)}</fieldset></SettingsSection>
 }
 
 export function PermissionsSettingsPage() {
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
-  return <SettingsPage categoryId="people" activeTab="/administration/people/permissions" title="Үүрэг ба эрх / Roles & Permissions" description="Хэрэглэгчийн role болон ажлын процесс дээр хийх үйлдлийн эрхийг удирдана."><TaskAssignmentPermissionsPanel />{roles.includes('admin') && <section className="settings-embedded"><div className="settings-embedded-heading"><ShieldCheck /><div><h3>Системийн role / System roles</h3><p>ERP custom role болон capability assignment-ийг эндээс удирдана.</p></div></div><ERPBuilderPanels /></section>}</SettingsPage>
+  return <SettingsPage categoryId="people" activeTab="/administration/people/permissions" title="Үүрэг ба эрх"><TaskAssignmentPermissionsPanel />{roles.includes('admin') && <SettingsSection title="Системийн role" icon={ShieldCheck} className="settings-embedded"><ERPBuilderPanels /></SettingsSection>}</SettingsPage>
 }
 
 export function CollaborationSettingsPage() {
-  return <SettingsPage categoryId="workflows" activeTab="/administration/workflows/worktime" title="Ажлын цаг ба процесс / Worktime & Processes" description="Check-in урсгал, ажилтны хуваарь болон байршлын дүрмийг нэг дор тохируулна.">
-    <section className="settings-embedded"><div className="settings-embedded-heading"><ClipboardList /><div><h3>Check-in асуултууд</h3><p>Өдрийн асуултын банк болон хариулах хүрээ.</p></div></div><QuestionsPage /></section>
-    <section className="settings-embedded"><div className="settings-embedded-heading"><CalendarDays /><div><h3>Ажилтны хуваарь</h3><p>Check-in, сануулга болон ажлын өдрүүд.</p></div></div><SchedulePage /></section>
+  return <SettingsPage categoryId="workflows" activeTab="/administration/workflows/worktime" title="Ажлын цаг ба процесс">
+    <SettingsSection title="Check-in асуултууд" icon={ClipboardList} className="settings-embedded"><QuestionsPage /></SettingsSection>
+    <SettingsSection title="Ажилтны хуваарь" icon={CalendarDays} className="settings-embedded"><SchedulePage /></SettingsSection>
     <WorktimeGeofencePanel />
   </SettingsPage>
 }
@@ -198,7 +201,7 @@ function WorktimeQrKioskPanel() {
       toast.error(typeof detail === 'object' ? detail.message || 'Pairing код шинэчилсэнгүй' : detail || 'Pairing код шинэчилсэнгүй')
     }
   }
-  return <section className="settings-embedded worktime-kiosk-admin"><div className="settings-embedded-heading"><MonitorUp /><div><h3>Worktime QR дэлгэц</h3><p>TV дэлгэцийг pairing кодоор нэг удаа холбож, оффисын динамик QR үүсгэнэ.</p></div></div><form className="kiosk-create-form" onSubmit={submit}><label>Дэлгэцийн нэр<input value={label} onChange={(event) => setLabel(event.target.value)} required /></label><label>Location ID<input value={locationId} onChange={(event) => setLocationId(event.target.value)} pattern="[A-Za-z0-9_-]+" required /></label><label>Харагдах нэр<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><button className="primary-action" disabled={create.isPending}>Pairing код үүсгэх</button></form>{pairingCode && <div className="kiosk-pairing-code" role="status"><strong>{pairingCode}</strong><span>Энэ кодыг TV дээрх <a href="/worktimeqr" target="_blank" rel="noreferrer">/worktimeqr</a> дэлгэцэд 10 минутын дотор оруулна уу.</span><button className="secondary-action compact" onClick={() => navigator.clipboard?.writeText(pairingCode)}>Хуулах</button></div>}{kiosks.isError && <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />QR дэлгэцийн өгөгдлийн хүснэгт бэлэн биш байна. Backend migration-ийг ажиллуулаад дахин оролдоно уу.</div>}<div className="kiosk-list">{kiosks.isLoading ? <p>Дэлгэцүүдийг ачаалж байна…</p> : (kiosks.data ?? []).map((kiosk) => <article key={kiosk.id} className={`kiosk-row ${kiosk.status}`}><div><strong>{kiosk.display_name}</strong><span>{kiosk.label} · {kiosk.location_id} · {kiosk.status === 'active' ? 'Идэвхтэй' : 'Цуцлагдсан'}</span></div>{kiosk.status === 'active' && <div className="kiosk-row-actions"><button className="secondary-action compact" onClick={() => renewPairing(kiosk.id)} disabled={renew.isPending}>Дахин pair хийх</button><button className="danger-action compact" onClick={() => revoke.mutate(kiosk.id)} disabled={revoke.isPending}>Цуцлах</button></div>}</article>)}</div></section>
+  return <SettingsSection title="Worktime QR дэлгэц" icon={MonitorUp} className="settings-embedded worktime-kiosk-admin"><form className="kiosk-create-form" onSubmit={submit}><label>Дэлгэцийн нэр<input value={label} onChange={(event) => setLabel(event.target.value)} required /></label><label>Location ID<input value={locationId} onChange={(event) => setLocationId(event.target.value)} pattern="[A-Za-z0-9_-]+" required /></label><label>Харагдах нэр<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required /></label><button className="primary-action" disabled={create.isPending}>Pairing код үүсгэх</button></form>{pairingCode && <div className="kiosk-pairing-code" role="status"><strong>{pairingCode}</strong><span>Энэ кодыг TV дээрх <a href="/worktimeqr" target="_blank" rel="noreferrer">/worktimeqr</a> дэлгэцэд 10 минутын дотор оруулна уу.</span><button className="secondary-action compact" onClick={() => navigator.clipboard?.writeText(pairingCode)}>Хуулах</button></div>}{kiosks.isError && <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />QR дэлгэцийн өгөгдлийн хүснэгт бэлэн биш байна. Backend migration-ийг ажиллуулаад дахин оролдоно уу.</div>}<div className="kiosk-list">{kiosks.isLoading ? <p>Дэлгэцүүдийг ачаалж байна…</p> : (kiosks.data ?? []).map((kiosk) => <article key={kiosk.id} className={`kiosk-row ${kiosk.status}`}><div><strong>{kiosk.display_name}</strong><span>{kiosk.label} · {kiosk.location_id} · {kiosk.status === 'active' ? 'Идэвхтэй' : 'Цуцлагдсан'}</span></div>{kiosk.status === 'active' && <div className="kiosk-row-actions"><button className="secondary-action compact" onClick={() => renewPairing(kiosk.id)} disabled={renew.isPending}>Дахин pair хийх</button><button className="danger-action compact" onClick={() => revoke.mutate(kiosk.id)} disabled={revoke.isPending}>Цуцлах</button></div>}</article>)}</div></SettingsSection>
 }
 
 function WorktimeGeofencePanel() {
@@ -251,13 +254,14 @@ function WorktimeGeofencePanel() {
 
   const mapLatitude = latitude.trim() ? Number(latitude) : null
   const mapLongitude = longitude.trim() ? Number(longitude) : null
-  return <section className="settings-embedded worktime-geofence-admin"><div className="settings-embedded-heading"><MapPin /><div><h3>Ажлын цаг бүртгэх байршил</h3><p>Газрын зураг дээр оффисын байршлыг сонгож, ажилтан эхлүүлэх боломжтой радиусыг тохируулна.</p></div></div>{settings.isError ? <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />Оффисын байршлын тохиргоог ачаалж чадсангүй.</div> : <form className="worktime-geofence-form" onSubmit={save}><WorktimeMapPicker latitude={Number.isFinite(mapLatitude) ? mapLatitude : null} longitude={Number.isFinite(mapLongitude) ? mapLongitude : null} radiusMeters={Number(radius) || 150} disabled={!canEdit || update.isPending} onChange={({ latitude: nextLatitude, longitude: nextLongitude }) => { setLatitude(nextLatitude.toFixed(6)); setLongitude(nextLongitude.toFixed(6)) }} /><div className="form-row"><label>Өргөрөг (latitude)<input type="number" step="any" min="-90" max="90" value={latitude} onChange={(event) => setLatitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="47.9184" required /></label><label>Уртраг (longitude)<input type="number" step="any" min="-180" max="180" value={longitude} onChange={(event) => setLongitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="106.9177" required /></label><label>Радиус (метр)<input type="number" step="1" min="25" max="5000" value={radius} onChange={(event) => setRadius(event.target.value)} disabled={!canEdit || update.isPending} required /></label></div><div className="worktime-geofence-actions"><button type="button" className="secondary-action" onClick={useCurrentLocation} disabled={!canEdit || update.isPending}><LocateFixed size={15} />Одоогийн байршил ашиглах</button><button type="submit" className="primary-action" disabled={!canEdit || update.isPending}>{update.isPending ? 'Хадгалж байна…' : 'Байршил хадгалах'}</button></div><p className="field-help">{settings.data?.configured ? `Идэвхтэй · ${settings.data.radius_meters}м радиус` : 'Байршил тохируулаагүй байна.'}{!canEdit && ' · Зөвхөн админ өөрчилнө.'}</p></form>}</section>
+  return <SettingsSection title="Ажлын цаг бүртгэх байршил" icon={MapPin} className="settings-embedded worktime-geofence-admin">{settings.isError ? <div className="worktime-alert error" role="alert"><ShieldCheck size={17} />Оффисын байршлын тохиргоог ачаалж чадсангүй.</div> : <form className="worktime-geofence-form" onSubmit={save}><WorktimeMapPicker latitude={Number.isFinite(mapLatitude) ? mapLatitude : null} longitude={Number.isFinite(mapLongitude) ? mapLongitude : null} radiusMeters={Number(radius) || 150} disabled={!canEdit || update.isPending} onChange={({ latitude: nextLatitude, longitude: nextLongitude }) => { setLatitude(nextLatitude.toFixed(6)); setLongitude(nextLongitude.toFixed(6)) }} /><div className="form-row"><label>Өргөрөг (latitude)<input type="number" step="any" min="-90" max="90" value={latitude} onChange={(event) => setLatitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="47.9184" required /></label><label>Уртраг (longitude)<input type="number" step="any" min="-180" max="180" value={longitude} onChange={(event) => setLongitude(event.target.value)} disabled={!canEdit || update.isPending} placeholder="106.9177" required /></label><label>Радиус (метр)<input type="number" step="1" min="25" max="5000" value={radius} onChange={(event) => setRadius(event.target.value)} disabled={!canEdit || update.isPending} required /></label></div><div className="worktime-geofence-actions"><button type="button" className="secondary-action" onClick={useCurrentLocation} disabled={!canEdit || update.isPending}><LocateFixed size={15} />Одоогийн байршил ашиглах</button><button type="submit" className="primary-action" disabled={!canEdit || update.isPending}>{update.isPending ? 'Хадгалж байна…' : 'Байршил хадгалах'}</button></div><p className="field-help">{settings.data?.configured ? `Идэвхтэй · ${settings.data.radius_meters}м радиус` : 'Байршил тохируулаагүй байна.'}{!canEdit && ' · Зөвхөн админ өөрчилнө.'}</p></form>}</SettingsSection>
 }
 
 function UnlinkedAccountsPanel() {
   const accounts = useManagedAccounts()
   const createAccount = useCreateManagedAccount()
   const updateAccount = useUpdateManagedAccount()
+  const deleteAccount = useDeleteManagedAccount()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('member')
@@ -280,11 +284,14 @@ function UnlinkedAccountsPanel() {
     if (next.length < 10) { toast.error('Нууц үг 10+ тэмдэгт байх ёстой'); return }
     try { await updateAccount.mutateAsync({ id: account.id, password: next }); toast.success('Нууц үг шинэчлэгдлээ') } catch { /* API hook displays server feedback */ }
   }
-  return <section className="account-admin panel"><div className="panel-heading"><div><span className="eyebrow">Standalone access</span><h2>Ажилтантай холбогдоогүй хэрэглэгчид</h2><p>Системийн хэрэглэгчийг энд үүсгэнэ. Ажилтны хандалтыг ажилтны хүснэгтээс холбоно.</p></div><Users2 /></div><form className="account-create-form" onSubmit={create}><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label><label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" minLength={10} autoComplete="new-password" required /></label><label>Role<select value={role} onChange={(event) => setRole(event.target.value)}>{ACCOUNT_ROLES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className="primary-action compact" disabled={createAccount.isPending}><UserPlus size={15} />Нэмэх</button></form><div className="account-list" aria-live="polite">{unlinkedAccounts.map((account) => <article key={account.id}><div className="account-identity"><strong>{account.email}</strong><span>{account.status} · ажилтантай холбоогүй</span></div><fieldset className="role-editor"><legend>Access roles</legend>{ACCOUNT_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleRole(account, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}</fieldset><div><button className="icon-action" onClick={() => changePassword(account)} aria-label={`${account.email} password солих`}><KeyRound size={15} /></button><button className="secondary-action compact" onClick={() => updateAccount.mutate({ id: account.id, status: account.status === 'disabled' ? 'active' : 'disabled' })}>{account.status === 'disabled' ? 'Идэвхжүүлэх' : 'Идэвхгүй болгох'}</button></div></article>)}</div></section>
+  const remove = (account: { id: number; email: string }) => {
+    if (window.confirm(`${account.email} хэрэглэгчийг устгах уу?`)) deleteAccount.mutate(account.id)
+  }
+  return <SettingsSection title="Ажилтантай холбогдоогүй хэрэглэгчид" icon={Users2} className="account-admin panel"><form className="account-create-form" onSubmit={create}><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label><label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" minLength={10} autoComplete="new-password" required /></label><label>Role<select value={role} onChange={(event) => setRole(event.target.value)}>{ACCOUNT_ROLES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className="primary-action compact" disabled={createAccount.isPending}><UserPlus size={15} />Нэмэх</button></form><div className="account-list" aria-live="polite">{unlinkedAccounts.map((account) => <article key={account.id}><div className="account-identity"><strong>{account.email}</strong><span>{account.status} · ажилтантай холбогдоогүй</span></div><fieldset className="role-editor"><legend>Access roles</legend>{ACCOUNT_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleRole(account, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}</fieldset><div className="settings-row-actions"><button type="button" className="settings-icon-action" onClick={() => changePassword(account)} aria-label={`${account.email} нууц үг солих`} title="Нууц үг солих"><KeyRound size={16} /></button><button type="button" className="settings-icon-action" onClick={() => updateAccount.mutate({ id: account.id, status: account.status === 'disabled' ? 'active' : 'disabled' })} aria-label={`${account.email} ${account.status === 'disabled' ? 'идэвхжүүлэх' : 'идэвхгүй болгох'}`} title={account.status === 'disabled' ? 'Идэвхжүүлэх' : 'Идэвхгүй болгох'}><span className="sr-only">{account.status === 'disabled' ? 'Идэвхжүүлэх' : 'Идэвхгүй болгох'}</span>{account.status === 'disabled' ? <Check size={16} /> : <X size={16} />}</button><button type="button" className="settings-icon-action danger" onClick={() => remove(account)} aria-label={`${account.email} устгах`} title="Устгах"><Trash2 size={16} /></button></div></article>)}</div></SettingsSection>
 }
 
 export function AccessControlSettingsPage() {
-  return <SettingsPage categoryId="people" activeTab="/administration/people/users" title="Ажилтан ба хэрэглэгч / Employees & Users" description="Ажилтны бүртгэл, account холболт, role болон идэвхтэй төлвийг удирдана."><section className="settings-embedded access-settings"><div className="settings-embedded-heading"><Users2 /><div><h3>Ажилтан ба эрхүүд / Employees & Access</h3><p>Ажилтны бүртгэлээс хандалт холбож, role болон идэвхтэй төлвийг шинэчилнэ.</p></div></div><EmployeesPage /></section><UnlinkedAccountsPanel /><section className="settings-embedded"><div className="settings-embedded-heading"><UserRoundCog /><div><h3>Онбординг / Onboarding</h3><p>Шинэ ажилтны мэндчилгээ болон зөөлөн эхлэлийн тохиргоо.</p></div></div><OnboardingPage /></section></SettingsPage>
+  return <SettingsPage categoryId="people" activeTab="/administration/people/users" title="Ажилтан ба хэрэглэгч"><SettingsSection title="Ажилтан ба эрхүүд" icon={Users2} className="settings-embedded access-settings"><EmployeesPage /></SettingsSection><UnlinkedAccountsPanel /><SettingsSection title="Онбординг" icon={UserRoundCog} className="settings-embedded"><OnboardingPage /></SettingsSection></SettingsPage>
 }
 
 export function AutomationSettingsPage() {
@@ -299,24 +306,24 @@ export function AutomationSettingsPage() {
       else toast.error('Google OAuth тохиргоо дутуу байна')
     } catch { /* mutation feedback is handled by the API hook */ }
   }
-  return <SettingsPage categoryId="integrations" activeTab="/administration/integrations/overview" title="Интеграци ба төхөөрөмж / Integrations & Devices" description="Мэдэгдэл, Google Calendar, Telegram болон Worktime kiosk төхөөрөмжийг тохируулна.">
-    <section className="integration-grid settings-integrations"><article className="panel integration-panel"><CalendarClock /><div><strong>Google Calendar</strong><p>{calendarStatus.data?.status === 'active' ? `Холбогдсон · webhook ${calendarStatus.data.watch_active ? 'идэвхтэй' : 'шинэчлэгдэж байна'}${calendarStatus.data.last_error ? ` · ${calendarStatus.data.last_error}` : ''}` : 'Өөрийн Google Calendar-тай даалгаврын хугацааг синк хийнэ.'}</p>{calendarStatus.data?.status === 'active' && <select aria-label="Calendar sync mode" value={calendarStatus.data.sync_mode} onChange={(event) => syncMode.mutate(event.target.value as 'outbound' | 'bidirectional')}><option value="outbound">Зөвхөн OYUNS → Google</option><option value="bidirectional">Хоёр чиглэлтэй хугацааны sync</option></select>}</div>{calendarStatus.data?.status === 'active' ? <button className="secondary-action" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>Салгах</button> : <button className="secondary-action" onClick={connectCalendar} disabled={calendar.isPending}>Холбох</button>}</article></section>
-    <section className="settings-embedded"><div className="settings-embedded-heading"><UserRoundCog /><div><h3>Мэдэгдэл ба Telegram</h3><p>Удирдлагын хураангуй, мэдэгдэл болон Telegram тохиргоо.</p></div></div><ManagerSettingsPage /></section>
+  return <SettingsPage categoryId="integrations" activeTab="/administration/integrations/overview" title="Интеграци ба төхөөрөмж">
+    <SettingsSection title="Google Calendar" icon={CalendarClock} className="integration-grid settings-integrations"><article className="integration-panel"><div><strong>Google Calendar</strong><p>{calendarStatus.data?.status === 'active' ? `Холбогдсон · webhook ${calendarStatus.data.watch_active ? 'идэвхтэй' : 'шинэчлэгдэж байна'}${calendarStatus.data.last_error ? ` · ${calendarStatus.data.last_error}` : ''}` : 'Холбогдоогүй'}</p>{calendarStatus.data?.status === 'active' && <select aria-label="Calendar sync mode" value={calendarStatus.data.sync_mode} onChange={(event) => syncMode.mutate(event.target.value as 'outbound' | 'bidirectional')}><option value="outbound">Зөвхөн OYUNS → Google</option><option value="bidirectional">Хоёр чиглэлтэй хугацааны sync</option></select>}</div>{calendarStatus.data?.status === 'active' ? <button className="secondary-action" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>Салгах</button> : <button className="secondary-action" onClick={connectCalendar} disabled={calendar.isPending}>Холбох</button>}</article></SettingsSection>
+    <SettingsSection title="Мэдэгдэл ба Telegram" icon={UserRoundCog} className="settings-embedded"><ManagerSettingsPage /></SettingsSection>
     <WorktimeQrKioskPanel />
   </SettingsPage>
 }
 
 export function AdminAccessSettingsPage() {
-  return <SettingsPage categoryId="security" activeTab="/administration/security/authentication" title="Нэвтрэлт ба админ / Authentication & Admin" description="Админ хэрэглэгч, нууц үг болон account нэвтрэлтийн тохиргоог удирдана.">
-    <section className="settings-embedded admin-access-settings"><div className="settings-embedded-heading"><KeyRound /><div><h3>Админ хэрэглэгч ба нууц үг</h3><p>Эдгээр тохиргоо нь автоматжуулалт болон интеграцийн тохиргооноос тусдаа байна.</p></div></div><div className="flex flex-col gap-4 max-w-[700px]"><AdminAccessPanel /></div></section>
+  return <SettingsPage categoryId="security" activeTab="/administration/security/authentication" title="Нэвтрэлт ба админ">
+    <SettingsSection title="Админ хэрэглэгч ба нууц үг" icon={KeyRound} className="settings-embedded admin-access-settings"><div className="flex flex-col gap-4 max-w-[700px]"><AdminAccessPanel /></div></SettingsSection>
   </SettingsPage>
 }
 
 export function OyunsAssistantSettingsPage() {
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const canManageAgent = roles.includes('admin')
-  return <SettingsPage categoryId="ai" activeTab="/administration/ai/knowledge" title="OYUNS AI ба мэдлэг / OYUNS AI & Knowledge" description="Агентын ашиглах компанийн өгөгдлийн санг хянах болон хөгжүүлнэ.">
-    <section className="settings-embedded"><div className="settings-embedded-heading"><BookOpen /><div><h3>Компаний өгөгдлийн сан</h3><p>OYUNS-ийн баталгаатай эх сурвалжууд.</p></div></div><KnowledgePage /></section>
-    {canManageAgent && <section className="settings-embedded"><div className="settings-embedded-heading"><Code2 /><div><h3>OYUNS сургалт</h3><p>Тодорхойгүй хүсэлтийг review хийж, ойлголт нэмнэ.</p></div></div><DeveloperPage /></section>}
+  return <SettingsPage categoryId="ai" activeTab="/administration/ai/knowledge" title="OYUNS AI ба мэдлэг">
+    <SettingsSection title="Компанийн өгөгдлийн сан" icon={BookOpen} className="settings-embedded"><KnowledgePage /></SettingsSection>
+    {canManageAgent && <SettingsSection title="OYUNS сургалт" icon={Code2} className="settings-embedded"><DeveloperPage /></SettingsSection>}
   </SettingsPage>
 }

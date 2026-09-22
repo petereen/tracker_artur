@@ -1,6 +1,16 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Remove redundant Company Files and Admin Settings heading copy (`frontend/src/pages/CompanyFilesPage.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
+- [x] Refine payroll overview panels and shared Overview/Settings navigation (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/index.css`) — separated active/history panels, made the empty active preview fill its box, removed redundant section/setup labels, and shared the toolbar between Overview and Settings
+- [x] Keep assistant meeting drafts assigned to the requester and treat named meeting attendees as context, not delegated task assignees (`backend/app/services/enterprise_tools.py`, `backend/tests/test_enterprise_tools.py`)
+- [x] Respect the disabled daily work-report reminder setting in scheduled reminder jobs (`backend/app/bot/scheduler.py`, `backend/tests/test_scheduler.py`)
+- [x] Refresh administration settings cards, labels, collapsible sections, and account access actions (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/EmployeesPage.tsx`, `frontend/src/index.css`, `frontend/src/api/enterprise.ts`, `backend/app/routers/enterprise_auth.py`)
+  - [x] Add tenant-scoped managed-account deletion API and React Query mutation
+  - [x] Remove redundant bilingual and explanatory settings labels and add a shared collapsible section surface
+  - [x] Replace people/access text actions with borderless icon controls and add delete for linked and standalone accounts
+  - [x] Validate the settings redesign with frontend build/tests, backend syntax compilation, diff checks, and accessibility-oriented component review
+  - [x] Normalize collapsible section display so every settings card keeps one full-width content column
 - [x] Add Jev-first AI request routing with a private TypeSafe evaluator and read-only local fast paths (`jev-router`, `backend/app/services/ai_gateway`, Docker Compose, backend tests) — Jev router tests/build, Python compilation, diff checks, and Compose validation pass; dependency-backed backend pytest and Docker image acceptance remain blocked by the local environment
   - [x] Add the Node 22 evaluator service and locked `@typesafe-ai/sdk` dependency
   - [x] Wire Jev confidence-gated routing and deterministic local result rendering into the shared gateway

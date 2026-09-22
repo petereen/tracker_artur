@@ -113,7 +113,6 @@ export function DeveloperPage() {
     <div>
       <PageHeader
         title="OYUNS хөгжүүлэлт"
-        sub="Танигдаагүй хэллэгийг хянаж, баталгаатай контекстийн толь бичигт нэмнэ үү."
       >
         <Btn variant="primary" onClick={openCreate}>+ Контекст нэмэх</Btn>
       </PageHeader>

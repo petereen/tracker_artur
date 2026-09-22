@@ -227,6 +227,9 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
         if tool_name == "oyuns_tasks_prepare_create":
             data = schemas.TaskPrepareCreateInput.model_validate(arguments)
             action_type = "delegate_task" if data.assignee and data.assignee.casefold() not in {"self", "me", "myself", "би", "өөрөө", "надад", "өөртөө"} else "create_task"
+            task_input = enterprise_tools.AssistantTaskInput.model_validate(data.model_dump(mode="json"))
+            if enterprise_tools._is_personal_meeting_task(task_input):
+                action_type = "create_task"
             result = await enterprise_tools.execute(db, actor, action_type, data.model_dump(mode="json"), channel=channel, prompt=data.title, conversation_id=conversation_id)
             pending = _safe_pending_action(actor, result.get("data", {}).get("pending_action") or {}, channel=channel)
             safe = {"pending_action": pending} if pending else {}
