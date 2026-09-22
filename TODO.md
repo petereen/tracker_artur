@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Expose the guarded delete action for payroll salary components in the component list (frontend/src/pages/PayrollSetupHub.tsx)
 - [x] Expand payroll setup view to use the full available workspace width (`frontend/src/index.css`)
 - [x] Make every employee row removable, including employees without a linked access account (`frontend/src/pages/EmployeesPage.tsx`, `frontend/src/api/hooks.ts`)
 - [x] Default the Analytics tab to a 30-day time period (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/pages/StatsWorkspacePage.test.tsx`)
