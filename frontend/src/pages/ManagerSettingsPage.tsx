@@ -116,7 +116,7 @@ export function ManagerSettingsPage() {
   return (
     <div>
       <PageHeader title="Удирдлагын телеграм мэдэгдлийн тохиргоо" />
-      <div className="flex flex-col gap-4 max-w-[700px]">
+      <div className="settings-form-stack">
         <Card>
           <div className="font-semibold text-[15px] mb-4">Telegram</div>
           <div className="flex flex-col gap-3.5">

@@ -1,6 +1,9 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Create a repo-local OYUNS minimal product-design skill adapted from the supplied Codex brief and current frontend tokens (`docs/skills/oyuns-minimal-design/SKILL.md`)
+- [x] Move Worktime QR kiosk settings into Ажлын цаг ба процесс and make administration settings cards/forms use the full available width (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/ManagerSettingsPage.tsx`, `frontend/src/index.css`) — reset the Calendar action’s mobile grid placement so it remains compact and aligned
+- [x] Start administration settings sections collapsed by default (`frontend/src/pages/AdministrationSettingsPages.tsx`)
 - [x] Remove redundant Company Files and Admin Settings heading copy (`frontend/src/pages/CompanyFilesPage.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
 - [x] Refine payroll overview panels and shared Overview/Settings navigation (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/index.css`) — separated active/history panels, made the empty active preview fill its box, removed redundant section/setup labels, and shared the toolbar between Overview and Settings
 - [x] Keep assistant meeting drafts assigned to the requester and treat named meeting attendees as context, not delegated task assignees (`backend/app/services/enterprise_tools.py`, `backend/tests/test_enterprise_tools.py`)

@@ -4045,8 +4045,31 @@ body:has(.assistant-backdrop) {
 }
 
 .settings-page .integration-panel {
+  grid-template-columns: minmax(0, 1fr) auto;
   min-height: 88px;
   padding: var(--space-4) var(--space-5);
+}
+.settings-page .integration-panel > .secondary-action {
+  justify-self: end;
+  white-space: nowrap;
+  width: max-content;
+}
+.settings-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  width: 100%;
+}
+.settings-form-stack > .workspace-card {
+  min-width: 0;
+  width: 100%;
+}
+.settings-form-stack .workspace-input,
+.settings-form-stack .dropdown-select,
+.settings-form-stack .dropdown-select-trigger {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .settings-page .settings-embedded .bg-surface.border.rounded-xl {
@@ -4182,6 +4205,15 @@ body:has(.assistant-backdrop) {
   }
 
   .settings-page .account-create-form button {
+    justify-self: start;
+  }
+
+  .settings-page .integration-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-page .integration-panel > .secondary-action {
+    grid-column: 1;
     justify-self: start;
   }
 

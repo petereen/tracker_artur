@@ -56,7 +56,7 @@ function firstAllowedSettingsPath(category: SettingsCategory, roles: string[]) {
   return category.tabs.find((tab) => !tab.roles || tab.roles.some((role) => roles.includes(role)))?.to || category.to
 }
 
-function SettingsSection({ title, icon: Icon, children, className = '', defaultOpen = true }: { title: string; icon: typeof Settings2; children: ReactNode; className?: string; defaultOpen?: boolean }) {
+function SettingsSection({ title, icon: Icon, children, className = '', defaultOpen = false }: { title: string; icon: typeof Settings2; children: ReactNode; className?: string; defaultOpen?: boolean }) {
   return <details className={`settings-section ${className}`} open={defaultOpen} data-slot="settings-section">
     <summary className="settings-section-summary" data-slot="settings-section-summary">
       <Icon className="settings-section-icon" size={18} />
@@ -170,6 +170,7 @@ export function CollaborationSettingsPage() {
   return <SettingsPage categoryId="workflows" activeTab="/administration/workflows/worktime" title="Ажлын цаг ба процесс">
     <SettingsSection title="Check-in асуултууд" icon={ClipboardList} className="settings-embedded"><QuestionsPage /></SettingsSection>
     <SettingsSection title="Ажилтны хуваарь" icon={CalendarDays} className="settings-embedded"><SchedulePage /></SettingsSection>
+    <WorktimeQrKioskPanel />
     <WorktimeGeofencePanel />
   </SettingsPage>
 }
@@ -309,13 +310,12 @@ export function AutomationSettingsPage() {
   return <SettingsPage categoryId="integrations" activeTab="/administration/integrations/overview" title="Интеграци ба төхөөрөмж">
     <SettingsSection title="Google Calendar" icon={CalendarClock} className="integration-grid settings-integrations"><article className="integration-panel"><div><strong>Google Calendar</strong><p>{calendarStatus.data?.status === 'active' ? `Холбогдсон · webhook ${calendarStatus.data.watch_active ? 'идэвхтэй' : 'шинэчлэгдэж байна'}${calendarStatus.data.last_error ? ` · ${calendarStatus.data.last_error}` : ''}` : 'Холбогдоогүй'}</p>{calendarStatus.data?.status === 'active' && <select aria-label="Calendar sync mode" value={calendarStatus.data.sync_mode} onChange={(event) => syncMode.mutate(event.target.value as 'outbound' | 'bidirectional')}><option value="outbound">Зөвхөн OYUNS → Google</option><option value="bidirectional">Хоёр чиглэлтэй хугацааны sync</option></select>}</div>{calendarStatus.data?.status === 'active' ? <button className="secondary-action" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>Салгах</button> : <button className="secondary-action" onClick={connectCalendar} disabled={calendar.isPending}>Холбох</button>}</article></SettingsSection>
     <SettingsSection title="Мэдэгдэл ба Telegram" icon={UserRoundCog} className="settings-embedded"><ManagerSettingsPage /></SettingsSection>
-    <WorktimeQrKioskPanel />
   </SettingsPage>
 }
 
 export function AdminAccessSettingsPage() {
   return <SettingsPage categoryId="security" activeTab="/administration/security/authentication" title="Нэвтрэлт ба админ">
-    <SettingsSection title="Админ хэрэглэгч ба нууц үг" icon={KeyRound} className="settings-embedded admin-access-settings"><div className="flex flex-col gap-4 max-w-[700px]"><AdminAccessPanel /></div></SettingsSection>
+    <SettingsSection title="Админ хэрэглэгч ба нууц үг" icon={KeyRound} className="settings-embedded admin-access-settings"><div className="settings-form-stack"><AdminAccessPanel /></div></SettingsSection>
   </SettingsPage>
 }
 
