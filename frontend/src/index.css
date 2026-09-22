@@ -3753,6 +3753,158 @@ body:has(.assistant-backdrop) {
   --settings-control-height: 40px;
 }
 
+.settings-layout {
+  align-items: start;
+  display: grid;
+  gap: clamp(22px, 3vw, 42px);
+  grid-template-columns: minmax(190px, 218px) minmax(0, 1fr);
+}
+
+.settings-sidebar {
+  position: sticky;
+  top: 18px;
+}
+
+.settings-back {
+  align-items: center;
+  color: var(--color-text);
+  display: flex;
+  font-size: 0.75rem;
+  font-weight: 700;
+  gap: 8px;
+  margin-bottom: 26px;
+  text-decoration: none;
+}
+
+.settings-back small {
+  color: var(--color-muted);
+  font-size: 0.63rem;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+.settings-sidebar-label,
+.settings-category-kicker {
+  color: var(--color-muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.settings-sidebar-label {
+  border-bottom: 1px solid var(--color-border-soft);
+  padding-bottom: 10px;
+}
+
+.settings-sidebar-label span {
+  display: block;
+  font-size: 0.53rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  margin-top: 3px;
+  opacity: 0.7;
+}
+
+.settings-category-nav {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+}
+
+.settings-category-nav a {
+  align-items: flex-start;
+  border-left: 2px solid transparent;
+  border-radius: 0 9px 9px 0;
+  color: var(--color-muted);
+  display: flex;
+  gap: 10px;
+  padding: 10px 11px;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.settings-category-nav a:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+.settings-category-nav a.active {
+  background: var(--color-accent-soft);
+  border-left-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.settings-category-nav a span {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-category-nav strong {
+  color: inherit;
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.settings-category-nav small {
+  color: var(--color-muted);
+  font-size: 0.62rem;
+  line-height: 1.25;
+}
+
+.settings-main {
+  min-width: 0;
+}
+
+.settings-page-heading {
+  align-items: flex-start;
+}
+
+.settings-category-kicker {
+  display: block;
+  margin-bottom: 7px;
+}
+
+.settings-tab-nav {
+  align-items: stretch;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: 3px;
+  margin: 0 0 22px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.settings-tab-nav::-webkit-scrollbar { display: none; }
+
+.settings-tab-label {
+  align-items: center;
+  color: var(--color-muted);
+  display: inline-flex;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  margin-right: 10px;
+  padding: 10px 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.settings-tab-nav a {
+  border-bottom: 2px solid transparent;
+  color: var(--color-muted);
+  display: grid;
+  gap: 2px;
+  min-width: max-content;
+  padding: 9px 10px 10px;
+  text-decoration: none;
+}
+
+.settings-tab-nav a:hover { color: var(--color-text); }
+.settings-tab-nav a.active { border-bottom-color: var(--color-accent); color: var(--color-accent); }
+.settings-tab-nav a span { font-size: 0.74rem; font-weight: 700; }
+.settings-tab-nav a small { color: var(--color-muted); font-size: 0.6rem; }
+
 .settings-content {
   display: grid;
   gap: var(--settings-section-gap);
@@ -3932,6 +4084,47 @@ body:has(.assistant-backdrop) {
   }
 }
 @media (max-width: 640px) {
+  .settings-layout {
+    display: block;
+  }
+
+  .settings-sidebar {
+    position: static;
+  }
+
+  .settings-back {
+    margin-bottom: 18px;
+  }
+
+  .settings-sidebar-label {
+    border-bottom: 0;
+    padding-bottom: 5px;
+  }
+
+  .settings-category-nav {
+    display: flex;
+    gap: 5px;
+    margin: 0 0 22px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .settings-category-nav::-webkit-scrollbar { display: none; }
+
+  .settings-category-nav a {
+    border: 1px solid var(--color-border);
+    border-radius: 9px;
+    flex: 0 0 auto;
+    padding: 8px 10px;
+  }
+
+  .settings-category-nav a.active {
+    border-color: var(--color-accent);
+  }
+
+  .settings-category-nav a > svg { display: none; }
+
   .settings-category-grid {
     grid-template-columns: 1fr;
   }
@@ -4003,6 +4196,13 @@ body:has(.assistant-backdrop) {
   font-size: 0.73rem;
   line-height: 1.45;
   margin-top: 4px;
+}
+
+.settings-category-grid p {
+  color: var(--color-muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  margin: 7px 0 0;
 }
 .settings-subnav {
   align-items: center;

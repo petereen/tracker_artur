@@ -33,6 +33,7 @@ const ContractPrintPage = lazy(() => import('./pages/ContractsWorkspacePage').th
 const AdministrationHubPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdministrationHubPage })))
 const WorkspaceIdentitySettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.WorkspaceIdentitySettingsPage })))
 const CollaborationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.CollaborationSettingsPage })))
+const PermissionsSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.PermissionsSettingsPage })))
 const AccessControlSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AccessControlSettingsPage })))
 const AutomationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AutomationSettingsPage })))
 const ERPSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.ERPSettingsPage })))
@@ -148,26 +149,36 @@ function AuthenticatedApp() {
         </Route>
         <Route element={<RequireRoles allowedRoles={MANAGEMENT_ROLES} />}>
           <Route path="administration" element={<AdministrationHubPage />} />
-          <Route path="administration/workspace" element={<WorkspaceIdentitySettingsPage />} />
-          <Route path="administration/collaboration" element={<CollaborationSettingsPage />} />
-          <Route path="administration/automation" element={<AutomationSettingsPage />} />
+          <Route path="administration/organization/profile" element={<WorkspaceIdentitySettingsPage />} />
+          <Route path="administration/workflows/worktime" element={<CollaborationSettingsPage />} />
+          <Route path="administration/integrations/overview" element={<AutomationSettingsPage />} />
         </Route>
-        <Route path="administration/oyuns" element={<OyunsAssistantSettingsPage />} />
+        <Route path="administration/ai/knowledge" element={<OyunsAssistantSettingsPage />} />
         <Route element={<RequireRoles allowedRoles={['admin']} />}>
-          <Route path="administration/access" element={<AccessControlSettingsPage />} />
-          <Route path="administration/erp" element={<ERPSettingsPage />} />
-          <Route path="administration/admin-access" element={<AdminAccessSettingsPage />} />
+          <Route path="administration/people/users" element={<AccessControlSettingsPage />} />
+          <Route path="administration/organization/modules" element={<ERPSettingsPage />} />
+          <Route path="administration/security/authentication" element={<AdminAccessSettingsPage />} />
+        </Route>
+        <Route element={<RequireRoles allowedRoles={['admin', 'manager']} />}>
+          <Route path="administration/people/permissions" element={<PermissionsSettingsPage />} />
         </Route>
         <Route path="profile" element={<ProfilePage />} />
         <Route path="company-files" element={<CompanyFilesPage />} />
         <Route path="chat/:conversationId?" element={<ChatWorkspacePage />} />
-        <Route path="legacy/employees" element={<Navigate to="/administration/access" replace />} />
-        <Route path="legacy/questions" element={<Navigate to="/administration/collaboration" replace />} />
-        <Route path="legacy/schedule" element={<Navigate to="/administration/collaboration" replace />} />
-        <Route path="legacy/manager" element={<Navigate to="/administration/automation" replace />} />
-        <Route path="legacy/knowledge" element={<Navigate to="/administration/oyuns" replace />} />
-        <Route path="legacy/onboarding" element={<Navigate to="/administration/automation" replace />} />
-        <Route path="legacy/developer" element={<Navigate to="/administration/oyuns" replace />} />
+        <Route path="administration/workspace" element={<Navigate to="/administration/organization/profile" replace />} />
+        <Route path="administration/collaboration" element={<Navigate to="/administration/workflows/worktime" replace />} />
+        <Route path="administration/automation" element={<Navigate to="/administration/integrations/overview" replace />} />
+        <Route path="administration/oyuns" element={<Navigate to="/administration/ai/knowledge" replace />} />
+        <Route path="administration/access" element={<Navigate to="/administration/people/users" replace />} />
+        <Route path="administration/erp" element={<Navigate to="/administration/organization/modules" replace />} />
+        <Route path="administration/admin-access" element={<Navigate to="/administration/security/authentication" replace />} />
+        <Route path="legacy/employees" element={<Navigate to="/administration/people/users" replace />} />
+        <Route path="legacy/questions" element={<Navigate to="/administration/workflows/worktime" replace />} />
+        <Route path="legacy/schedule" element={<Navigate to="/administration/workflows/worktime" replace />} />
+        <Route path="legacy/manager" element={<Navigate to="/administration/integrations/overview" replace />} />
+        <Route path="legacy/knowledge" element={<Navigate to="/administration/ai/knowledge" replace />} />
+        <Route path="legacy/onboarding" element={<Navigate to="/administration/people/users" replace />} />
+        <Route path="legacy/developer" element={<Navigate to="/administration/ai/knowledge" replace />} />
       </Route>
       <Route path="contracts/:publicId/print" element={<ContractPrintPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

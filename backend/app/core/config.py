@@ -139,6 +139,14 @@ class Settings(BaseSettings):
     AI_GATEWAY_MAX_TOOL_CALLS: int = 8
     AI_GATEWAY_READ_CONCURRENCY: int = 4
     AI_GATEWAY_TOOL_TIMEOUT_SECONDS: float = 20.0
+    # Jev is a private, confidence-gated classifier. The gateway fails open to
+    # its existing frontier route whenever this service is unavailable.
+    JEV_ROUTER_ENABLED: bool = True
+    JEV_ROUTER_URL: str = "http://jev-router:8030"
+    JEV_ROUTER_SHARED_SECRET: str = ""
+    JEV_ROUTER_TIMEOUT_SECONDS: float = 2.8
+    JEV_ROUTER_CONFIDENCE_THRESHOLD: float = 0.90
+    JEV_ROUTER_MODEL: str = "jev-1.13.0"
 
     class Config:
         env_file = ".env"

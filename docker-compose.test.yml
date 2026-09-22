@@ -1,4 +1,12 @@
 services:
+  jev-router-test:
+    build:
+      context: .
+      dockerfile: jev-router/Dockerfile.test
+    environment:
+      TYPESAFE_API_KEY: test-key
+      JEV_ROUTER_SHARED_SECRET: test-secret
+
   db-test:
     image: pgvector/pgvector:pg15
     environment:

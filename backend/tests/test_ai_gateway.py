@@ -1,5 +1,7 @@
 import asyncio
+from datetime import date
 
+from app.core.enterprise_deps import ActorContext, permissions_for_roles
 from app.services.ai_gateway.cache import exact_key
 from app.services.ai_gateway.config import QueryCategory, registry
 from app.services.ai_gateway.gateway import (
@@ -9,6 +11,7 @@ from app.services.ai_gateway.gateway import (
     EXPLICIT_PROMPT_CACHE_TTL,
     GatewayRequest,
 )
+from app.services.ai_gateway.jev import JevEvaluation, resolve_local_route
 
 
 def test_default_registry_covers_each_supported_category():
@@ -124,6 +127,34 @@ def test_history_is_trimmed_from_oldest_turns_without_touching_latest_turn():
         {"role": "assistant", "content": "new"},
     ]
     assert gateway._trim_history(history, 20) == [{"role": "assistant", "content": "new"}]
+
+
+def test_jev_frontier_route_maps_to_terra_without_openai_classifier():
+    gateway = AIGateway()
+    classification = gateway._classify_from_jev(
+        JevEvaluation("frontier_reasoning", 0.97, {"frontier_reasoning": 0.97}, {}, "jev-1.13.0", {"input_tokens": 10}),
+        "compare these two payroll policies",
+    )
+    assert classification.category is QueryCategory.COMPLEX_REASONING
+    assert gateway._last_routing_decision is not None
+    assert gateway._last_routing_decision.model_key == "terra"
+
+
+def test_local_renderer_redacts_empty_and_denied_states_in_requested_language():
+    gateway = AIGateway()
+    assert "олдсонгүй" in gateway._render_local_result("tasks_lookup", {"status": "empty", "data": {}}, "mn")
+    assert "доступ" in gateway._render_local_result("tasks_lookup", {"status": "denied", "data": {}}, "ru")
+
+
+def test_jev_local_route_uses_strictly_greater_than_threshold():
+    roles = frozenset({"member"})
+    actor = ActorContext(7, 3, 9, "person@example.test", "mn", roles, permissions_for_roles(roles), "mn", "web")
+    evaluation = JevEvaluation("tasks_lookup", 0.90, {"tasks_lookup": 0.90}, {"timeframe": "today"}, "jev-1.13.0", {})
+    assert asyncio.run(resolve_local_route(None, actor, evaluation, "show tasks", now=date(2026, 9, 22))) is None
+
+
+def test_jev_history_redacts_prior_links_and_action_references():
+    assert AIGateway._jev_history([{"role": "assistant", "content": "Open https://erp.example/task/1 with mcpact_secret"}]) == [{"role": "assistant", "content": "Open [link] with [reference]"}]
 
 
 def test_tool_enabled_turn_keeps_enterprise_tools_when_classifier_misses_route(monkeypatch):

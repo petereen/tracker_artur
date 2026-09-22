@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Archive, ArrowRight, Banknote, CalendarDays, Check, ChevronDown, ChevronUp, CircleAlert, Copy, FileText, Landmark, Layers3, Pencil, Plus, Save, Search, Settings2, ShieldCheck, Trash2, Users, WalletCards, X } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -97,7 +98,10 @@ function Drawer({ title, children, onClose, dirty = false }: { title: string; ch
     return () => { document.removeEventListener('keydown', onKey); returnFocusRef.current?.focus() }
   }, [dirty, onClose])
   const close = () => { if (!dirty || window.confirm('Хадгалаагүй өөрчлөлт байна. Хаах уу?')) onClose() }
-  return <div className="payroll-setup-scrim" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}><aside ref={drawerRef} className="payroll-setup-drawer" role="dialog" aria-modal="true" aria-label={title}><header><div><span className="payroll-v2-kicker">ТОХИРГОО</span><h2>{title}</h2></div><button className="payroll-setup-icon-button" onClick={close} aria-label="Хаах"><X size={18} /></button></header><div className="payroll-setup-drawer-body">{children}</div></aside></div>
+  return createPortal(
+    <div className="payroll-setup-scrim" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}><aside ref={drawerRef} className="payroll-setup-drawer" role="dialog" aria-modal="true" aria-label={title}><header><div><span className="payroll-v2-kicker">ТОХИРГОО</span><h2>{title}</h2></div><button className="payroll-setup-icon-button" onClick={close} aria-label="Хаах"><X size={18} /></button></header><div className="payroll-setup-drawer-body">{children}</div></aside></div>,
+    document.body,
+  )
 }
 
 function FormActions({ pending, onCancel, submitLabel = 'Хадгалах' }: { pending?: boolean; onCancel: () => void; submitLabel?: string }) {

@@ -3,6 +3,8 @@
 !frontend/**
 !server/
 !server/**
+!jev-router/
+!jev-router/**
 !types/
 !types/**
 frontend/node_modules/
@@ -13,3 +15,5 @@ frontend/playwright-report/
 frontend/test-results/
 server/node_modules/
 server/dist/
+jev-router/node_modules/
+jev-router/dist/

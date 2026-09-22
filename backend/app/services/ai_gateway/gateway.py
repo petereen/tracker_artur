@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 import hashlib
 from dataclasses import dataclass, field
@@ -18,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import tiktoken
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -26,6 +27,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.enterprise_deps import ActorContext
 from app.services.ai_gateway.cache import ResponseCache, exact_key
 from app.services.ai_gateway.config import QueryCategory, registry
+from app.services.ai_gateway.jev import JevEvaluation, JevUnavailable, allowed_handlers, evaluate_remote, resolve_local_route
 from app.services.ai_gateway.tools.registry import ToolRegistry
 from app.services.mcp.catalog import _strict_schema, get_tool
 from app.services.mcp.references import resolve_resource_reference, resource_reference
@@ -195,6 +197,7 @@ class GatewayRequest:
     mcp_context: list[dict] = field(default_factory=list)
     actor_context: ActorContext | None = None
     database: Any | None = None
+    jev_evaluation: JevEvaluation | None = None
 
 
 @dataclass(slots=True)
@@ -211,6 +214,7 @@ class GatewayResponse:
     deliveries: list[dict] = field(default_factory=list)
     degraded: bool = False
     degraded_reason: str | None = None
+    jev: dict[str, Any] = field(default_factory=dict)
 
 
 ProviderFailureKind = Literal["not_configured", "timeout", "network", "rate_limit", "provider_5xx", "provider_rejected", "invalid_response", "database"]
@@ -237,6 +241,189 @@ class AIGateway:
         self.cache = ResponseCache()
         self.tool_registry = ToolRegistry()
         self._last_routing_decision: RoutingDecision | None = None
+
+    @staticmethod
+    def _jev_history(history: list[dict]) -> list[dict]:
+        """Keep conversational meaning while excluding prior tool artifacts."""
+        redacted: list[dict] = []
+        for item in history[-8:]:
+            if item.get("role") not in {"user", "assistant"}:
+                continue
+            content = str(item.get("content") or "")
+            content = re.sub(r"(?:mcpact_|ap1\.|ap2\.)\S+", "[reference]", content)
+            content = re.sub(r"https?://\S+", "[link]", content)
+            redacted.append({"role": item["role"], "content": content[:8_000]})
+        return redacted
+
+    @staticmethod
+    def _local_status_text(status: str, language: str) -> str | None:
+        messages = {
+            "en": {
+                "empty": "No matching authorized records were found.",
+                "indexing": "Matching company-file metadata was found, but content indexing is still in progress.",
+                "partial": "Authorized metadata was found, but content enrichment is incomplete.",
+                "denied": "You do not have access to that resource.",
+                "unavailable": "That OYUNS lookup is temporarily unavailable.",
+            },
+            "mn": {
+                "empty": "Таны хандах эрхтэй тохирох мэдээлэл олдсонгүй.",
+                "indexing": "Компанийн файлын мэдээлэл олдсон боловч агуулгын индексжүүлэлт дуусаагүй байна.",
+                "partial": "Зөвшөөрөгдсөн файлын мэдээлэл олдсон боловч агуулгын боловсруулалт дутуу байна.",
+                "denied": "Та энэ мэдээлэлд хандах эрхгүй байна.",
+                "unavailable": "OYUNS-ийн энэ хайлт түр боломжгүй байна.",
+            },
+            "ru": {
+                "empty": "Подходящих разрешённых записей не найдено.",
+                "indexing": "Метаданные файла найдены, но индексация содержимого ещё выполняется.",
+                "partial": "Разрешённые метаданные найдены, но обработка содержимого неполная.",
+                "denied": "У вас нет доступа к этому ресурсу.",
+                "unavailable": "Этот поиск OYUNS временно недоступен.",
+            },
+        }
+        return messages.get(language, messages["en"]).get(status)
+
+    @classmethod
+    def _render_local_result(cls, route: str, result: dict, language: str) -> str:
+        status = str(result.get("status") or "unavailable")
+        status_text = cls._local_status_text(status, language)
+        if status_text:
+            return status_text
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        if language == "mn":
+            labels = {"tasks": "Даалгавар", "projects": "Төсөл", "plans": "Төлөвлөгөө", "milestones": "Үе шат", "events": "Хуанлийн мэдээлэл", "employees": "Ажилтан", "sources": "Эх сурвалж", "dashboard": "ERP хураангуй", "documents": "ERP баримт", "rates": "Ханш"}
+        elif language == "ru":
+            labels = {"tasks": "Задачи", "projects": "Проекты", "plans": "Планы", "milestones": "Этапы", "events": "Календарь", "employees": "Сотрудники", "sources": "Источники", "dashboard": "Сводка ERP", "documents": "Документы ERP", "rates": "Курсы"}
+        else:
+            labels = {"tasks": "Tasks", "projects": "Projects", "plans": "Plans", "milestones": "Milestones", "events": "Calendar", "employees": "Employees", "sources": "Sources", "dashboard": "ERP summary", "documents": "ERP documents", "rates": "Rates"}
+
+        items = data.get("items") if isinstance(data.get("items"), list) else []
+        if route == "knowledge_search":
+            lines = []
+            for item in items[:5]:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title") or "company file")
+                excerpt = str(item.get("excerpt") or "").replace("\n", " ").strip()[:360]
+                lines.append(f"• {title}" + (f": {excerpt}" if excerpt else ""))
+            return "\n".join(lines) if lines else cls._local_status_text("empty", language) or "No results."
+        if route == "employee_count":
+            groups = data.get("groups") if isinstance(data.get("groups"), dict) else {}
+            return "\n".join([f"{labels['employees']}: "] + [f"• {key}: {value}" for key, value in groups.items()]) if groups else cls._local_status_text("empty", language) or "No results."
+        if route in {"employee_lookup", "tasks_lookup", "projects_lookup"}:
+            entity = "employees" if route == "employee_lookup" else "tasks" if route == "tasks_lookup" else str(data.get("entity") or "projects")
+            lines = [labels.get(entity, entity)]
+            for item in items[:10]:
+                if not isinstance(item, dict):
+                    continue
+                title = item.get("name") or item.get("title") or item.get("summary") or "—"
+                details = [str(item[key]) for key in ("status", "workflow_status", "job_title", "priority", "start_at", "deadline_at") if item.get(key) not in (None, "")]
+                lines.append("• " + str(title) + (f" — {' · '.join(details)}" if details else ""))
+            return "\n".join(lines)
+        if route == "calendar_lookup":
+            lines = [labels["events"]]
+            for item in items[:10]:
+                if not isinstance(item, dict):
+                    continue
+                title = item.get("title") or item.get("summary") or "—"
+                when = item.get("start") or item.get("start_at") or item.get("date") or ""
+                lines.append(f"• {title}" + (f" — {when}" if when else ""))
+            return "\n".join(lines)
+        if route == "stats_lookup":
+            metrics = data.get("metrics") if isinstance(data.get("metrics"), dict) else {}
+            return "\n".join(["Statistics" if language == "en" else "Статистик" if language == "mn" else "Статистика"] + [f"• {key}: {value}" for key, value in metrics.items()])
+        if route == "erp_lookup":
+            dashboard = data.get("dashboard") if isinstance(data.get("dashboard"), dict) else None
+            if dashboard:
+                return "\n".join([labels["dashboard"]] + [f"• {key}: {value}" for key, value in dashboard.items()])
+            documents = data.get("documents") if isinstance(data.get("documents"), list) else []
+            return "\n".join([labels["documents"]] + [f"• {item.get('number') or '—'} — {item.get('type') or ''} {item.get('status') or ''} {item.get('grand_total') or ''}" for item in documents if isinstance(item, dict)])
+        if route == "exchange_rate_lookup":
+            values = data.get("values") if isinstance(data.get("values"), list) else []
+            rates = data.get("rates") if isinstance(data.get("rates"), list) else []
+            rows = values or rates
+            return "\n".join([labels["rates"]] + [f"• {item.get('label') or item.get('pair') or '—'}: {item.get('amount') or item.get('values') or ''}" for item in rows if isinstance(item, dict)])
+        return str(result.get("summary") or "Lookup completed.")
+
+    async def _jev_local_turn(self, db: Any, request: GatewayRequest, history: list[dict], grounding_context: dict) -> GatewayResponse | None:
+        if request.actor_context is None or not settings.JEV_ROUTER_ENABLED:
+            return None
+        started = time.monotonic()
+        latency_ms = lambda: int((time.monotonic() - started) * 1_000)
+        try:
+            evaluation = await evaluate_remote({
+                "message": request.text,
+                "history": self._jev_history(history),
+                "channel": request.channel if request.channel in {"web", "telegram"} else "web",
+                "locale": request.language_hint if request.language_hint in {"mn", "en", "ru"} else "other",
+                "timezone": grounding_context.get("timezone"),
+                "current_time": grounding_context.get("current_time"),
+                "allowed_handlers": allowed_handlers(self.tool_registry, request.actor_context),
+                "currency_candidates": ["USD/MNT", "EUR/MNT", "CNY/MNT", "JPY/MNT", "RUB/MNT", "KRW/MNT"],
+            })
+            request.jev_evaluation = evaluation
+            if evaluation.route in {"frontier_reasoning", "unsupported_lookup"}:
+                log.info("ai_gateway.jev_fallback route=%s confidence=%.3f model=%s latency_ms=%d reason=route", evaluation.route, evaluation.confidence, evaluation.model, latency_ms())
+                return None
+            if evaluation.route not in allowed_handlers(self.tool_registry, request.actor_context):
+                log.info("ai_gateway.jev_fallback route=%s confidence=%.3f model=%s latency_ms=%d reason=unauthorized_handler", evaluation.route, evaluation.confidence, evaluation.model, latency_ms())
+                return None
+            now = datetime.fromisoformat(str(grounding_context.get("current_time"))).date() if grounding_context.get("current_time") else datetime.now(timezone.utc).date()
+            local = await resolve_local_route(db, request.actor_context, evaluation, request.text, now=now)
+            if local is None:
+                log.info("ai_gateway.jev_fallback route=%s confidence=%.3f reason=arguments model=%s latency_ms=%d", evaluation.route, evaluation.confidence, evaluation.model, latency_ms())
+                return None
+            tool_name, arguments = local
+            definition = self.tool_registry.get(tool_name)
+            if definition is None or not definition.read_only:
+                return None
+            if isinstance(db, AsyncSession):
+                async with AsyncSessionLocal() as read_db:
+                    result = await self.tool_registry.dispatch_tool(tool_name, arguments, request.actor_context, db=read_db, conversation_id=request.conversation_id)
+            else:
+                result = await self.tool_registry.dispatch_tool(tool_name, arguments, request.actor_context, db=db, conversation_id=request.conversation_id)
+            answer = self._render_local_result(evaluation.route, result, request.language_hint)
+            deliveries = self._materialize_file_deliveries(result, request.actor_context)
+            elapsed = latency_ms()
+            log.info("ai_gateway.jev_local route=%s confidence=%.3f model=%s usage=%s latency_ms=%d", evaluation.route, evaluation.confidence, evaluation.model, evaluation.usage, elapsed)
+            return GatewayResponse(
+                answer=answer,
+                sources=list(result.get("sources", [])),
+                route=f"jev_local:{evaluation.route}",
+                model=evaluation.model,
+                cache="bypass",
+                web_search_used=False,
+                usage=evaluation.usage,
+                tool_results=[result],
+                deliveries=deliveries,
+                jev={"route": evaluation.route, "confidence": evaluation.confidence, "probabilities": evaluation.probabilities, "model": evaluation.model, "usage": evaluation.usage, "latency_ms": elapsed},
+            )
+        except (JevUnavailable, asyncio.TimeoutError, ValueError, ValidationError):
+            log.info("ai_gateway.jev_unavailable latency_ms=%d reason=service", latency_ms(), exc_info=True)
+            return None
+        except Exception:
+            log.exception("ai_gateway.jev_local_failed latency_ms=%d reason=unexpected", latency_ms())
+            return None
+
+    def _classify_from_jev(self, evaluation: JevEvaluation, text: str) -> Classification:
+        """Convert a successful Jev route into the existing gateway contract."""
+        complex_route = evaluation.route == "frontier_reasoning"
+        decision = RoutingDecision(
+            model_key="terra" if complex_route else "luna",
+            reasoning_effort="medium" if complex_route else "none",
+            output_format="plain_text",
+            verbosity="medium" if complex_route else "low",
+            action_intents=["tasks_write"] if "tasks_write" in self._infer_enterprise_intents(text) else [],
+        )
+        self._last_routing_decision = decision
+        return Classification(
+            category=QueryCategory.COMPLEX_REASONING if complex_route else QueryCategory.SIMPLE_QA,
+            language=detect_language(text).value,
+            requires_freshness=self._requires_freshness(text),
+            requires_enterprise_tools=bool(self._infer_enterprise_intents(text) or is_scheduled_task(text)),
+            requested_modalities=["text"],
+            cache_eligible=False,
+            enterprise_intents=["tasks_write"] if decision.action_intents else [],
+        )
 
     async def execute_turn(self, db: Any, actor_context: ActorContext, message_history: Sequence[dict] | MessageHistory, *, conversation_id: int | None = None) -> GatewayResponse:
         """Run one transport-neutral turn through the in-process registry."""
@@ -283,10 +470,12 @@ class AIGateway:
             database=db,
             grounding_context=grounding_context,
         )
-        if is_simple_self_meeting(current):
-            preview = await self._offline_task_preview(db, request, fast=True)
-            if preview is not None:
-                return preview
+        # Jev must be the first semantic decision for authenticated chat turns.
+        # Task writes are intentionally not in its local catalog; the existing
+        # preview fallback remains available only after the frontier path fails.
+        local = await self._jev_local_turn(db, request, history, grounding_context)
+        if local is not None:
+            return local
         # Knowledge retrieval is an enhancement to the live model turn.  A
         # missing/stale retrieval migration or a transient database/index
         # failure must not turn every ordinary assistant message into HTTP
@@ -685,7 +874,11 @@ class AIGateway:
             if cached:
                 return GatewayResponse(**{**cached, "cache": "exact", "sources": request.grounding_sources})
 
-        classification = await self._classify(request.text)
+        classification = (
+            self._classify_from_jev(request.jev_evaluation, request.text)
+            if request.jev_evaluation is not None
+            else await self._classify(request.text)
+        )
         decision = self._last_routing_decision
         configured_route = config.routes[classification.category]
         route_models = ([decision.model_key] + [key for key in configured_route if key != decision.model_key]) if decision and decision.model_key in config.models else configured_route

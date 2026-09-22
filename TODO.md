@@ -1,6 +1,18 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add Jev-first AI request routing with a private TypeSafe evaluator and read-only local fast paths (`jev-router`, `backend/app/services/ai_gateway`, Docker Compose, backend tests) — Jev router tests/build, Python compilation, diff checks, and Compose validation pass; dependency-backed backend pytest and Docker image acceptance remain blocked by the local environment
+  - [x] Add the Node 22 evaluator service and locked `@typesafe-ai/sdk` dependency
+  - [x] Wire Jev confidence-gated routing and deterministic local result rendering into the shared gateway
+  - [x] Configure private evaluator deployment and environment contracts across Compose variants
+  - [x] Add Jev router, gateway, and cross-channel regression coverage
+- [x] Implement the Admin Settings information architecture with six bilingual categories, canonical routes, and a responsive two-level navigation (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/App.tsx`, `frontend/src/components/EnterpriseShell.tsx`, `frontend/src/index.css`)
+  - [x] Inventory existing settings and map each item to a primary category and tab
+  - [x] Define consolidation rationale, navigation pattern, and migration priorities
+  - [x] Move task assignment permissions to People & Access and geofence rules to Worktime & Processes
+  - [x] Move Worktime QR kiosk management to Automation & Integrations and preserve legacy route redirects
+  - [x] Add bilingual category/tab labels with responsive sidebar and tab navigation
+  - [x] Verify TypeScript/Vite production build and focused shell tests
 - [x] Remove redundant Payroll heading copy and let the module fill the available workspace (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/index.css`)
 - [x] Open company knowledge to all authenticated workspace members with read-only member access while keeping OYUNS training admin-only (`frontend/src/App.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/KnowledgePage.tsx`, `frontend/src/pages/KnowledgePage.test.tsx`, `backend/app/routers/knowledge.py`, `backend/tests/test_knowledge_api.py`)
 - [x] Keep OYUNS responses in the user's Mongolian language and expose confirm/reject/edit task-draft actions in Telegram and platform chat (`backend/app/services/assistant_text.py`, `backend/app/services/ai_gateway`, `backend/app/bot/assistant_handlers.py`, `backend/app/routers/chat.py`, `frontend/src/pages/ChatWorkspacePage.tsx`, `frontend/src/components/OyunsAssistant.tsx`) — frontend focused tests/build pass; keyboard focus/touch sizing is covered; backend syntax and Alembic head checks pass, while dependency-backed pytest is blocked by the local environment
@@ -561,6 +573,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Fix payroll setup sidepanel layering so drawer headers and close buttons render above the sticky workspace header (`frontend/src/pages/PayrollSetupHub.tsx`)
 - [x] Open company knowledge to all authenticated workspace members with read-only member access while keeping OYUNS training admin-only (`frontend/src/App.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/KnowledgePage.tsx`, `frontend/src/pages/KnowledgePage.test.tsx`, `backend/app/routers/knowledge.py`, `backend/tests/test_knowledge_api.py`)
 - [x] Fix task and shared side-panel full-viewport overlay, close controls, and panel-local scrolling with body-level rendering and native scroll reset (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 - [x] Fix backend startup SyntaxError in the asset-disposal journal route (`backend/app/erp/router.py`)
