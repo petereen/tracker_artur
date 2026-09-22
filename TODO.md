@@ -586,6 +586,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Fix the unified Payroll v2 component-master backfill so PostgreSQL can run the migration (`backend/alembic/versions/a1b2c3d4e5f6_unified_payroll_v2.py`, `backend/tests/test_payroll_v2_contract.py`)
 - [x] Fix payroll setup sidepanel layering so drawer headers and close buttons render above the sticky workspace header (`frontend/src/pages/PayrollSetupHub.tsx`)
 - [x] Open company knowledge to all authenticated workspace members with read-only member access while keeping OYUNS training admin-only (`frontend/src/App.tsx`, `frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/pages/KnowledgePage.tsx`, `frontend/src/pages/KnowledgePage.test.tsx`, `backend/app/routers/knowledge.py`, `backend/tests/test_knowledge_api.py`)
 - [x] Fix task and shared side-panel full-viewport overlay, close controls, and panel-local scrolling with body-level rendering and native scroll reset (`frontend/src/pages/EnterpriseTasksPage.tsx`, `frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)

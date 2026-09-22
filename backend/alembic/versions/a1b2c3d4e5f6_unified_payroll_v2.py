@@ -61,9 +61,9 @@ def upgrade() -> None:
         SET component_master_id = cm.id
         FROM payslips p
         JOIN payroll_runs r ON r.id = p.payroll_run_id
-        JOIN payroll_salary_component_masters cm
-          ON cm.organization_id = p.organization_id AND cm.code = li.component_code
+        JOIN payroll_salary_component_masters cm ON cm.organization_id = p.organization_id
         WHERE li.payslip_id = p.id AND r.organization_id = p.organization_id
+          AND cm.code = li.component_code
     """))
     op.create_index("ix_payroll_payslip_line_component_master", "payslip_line_items", ["component_master_id"])
 

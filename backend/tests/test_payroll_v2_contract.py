@@ -12,6 +12,13 @@ def test_unified_v2_migration_is_the_single_successor_and_contains_guardrails():
         assert marker in migration
 
 
+def test_component_master_backfill_does_not_reference_update_alias_in_join_on_clause():
+    migration = next(ROOT.glob("alembic/versions/*_unified_payroll_v2.py")).read_text()
+    assert "JOIN payroll_salary_component_masters cm ON cm.organization_id = p.organization_id" in migration
+    assert "AND cm.code = li.component_code" in migration
+    assert "ON cm.organization_id = p.organization_id AND cm.code = li.component_code" not in migration
+
+
 def test_v2_api_has_preflight_usage_preview_reversal_and_legacy_sunset():
     router = (ROOT / "app/payroll/router.py").read_text()
     service = (ROOT / "app/payroll/service.py").read_text()
