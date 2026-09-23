@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Fix salary structure deletion failures and allow deleting published structures only when they have no employee or payslip references (`backend/app/payroll/service.py`, `backend/alembic/versions/r1s2t3u4v5w6_allow_safe_salary_structure_delete.py`)
 - [x] Allow salary components to be edited and permanently deleted even when referenced, preserving payroll snapshots (`backend/app/payroll/service.py`, `backend/app/models/models.py`, `backend/alembic/versions`, `frontend/src/pages/PayrollSetupHub.tsx`)
   - [x] Remove edit lock and hard-delete usage restriction (`backend/app/payroll/service.py`)
   - [x] Preserve historical component identity while detaching/deleting dependent references (`backend/app/models/models.py`, `backend/alembic/versions`, payroll services)

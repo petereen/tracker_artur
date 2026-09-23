@@ -768,8 +768,6 @@ async def bump_salary_structure(db: AsyncSession, actor: ActorContext, structure
 async def delete_salary_structure(db: AsyncSession, actor: ActorContext, structure: SalaryStructure) -> None:
     if structure.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Salary structure not found")
-    if structure.status in {"published", "active"}:
-        raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_immutable"})
     referenced_profile = await db.scalar(select(EmployeePayrollProfile.id).where(EmployeePayrollProfile.salary_structure_id == structure.id).limit(1))
     if referenced_profile:
         raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_referenced_by_employee"})
