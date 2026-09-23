@@ -981,9 +981,11 @@ async def create_account(
     if not roles or not set(roles).issubset(allowed):
         raise HTTPException(status_code=400, detail="Invalid roles")
     if data.employee_id:
-        employee = await db.get(Employee, data.employee_id)
+        employee = await db.scalar(select(Employee).where(Employee.id == data.employee_id, Employee.organization_id == actor.organization_id, Employee.deleted_at.is_(None)))
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
+        if not employee.is_active:
+            raise HTTPException(status_code=409, detail={"code": "worker_inactive"})
         linked_account = await db.scalar(select(UserAccount.id).where(UserAccount.employee_id == data.employee_id))
         if linked_account:
             raise HTTPException(status_code=409, detail="Employee already has an account")
@@ -1049,6 +1051,10 @@ async def update_account(
         await db.execute(RefreshSession.__table__.update().where(RefreshSession.account_id == account.id, RefreshSession.revoked_at.is_(None)).values(revoked_at=datetime.now(timezone.utc)))
     for field, value in patch.items():
         setattr(account, field, value)
+    if patch.get("status") == "active" and account.employee_id:
+        employee = await db.scalar(select(Employee).where(Employee.id == account.employee_id, Employee.organization_id == actor.organization_id))
+        if not employee or not employee.is_active or employee.deleted_at is not None:
+            raise HTTPException(status_code=409, detail={"code": "worker_inactive"})
     if patch.get("status") == "active":
         # Reactivation must also clear a temporary lock; otherwise the account
         # remains blocked until the old lock timestamp expires.

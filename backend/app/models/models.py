@@ -56,6 +56,8 @@ class Employee(Base):
     metadata_json = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     timezone = Column(Text, nullable=False, server_default="Asia/Ulaanbaatar", default="Asia/Ulaanbaatar")
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    deleted_at = Column(DateTime(timezone=True), index=True)
+    deleted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     onboarded_at = Column(DateTime(timezone=True))
 
@@ -2917,6 +2919,7 @@ class EmployeePayrollProfile(Base):
     social_insurance_number_ciphertext = Column(Text)
     payment_method = Column(String(16), nullable=False, server_default="bank", default="bank")
     document_status = Column(String(16), nullable=False, server_default="submitted", default="submitted")
+    component_overrides = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -3112,6 +3115,7 @@ class Payslip(Base):
     published_at = Column(DateTime(timezone=True))
     cancelled_at = Column(DateTime(timezone=True))
     employee_profile_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    payout_snapshot_ciphertext = Column(Text)
     input_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     calculation_trace = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
     ytd_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)

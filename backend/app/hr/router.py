@@ -56,11 +56,13 @@ from .service import (
     bind_invite_user,
     can_manage_attendance,
     can_manage_hr,
+    archive_worker,
     create_invite,
     employee_in_scope,
     ensure_details,
     leave_balance,
     leave_days,
+    set_worker_active,
     suggested_attendance,
 )
 
@@ -109,7 +111,8 @@ async def _employee_out(db: AsyncSession, actor: ActorContext, employee: Employe
         "department_id": details.department_id if details else None, "department_name": department.name if department else None,
         "manager_id": details.manager_id if details else employee.manager_id, "job_title": details.job_title if details else employee.job_title,
         "employment_role": details.employment_role if details else None, "start_date": details.start_date.isoformat() if details and details.start_date else None,
-        "end_date": details.end_date.isoformat() if details and details.end_date else None, "employment_status": details.employment_status if details else ("active" if employee.is_active else "inactive"),
+        "end_date": details.end_date.isoformat() if details and details.end_date else None, "employment_status": "active" if employee.is_active else "inactive",
+        "is_archived": employee.deleted_at is not None,
         "telegram_status": "connected" if employee.telegram_id else "pending_invite" if pending else "not_invited", "account_id": account,
     }
 
@@ -155,17 +158,23 @@ async def archive_department(department_id: int, db: AsyncSession = Depends(get_
 
 
 @router.get("/employees")
-async def list_hr_employees(search: str | None = Query(default=None, max_length=160), department_id: int | None = None, status_filter: str | None = Query(default=None, alias="status"), telegram_status: str | None = None, page: int = Query(default=1, ge=1), page_size: int = Query(default=50, ge=1, le=200), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def list_hr_employees(search: str | None = Query(default=None, max_length=160), department_id: int | None = None, status_filter: str | None = Query(default=None, alias="status"), telegram_status: str | None = None, include_archived: bool = False, page: int = Query(default=1, ge=1), page_size: int = Query(default=50, ge=1, le=200), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     query = select(Employee, EmployeeDetails).outerjoin(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).where(Employee.organization_id == actor.organization_id, *_employee_scope_clause(actor))
     if search:
         term = f"%{search.strip()}%"
         query = query.where(or_(Employee.name.ilike(term), Employee.telegram_username.ilike(term), Employee.first_name.ilike(term), Employee.last_name.ilike(term), EmployeeDetails.job_title.ilike(term)))
     if department_id is not None: query = query.where(EmployeeDetails.department_id == department_id)
-    if status_filter in {"active", "inactive", "terminated"}: query = query.where((EmployeeDetails.employment_status if status_filter != "active" else EmployeeDetails.employment_status) == status_filter)
+    if not include_archived: query = query.where(Employee.deleted_at.is_(None))
+    if status_filter == "active": query = query.where(Employee.is_active.is_(True))
+    elif status_filter in {"inactive", "terminated"}: query = query.where(Employee.is_active.is_(False))
     rows = (await db.execute(query.order_by(Employee.name).offset((page - 1) * page_size).limit(page_size))).all()
     items = [await _employee_out(db, actor, employee, details) for employee, details in rows]
     if telegram_status: items = [item for item in items if item["telegram_status"] == telegram_status]
-    total = await db.scalar(select(func.count(Employee.id)).select_from(Employee).outerjoin(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).where(Employee.organization_id == actor.organization_id, *_employee_scope_clause(actor))) or 0
+    total_query = select(func.count(Employee.id)).select_from(Employee).outerjoin(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).where(Employee.organization_id == actor.organization_id, *_employee_scope_clause(actor))
+    if not include_archived: total_query = total_query.where(Employee.deleted_at.is_(None))
+    if status_filter == "active": total_query = total_query.where(Employee.is_active.is_(True))
+    elif status_filter in {"inactive", "terminated"}: total_query = total_query.where(Employee.is_active.is_(False))
+    total = await db.scalar(total_query) or 0
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 
@@ -202,8 +211,13 @@ async def update_hr_employee(employee_id: int, data: EmployeePatch, db: AsyncSes
         await employee_in_scope(db, actor, data.manager_id)
     for key in ("name", "first_name", "last_name", "timezone"):
         if key in patch: setattr(employee, key, patch.pop(key))
+    requested_active = patch.pop("is_active", None)
+    employment_status = patch.pop("employment_status", None)
+    restore = patch.pop("restore", False)
     for key, value in patch.items(): setattr(details, key, value)
-    if "employment_status" in patch: employee.is_active = patch["employment_status"] == "active"
+    if employment_status is not None: requested_active = employment_status == "active"
+    if requested_active is not None:
+        await set_worker_active(db, employee, requested_active, restore=restore or (requested_active and employee.deleted_at is not None))
     await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="updated", after=data.model_dump(exclude_unset=True))
     await db.commit()
     return await _employee_out(db, actor, employee, details)
@@ -212,8 +226,7 @@ async def update_hr_employee(employee_id: int, data: EmployeePatch, db: AsyncSes
 @router.delete("/employees/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_hr_employee(employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
     employee = await employee_in_scope(db, actor, employee_id, write=True)
-    employee.is_active = False
-    details = await ensure_details(db, employee); details.employment_status = "inactive"
+    await archive_worker(db, employee, account_id=actor.account_id)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

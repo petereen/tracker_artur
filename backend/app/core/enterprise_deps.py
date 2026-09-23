@@ -95,6 +95,10 @@ async def actor_from_account_id(account_id: int, db: AsyncSession) -> ActorConte
     account = await db.get(UserAccount, account_id)
     if not account or account.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account unavailable")
+    if account.employee_id:
+        employee = await db.get(Employee, account.employee_id)
+        if not employee or not employee.is_active or employee.deleted_at is not None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Worker unavailable")
     today = date.today()
     rows = (
         await db.execute(
@@ -131,7 +135,7 @@ async def actor_from_telegram_id(telegram_id: str, db: AsyncSession) -> ActorCon
     The legacy manager allowlist remains available to old bot commands only; it
     must not grant enterprise-data access without a linked UserAccount.
     """
-    employee = await db.scalar(select(Employee).where(Employee.telegram_id == str(telegram_id), Employee.is_active.is_(True)))
+    employee = await db.scalar(select(Employee).where(Employee.telegram_id == str(telegram_id), Employee.is_active.is_(True), Employee.deleted_at.is_(None)))
     if not employee:
         return None
     account = await db.scalar(select(UserAccount).where(UserAccount.employee_id == employee.id, UserAccount.status == "active"))

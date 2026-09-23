@@ -81,6 +81,27 @@ async def ensure_details(db: AsyncSession, employee: Employee, *, start_date: da
     return details
 
 
+async def set_worker_active(db: AsyncSession, employee: Employee, active: bool, *, restore: bool = False) -> None:
+    """Keep HR's legacy status and account access aligned with the person row."""
+    employee.is_active = active
+    if restore:
+        employee.deleted_at = None
+        employee.deleted_by_account_id = None
+    details = await ensure_details(db, employee)
+    details.employment_status = "active" if active else "inactive"
+    accounts = (await db.execute(select(UserAccount).where(UserAccount.organization_id == employee.organization_id, UserAccount.employee_id == employee.id))).scalars().all()
+    if not active:
+        for account in accounts:
+            if account.status == "active":
+                account.status = "disabled"
+
+
+async def archive_worker(db: AsyncSession, employee: Employee, *, account_id: int | None = None) -> None:
+    employee.deleted_at = datetime.now(timezone.utc)
+    employee.deleted_by_account_id = account_id
+    await set_worker_active(db, employee, False)
+
+
 def _token_hash(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 

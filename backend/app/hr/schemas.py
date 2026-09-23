@@ -47,6 +47,8 @@ class EmployeePatch(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     employment_status: Literal["active", "inactive", "terminated"] | None = None
+    is_active: bool | None = None
+    restore: bool = False
     timezone: str | None = None
 
 

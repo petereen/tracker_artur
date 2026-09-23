@@ -41,8 +41,8 @@ export function useChangeOwnPassword() {
 }
 
 // --- Employees ---
-export function useEmployees() {
-  return useQuery({ queryKey: ['employees'], queryFn: () => api.get('/employees').then((r) => r.data) })
+export function useEmployees(includeArchived = false) {
+  return useQuery({ queryKey: ['employees', { includeArchived }], queryFn: () => api.get('/employees', { params: { include_archived: includeArchived } }).then((r) => r.data) })
 }
 export function useEmployeePerformance(employeeId: number | null, filters: DateRangeFilters = {}) {
   const params = dashboardParams(filters)
@@ -59,6 +59,7 @@ export function useCreateEmployee() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employees'] })
       qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
+      qc.invalidateQueries({ queryKey: ['v1', 'workers'] })
       toast.success('Ажилтан нэмэгдлээ')
     },
     onError: () => toast.error('Нэмэхэд алдаа гарлаа'),
@@ -71,6 +72,7 @@ export function useUpdateEmployee() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employees'] })
       qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
+      qc.invalidateQueries({ queryKey: ['v1', 'workers'] })
       toast.success('Хадгалагдлаа')
     },
   })
@@ -82,6 +84,7 @@ export function useDeleteEmployee() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['employees'] })
       qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
+      qc.invalidateQueries({ queryKey: ['v1', 'workers'] })
       toast.success('Устгагдлаа')
     },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Ажилтан устгагдсангүй'),

@@ -1214,7 +1214,7 @@ a {
 .auth-form-wrap .telegram-login .native-telegram-action { margin-top: 2px; }
 .auth-form-wrap .native-telegram-action { margin-top: 20px; }
 .auth-form-wrap .login-divider { margin-top: 21px; }
-.auth-form-wrap footer { gap: 24px; justify-content: center; margin-top: 34px; }
+.auth-form-wrap footer { display: flex; gap: 24px; justify-content: center; margin-top: 34px; }
 .auth-form-wrap a:focus-visible,
 .auth-form-wrap button:focus-visible,
 .auth-form-wrap input:focus-visible {
@@ -12386,3 +12386,8 @@ html.capacitor-native .native-boot-error {
   .employee-access-header { align-items: flex-start; }
   .employee-settings-footer { gap: 10px; }
 }
+.payroll-v2-draft-workers { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; max-height: 220px; overflow: auto; margin: 12px 0 20px; }
+.payroll-v2-draft-workers label { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border, #e5e7eb); border-radius: 8px; }
+.payroll-v2-register-subtotal { background: var(--muted, #f5f6f8); font-weight: 700; }
+.payroll-v2-table .payroll-v2-sticky-worker { position: sticky; left: 0; z-index: 1; background: var(--card, #fff); text-align: left; min-width: 170px; }
+.payroll-v2-table-wrap:has(.payroll-v2-sticky-worker) { overflow: auto; }

@@ -191,6 +191,11 @@ class EmployeePayrollInput(BaseModel):
     taxpayer_number: str | None = None
     social_insurance_number: str | None = None
     payment_method: Literal["bank", "cash", "other"] = "bank"
+    component_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class PayrollAssignmentEstimateInput(EmployeePayrollInput):
+    pass
 
 
 class BankAccountInput(BaseModel):
@@ -267,6 +272,11 @@ class PayrollRunInput(BaseModel):
     variable_inputs: list[VariablePayInput] = Field(default_factory=list)
 
 
+class PayrollDraftInputUpdate(BaseModel):
+    employee_ids: list[int] = Field(min_length=1)
+    variable_inputs: list[VariablePayInput] = Field(default_factory=list)
+
+
 class PayrollCycleInputCorrection(BaseModel):
     employee_id: int
     actual_worked_hours: Decimal = Field(ge=0)
@@ -277,6 +287,7 @@ class PayrollCycleInputCorrection(BaseModel):
 
 class CalculateRunInput(BaseModel):
     acknowledge_example: bool = False
+    preview_checksum: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class ReconciliationResolutionInput(BaseModel):

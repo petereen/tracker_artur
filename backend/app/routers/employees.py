@@ -6,9 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.config import settings
-from app.core.deps import get_current_user
+from app.core.enterprise_deps import ActorContext, get_actor, require_roles
 from app.models.models import Employee, Schedule, Streak, SurveySession, WorkReport, WorkReportRevision, WorkTimeEntry
+from app.hr.service import archive_worker, set_worker_active
 from app.services.work_report_service import summarize_work_time
 
 router = APIRouter()
@@ -39,6 +39,7 @@ class EmployeeOut(BaseModel):
     # serialization (Sentry issue 28: ResponseValidationError on GET /employees).
     timezone: str = "Asia/Ulaanbaatar"
     is_active: bool
+    deleted_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -59,8 +60,11 @@ class EmployeeOut(BaseModel):
 
 
 @router.get("", response_model=list[EmployeeOut])
-async def list_employees(db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
-    result = await db.execute(select(Employee).order_by(Employee.id))
+async def list_employees(include_archived: bool = Query(False), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    query = select(Employee).where(Employee.organization_id == actor.organization_id)
+    if not include_archived:
+        query = query.where(Employee.deleted_at.is_(None))
+    result = await db.execute(query.order_by(Employee.id))
     return result.scalars().all()
 
 
@@ -203,8 +207,8 @@ async def employee_performance(
 
 
 @router.post("", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
-async def create_employee(data: EmployeeCreate, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
-    emp = Employee(organization_id=settings.DEFAULT_COMPANY_ORGANIZATION_ID, **data.model_dump())
+async def create_employee(data: EmployeeCreate, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "hr"))):
+    emp = Employee(organization_id=actor.organization_id, **data.model_dump())
     db.add(emp)
     await db.flush()
     db.add(Schedule(employee_id=emp.id))
@@ -215,23 +219,27 @@ async def create_employee(data: EmployeeCreate, db: AsyncSession = Depends(get_d
 
 
 @router.put("/{employee_id}", response_model=EmployeeOut)
-async def update_employee(employee_id: int, data: EmployeeUpdate, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
-    result = await db.execute(select(Employee).where(Employee.id == employee_id))
+async def update_employee(employee_id: int, data: EmployeeUpdate, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "hr"))):
+    result = await db.execute(select(Employee).where(Employee.id == employee_id, Employee.organization_id == actor.organization_id))
     emp = result.scalar_one_or_none()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    for k, v in data.model_dump(exclude_none=True).items():
+    values = data.model_dump(exclude_none=True)
+    active = values.pop("is_active", None)
+    for k, v in values.items():
         setattr(emp, k, v)
+    if active is not None:
+        await set_worker_active(db, emp, active, restore=active and emp.deleted_at is not None)
     await db.commit()
     await db.refresh(emp)
     return emp
 
 
 @router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_employee(employee_id: int, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
-    result = await db.execute(select(Employee).where(Employee.id == employee_id))
+async def delete_employee(employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "hr"))):
+    result = await db.execute(select(Employee).where(Employee.id == employee_id, Employee.organization_id == actor.organization_id))
     emp = result.scalar_one_or_none()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    await db.delete(emp)
+    await archive_worker(db, emp, account_id=actor.account_id)
     await db.commit()

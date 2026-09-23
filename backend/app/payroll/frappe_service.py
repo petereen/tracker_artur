@@ -277,7 +277,8 @@ async def get_employees(db: AsyncSession, actor: ActorContext, run: PayrollRun, 
         EmployeePayrollProfile.effective_from <= run.period_end,
         (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= run.period_start)),
         Employee.organization_id == actor.organization_id,
-        or_(Employee.is_active.is_(True), Employee.id.in_(select(EmployeeDetails.employee_id).where(EmployeeDetails.organization_id == actor.organization_id, EmployeeDetails.end_date >= run.period_start))),
+        Employee.is_active.is_(True),
+        Employee.deleted_at.is_(None),
     )
     if requested_ids:
         query = query.where(EmployeePayrollProfile.employee_id.in_(requested_ids))

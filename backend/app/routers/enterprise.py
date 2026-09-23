@@ -3326,7 +3326,7 @@ async def analytics_drilldown(
 
 @router.get("/workers")
 async def worker_directory(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    employees = (await db.execute(select(Employee).where(Employee.organization_id == actor.organization_id, Employee.is_active.is_(True)).order_by(Employee.name))).scalars().all()
+    employees = (await db.execute(select(Employee).where(Employee.organization_id == actor.organization_id, Employee.is_active.is_(True), Employee.deleted_at.is_(None)).order_by(Employee.name))).scalars().all()
     open_entries = (await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.ended_at.is_(None)))).scalars().all()
     by_employee = {entry.employee_id: entry for entry in open_entries}
     return [

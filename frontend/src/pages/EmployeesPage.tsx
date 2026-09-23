@@ -6,6 +6,7 @@ import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../component
 import { useEmployees, useCreateEmployee, useDeleteEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
 import { useCreateManagedAccount, useDeleteManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
 import { ReportDetailModal } from '../components/ReportDetailModal'
+import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
 
 const TZ_OPTIONS = [
   { value: 'Asia/Ulaanbaatar',    label: 'Улаанбаатар (UTC+8)' },
@@ -48,7 +49,8 @@ function localDate(value = new Date()) {
 }
 
 export function EmployeesPage() {
-  const { data: employees = [] } = useEmployees()
+  const [includeArchived, setIncludeArchived] = useState(false)
+  const { data: employees = [] } = useEmployees(includeArchived)
   const create = useCreateEmployee()
   const deleteEmployee = useDeleteEmployee()
   const update = useUpdateEmployee()
@@ -184,6 +186,7 @@ export function EmployeesPage() {
   return (
     <div>
       <PageHeader title="Ажилтнууд">
+        <label className="employee-archive-toggle"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} />Архивласан</label>
         <Btn variant="primary" onClick={openCreate}>+ Нэмэх</Btn>
       </PageHeader>
 
@@ -213,16 +216,9 @@ export function EmployeesPage() {
                     ? <div className="employee-role-chips">{ACCESS_ROLES.filter(([value]) => account.roles.includes(value)).map(([, label]) => <span key={label}>{label}</span>)}</div>
                     : <span className="text-xs text-muted">Эрх тохируулаагүй</span> })()}
                 </td>
-                <td className="px-4 py-3"><Badge color={e.is_active ? 'green' : 'muted'}>{e.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge></td>
+                <td className="px-4 py-3"><Badge color={e.deleted_at ? 'muted' : e.is_active ? 'green' : 'muted'}>{e.deleted_at ? 'Архивласан' : e.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge></td>
                 <td className="px-3 py-1.5" onClick={(event) => event.stopPropagation()}>
-                  <div className="employee-menu-wrap">
-                    <button type="button" className="employee-more-button" aria-label={`${e.name} үйлдлүүд`} aria-expanded={openMenuId === e.id} onClick={() => setOpenMenuId(openMenuId === e.id ? null : e.id)}><MoreVertical size={18} /></button>
-                    {openMenuId === e.id && <div className="employee-action-menu" role="menu">
-                      <button role="menuitem" onClick={() => { openEdit(e); setOpenMenuId(null) }}><Pencil size={15} />Засах</button>
-                      <button role="menuitem" onClick={() => { toggle(e); setOpenMenuId(null) }}>{e.is_active ? <UserRoundX size={15} /> : <UserCheck size={15} />}{e.is_active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}</button>
-                      <button role="menuitem" className="danger" onClick={() => { removeEmployee(e); setOpenMenuId(null) }}><Trash2 size={15} />Жагсаалтаас устгах</button>
-                    </div>}
-                  </div>
+                  <WorkerActionsMenu worker={e} open={openMenuId === e.id} onOpen={() => setOpenMenuId(openMenuId === e.id ? null : e.id)} onEdit={() => { openEdit(e); setOpenMenuId(null) }} onDelete={() => { removeEmployee(e); setOpenMenuId(null) }} onSetActive={(active) => { if (active && e.deleted_at) update.mutate({ id: e.id, is_active: true }); else update.mutate({ id: e.id, is_active: active }); setOpenMenuId(null) }} />
                 </td>
               </tr>
             ))}

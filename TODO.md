@@ -1,6 +1,32 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [ ] Unify worker lifecycle across People/Users, HR, and Payroll and add editable payroll preview before freeze
+  - [x] Add employee archive state and assignment-level component method overrides with conservative status backfill and migration-head merge (`backend/app/models/models.py`, `backend/alembic/versions/r9s0t1u2v3w4_shared_worker_lifecycle.py`, `backend/alembic/versions/s0t1u2v3w4x5_merge_worker_lifecycle.py`)
+  - [x] Reconcile HR employment status to Employee.is_active; share tenant-scoped worker actions and archived-worker restoration
+    - [x] Add conservative status migration and canonical HR active/archive handling (`backend/app/hr/router.py`, `backend/app/hr/service.py`)
+    - [x] Scope People/Users worker CRUD to the actor organization and make Delete archive the shared employee (`backend/app/routers/employees.py`)
+    - [x] Deny linked-account session/login use while its shared worker is inactive or archived (`backend/app/core/enterprise_deps.py`, `backend/app/routers/enterprise_auth.py`)
+    - [x] Add the shared People/HR worker action menu (`frontend/src/components/WorkerActionsMenu.tsx`)
+    - [x] Add archived-worker filtering and shared lifecycle actions to People/Users (`frontend/src/pages/EmployeesPage.tsx`, `frontend/src/api/hooks.ts`)
+    - [x] Add the shared worker action menu and archived-worker filtering to HR (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`)
+  - [x] Restrict new payroll selections to active employees while preserving historical snapshots
+  - [x] Replace HR compensation editor with effective-dated Salary Structure assignment and Payroll-engine estimate
+    - [x] Persist and validate worker-specific component method overrides on effective-dated Payroll assignments (`backend/app/payroll/schemas.py`, `backend/app/payroll/service.py`, `backend/app/payroll/router.py`)
+    - [x] Expose per-component fixed/percentage/formula and proration choices in the Payroll assignment editor (`frontend/src/pages/PayrollSetupHub.tsx`)
+    - [x] Replace HR’s free-floating compensation editor with the shared effective-dated Payroll assignment editor (`frontend/src/pages/HRWorkspacePage.tsx`, `frontend/src/pages/PayrollSetupHub.tsx`, `backend/app/payroll/router.py`)
+    - [x] Show gross/net estimate from the payroll calculator with full-period assumptions (`backend/app/payroll/router.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollSetupHub.tsx`)
+  - [x] Add mutable run draft inputs, side-effect-free preview, preview checksum confirmation, and shared register rendering
+    - [x] Add draft employee/variable input updates and active-worker validation (`backend/app/payroll/schemas.py`, `backend/app/payroll/router.py`)
+    - [x] Refresh approved HR attendance/leave/worktime for read-only preview and require a matching checksum to freeze (`backend/app/payroll/service.py`, `backend/app/payroll/router.py`)
+    - [x] Add typed draft update, preview, and checksum-confirmation frontend hooks (`frontend/src/api/enterprise.ts`)
+    - [x] Expose saved manual bonus/deduction inputs and add editable preview, checksum freeze, department subtotals, and frozen register UI (`backend/app/payroll/router.py`, `frontend/src/pages/PayrollWorkspacePage.tsx`)
+  - [x] Freeze effective bank payout details in payslips; use approved frozen snapshots for register Excel and bank remittance exports (`backend/app/payroll/service.py`, `backend/app/payroll/router.py`)
+  - [ ] Add focused backend/frontend coverage and run migrations, builds, and available acceptance checks
+    - [x] Verify the new schema migration and merge form one deployable Alembic head (`backend/tests/test_alembic_graph.py`)
+    - [x] Run frontend production build, Python compile checks, and payroll input/rule unit tests
+    - [ ] Run API/database migration and browser acceptance tests in the project runtime
+    - [ ] Resolve unrelated existing frontend test failures before treating the full suite as green
 - [x] Replace payroll account CRUD with tags on ERP chart accounts, add period GL totals and report reconciliation, and derive posting roles from calculated journal lines
   - [x] Add the organization-scoped account-tag and payroll GL run/role schema plus a backfill migration (`backend/app/models/models.py`, `backend/alembic/versions/r8s9t0u1v2w3_payroll_account_tags_gl_totals.py`)
   - [x] Add payroll account purpose tags and tagged-account APIs; migrate existing mapped payroll accounts (`backend/app/payroll/schemas.py`, `backend/app/payroll/router.py`, `frontend/src/pages/PayrollSetupHub.tsx`, `docs/payroll-setup-workflow.md`, `docs/erp-core-configuration-fix.md`)
@@ -1106,6 +1132,7 @@ Collaboration
 - [x] Add focused backend enterprise/RBAC/compatibility tests and frontend semantics/accessibility tests
 
 ## Completed Tasks
+- [x] Restore spacing between the auth screen privacy and user agreement links (`frontend/src/index.css`)
 - [x] Add the on-demand `/monthly_digest` Telegram command restricted to configured manager recipients (`backend/app/bot/work_report_handlers.py`, `backend/app/bot/menu.py`, `backend/app/bot/handlers.py`, `backend/tests/test_work_report_handlers.py`)
 - [x] Deliver OYUNS ERP Core Operations MVP: normalized masters, contextual requests, buying/selling workbench, approval-aware KPIs, archive/restore, MN/EN/RU copy, and regression coverage (`backend/app/erp`, `backend/app/models/models.py`, `frontend/src`)
 - [x] Run available focused validation and document environment-dependent checks
