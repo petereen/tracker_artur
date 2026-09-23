@@ -1,6 +1,22 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add payroll account management with safe delete/archive, seed deletion tracking, eligible role mappings, and permission-aware settings UI (`backend/app/erp`, `backend/app/payroll/router.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollSetupHub.tsx`)
+  - [x] Add an organization-scoped tombstone model so deleted seeded accounts stay deleted (`backend/app/models/models.py`)
+  - [x] Add an additive migration for seed-account deletion tombstones (`backend/alembic/versions/b7c8d9e0f1a2_payroll_account_seed_tombstones.py`)
+  - [x] Skip tombstoned seed codes during organization bootstrap (`backend/app/erp/service.py`)
+  - [x] Add tenant-scoped account CRUD, deletion reference checks, archive/restore behavior, and account permissions (`backend/app/erp/router.py`)
+  - [x] Validate payroll mappings against active, postable, MNT accounts with compatible purposes (`backend/app/payroll/router.py`)
+  - [x] Preserve non-payroll account purposes on shared ERP account CRUD (`backend/app/erp/router.py`)
+  - [x] Reuse payroll eligibility checks for mapping saves and payroll preflight (`backend/app/payroll/router.py`, `backend/app/payroll/service.py`)
+  - [x] Add route, schema, and account purpose validation regression checks (`backend/tests/test_erp_foundation.py`)
+  - [x] Add payroll settings account manager and connect it to account/mapping APIs (`frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollSetupHub.tsx`)
+    - [x] Add typed account CRUD and effective-permission frontend hooks (`frontend/src/api/enterprise.ts`)
+    - [x] Build account manager, accessible editor, role validation, and responsive layout (`frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/index.css`)
+    - [x] Block save on invalid assigned roles and allow removing the optional advance mapping (`frontend/src/pages/PayrollSetupHub.tsx`)
+- [x] Make statutory rule tiers editable and deletable through Payroll Setup; allow published rules to be edited through a successor profile version (`frontend/src/pages/PayrollSetupHub.tsx`)
+- [x] Prevent duplicate payroll profile effective dates in the employee assignment drawer and default edits to the current profile's start date (`frontend/src/pages/PayrollSetupHub.tsx`)
+- [x] Add an audited unpublish action that returns published salary structures to draft (`backend/app/payroll/router.py`, payroll immutability migration, `frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollSetupHub.tsx`)
 - [x] Fix salary structure deletion failures and allow deleting published structures only when they have no employee or payslip references (`backend/app/payroll/service.py`, `backend/alembic/versions/r1s2t3u4v5w6_allow_safe_salary_structure_delete.py`)
 - [x] Allow salary components to be edited and permanently deleted even when referenced, preserving payroll snapshots (`backend/app/payroll/service.py`, `backend/app/models/models.py`, `backend/alembic/versions`, `frontend/src/pages/PayrollSetupHub.tsx`)
   - [x] Remove edit lock and hard-delete usage restriction (`backend/app/payroll/service.py`)
@@ -652,6 +668,10 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Add Payroll Settings account CRUD, permission-aware role mapping, referenced-account archiving, seed deletion tombstones, and regression checks (`backend/app/erp`, `backend/app/payroll`, `frontend/src`, `backend/tests`) — frontend production build, Python compilation, migration graph, and whitespace checks passed; backend pytest could not collect because FastAPI is not installed in the local Python environment
+- [x] Redesign the authentication screen using the supplied auth-09 reference while preserving OYUNS colors, design tokens, and login behavior (frontend/src/pages/LoginPage.tsx, frontend/src/index.css)
+- [x] Expose edit controls for all statutory profiles; editing a published profile uses the existing version-bump API, while tier rows can be added, changed, or removed in the profile editor (`frontend/src/pages/PayrollSetupHub.tsx`)
+- [x] Add a published salary structure unpublish action that transitions the structure and its version snapshot to draft, records an audit event, and exposes a confirmation guarded by payroll approval capability (`backend/app/payroll/router.py`, `backend/alembic/versions/s1t2u3v4w5x6_allow_salary_structure_unpublish.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollSetupHub.tsx`)
 - [x] Merge the payroll component Alembic heads so deployments can target `head` (`backend/alembic/versions/s2t3u4v5w6x7_merge_payroll_component_heads.py`)
 - [x] Default the Analytics tab to a 30-day time period (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/pages/StatsWorkspacePage.test.tsx`)
 - [x] Fix the unified Payroll v2 component-master backfill so PostgreSQL can run the migration (`backend/alembic/versions/a1b2c3d4e5f6_unified_payroll_v2.py`, `backend/tests/test_payroll_v2_contract.py`)

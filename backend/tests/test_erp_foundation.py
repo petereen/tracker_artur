@@ -4,6 +4,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.erp.service import DEFAULT_ACCOUNTS, DOCUMENT_MODULES, ERP_MODULES, calculate_lines, module_settings, operation_catalog, validate_definition_fields, validate_form_values, validate_workflow
+from app.erp.router import _normalize_account_values
+from app.payroll.router import payroll_role_account_is_valid
 from app.main import app
 from app.models.models import Base
 from app.services.mcp.catalog import CATALOG
@@ -63,6 +65,37 @@ def test_erp_routes_are_versioned_and_cover_meta_masters_documents_and_reports()
         "/v1/erp/catalog", "/v1/erp/admin/forms/{operation}", "/v1/erp/admin/forms/{operation}/publish", "/v1/erp/master-requests/{operation}", "/v1/erp/documents/by-id/{document_id}/transition",
         "/v1/erp/documents/by-id/{document_id}/archive", "/v1/erp/documents/by-id/{document_id}/restore",
     }.issubset(paths)
+
+
+def test_payroll_account_routes_cover_permissions_and_lifecycle_actions():
+    routes = {(method, route.path) for route in app.routes if hasattr(route, "methods") for method in route.methods}
+    assert {
+        ("GET", "/v1/erp/accounting/accounts/permissions"),
+        ("PUT", "/v1/erp/accounting/accounts/{account_id}"),
+        ("DELETE", "/v1/erp/accounting/accounts/{account_id}"),
+    }.issubset(routes)
+    assert "erp_deleted_seed_accounts" in Base.metadata.tables
+
+
+def test_payroll_account_purpose_requires_matching_classification():
+    values = {"purpose": "salary_expense", "classification": "expense", "currency": "mnt"}
+    _normalize_account_values(values)
+    assert values["currency"] == "MNT"
+    with pytest.raises(HTTPException) as error:
+        _normalize_account_values({"purpose": "pit_payable", "classification": "expense", "currency": "MNT"})
+    assert error.value.detail["code"] == "payroll_account_classification_invalid"
+    general_erp_account = {"purpose": "inventory", "classification": "asset", "currency": "MNT"}
+    _normalize_account_values(general_erp_account)
+
+
+def test_payroll_role_account_eligibility_requires_postable_mnt_account_and_purpose():
+    from types import SimpleNamespace
+
+    account = SimpleNamespace(is_active=True, is_group=False, currency="MNT", purpose="general", classification="expense")
+    assert payroll_role_account_is_valid("salary_expense", account)
+    assert not payroll_role_account_is_valid("pit_payable", account)
+    assert not payroll_role_account_is_valid("salary_expense", SimpleNamespace(**{**account.__dict__, "is_group": True}))
+    assert not payroll_role_account_is_valid("salary_expense", SimpleNamespace(**{**account.__dict__, "currency": "USD"}))
 
 
 def test_every_broad_mvp_document_domain_has_an_explicit_module():

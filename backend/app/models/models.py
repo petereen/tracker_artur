@@ -2333,6 +2333,16 @@ class ERPAccount(Base):
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
 
 
+class ERPDeletedSeedAccount(Base):
+    __tablename__ = "erp_deleted_seed_accounts"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_erp_deleted_seed_account_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(64), nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class ERPDocument(Base):
     __tablename__ = "erp_documents"
     __table_args__ = (

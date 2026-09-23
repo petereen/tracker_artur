@@ -49,42 +49,70 @@ export function LoginPage() {
   }
 
   return (
-    <main className="login-stage">
-      <section className="login-card" aria-labelledby="login-title">
-        <img src="/oyuns-aio-logo.png" alt="OYUNS All-in-One" className="login-logo" />
-        <div className="eyebrow">OYUNS WORKSPACE</div>
-        <h1 id="login-title">Илүү хурдан. Илүү хялбар.</h1>
-        <p>Төсөл, даалгавар, цагийн бүртгэл, тайлан болон багийн ачааллаа нэг платформоос удирдана.</p>
-        {native && capabilities.data?.telegram_native && <>
-          <button className="primary-action native-telegram-action" type="button" onClick={() => void startNativeTelegramLogin()} disabled={telegramState.status === 'opening' || telegramState.status === 'waiting'}>
-            {telegramState.status === 'opening' || telegramState.status === 'waiting' ? 'Telegram нэвтрэлтийг хүлээж байна…' : 'Telegram-аар нэвтрэх'} <ArrowRight size={16} aria-hidden />
-          </button>
-          {telegramState.status === 'error' && <p className="login-inline-error" role="alert">{telegramState.message}</p>}
-          {telegramState.status === 'cancelled' && <p className="login-inline-hint">Telegram нэвтрэлтийг цуцалсан. Дахин оролдоно уу.</p>}
-          <div className="login-divider"><span>эсвэл нууц үгээр</span></div>
-        </>}
-        <form onSubmit={submit} className="login-form">
-          <label>
-            <span>Нэвтрэх нэр</span>
-            <div className="field-with-icon"><Mail size={16} aria-hidden /><input value={username} onChange={(event) => setUsername(event.target.value)} type="text" autoComplete="username" required /></div>
-          </label>
-          <label>
-            <span>Нууц үг</span>
-            <div className="field-with-icon"><LockKeyhole size={16} aria-hidden /><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></div>
-          </label>
-          <button className="primary-action" type="submit" disabled={login.isPending}>
-            {login.isPending ? 'Нэвтэрч байна…' : 'Нэвтрэх'} <ArrowRight size={16} aria-hidden />
-          </button>
-        </form>
-        {!native && <div className="telegram-login">
-          <span>эсвэл Telegram-аар</span>
-          <button className="primary-action native-telegram-action" type="button" onClick={() => { window.location.assign('/api/v1/auth/telegram') }}>
-            Telegram-аар нэвтрэх <ArrowRight size={16} aria-hidden />
-          </button>
-          {webTelegramError && <p className="login-inline-error" role="alert">{webTelegramError}</p>}
-        </div>}
-        <footer><a href="/privacy">Нууцлал</a><a href="/terms">Үйлчилгээний нөхцөл</a></footer>
+    <main className="login-stage auth-layout">
+      <section className="auth-form-side" aria-labelledby="login-title">
+        <div className="auth-form-wrap">
+          <img src="/oyuns-aio-logo.png" alt="OYUNS All-in-One" className="login-logo" />
+          <div className="auth-form-heading">
+            <span className="auth-kicker">OYUNS WORKSPACE</span>
+            <h1 id="login-title">Тавтай морил</h1>
+            <p>Ажлаа үргэлжлүүлэхийн тулд бүртгэлээрээ нэвтэрнэ үү.</p>
+          </div>
+          {native && capabilities.data?.telegram_native && <>
+            <button className="primary-action native-telegram-action" type="button" onClick={() => void startNativeTelegramLogin()} disabled={telegramState.status === 'opening' || telegramState.status === 'waiting'}>
+              {telegramState.status === 'opening' || telegramState.status === 'waiting' ? 'Telegram нэвтрэлтийг хүлээж байна…' : 'Telegram-аар нэвтрэх'} <ArrowRight size={16} aria-hidden />
+            </button>
+            {telegramState.status === 'error' && <p className="login-inline-error" role="alert">{telegramState.message}</p>}
+            {telegramState.status === 'cancelled' && <p className="login-inline-hint">Telegram нэвтрэлтийг цуцалсан. Дахин оролдоно уу.</p>}
+            <div className="login-divider"><span>эсвэл нууц үгээр</span></div>
+          </>}
+          <form onSubmit={submit} className="login-form">
+            <label>
+              <span>Нэвтрэх нэр</span>
+              <div className="field-with-icon"><Mail size={16} aria-hidden /><input value={username} onChange={(event) => setUsername(event.target.value)} type="text" autoComplete="username" required /></div>
+            </label>
+            <label>
+              <span>Нууц үг</span>
+              <div className="field-with-icon"><LockKeyhole size={16} aria-hidden /><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></div>
+            </label>
+            <div className="auth-form-options"><a href="/forgot-password">Нууц үгээ мартсан уу?</a></div>
+            <button className="primary-action" type="submit" disabled={login.isPending}>
+              {login.isPending ? 'Нэвтэрч байна…' : 'Нэвтрэх'} <ArrowRight size={16} aria-hidden />
+            </button>
+          </form>
+          {!native && <div className="telegram-login">
+            <span>эсвэл Telegram-аар</span>
+            <button className="primary-action native-telegram-action" type="button" onClick={() => { window.location.assign('/api/v1/auth/telegram') }}>
+              Telegram-аар нэвтрэх <ArrowRight size={16} aria-hidden />
+            </button>
+            {webTelegramError && <p className="login-inline-error" role="alert">{webTelegramError}</p>}
+          </div>}
+          <footer><a href="/privacy">Нууцлал</a><a href="/terms">Үйлчилгээний нөхцөл</a></footer>
+        </div>
       </section>
+      <aside className="auth-brand-side" aria-label="OYUNS ажлын талбар">
+        <div className="auth-brand-content">
+          <div className="auth-brand-mark"><span>O</span><span>OYUNS WORKSPACE</span></div>
+          <div className="auth-brand-copy">
+            <span className="auth-brand-label">НЭГ АЖЛЫН ОРЧИН</span>
+            <h2>Багийн ажил<br />нэг дор цэгцтэй.</h2>
+            <p>Төсөл, даалгавар, цагийн бүртгэл, тайлангаа нэг ажлын талбарт холбоно.</p>
+          </div>
+          <div className="auth-workspace-preview" aria-hidden="true">
+            <div className="auth-preview-top"><span className="auth-preview-dot" /><span>Ажлын талбар</span><span className="auth-preview-menu">•••</span></div>
+            <div className="auth-preview-body">
+              <div className="auth-preview-sidebar"><i /><i /><i /><i /></div>
+              <div className="auth-preview-main">
+                <div className="auth-preview-title"><i /><b /><b /></div>
+                <div className="auth-preview-grid"><i /><i /><i /></div>
+                <div className="auth-preview-list"><i /><i /><i /></div>
+              </div>
+            </div>
+            <div className="auth-preview-caption"><span className="auth-preview-check">✓</span><span><b>Бүгд нэг дор</b><small>Танай багийн ажил үргэлжилнэ</small></span><span className="auth-preview-arrow">↗</span></div>
+          </div>
+          <div className="auth-brand-footer"><span>ТӨЛӨВЛӨ · ХАМТАР · ГҮЙЦЭТГЭ</span><span>OYUNS © 2026</span></div>
+        </div>
+      </aside>
     </main>
   )
 }

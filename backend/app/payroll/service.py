@@ -394,7 +394,12 @@ async def preflight_run(db: AsyncSession, actor: ActorContext, data: PayrollRunI
     missing_roles = sorted(required_roles - mapped_roles)
     mapped_account_ids = {account_roles[role] for role in required_roles & mapped_roles}
     valid_role_accounts = {row.id: row for row in (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.id.in_(mapped_account_ids or {-1}), ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False), ERPAccount.currency == "MNT"))).scalars().all()}
-    invalid_roles = sorted(role for role in required_roles & mapped_roles if account_roles[role] not in valid_role_accounts or valid_role_accounts[account_roles[role]].purpose not in {role, "general"})
+    role_classifications = {
+        "salary_expense": "expense", "employer_shi_expense": "expense", "employee_shi_payable": "liability",
+        "employer_shi_payable": "liability", "pit_payable": "liability", "net_pay_payable": "liability",
+        "bank": "asset", "advance_clearing": "asset",
+    }
+    invalid_roles = sorted(role for role in required_roles & mapped_roles if account_roles[role] not in valid_role_accounts or valid_role_accounts[account_roles[role]].purpose not in {role, "general"} or valid_role_accounts[account_roles[role]].classification != role_classifications[role])
     if missing_roles:
         issue("payroll_gl_mapping_incomplete", "Default payroll posting profile is missing required account mappings.", remediation_url="/erp/payroll/setup?tab=accounting", metadata={"missing_roles": missing_roles})
     if invalid_roles:

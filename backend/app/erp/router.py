@@ -12,22 +12,51 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Uplo
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor
 from app.models.models import (
-    ERPAccessRole, ERPAccount, ERPAccountingSettings, ERPAccountRole, ERPCapability, ERPCustomField, ERPDocument, ERPDocumentLine,
-    Employee, PayrollRun, ERPFormDefinition, ERPMasterRequest, ERPGeneralLedgerEntry, ERPApprovalRule, ERPImportBatch, ERPPaymentAllocation, ERPPostingPeriod, ERPItem, ERPParty, ERPStockLedgerEntry, ERPTeamRole, ERPWarehouse, ERPWorkflowTransition, ERPModuleConfig, ERPUnitOfMeasure, ERPPriceList, ERPPriceListEntry, ERPDiscountTier, ERPReorderRule, ERPCostCenter, ERPTaxTemplate, ERPTaxTemplateRate, ERPInventoryLevel, ERPSourceLineAllocation, ERPStockValuationLayer, ERPBOMSnapshot, ERPAssetBook, ERPAssetDepreciationSchedule, ERPAssetMaintenanceRecord, ERPAssetDisposal, IdempotencyRecord, Organization, Project, Team, TeamMember, UserAccount,
+    Base, ERPAccessRole, ERPAccount, ERPAccountingSettings, ERPAccountRole, ERPDeletedSeedAccount, ERPCapability, ERPCustomField, ERPDocument, ERPDocumentLine,
+    Employee, PayrollRun, ERPFormDefinition, ERPMasterRequest, ERPGeneralLedgerEntry, ERPApprovalRule, ERPImportBatch, ERPPaymentAllocation, ERPPostingPeriod, ERPItem, ERPParty, ERPStockLedgerEntry, ERPTeamRole, ERPWarehouse, ERPWorkflowTransition, ERPModuleConfig, ERPUnitOfMeasure, ERPPriceList, ERPPriceListEntry, ERPDiscountTier, ERPReorderRule, ERPCostCenter, ERPTaxTemplate, ERPTaxTemplateRate, ERPInventoryLevel, ERPSourceLineAllocation, ERPStockValuationLayer, ERPBOMSnapshot, ERPAssetBook, ERPAssetDepreciationSchedule, ERPAssetMaintenanceRecord, ERPAssetDisposal, IdempotencyRecord, Organization, PayrollPostingProfile, Project, Team, TeamMember, UserAccount,
 )
 from app.services.enterprise_events import record_change
 from app.erp.service import (
-    DOCUMENT_MODULES, DOCUMENT_TYPES, ERP_MODULES, MASTER_OPERATION_MODULES, MASTER_OPERATIONS, MODULE_SETTINGS_KEY, VALID_ACTIONS, as_money, calculate_lines,
+    DEFAULT_ACCOUNTS, DOCUMENT_MODULES, DOCUMENT_TYPES, ERP_MODULES, MASTER_OPERATION_MODULES, MASTER_OPERATIONS, MODULE_SETTINGS_KEY, VALID_ACTIONS, as_money, calculate_lines,
     approval_required, bootstrap_organization, cancel_document, capability_scopes, default_workflow, document_out, ensure_definition, module_settings, next_number, operation_catalog, post_document, published_definition, record_workflow_transition, require_capability, require_phase5_gate, phase5_gate_status, scope_allows, validate_custom_fields, validate_definition_fields, validate_form_values, validate_workflow,
 )
 from app.payroll.router import router as payroll_router
 
 
 router = APIRouter()
+
+PAYROLL_ROLE_CLASSIFICATIONS = {
+    "salary_expense": "expense", "employer_shi_expense": "expense",
+    "employee_shi_payable": "liability", "employer_shi_payable": "liability",
+    "pit_payable": "liability", "net_pay_payable": "liability",
+    "bank": "asset", "advance_clearing": "asset",
+}
+
+
+def _account_out(row: ERPAccount) -> dict[str, Any]:
+    return {"id": row.id, "code": row.code, "name": row.name, "account_type": row.account_type, "classification": row.classification, "purpose": row.purpose, "currency": row.currency, "parent_id": row.parent_id, "is_group": row.is_group, "is_active": row.is_active}
+
+
+def _normalize_account_values(values: dict[str, Any]) -> None:
+    values["currency"] = values["currency"].upper()
+    expected = PAYROLL_ROLE_CLASSIFICATIONS.get(values["purpose"])
+    if expected and values["classification"] != expected:
+        raise HTTPException(status_code=422, detail={"code": "payroll_account_classification_invalid", "purpose": values["purpose"]})
+
+
+async def _account_is_referenced(db: AsyncSession, account: ERPAccount) -> bool:
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            if any(foreign_key.column.table.name == "erp_accounts" for foreign_key in column.foreign_keys):
+                if await db.scalar(select(column).where(column == account.id).limit(1)) is not None:
+                    return True
+    profiles = (await db.execute(select(PayrollPostingProfile).where(PayrollPostingProfile.organization_id == account.organization_id))).scalars().all()
+    return any(account.id in {int(value) for value in (profile.account_roles or {}).values() if str(value).isdigit()} for profile in profiles)
 
 
 class ModulesInput(BaseModel):
@@ -1085,25 +1114,97 @@ async def create_warehouse(data: WarehouseInput, db: AsyncSession = Depends(get_
 async def list_accounts(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "accounts", "view")
     rows = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id).order_by(ERPAccount.code))).scalars().all()
-    return [{"id": row.id, "code": row.code, "name": row.name, "account_type": row.account_type, "classification": row.classification, "purpose": row.purpose, "currency": row.currency, "parent_id": row.parent_id, "is_group": row.is_group, "is_active": row.is_active} for row in rows]
+    return [_account_out(row) for row in rows]
+
+
+@router.get("/accounting/accounts/permissions")
+async def account_permissions(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    permissions = {}
+    for action in ("view", "create", "edit", "administer"):
+        try:
+            await require_capability(db, actor, "accounts", action)
+            permissions[action] = True
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_403_FORBIDDEN:
+                raise
+            permissions[action] = False
+    return permissions
 
 
 @router.post("/accounting/accounts", status_code=status.HTTP_201_CREATED)
 async def create_account(data: AccountInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "accounts", "create")
     values = data.model_dump()
-    values["currency"] = values["currency"].upper()
     values["classification"] = values["classification"] or (values["account_type"] if values["account_type"] in {"asset", "liability", "equity", "income", "expense"} else "asset")
+    values["account_type"] = values["classification"]
+    _normalize_account_values(values)
     if values["parent_id"]:
         parent = await db.scalar(select(ERPAccount).where(ERPAccount.id == values["parent_id"], ERPAccount.organization_id == actor.organization_id))
         if not parent:
             raise HTTPException(status_code=422, detail={"code": "erp_account_parent_invalid"})
-        if not parent.is_group or parent.id == values.get("id"):
+        if not parent.is_group or not parent.is_active:
             raise HTTPException(status_code=422, detail={"code": "erp_account_parent_must_be_group"})
     account = ERPAccount(organization_id=actor.organization_id, **values)
     db.add(account)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail={"code": "erp_account_code_duplicate"}) from exc
+    await db.refresh(account)
+    return _account_out(account)
+
+
+@router.put("/accounting/accounts/{account_id}")
+async def update_account(account_id: int, data: AccountInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "accounts", "edit")
+    account = await db.scalar(select(ERPAccount).where(ERPAccount.id == account_id, ERPAccount.organization_id == actor.organization_id).with_for_update())
+    if not account:
+        raise HTTPException(status_code=404, detail={"code": "erp_account_not_found"})
+    values = data.model_dump()
+    values["classification"] = values["classification"] or (values["account_type"] if values["account_type"] in {"asset", "liability", "equity", "income", "expense"} else "asset")
+    values["account_type"] = values["classification"]
+    _normalize_account_values(values)
+    if values["parent_id"]:
+        parent = await db.scalar(select(ERPAccount).where(ERPAccount.id == values["parent_id"], ERPAccount.organization_id == actor.organization_id))
+        if not parent:
+            raise HTTPException(status_code=422, detail={"code": "erp_account_parent_invalid"})
+        if not parent.is_group or not parent.is_active or parent.id == account.id:
+            raise HTTPException(status_code=422, detail={"code": "erp_account_parent_must_be_group"})
+    referenced = await _account_is_referenced(db, account)
+    protected = ("code", "classification", "purpose", "currency", "parent_id", "is_group")
+    if referenced and any(getattr(account, key) != values[key] for key in protected):
+        raise HTTPException(status_code=409, detail={"code": "erp_account_referenced_fields_locked"})
+    for key, value in values.items():
+        setattr(account, key, value)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail={"code": "erp_account_code_duplicate"}) from exc
+    await db.refresh(account)
+    return _account_out(account)
+
+
+@router.delete("/accounting/accounts/{account_id}")
+async def delete_account(account_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "accounts", "administer")
+    account = await db.scalar(select(ERPAccount).where(ERPAccount.id == account_id, ERPAccount.organization_id == actor.organization_id).with_for_update())
+    if not account:
+        raise HTTPException(status_code=404, detail={"code": "erp_account_not_found"})
+    if await _account_is_referenced(db, account):
+        account.is_active = False
+        outcome = "archived"
+    else:
+        seeded_codes = {code for code, _name, _type in DEFAULT_ACCOUNTS}
+        if account.code in seeded_codes:
+            tombstone = await db.scalar(select(ERPDeletedSeedAccount.id).where(ERPDeletedSeedAccount.organization_id == account.organization_id, ERPDeletedSeedAccount.code == account.code))
+            if not tombstone:
+                db.add(ERPDeletedSeedAccount(organization_id=account.organization_id, code=account.code))
+        await db.delete(account)
+        outcome = "deleted"
     await db.commit()
-    return {"id": account.id, "code": account.code, "name": account.name, "account_type": account.account_type, "classification": account.classification, "purpose": account.purpose, "currency": account.currency, "is_group": account.is_group, "is_active": account.is_active}
+    return {"id": account_id, "outcome": outcome}
 
 
 @router.get("/accounting/settings")

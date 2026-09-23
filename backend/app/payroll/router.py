@@ -68,6 +68,22 @@ async def payroll_capability(db: AsyncSession, actor: ActorContext, action: str)
     await require_capability(db, actor, "payroll", action)
 
 
+PAYROLL_ACCOUNT_ROLE_REQUIREMENTS = {
+    "salary_expense": ("salary_expense", "expense"), "employer_shi_expense": ("employer_shi_expense", "expense"),
+    "employee_shi_payable": ("employee_shi_payable", "liability"), "employer_shi_payable": ("employer_shi_payable", "liability"),
+    "pit_payable": ("pit_payable", "liability"), "net_pay_payable": ("net_pay_payable", "liability"),
+    "bank": ("bank", "asset"), "advance_clearing": ("advance_clearing", "asset"),
+}
+
+
+def payroll_role_account_is_valid(role: str, account: ERPAccount | None) -> bool:
+    requirement = PAYROLL_ACCOUNT_ROLE_REQUIREMENTS.get(role)
+    if not requirement or not account:
+        return False
+    purpose, classification = requirement
+    return bool(account.is_active and not account.is_group and account.currency == "MNT" and account.purpose in {purpose, "general"} and account.classification == classification)
+
+
 @router.get("/capabilities")
 async def payroll_effective_capabilities(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     """Expose the effective payroll capability set for capability-driven UI."""
@@ -605,6 +621,29 @@ async def publish_structure(structure_id: int, db: AsyncSession = Depends(get_db
     return {"id": structure.id, "code": structure.code, "version": structure.version, "status": structure.status, "checksum": structure.checksum}
 
 
+@router.post("/salary-structures/{structure_id}/unpublish")
+async def unpublish_structure(structure_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "approve")
+    structure = await db.scalar(select(SalaryStructure).where(SalaryStructure.id == structure_id, SalaryStructure.organization_id == actor.organization_id).with_for_update())
+    if not structure:
+        raise HTTPException(status_code=404, detail="Salary structure not found")
+    if structure.status not in {"published", "active"}:
+        raise HTTPException(status_code=409, detail={"code": "payroll_salary_structure_not_published"})
+    prior_status = structure.status
+    structure.status = "draft"
+    structure.published_by_account_id = None
+    structure.published_at = None
+    version_snapshot = await db.scalar(select(SalaryStructureVersion).where(SalaryStructureVersion.salary_structure_id == structure.id, SalaryStructureVersion.version == structure.version))
+    if version_snapshot:
+        version_snapshot.status = "draft"
+        version_snapshot.published_by_account_id = None
+        version_snapshot.published_at = None
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="salary_structure", aggregate_id=structure.id, operation="unpublished", before={"code": structure.code, "version": structure.version, "status": prior_status}, after={"code": structure.code, "version": structure.version, "status": "draft"})
+    await db.commit()
+    await db.refresh(structure)
+    return {"id": structure.id, "code": structure.code, "version": structure.version, "status": structure.status, "checksum": structure.checksum}
+
+
 @router.put("/salary-structures/{structure_id}")
 async def update_structure_route(structure_id: int, data: SalaryStructureInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "administer")
@@ -964,8 +1003,19 @@ async def get_posting_profile(db: AsyncSession = Depends(get_db), actor: ActorCo
 @router.put("/posting-profiles/default")
 async def save_posting_profile(data: PostingProfileInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "administer")
-    accounts = (await db.execute(select(ERPAccount.id).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.id.in_(list(data.account_roles.values()))))).scalars().all()
-    if len(accounts) != len(set(data.account_roles.values())): raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_invalid"})
+    invalid_role_keys = set(data.account_roles) - set(PAYROLL_ACCOUNT_ROLE_REQUIREMENTS)
+    if invalid_role_keys:
+        raise HTTPException(status_code=422, detail={"code": "payroll_posting_role_invalid", "roles": sorted(invalid_role_keys)})
+    account_ids = set(data.account_roles.values())
+    accounts = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.id.in_(account_ids or {-1})))).scalars().all()
+    by_id = {account.id: account for account in accounts}
+    invalid_roles = []
+    for role, account_id in data.account_roles.items():
+        account = by_id.get(account_id)
+        if not payroll_role_account_is_valid(role, account):
+            invalid_roles.append(role)
+    if invalid_roles:
+        raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_invalid", "roles": sorted(invalid_roles)})
     row = await db.scalar(select(PayrollPostingProfile).where(PayrollPostingProfile.organization_id == actor.organization_id, PayrollPostingProfile.code == "default"))
     if row: row.account_roles = data.account_roles; row.is_active = True
     else: row = PayrollPostingProfile(organization_id=actor.organization_id, code="default", account_roles=data.account_roles); db.add(row)

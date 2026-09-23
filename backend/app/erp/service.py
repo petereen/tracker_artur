@@ -12,6 +12,7 @@ from app.core.enterprise_deps import ActorContext
 from app.models.models import (
     ERPAccessRole,
     ERPAccount,
+    ERPDeletedSeedAccount,
     ERPAccountingSettings,
     ERPAccountRole,
     ERPCapability,
@@ -453,7 +454,9 @@ async def bootstrap_organization(db: AsyncSession, organization_id: int) -> None
         classification, purpose = ACCOUNT_METADATA.get(code, ("asset", "general"))
         exists = await db.scalar(select(ERPAccount.id).where(ERPAccount.organization_id == organization_id, ERPAccount.code == code))
         if not exists:
-            db.add(ERPAccount(organization_id=organization_id, code=code, name=name, account_type=account_type, classification=classification, purpose=purpose, currency="MNT"))
+            deleted_seed = await db.scalar(select(ERPDeletedSeedAccount.id).where(ERPDeletedSeedAccount.organization_id == organization_id, ERPDeletedSeedAccount.code == code))
+            if not deleted_seed:
+                db.add(ERPAccount(organization_id=organization_id, code=code, name=name, account_type=account_type, classification=classification, purpose=purpose, currency="MNT"))
         else:
             account = await db.get(ERPAccount, exists)
             if account and account.purpose == "general":
