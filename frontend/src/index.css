@@ -1203,12 +1203,15 @@ a {
 .auth-form-options { display: flex; justify-content: flex-end; margin-top: -7px; }
 .auth-form-options a { color: var(--color-accent); font-size: 0.76rem; font-weight: 600; text-decoration: none; }
 .auth-form-options a:hover { text-decoration: underline; }
-.auth-form-wrap .login-form > .primary-action { min-height: 48px; }
+.auth-form-wrap .login-form > .primary-action,
+.auth-form-wrap .login-form > .secondary-action { min-height: 48px; width: 100%; }
+.auth-form-wrap .telegram-login.telegram-login-primary { margin: -8px 0 20px; }
+.auth-form-wrap .telegram-login-primary .native-telegram-action { margin-top: 0; min-height: 48px; width: 100%; }
 .auth-form-wrap .telegram-login { margin-top: 24px; }
 .auth-form-wrap .telegram-login .native-telegram-action { margin-top: 2px; }
 .auth-form-wrap .native-telegram-action { margin-top: 20px; }
 .auth-form-wrap .login-divider { margin-top: 21px; }
-.auth-form-wrap footer { justify-content: flex-start; margin-top: 34px; }
+.auth-form-wrap footer { gap: 20px; justify-content: flex-start; margin-top: 34px; }
 .auth-form-wrap a:focus-visible,
 .auth-form-wrap button:focus-visible,
 .auth-form-wrap input:focus-visible {
@@ -1250,19 +1253,6 @@ a {
   position: relative;
   width: 100%;
   z-index: 1;
-}
-.auth-brand-mark { align-items: center; display: flex; font-size: 0.68rem; font-weight: 700; gap: 10px; letter-spacing: 0.1em; }
-.auth-brand-mark > span:first-child {
-  align-items: center;
-  background: color-mix(in srgb, white 17%, transparent);
-  border: 1px solid color-mix(in srgb, white 30%, transparent);
-  border-radius: 10px;
-  display: inline-flex;
-  font-size: 1rem;
-  height: 34px;
-  justify-content: center;
-  letter-spacing: -0.05em;
-  width: 34px;
 }
 .auth-brand-copy { margin: clamp(52px, 9vh, 100px) 0 28px; max-width: 470px; }
 .auth-brand-label { color: color-mix(in srgb, white 76%, transparent); }

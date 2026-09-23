@@ -1,6 +1,11 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Refine login screen hierarchy, branding, logo, and legal links (`frontend/src/pages/LoginPage.tsx`, `frontend/src/index.css`)
+  - [x] Make Telegram login primary and email/password login secondary
+  - [x] Remove the blue panel's OYUNS mark and login helper sentence
+  - [x] Use the dark logo asset on the white login panel (`frontend/public/oyuns-aio-logo.png`)
+  - [x] Add spacing between privacy and terms links
 - [x] Add payroll account management with safe delete/archive, seed deletion tracking, eligible role mappings, and permission-aware settings UI (`backend/app/erp`, `backend/app/payroll/router.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollSetupHub.tsx`)
   - [x] Add an organization-scoped tombstone model so deleted seeded accounts stay deleted (`backend/app/models/models.py`)
   - [x] Add an additive migration for seed-account deletion tombstones (`backend/alembic/versions/b7c8d9e0f1a2_payroll_account_seed_tombstones.py`)
