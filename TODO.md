@@ -1,6 +1,14 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Allow salary components to be edited and permanently deleted even when referenced, preserving payroll snapshots (`backend/app/payroll/service.py`, `backend/app/models/models.py`, `backend/alembic/versions`, `frontend/src/pages/PayrollSetupHub.tsx`)
+  - [x] Remove edit lock and hard-delete usage restriction (`backend/app/payroll/service.py`)
+  - [x] Preserve historical component identity while detaching/deleting dependent references (`backend/app/models/models.py`, `backend/alembic/versions`, payroll services)
+    - [x] Define nullable/detachable historical references and component code/name snapshots (`backend/app/models/models.py`)
+    - [x] Use salary snapshots when creating and processing additional salary records (`backend/app/payroll/frappe_service.py`, `backend/app/payroll/inputs.py`)
+    - [x] Keep additional-salary API listings and salary-run extraction available after master deletion (`backend/app/payroll/router.py`, `backend/app/payroll/frappe_service.py`, `frontend/src/api/enterprise.ts`)
+    - [x] Migrate history-preserving delete behavior and recurring compensation cleanup (`backend/alembic/versions`)
+  - [x] Expose permanent delete for referenced components (`frontend/src/pages/PayrollSetupHub.tsx`)
 - [x] Allow payroll salary component codes to be reused after archive, while preserving uniqueness among active components (`backend/app/payroll/service.py`, `backend/app/payroll/frappe_service.py`, `backend/app/models/models.py`, `backend/alembic/versions`)
   - [x] Ignore archived components in duplicate-code checks (`backend/app/payroll/service.py`, `backend/app/payroll/frappe_service.py`)
   - [x] Define active-only code uniqueness in the model (`backend/app/models/models.py`)

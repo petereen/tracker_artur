@@ -1211,14 +1211,14 @@ async def bulk_salary_structure_assignment_route(data: BulkSalaryStructureAssign
 @router.get("/additional-salaries")
 async def list_additional_salaries(employee_id: int | None = None, status_filter: str | None = Query(default=None, alias="status"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "view")
-    query = select(AdditionalSalary, PayrollSalaryComponentMaster.code).join(PayrollSalaryComponentMaster, PayrollSalaryComponentMaster.id == AdditionalSalary.salary_component_id).where(AdditionalSalary.organization_id == actor.organization_id)
+    query = select(AdditionalSalary).where(AdditionalSalary.organization_id == actor.organization_id)
     if employee_id is not None:
         scoped = await _employee_scope(db, actor, employee_id)
         query = query.where(AdditionalSalary.employee_id == scoped)
     if status_filter:
         query = query.where(AdditionalSalary.status == status_filter)
-    rows = (await db.execute(query.order_by(AdditionalSalary.payroll_date.desc(), AdditionalSalary.id.desc()))).all()
-    return [additional_salary_out(row, code) for row, code in rows]
+    rows = (await db.execute(query.order_by(AdditionalSalary.payroll_date.desc(), AdditionalSalary.id.desc()))).scalars().all()
+    return [additional_salary_out(row, row.component_code) for row in rows]
 
 
 @router.post("/additional-salaries", status_code=status.HTTP_201_CREATED)
@@ -1229,8 +1229,7 @@ async def create_additional_salary_route(data: AdditionalSalaryInput, db: AsyncS
     row = await create_additional_salary(db, actor, data)
     await record_change(db, actor=actor, topic="payroll", aggregate_type="additional_salary", aggregate_id=row.id, operation="created", after={"number": row.number, "employee_id": row.employee_id, "amount": str(row.amount)})
     await db.commit(); await db.refresh(row)
-    component = await db.get(PayrollSalaryComponentMaster, row.salary_component_id)
-    return additional_salary_out(row, component.code if component else None)
+    return additional_salary_out(row, row.component_code)
 
 
 @router.post("/additional-salaries/{salary_id}/submit")
@@ -1242,8 +1241,7 @@ async def submit_additional_salary_route(salary_id: int, db: AsyncSession = Depe
     await submit_additional_salary(db, actor, row)
     await record_change(db, actor=actor, topic="payroll", aggregate_type="additional_salary", aggregate_id=row.id, operation="submitted", after={"status": row.status})
     await db.commit(); await db.refresh(row)
-    component = await db.get(PayrollSalaryComponentMaster, row.salary_component_id)
-    return additional_salary_out(row, component.code if component else None)
+    return additional_salary_out(row, row.component_code)
 
 
 @router.post("/additional-salaries/{salary_id}/cancel")
@@ -1255,8 +1253,7 @@ async def cancel_additional_salary_route(salary_id: int, db: AsyncSession = Depe
     await cancel_additional_salary(db, actor, row)
     await record_change(db, actor=actor, topic="payroll", aggregate_type="additional_salary", aggregate_id=row.id, operation="cancelled", after={"status": row.status})
     await db.commit(); await db.refresh(row)
-    component = await db.get(PayrollSalaryComponentMaster, row.salary_component_id)
-    return additional_salary_out(row, component.code if component else None)
+    return additional_salary_out(row, row.component_code)
 
 
 @router.post("/payroll-entries", status_code=status.HTTP_201_CREATED)

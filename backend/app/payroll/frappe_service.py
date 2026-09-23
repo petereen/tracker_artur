@@ -111,7 +111,7 @@ def additional_salary_out(row: AdditionalSalary, component_code: str | None = No
         "number": row.number,
         "employee_id": row.employee_id,
         "salary_component_id": row.salary_component_id,
-        "salary_component_code": component_code,
+        "salary_component_code": row.component_code or component_code,
         "payroll_date": row.payroll_date.isoformat(),
         "amount": str(row.amount),
         "component_kind": row.component_kind,
@@ -176,8 +176,6 @@ async def create_component_master(db: AsyncSession, actor: ActorContext, data: S
 async def update_component_master(db: AsyncSession, actor: ActorContext, row: PayrollSalaryComponentMaster, data: SalaryComponentMasterInput) -> PayrollSalaryComponentMaster:
     if row.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Salary component not found")
-    if row.status != "active":
-        raise HTTPException(status_code=409, detail={"code": "payroll_component_master_inactive"})
     duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.is_active.is_(True), PayrollSalaryComponentMaster.id != row.id))
     if duplicate:
         raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
@@ -211,7 +209,7 @@ async def create_additional_salary(db: AsyncSession, actor: ActorContext, data: 
         raise HTTPException(status_code=422, detail={"code": "payroll_employee_profile_missing", "employee_id": data.employee_id})
     if component.component_kind not in {"earning", "deduction"}:
         raise HTTPException(status_code=422, detail={"code": "payroll_additional_component_kind_invalid"})
-    values = {**data.model_dump(), "component_kind": component.component_kind, "taxable": component.is_taxable, "shi_subject": component.is_shi_subject}
+    values = {**data.model_dump(), "component_code": component.code, "component_name": component.name, "component_kind": component.component_kind, "taxable": component.is_taxable, "shi_subject": component.is_shi_subject}
     row = AdditionalSalary(organization_id=actor.organization_id, number=_run_number("ADD-SAL", data.payroll_date.year), created_by_account_id=actor.account_id, **values)
     db.add(row)
     await db.flush()
@@ -344,8 +342,7 @@ async def create_salary_slips(db: AsyncSession, actor: ActorContext, run: Payrol
     if not employee_ids:
         raise HTTPException(status_code=422, detail={"code": "payroll_get_employees_first"})
     additional_result = await db.execute(
-        select(AdditionalSalary, PayrollSalaryComponentMaster)
-        .join(PayrollSalaryComponentMaster, PayrollSalaryComponentMaster.id == AdditionalSalary.salary_component_id)
+        select(AdditionalSalary)
         .where(
             AdditionalSalary.organization_id == actor.organization_id,
             AdditionalSalary.employee_id.in_(employee_ids),
@@ -356,13 +353,13 @@ async def create_salary_slips(db: AsyncSession, actor: ActorContext, run: Payrol
         )
         .order_by(AdditionalSalary.id)
     )
-    additional = additional_result.all()
+    additional = additional_result.scalars().all()
     existing_variables = list((run.input_snapshot or {}).get("variable_inputs") or [])
     represented = {int(item.get("additional_salary_id")) for item in existing_variables if item.get("additional_salary_id")}
-    for row, component in additional:
+    for row in additional:
         if row.id in represented:
             continue
-        existing_variables.append({"employee_id": row.employee_id, "code": component.code, "label": component.name, "amount": str(row.amount), "component_kind": row.component_kind, "taxable": row.taxable, "shi_subject": row.shi_subject, "source": row.source, "reference": row.reference, "additional_salary_id": row.id})
+        existing_variables.append({"employee_id": row.employee_id, "code": row.component_code, "label": row.component_name, "amount": str(row.amount), "component_kind": row.component_kind, "taxable": row.taxable, "shi_subject": row.shi_subject, "source": row.source, "reference": row.reference, "additional_salary_id": row.id})
         row.payroll_run_id = run.id
     run.input_snapshot = {**(run.input_snapshot or {}), "variable_inputs": existing_variables}
     slips = await calculate_run(db, actor, run)

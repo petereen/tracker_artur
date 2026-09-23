@@ -8,12 +8,12 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enterprise_deps import ActorContext
 from app.models.models import (
-    AdditionalSalary, Employee, EmployeeBankAccount, EmployeeDetails, EmployeePayrollProfile, ERPAccount, ERPDocument, ERPCostCenter, Organization, UserAccount,
+    AdditionalSalary, Employee, EmployeeBankAccount, EmployeeCompensationItem, EmployeeDetails, EmployeePayrollProfile, ERPAccount, ERPDocument, ERPCostCenter, Organization, UserAccount,
     ERPGeneralLedgerEntry, PayrollAdvance, PayrollBankExportProfile, PayrollEmployeeAccumulator,
     PayrollExportArtifact, PayrollPostingProfile, PayrollRun, Payslip, PayslipLineItem,
     PayrollSalaryComponentMaster, PayrollPaymentAllocation, PayrollPaymentBatch, PayrollPaymentReversal, PayrollStatementImport, PayrollStatementLine,
@@ -210,13 +210,7 @@ async def component_master_usage(db: AsyncSession, actor: ActorContext, componen
 async def update_component_master(db: AsyncSession, actor: ActorContext, row: PayrollSalaryComponentMaster, data: SalaryComponentMasterInput) -> PayrollSalaryComponentMaster:
     if row.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Salary component not found")
-    usage = await component_master_usage(db, actor, row.id)
     values = data.model_dump()
-    locked = {"code", "component_kind", "formula", "amount_mode", "percentage_basis", "proration_basis", "is_taxable", "is_shi_subject", "is_non_taxable_allowance", "is_leave_average_eligible", "is_flexible_benefit", "max_benefit_amount_yearly", "pay_against_benefit_claim", "only_tax_impact", "payer", "account_id", "cost_center_id"}
-    if usage["in_use"]:
-        changed = [key for key in locked if values.get(key) != getattr(row, key)]
-        if changed:
-            raise HTTPException(status_code=409, detail={"code": "payroll_component_financial_fields_locked", "fields": changed, "usage": usage["references"]})
     duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.is_active.is_(True), PayrollSalaryComponentMaster.id != row.id))
     if duplicate:
         raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
@@ -232,9 +226,9 @@ async def update_component_master(db: AsyncSession, actor: ActorContext, row: Pa
 
 
 async def delete_component_master(db: AsyncSession, actor: ActorContext, row: PayrollSalaryComponentMaster) -> None:
-    usage = await component_master_usage(db, actor, row.id)
-    if usage["in_use"]:
-        raise HTTPException(status_code=409, detail={"code": "payroll_component_in_use", "component_id": row.id, "references": usage["references"], "allowed_actions": ["archive", "clone"]})
+    await db.execute(delete(EmployeeCompensationItem).where(EmployeeCompensationItem.component_master_id == row.id))
+    await db.execute(update(AdditionalSalary).where(AdditionalSalary.salary_component_id == row.id).values(salary_component_id=None))
+    await db.execute(update(PayslipLineItem).where(PayslipLineItem.component_master_id == row.id).values(component_master_id=None))
     await db.delete(row)
 
 

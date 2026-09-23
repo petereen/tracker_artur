@@ -137,5 +137,5 @@ async def prepare_recurring_compensation(db, run):
         number = f"HR-COMP-{item.id}-{run.period_end:%Y%m}"
         existing = await db.scalar(select(AdditionalSalary.id).where(AdditionalSalary.organization_id == run.organization_id, AdditionalSalary.number == number))
         if existing is None and master.component_kind in {"earning", "deduction"}:
-            db.add(AdditionalSalary(organization_id=run.organization_id, number=number, employee_id=item.employee_id, salary_component_id=master.id, payroll_date=run.period_end, amount=item.amount, component_kind=master.component_kind, taxable=master.is_taxable, shi_subject=master.is_shi_subject, source="import", reference=f"hr-recurring:{item.id}:{run.period_end:%Y-%m}", status="submitted", created_by_account_id=run.created_by_account_id))
+            db.add(AdditionalSalary(organization_id=run.organization_id, number=number, employee_id=item.employee_id, salary_component_id=master.id, component_code=master.code, component_name=master.name, payroll_date=run.period_end, amount=item.amount, component_kind=master.component_kind, taxable=master.is_taxable, shi_subject=master.is_shi_subject, source="import", reference=f"hr-recurring:{item.id}:{run.period_end:%Y-%m}", status="submitted", created_by_account_id=run.created_by_account_id))
     await db.flush()
