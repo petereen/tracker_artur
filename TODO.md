@@ -6,6 +6,7 @@
   - [x] Reconcile HR employment status to Employee.is_active; share tenant-scoped worker actions and archived-worker restoration
     - [x] Add conservative status migration and canonical HR active/archive handling (`backend/app/hr/router.py`, `backend/app/hr/service.py`)
     - [x] Scope People/Users worker CRUD to the actor organization and make Delete archive the shared employee (`backend/app/routers/employees.py`)
+    - [x] Restore deployment startup by using the actor dependency and organization scope in employee performance (`backend/app/routers/employees.py`)
     - [x] Deny linked-account session/login use while its shared worker is inactive or archived (`backend/app/core/enterprise_deps.py`, `backend/app/routers/enterprise_auth.py`)
     - [x] Add the shared People/HR worker action menu (`frontend/src/components/WorkerActionsMenu.tsx`)
     - [x] Add archived-worker filtering and shared lifecycle actions to People/Users (`frontend/src/pages/EmployeesPage.tsx`, `frontend/src/api/hooks.ts`)

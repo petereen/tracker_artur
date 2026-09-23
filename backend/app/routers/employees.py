@@ -76,10 +76,15 @@ async def employee_performance(
     date_to: Optional[date] = None,
     all_time: bool = False,
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    actor: ActorContext = Depends(get_actor),
 ):
     """Return the operational metrics displayed on an employee's profile."""
-    emp = await db.get(Employee, employee_id)
+    emp = await db.scalar(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.organization_id == actor.organization_id,
+        )
+    )
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
 
