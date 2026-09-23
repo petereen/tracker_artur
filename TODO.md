@@ -652,6 +652,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Merge the payroll component Alembic heads so deployments can target `head` (`backend/alembic/versions/s2t3u4v5w6x7_merge_payroll_component_heads.py`)
 - [x] Default the Analytics tab to a 30-day time period (`frontend/src/pages/StatsWorkspacePage.tsx`, `frontend/src/pages/StatsWorkspacePage.test.tsx`)
 - [x] Fix the unified Payroll v2 component-master backfill so PostgreSQL can run the migration (`backend/alembic/versions/a1b2c3d4e5f6_unified_payroll_v2.py`, `backend/tests/test_payroll_v2_contract.py`)
 - [x] Fix payroll setup sidepanel layering so drawer headers and close buttons render above the sticky workspace header (`frontend/src/pages/PayrollSetupHub.tsx`)
