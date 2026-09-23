@@ -74,6 +74,7 @@ class AccessTokenOut(BaseModel):
 
 class AuthCapabilities(BaseModel):
     telegram_native: bool
+    light_logo: str = "/oyuns-aio-logo.png"
 
 
 class RefreshInput(BaseModel):
@@ -456,9 +457,20 @@ async def _telegram_session(
 
 
 @router.get("/capabilities", response_model=AuthCapabilities)
-async def auth_capabilities():
+async def auth_capabilities(db: AsyncSession = Depends(get_db)):
     """Expose non-secret authentication capabilities for login surfaces."""
-    return AuthCapabilities(telegram_native=telegram_oidc.is_configured())
+    organization = (await db.execute(select(Organization).order_by(Organization.id).limit(1))).scalar_one_or_none()
+    branding = (organization.settings or {}).get("branding", {}) if organization else {}
+    logo = branding.get("light", "/oyuns-aio-logo.png")
+    if logo == "default":
+        logo = "/favicon.png"
+    elif logo == "legacy-aio":
+        logo = "/oyuns-aio-logo.png"
+    elif logo == "legacy-icon":
+        logo = "/favicon.png"
+    elif not logo.startswith("data:image/"):
+        logo = "/favicon.png"
+    return AuthCapabilities(telegram_native=telegram_oidc.is_configured(), light_logo=logo)
 
 
 @router.post("/telegram-native/start")

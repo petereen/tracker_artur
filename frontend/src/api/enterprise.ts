@@ -374,7 +374,7 @@ export function useEnterpriseLogin() {
   })
 }
 
-export interface AuthCapabilities { telegram_native: boolean }
+export interface AuthCapabilities { telegram_native: boolean; light_logo: string }
 
 export function useAuthCapabilities(enabled = true) {
   return useQuery<AuthCapabilities>({

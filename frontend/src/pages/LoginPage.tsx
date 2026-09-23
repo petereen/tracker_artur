@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, LockKeyhole, Mail } from 'lucide-react'
+import { ArrowRight, LockKeyhole, Mail, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthCapabilities, useEnterpriseLogin } from '../api/enterprise'
 import { isNativePlatform } from '../platform/runtime'
 import { startNativeTelegramLogin, subscribeToNativeTelegramAuth, type NativeTelegramAuthState } from '../platform/telegram-auth'
+import Grainient from '../components/Grainient'
 
 export function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const login = useEnterpriseLogin()
   const native = isNativePlatform()
-  const capabilities = useAuthCapabilities(native)
+  const capabilities = useAuthCapabilities()
   const [telegramState, setTelegramState] = useState<NativeTelegramAuthState>({ status: 'idle' })
   const [webTelegramError, setWebTelegramError] = useState<string | null>(null)
 
@@ -52,20 +53,20 @@ export function LoginPage() {
     <main className="login-stage auth-layout">
       <section className="auth-form-side" aria-labelledby="login-title">
         <div className="auth-form-wrap">
-          <img src="/oyuns-aio-logo.png" alt="OYUNS All-in-One" className="login-logo" />
+          <img src={capabilities.data?.light_logo || '/oyuns-aio-logo.png'} alt="OYUNS All-in-One" className="login-logo" />
           <div className="auth-form-heading">
             <h1 id="login-title">Тавтай морил</h1>
           </div>
           {!native && <div className="telegram-login telegram-login-primary">
-            <button className="primary-action native-telegram-action" type="button" onClick={() => { window.location.assign('/api/v1/auth/telegram') }}>
-              Telegram-аар нэвтрэх <ArrowRight size={16} aria-hidden />
+            <button className="primary-action native-telegram-action telegram-brand-button" type="button" onClick={() => { window.location.assign('/api/v1/auth/telegram') }}>
+              <Send size={17} aria-hidden /> Telegram-аар нэвтрэх
             </button>
             {webTelegramError && <p className="login-inline-error" role="alert">{webTelegramError}</p>}
             <div className="login-divider"><span>эсвэл и-мэйлээр</span></div>
           </div>}
           {native && capabilities.data?.telegram_native && <>
-            <button className="primary-action native-telegram-action" type="button" onClick={() => void startNativeTelegramLogin()} disabled={telegramState.status === 'opening' || telegramState.status === 'waiting'}>
-              {telegramState.status === 'opening' || telegramState.status === 'waiting' ? 'Telegram нэвтрэлтийг хүлээж байна…' : 'Telegram-аар нэвтрэх'} <ArrowRight size={16} aria-hidden />
+            <button className="primary-action native-telegram-action telegram-brand-button" type="button" onClick={() => void startNativeTelegramLogin()} disabled={telegramState.status === 'opening' || telegramState.status === 'waiting'}>
+              {telegramState.status === 'opening' || telegramState.status === 'waiting' ? 'Telegram нэвтрэлтийг хүлээж байна…' : <><Send size={17} aria-hidden /> Telegram-аар нэвтрэх</>}
             </button>
             {telegramState.status === 'error' && <p className="login-inline-error" role="alert">{telegramState.message}</p>}
             {telegramState.status === 'cancelled' && <p className="login-inline-hint">Telegram нэвтрэлтийг цуцалсан. Дахин оролдоно уу.</p>}
@@ -89,6 +90,7 @@ export function LoginPage() {
         </div>
       </section>
       <aside className="auth-brand-side" aria-label="OYUNS ажлын талбар">
+        <Grainient className="auth-grainient" />
         <div className="auth-brand-content">
           <div className="auth-brand-copy">
             <span className="auth-brand-label">ТАНЫ АЖЛЫН ОРОН ЗАЙ</span>

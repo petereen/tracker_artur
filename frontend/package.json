@@ -54,6 +54,7 @@
     "ldrs": "^1.1.9",
     "lucide-react": "^1.28.0",
     "motion": "^12.43.0",
+    "ogl": "^1.0.11",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -61,9 +62,9 @@
     "react-i18next": "^17.0.11",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.2",
-    "socket.io-client": "^4.8.1",
     "recharts": "^2.13.3",
     "remark-gfm": "^4.0.1",
+    "socket.io-client": "^4.8.1",
     "zustand": "^5.0.1"
   },
   "devDependencies": {

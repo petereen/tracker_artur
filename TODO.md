@@ -1,11 +1,13 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Compact the admin worker list and redesign the worker detail dialog with settings/statistics views (`frontend/src/pages/EmployeesPage.tsx`, `frontend/src/index.css`)
 - [x] Refine login screen hierarchy, branding, logo, and legal links (`frontend/src/pages/LoginPage.tsx`, `frontend/src/index.css`)
-  - [x] Make Telegram login primary and email/password login secondary
+  - [x] Make Telegram login primary, style it with Telegram blue and a send icon, and keep email/password login secondary
   - [x] Remove the blue panel's OYUNS mark and login helper sentence
-  - [x] Use the dark logo asset on the white login panel (`frontend/public/oyuns-aio-logo.png`)
-  - [x] Add spacing between privacy and terms links
+  - [x] Load the admin-configured light logo on the auth screen (`backend/app/routers/enterprise_auth.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/LoginPage.tsx`)
+  - [x] Center privacy and terms links with visible spacing
+  - [x] Integrate the Grainient WebGL background with OYUNS blue and navy colors (`frontend/src/components/Grainient.tsx`, `frontend/src/components/Grainient.css`, `frontend/src/pages/LoginPage.tsx`)
 - [x] Add payroll account management with safe delete/archive, seed deletion tracking, eligible role mappings, and permission-aware settings UI (`backend/app/erp`, `backend/app/payroll/router.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/PayrollSetupHub.tsx`)
   - [x] Add an organization-scoped tombstone model so deleted seeded accounts stay deleted (`backend/app/models/models.py`)
   - [x] Add an additive migration for seed-account deletion tombstones (`backend/alembic/versions/b7c8d9e0f1a2_payroll_account_seed_tombstones.py`)

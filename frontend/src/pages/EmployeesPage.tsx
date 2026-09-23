@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
-import { Check, KeyRound, Pencil, Trash2, UserCheck, UserRoundX, X } from 'lucide-react'
+import { KeyRound, MoreVertical, Pencil, Trash2, UserCheck, UserRoundX } from 'lucide-react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 import { useEmployees, useCreateEmployee, useDeleteEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
 import { useCreateManagedAccount, useDeleteManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
@@ -59,6 +59,9 @@ export function EmployeesPage() {
   const [search, setSearch] = useState('')
   // null = закрыто, { id: null } = создание, { id: number } = редактирование
   const [editing, setEditing] = useState<{ id: number | null } | null>(null)
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null)
+  const [employeeView, setEmployeeView] = useState<'settings' | 'stats'>('settings')
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null)
   const [performanceId, setPerformanceId] = useState<number | null>(null)
   const [performanceRange, setPerformanceRange] = useState<'day' | 'week' | 'month' | 'all' | 'custom'>('month')
   const [performanceFrom, setPerformanceFrom] = useState('')
@@ -83,6 +86,8 @@ export function EmployeesPage() {
   }
 
   const openEdit = (emp: any) => {
+    setSelectedEmployeeId(null)
+    setPerformanceId(null)
     setForm({
       name: emp.name || '',
       telegram_id: emp.telegram_id || '',
@@ -181,7 +186,7 @@ export function EmployeesPage() {
         <Btn variant="primary" onClick={openCreate}>+ Нэмэх</Btn>
       </PageHeader>
 
-      <Card className="admin-table-card p-0 overflow-hidden">
+      <Card className="admin-table-card employee-list-card p-0 overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
           <input value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Нэр эсвэл @username-аар хайх…"
@@ -190,38 +195,32 @@ export function EmployeesPage() {
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-surface2">
-              {['Ажилтан', 'Telegram', 'ID', 'Хандалт', 'Цагийн бүс', 'Төлөв', ''].map((h) => (
+              {['Нэр', 'Telegram', 'Telegram ID', 'Идэвхтэй эрх', 'Төлөв', ''].map((h) => (
                 <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted border-b border-border whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.map((e: any, i: number) => (
-              <tr key={e.id} onClick={() => { setPerformanceId(e.id); setPerformanceRange('month'); setPerformanceFrom(''); setPerformanceTo('') }}
+              <tr key={e.id} onClick={() => { setSelectedEmployeeId(e.id); setEmployeeView('settings'); setOpenMenuId(null) }}
                 className={`cursor-pointer transition-colors hover:bg-surface2 ${i < filtered.length - 1 ? 'border-b border-border2' : ''}`}>
-                <td className="px-4 py-3 font-medium">{e.name}</td>
-                <td className="px-4 py-3 text-muted font-mono text-xs">{e.telegram_username || '—'}</td>
-                <td className="px-4 py-3 text-muted2 font-mono text-[11px]">{e.telegram_id}</td>
-                <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
-                  {(() => {
-                    const account = accountFor(e)
-                    if (!account) return <Btn variant="ghost" onClick={() => linkAccess(e)} disabled={createAccount.isPending}>Холбох</Btn>
-                    return <div className="flex flex-wrap gap-x-2 gap-y-1 max-w-[240px]">
-                      {ACCESS_ROLES.map(([value, label]) => <label key={value} className="inline-flex items-center gap-1 text-[11px] text-muted whitespace-nowrap">
-                        <input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleAccessRole(e, value)} disabled={updateAccount.isPending} />
-                        {label}
-                      </label>)}
-                    </div>
-                  })()}
+                <td className="px-4 py-2.5 font-medium">{e.name}</td>
+                <td className="px-4 py-2.5 text-muted font-mono text-xs">{e.telegram_username || '—'}</td>
+                <td className="px-4 py-2.5 text-muted2 font-mono text-[11px]">{e.telegram_id}</td>
+                <td className="px-4 py-2.5">
+                  {(() => { const account = accountFor(e); return account?.roles.length
+                    ? <div className="employee-role-chips">{ACCESS_ROLES.filter(([value]) => account.roles.includes(value)).map(([, label]) => <span key={label}>{label}</span>)}</div>
+                    : <span className="text-xs text-muted">Эрх тохируулаагүй</span> })()}
                 </td>
-                <td className="px-4 py-3 text-muted text-xs">{e.timezone}</td>
                 <td className="px-4 py-3"><Badge color={e.is_active ? 'green' : 'muted'}>{e.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge></td>
-                <td className="px-4 py-3">
-                  <div className="settings-row-actions" onClick={(event) => event.stopPropagation()}>
-                    <button type="button" className="settings-icon-action" onClick={() => openEdit(e)} aria-label={`${e.name} засах`} title="Засах"><Pencil size={16} /></button>
-                    {accountFor(e) && <><button type="button" className="settings-icon-action" onClick={() => changeAccessPassword(e)} aria-label={`${e.name} нууц үг солих`} title="Нууц үг солих"><KeyRound size={16} /></button><button type="button" className="settings-icon-action" onClick={() => toggleAccountStatus(e)} aria-label={`${e.name} хандалт ${accountFor(e)?.status === 'disabled' ? 'идэвхжүүлэх' : 'хаах'}`} title={accountFor(e)?.status === 'disabled' ? 'Хандалт идэвхжүүлэх' : 'Хандалт хаах'}>{accountFor(e)?.status === 'disabled' ? <UserCheck size={16} /> : <UserRoundX size={16} />}</button><button type="button" className="settings-icon-action danger" onClick={() => removeAccess(e)} aria-label={`${e.name} хандалт устгах`} title="Хандалт устгах"><Trash2 size={16} /></button></>}
-                    <button type="button" className="settings-icon-action danger" onClick={() => removeEmployee(e)} disabled={deleteEmployee.isPending} aria-label={`${e.name} ажилтан устгах`} title="Ажилтан устгах"><Trash2 size={16} /></button>
-                    <button type="button" className="settings-icon-action" onClick={() => toggle(e)} aria-label={`${e.name} ${e.is_active ? 'идэвхгүй болгох' : 'идэвхжүүлэх'}`} title={e.is_active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}>{e.is_active ? <X size={16} /> : <Check size={16} />}</button>
+                <td className="px-3 py-1.5" onClick={(event) => event.stopPropagation()}>
+                  <div className="employee-menu-wrap">
+                    <button type="button" className="employee-more-button" aria-label={`${e.name} үйлдлүүд`} aria-expanded={openMenuId === e.id} onClick={() => setOpenMenuId(openMenuId === e.id ? null : e.id)}><MoreVertical size={18} /></button>
+                    {openMenuId === e.id && <div className="employee-action-menu" role="menu">
+                      <button role="menuitem" onClick={() => { openEdit(e); setOpenMenuId(null) }}><Pencil size={15} />Засах</button>
+                      <button role="menuitem" onClick={() => { toggle(e); setOpenMenuId(null) }}>{e.is_active ? <UserRoundX size={15} /> : <UserCheck size={15} />}{e.is_active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}</button>
+                      <button role="menuitem" className="danger" onClick={() => { removeEmployee(e); setOpenMenuId(null) }}><Trash2 size={15} />Жагсаалтаас устгах</button>
+                    </div>}
                   </div>
                 </td>
               </tr>
@@ -257,8 +256,37 @@ export function EmployeesPage() {
         </Modal>
       )}
 
-      {performanceId !== null && (
-        <Modal title="Ажилтны гүйцэтгэл" onClose={() => setPerformanceId(null)} className="performance-modal max-w-6xl max-h-[calc(100vh-48px)] overflow-y-auto">
+      {selectedEmployeeId !== null && (() => {
+        const employee = employees.find((item: any) => item.id === selectedEmployeeId)
+        if (!employee) return null
+        const account = accountFor(employee)
+        return <Modal title="Ажилтны дэлгэрэнгүй" onClose={() => { setSelectedEmployeeId(null); setPerformanceId(null) }} className="employee-detail-modal">
+          <div className="employee-detail-heading">
+            <div><div className="employee-detail-name">{employee.name}</div><div className="employee-detail-meta">{employee.telegram_username || 'Telegram username байхгүй'} <span>·</span> ID {employee.telegram_id}</div></div>
+            <Badge color={employee.is_active ? 'green' : 'muted'}>{employee.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge>
+          </div>
+          <div className="employee-view-switch" role="radiogroup" aria-label="Хэрэглэгчийн харагдац">
+            {([['settings', 'Тохиргоо'], ['stats', 'Статистик']] as const).map(([view, label]) => <button key={view} type="button" role="radio" aria-checked={employeeView === view} className={employeeView === view ? 'active' : ''} onClick={() => { setEmployeeView(view); if (view === 'stats') { setPerformanceId(employee.id); setPerformanceRange('month'); setPerformanceFrom(''); setPerformanceTo('') } }}><span className="employee-radio-dot" />{label}</button>)}
+          </div>
+          {employeeView === 'settings' ? <section className="employee-settings-view">
+            <div className="employee-settings-grid">
+              <div><span className="employee-field-label">Telegram</span><strong>{employee.telegram_username || '—'}</strong></div>
+              <div><span className="employee-field-label">Цагийн бүс</span><strong>{employee.timezone}</strong></div>
+            </div>
+            <div className="employee-access-header"><div><strong>Хандалтын эрх</strong><span>Энэ ажилтанд оноосон role-ууд</span></div>
+              {!account && <Btn variant="primary" onClick={() => linkAccess(employee)} disabled={createAccount.isPending}>Хандалт холбох</Btn>}
+            </div>
+            {account ? <fieldset className="employee-role-editor"><legend>Хандалтын эрхүүд</legend>{ACCESS_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleAccessRole(employee, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}</fieldset> : <p className="employee-no-access">Хандалт холбогдоогүй байна.</p>}
+            <div className="employee-settings-footer"><span>{account ? `Хэрэглэгчийн төлөв · ${account.status === 'active' ? 'Идэвхтэй' : 'Идэвхгүй'}` : 'Хандалтын бүртгэл алга'}</span><div className="employee-detail-menu-wrap">
+              <button className="employee-detail-more" type="button" aria-label="Хэрэглэгчийн нэмэлт үйлдэл" aria-expanded={openMenuId === -1} onClick={() => setOpenMenuId(openMenuId === -1 ? null : -1)}><MoreVertical size={18} />Үйлдлүүд</button>
+              {openMenuId === -1 && <div className="employee-action-menu employee-detail-action-menu" role="menu">
+                <button role="menuitem" onClick={() => { openEdit(employee); setOpenMenuId(null) }}><Pencil size={15} />Ажилтан засах</button>
+                {account ? <><button role="menuitem" onClick={() => changeAccessPassword(employee)}><KeyRound size={15} />Нууц үг солих</button><button role="menuitem" onClick={() => toggleAccountStatus(employee)}>{account.status === 'disabled' ? <UserCheck size={15} /> : <UserRoundX size={15} />}{account.status === 'disabled' ? 'Хандалт идэвхжүүлэх' : 'Хандалт хаах'}</button><button role="menuitem" className="danger" onClick={() => removeAccess(employee)}><Trash2 size={15} />Хандалтыг устгах</button></> : null}
+                <button role="menuitem" onClick={() => toggle(employee)}>{employee.is_active ? <UserRoundX size={15} /> : <UserCheck size={15} />}{employee.is_active ? 'Ажилтныг идэвхгүй болгох' : 'Ажилтныг идэвхжүүлэх'}</button>
+                <button role="menuitem" className="danger" onClick={() => removeEmployee(employee)}><Trash2 size={15} />Ажилтныг устгах</button>
+              </div>}
+            </div></div>
+          </section> : <section className="employee-stats-view">
           {performance.isLoading && <div className="py-12 text-center text-muted">Гүйцэтгэлийн мэдээлэл ачаалж байна…</div>}
           {performance.isError && <div className="py-12 text-center text-red">Мэдээлэл ачаалахад алдаа гарлаа</div>}
           {performance.data && (() => {
@@ -361,8 +389,9 @@ export function EmployeesPage() {
               </div>
             </div>
           })()}
+          </section>}
         </Modal>
-      )}
+      })()}
       {reportDetailId !== null && <ReportDetailModal reportId={reportDetailId} onClose={() => setReportDetailId(null)} />}
     </div>
   )
