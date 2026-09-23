@@ -2,6 +2,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.erp.service import DEFAULT_ACCOUNTS, DOCUMENT_MODULES, ERP_MODULES, calculate_lines, module_settings, operation_catalog, validate_definition_fields, validate_form_values, validate_workflow
 from app.erp.router import _normalize_account_values
@@ -88,14 +89,28 @@ def test_payroll_account_purpose_requires_matching_classification():
     _normalize_account_values(general_erp_account)
 
 
-def test_payroll_role_account_eligibility_requires_postable_mnt_account_and_purpose():
+def test_payroll_role_account_eligibility_checks_classification_not_erp_purpose():
     from types import SimpleNamespace
 
     account = SimpleNamespace(is_active=True, is_group=False, currency="MNT", purpose="general", classification="expense")
     assert payroll_role_account_is_valid("salary_expense", account)
+    assert payroll_role_account_is_valid("salary_expense", SimpleNamespace(**{**account.__dict__, "purpose": "inventory"}))
     assert not payroll_role_account_is_valid("pit_payable", account)
     assert not payroll_role_account_is_valid("salary_expense", SimpleNamespace(**{**account.__dict__, "is_group": True}))
     assert not payroll_role_account_is_valid("salary_expense", SimpleNamespace(**{**account.__dict__, "currency": "USD"}))
+
+
+def test_payroll_tags_and_gl_totals_are_exposed_and_multi_purpose_tags_are_validated():
+    from app.payroll.schemas import PayrollAccountTagsInput
+
+    routes = {(method, route.path) for route in app.routes if hasattr(route, "methods") for method in route.methods}
+    assert ("GET", "/v1/erp/payroll/account-tags") in routes
+    assert ("PUT", "/v1/erp/payroll/account-tags/{account_id}") in routes
+    assert ("GET", "/v1/erp/payroll/payroll-periods/{period_id}/gl-totals") in routes
+    assert {"payroll_run_id", "payroll_role"}.issubset(Base.metadata.tables["erp_general_ledger_entries"].c.keys())
+    assert PayrollAccountTagsInput(purposes=["salary_expense", "bank"]).purposes == ["salary_expense", "bank"]
+    with pytest.raises(ValidationError):
+        PayrollAccountTagsInput(purposes=["salary_expense", "salary_expense"])
 
 
 def test_every_broad_mvp_document_domain_has_an_explicit_module():

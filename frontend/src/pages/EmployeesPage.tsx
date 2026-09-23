@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
 import { KeyRound, MoreVertical, Pencil, Trash2, UserCheck, UserRoundX } from 'lucide-react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
@@ -230,7 +231,7 @@ export function EmployeesPage() {
         {filtered.length === 0 && <div className="px-5 py-8 text-center text-muted">Ажилтан олдсонгүй</div>}
       </Card>
 
-      {editing && (
+      {editing && createPortal(
         <Modal title={isEdit ? 'Ажилтан засах' : 'Шинэ ажилтан'} onClose={close}>
           <div className="flex flex-col gap-3.5">
             <Input label="Нэр, овог" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="Бат Болд" fullWidth />
@@ -253,14 +254,14 @@ export function EmployeesPage() {
               <Btn variant="primary" onClick={submit} disabled={create.isPending || update.isPending}>{isEdit ? 'Хадгалах' : 'Нэмэх'}</Btn>
             </div>
           </div>
-        </Modal>
+        </Modal>, document.body
       )}
 
       {selectedEmployeeId !== null && (() => {
         const employee = employees.find((item: any) => item.id === selectedEmployeeId)
         if (!employee) return null
         const account = accountFor(employee)
-        return <Modal title="Ажилтны дэлгэрэнгүй" onClose={() => { setSelectedEmployeeId(null); setPerformanceId(null) }} className="employee-detail-modal">
+        return createPortal(<Modal title="Ажилтны дэлгэрэнгүй" onClose={() => { setSelectedEmployeeId(null); setPerformanceId(null) }} className="employee-detail-modal">
           <div className="employee-detail-heading">
             <div><div className="employee-detail-name">{employee.name}</div><div className="employee-detail-meta">{employee.telegram_username || 'Telegram username байхгүй'} <span>·</span> ID {employee.telegram_id}</div></div>
             <Badge color={employee.is_active ? 'green' : 'muted'}>{employee.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge>
@@ -390,7 +391,7 @@ export function EmployeesPage() {
             </div>
           })()}
           </section>}
-        </Modal>
+        </Modal>, document.body)
       })()}
       {reportDetailId !== null && <ReportDetailModal reportId={reportDetailId} onClose={() => setReportDetailId(null)} />}
     </div>

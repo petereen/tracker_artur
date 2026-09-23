@@ -132,29 +132,31 @@ Set the legal company, base currency, fiscal year, timezone, open posting period
 
 Use the existing Chart of Accounts; add missing ledger accounts rather than replacing it. Disable obsolete unused accounts only after checking defaults/history. Group accounts organize the hierarchy; posting must target non-group ledgers. [Chart of Accounts](https://docs.frappe.io/erpnext/chart-of-accounts)
 
-### 7. Create the minimum payroll accounts and map them
+### 7. Tag existing chart accounts for payroll and map posting roles
 
-Use company-specific account numbers; the names below describe purpose. Seven ledgers cover ordinary monthly payroll with employee and employer insurance and income-tax withholding in the current implementation.
+Create accounts only in the ERP Chart of Accounts. Payroll Setup assigns one or more payroll purpose tags to those existing accounts and maps tagged accounts to posting roles. Tagging is available for any account; posting validates that the account classification, currency, and active posting status fit the role. Confirm the initial role catalog with the accountant before rollout.
 
-| Account | Classification | Current posting role |
+Initial role catalog review record (complete before production): Status: pending accountant review. Reviewer: __________. Review date: __________. Approved changes or notes: __________.
+
+| Payroll purpose | Expected classification | Posting role |
 | --- | --- | --- |
-| Salaries and wages expense | Expense | `salary_expense` |
-| Employer social-insurance expense | Expense | `employer_shi_expense` |
-| Net salaries payable | Liability | `net_pay_payable` |
-| Employee social insurance payable | Liability | `employee_shi_payable` |
-| Employer social insurance payable | Liability | `employer_shi_payable` |
-| Employee income tax payable | Liability | `pit_payable` |
-| Company payroll bank ledger | Asset / bank | `bank`, plus the actual Bank Entry payment account |
+| Salary expense | Expense | `salary_expense` |
+| Employer NDSH expense | Expense | `employer_shi_expense` |
+| Net salary payable | Liability | `net_pay_payable` |
+| Employee NDSH payable | Liability | `employee_shi_payable` |
+| Employer NDSH payable | Liability | `employer_shi_payable` |
+| PIT payable | Liability | `pit_payable` |
+| Bank | Asset | `bank` when an advance or payment uses it |
 
-Add only when used: employee advances/receivables (`advance_clearing`), other deduction payables (`other_deductions_payable`), separate allowance expenses, cash, bank charges, and insurance-fund subaccounts. Preserve existing balances and use an approved balanced opening journal for migration.
+Add tags and mappings only when used: employee advances/receivables (`advance_clearing`), other deduction payables (`other_deductions_payable`), separate allowance expenses, cash, bank charges, and insurance-fund subaccounts. Only roles present in the calculated, nonzero journal lines are required to post a run. Preserve existing balances and use an approved balanced opening journal for migration.
 
 Create one active default cost center initially, then departments when useful. Frappe supports cost-center allocation without multiplying expense accounts. [Cost Center](https://docs.frappe.io/erpnext/cost-center)
 
-Save the mappings at **Payroll → Account mapping**, backed by `/v1/erp/payroll/posting-profiles/default`. Expand the mapping form conditionally for advances/other deductions. The current seed accounts omit several statutory/employer accounts, so seeded Accounting is not a complete Payroll configuration.
+Save purpose tags and mappings at **Payroll → Accounting**, backed by `/v1/erp/payroll/account-tags` and `/v1/erp/payroll/posting-profiles/default`. Payroll pickers show only accounts tagged for the selected purpose. Period totals come from posted payroll accrual and reversal GL lines linked to runs in the selected Payroll Period.
 
 Required implementation controls:
 
-- Filter and validate organization, active status, non-group status, account purpose, and currency at save and post time. The current account schema has no dedicated `bank` account type; add a bank-purpose classification/link rather than offering every ledger as a payment account.
+- Scope purpose tags by organization and account. Permit any account to receive any supported payroll purpose tag, then validate active status, non-group status, compatible classification, currency, and the role tag when a journal line is posted.
 - Apply the posting-period guard to payroll accrual and Bank Entry. Both currently write GL directly and bypass the guard used by generic ERP posting.
 - Honor the approved posting date. Payroll accrual currently writes `run.period_end` despite the entry collecting a separate posting date.
 - Resolve cost-center defaults consistently and include employer costs. The run's cost center must affect ledger rows; merely storing it on the run is insufficient.

@@ -1,7 +1,17 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Replace payroll account CRUD with tags on ERP chart accounts, add period GL totals and report reconciliation, and derive posting roles from calculated journal lines
+  - [x] Add the organization-scoped account-tag and payroll GL run/role schema plus a backfill migration (`backend/app/models/models.py`, `backend/alembic/versions/r8s9t0u1v2w3_payroll_account_tags_gl_totals.py`)
+  - [x] Add payroll account purpose tags and tagged-account APIs; migrate existing mapped payroll accounts (`backend/app/payroll/schemas.py`, `backend/app/payroll/router.py`, `frontend/src/pages/PayrollSetupHub.tsx`, `docs/payroll-setup-workflow.md`, `docs/erp-core-configuration-fix.md`)
+  - [x] Require payroll periods for new runs and add auditable run/role references to payroll GL lines (`backend/app/payroll/schemas.py`, `backend/app/payroll/service.py`, `backend/app/payroll/router.py`, `backend/app/payroll/frappe_service.py`, `frontend/src/pages/PayrollWorkspacePage.tsx`)
+  - [x] Derive required posting roles from balanced calculated journal lines for preview and posting (`backend/app/payroll/service.py`, `backend/app/payroll/router.py`, `backend/app/payroll/frappe_service.py`)
+  - [x] Backfill historical runs and GL classifications; expose unclassifiable history in period totals
+  - [x] Add period GL totals, report reconciliation, and payroll settings/report UI (`backend/app/payroll/router.py`, `frontend/src/api/enterprise.ts`)
+  - [x] Add focused backend regression coverage and run available validation
 - [x] Compact the admin worker list and redesign the worker detail dialog with settings/statistics views (`frontend/src/pages/EmployeesPage.tsx`, `frontend/src/index.css`)
+  - [x] Allow the worker three dot menu to escape the list card boundary (`frontend/src/index.css`)
+  - [x] Render worker dialogs above the workspace header using a document-level portal (`frontend/src/pages/EmployeesPage.tsx`)
 - [x] Refine login screen hierarchy, branding, logo, and legal links (`frontend/src/pages/LoginPage.tsx`, `frontend/src/index.css`)
   - [x] Make Telegram login primary, style it with Telegram blue and a send icon, and keep email/password login secondary
   - [x] Remove the blue panel's OYUNS mark and login helper sentence
@@ -267,7 +277,7 @@
 - [ ] Unify approved HR attendance, leave, holidays, employment dates, and recurring compensation into one frozen payroll input builder for every entry point (`backend/app/hr/router.py`, `backend/app/payroll/frappe_service.py`, `backend/app/payroll/service.py`) — remove inconsistent worktime-only checks and preserve the selected attendance policy
 - [x] Persist Payroll Entry filters and detailed employee validation results; allow correction/revalidation before slip creation and use local calendar dates in forms (`backend/app/payroll/frappe_service.py`, `backend/app/payroll/router.py`, `frontend/src/pages/PayrollWorkspacePage.tsx`) — saved selection/policy survives refresh; Recheck Employees refreshes canonical HR inputs; blocking issues are actionable per employee
 - [ ] Add Payroll review and distinct approval gates, capability-aligned UI actions, explicit payslip release, and protected salary detail access (`backend/app/payroll`, `backend/app/erp/service.py`, `frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/components/EnterpriseShell.tsx`)
-- [ ] Configure the minimum company/fiscal settings, seven payroll ledger mappings, cost center, opening balances, and bank export layout with finance validation (`backend/app/erp`, `backend/app/payroll`, organization configuration) — steps 6–8 of `docs/erp-core-configuration-fix.md`
+- [ ] Configure the minimum company/fiscal settings, tagged payroll ledger mappings, cost center, opening balances, and bank export layout with finance validation (`backend/app/erp`, `backend/app/payroll`, organization configuration) — steps 6–8 of `docs/erp-core-configuration-fix.md`
 - [ ] Enforce account purpose/group/currency checks, approved posting dates, closed-period guards, immutable posting mappings, cost-center defaults, and payment allocation consistency on both Payroll GL paths (`backend/app/payroll/service.py`, `backend/app/payroll/frappe_service.py`, `backend/app/erp`)
 - [ ] Deliver a dedicated Payroll payment workflow with bank references, employee allocations, partial/rejected/retried payments, separate recorded/confirmed/reconciled states, and statement matching without duplicate GL entries (`backend/app/payroll`, `backend/app/erp`, `backend/app/models/models.py`, `frontend/src/pages`)
 - [ ] Simplify Payroll to Overview / Run payroll / Employees / Reports / Settings; move module switches and form builders to administration and preserve legacy history (`frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/ERPWorkspacePage.tsx`, `frontend/src/components/EnterpriseShell.tsx`)

@@ -12325,7 +12325,8 @@ html.capacitor-native .native-boot-error {
 }
 
 /* Compact worker directory and a wide, scroll-safe detail workspace. */
-.employee-list-card { overflow-x: auto !important; }
+.employee-list-card { overflow: visible !important; position: relative; }
+.employee-list-card tbody tr:has(.employee-menu-wrap [aria-expanded='true']) { position: relative; z-index: 10; }
 .employee-list-card table { min-width: 760px; }
 .employee-list-card th { padding-bottom: 9px; padding-top: 9px; }
 .employee-list-card tbody tr { height: 52px; }

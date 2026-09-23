@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enterprise_deps import ActorContext
 from app.models.models import (
-    AdditionalSalary, Employee, EmployeeBankAccount, EmployeeCompensationItem, EmployeeDetails, EmployeePayrollProfile, ERPAccount, ERPDocument, ERPCostCenter, Organization, UserAccount,
+    AdditionalSalary, Employee, EmployeeBankAccount, EmployeeCompensationItem, EmployeeDetails, EmployeePayrollProfile, ERPAccount, ERPDocument, ERPCostCenter, Organization, UserAccount, PayrollPeriod, PayrollAccountTag,
     ERPGeneralLedgerEntry, PayrollAdvance, PayrollBankExportProfile, PayrollEmployeeAccumulator,
     PayrollExportArtifact, PayrollPostingProfile, PayrollRun, Payslip, PayslipLineItem,
     PayrollSalaryComponentMaster, PayrollPaymentAllocation, PayrollPaymentBatch, PayrollPaymentReversal, PayrollStatementImport, PayrollStatementLine,
@@ -273,10 +273,20 @@ async def preflight_run(db: AsyncSession, actor: ActorContext, data: PayrollRunI
         issue("payroll_invalid_period", "Period end must be on or after period start.")
         return {"can_create": False, "employee_ids": [], "employee_count": 0, "blockers": blockers, "warnings": warnings}
 
+    period = await db.scalar(select(PayrollPeriod).where(
+        PayrollPeriod.id == data.payroll_period_id,
+        PayrollPeriod.organization_id == actor.organization_id,
+        PayrollPeriod.status == "open",
+    ))
+    if not period or period.start_date > data.period_start or period.end_date < data.period_end:
+        issue("payroll_period_invalid", "Select an open Payroll Period that contains the run dates.", remediation_url="/erp/payroll/setup?tab=rules")
+
     try:
         profile = await (ensure_profile_active(db, data.statutory_profile_id, data.tax_point_date) if data.statutory_profile_id else resolve_profile(db, actor.organization_id, data.tax_point_date))
         if profile.organization_id != actor.organization_id:
             raise HTTPException(status_code=404, detail={"code": "payroll_statutory_profile_missing"})
+        if period and period.statutory_profile_id != profile.id:
+            issue("payroll_period_profile_mismatch", "Use the statutory profile assigned to this Payroll Period.", remediation_url="/erp/payroll/setup?tab=rules")
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
         issue(str(detail.get("code", "payroll_statutory_profile_missing")), "No published statutory profile is effective for this tax point.", remediation_url="/erp/payroll/setup?tab=rules")
@@ -388,22 +398,28 @@ async def preflight_run(db: AsyncSession, actor: ActorContext, data: PayrollRunI
             issue("payroll_worktime_overlap", "Overlapping WorkTime entries must be resolved before calculation.", entity_ids=sorted(set(overlap_ids)), remediation_url="/hr/attendance")
 
     posting = await db.scalar(select(PayrollPostingProfile).where(PayrollPostingProfile.organization_id == actor.organization_id, PayrollPostingProfile.code == "default", PayrollPostingProfile.is_active.is_(True)))
-    required_roles = ({"advance_clearing", "net_pay_payable", "bank"} if data.run_type == "advance" else {"salary_expense", "employer_shi_expense", "net_pay_payable", "pit_payable", "employee_shi_payable", "employer_shi_payable", "bank"})
     account_roles = posting.account_roles if posting else {}
-    mapped_roles = {role for role, account_id in account_roles.items() if account_id}
-    missing_roles = sorted(required_roles - mapped_roles)
-    mapped_account_ids = {account_roles[role] for role in required_roles & mapped_roles}
-    valid_role_accounts = {row.id: row for row in (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.id.in_(mapped_account_ids or {-1}), ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False), ERPAccount.currency == "MNT"))).scalars().all()}
-    role_classifications = {
-        "salary_expense": "expense", "employer_shi_expense": "expense", "employee_shi_payable": "liability",
-        "employer_shi_payable": "liability", "pit_payable": "liability", "net_pay_payable": "liability",
-        "bank": "asset", "advance_clearing": "asset",
-    }
-    invalid_roles = sorted(role for role in required_roles & mapped_roles if account_roles[role] not in valid_role_accounts or valid_role_accounts[account_roles[role]].purpose not in {role, "general"} or valid_role_accounts[account_roles[role]].classification != role_classifications[role])
-    if missing_roles:
-        issue("payroll_gl_mapping_incomplete", "Default payroll posting profile is missing required account mappings.", remediation_url="/erp/payroll/setup?tab=accounting", metadata={"missing_roles": missing_roles})
-    if invalid_roles:
-        issue("payroll_gl_mapping_invalid", "Payroll posting accounts must be active MNT posting accounts.", remediation_url="/erp/payroll/setup?tab=accounting", metadata={"invalid_roles": invalid_roles})
+    if not posting:
+        issue("payroll_gl_mapping_unconfigured", "Payroll posting mappings can be completed after calculation identifies the journal lines.", severity="warning", remediation_url="/erp/payroll/setup?tab=accounting")
+    else:
+        mapped_account_ids = {int(account_id) for account_id in account_roles.values() if int(account_id) > 0}
+        mapped_accounts = {row.id: row for row in (await db.execute(select(ERPAccount).where(
+            ERPAccount.organization_id == actor.organization_id,
+            ERPAccount.id.in_(mapped_account_ids or {-1}),
+        ))).scalars().all()}
+        purpose_tags = set((await db.execute(select(PayrollAccountTag.account_id, PayrollAccountTag.purpose).where(
+            PayrollAccountTag.organization_id == actor.organization_id,
+            PayrollAccountTag.account_id.in_(mapped_account_ids or {-1}),
+        ))).all())
+        invalid_roles = sorted(role for role, account_id in account_roles.items()
+            if role not in PAYROLL_GL_CLASSIFICATIONS or int(account_id) not in mapped_accounts
+            or not mapped_accounts[int(account_id)].is_active
+            or mapped_accounts[int(account_id)].is_group
+            or mapped_accounts[int(account_id)].currency != "MNT"
+            or mapped_accounts[int(account_id)].classification != PAYROLL_GL_CLASSIFICATIONS.get(role)
+            or (int(account_id), role) not in purpose_tags)
+        if invalid_roles:
+            issue("payroll_gl_mapping_invalid", "One or more saved payroll mappings need an active tagged posting account.", severity="warning", remediation_url="/erp/payroll/setup?tab=accounting", metadata={"invalid_roles": invalid_roles})
     if profile and profile.is_example:
         issue("payroll_example_profile", "The statutory profile is an example configuration and requires acknowledgement at calculation.", severity="warning", remediation_url="/erp/payroll/setup?tab=rules")
 
@@ -858,7 +874,10 @@ async def create_run(db: AsyncSession, actor: ActorContext, data: PayrollRunInpu
     approved_time_snapshot = [{"id": entry.id, "employee_id": entry.employee_id, "local_work_date": entry.local_work_date.isoformat() if entry.local_work_date else None, "started_at": entry.started_at.isoformat(), "ended_at": entry.ended_at.isoformat() if entry.ended_at else None, "approval_status": entry.approval_status, "hours": str(Decimal(str((entry.ended_at - entry.started_at).total_seconds())) / Decimal("3600")) if entry.ended_at else "0"} for entry in approved_entries]
     snapshot = {"employee_ids": employee_ids, "employee_filter": data.employee_filter, "overrides": data.input_overrides, "attendance_policy": data.attendance_policy, "validate_attendance": data.validate_attendance, "posting_date": (data.posting_date or data.tax_point_date).isoformat(), "cost_center_id": data.cost_center_id, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": approved_time_ids, "approved_time_entries": approved_time_snapshot, "preflight": preflight, "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
     config_snapshot = {"profile_id": profile.id, "profile_version": profile.version, "profile_checksum": profile.checksum, "source_references": profile.source_references, "is_example": profile.is_example, "currency": profile.currency, "pit_withholding_method": profile.pit_withholding_method, "pit_calculation_mode": profile.pit_calculation_mode, "pit_formula": profile.pit_formula, "standard_daily_hours": str(profile.standard_daily_hours), "standard_weekly_hours": str(profile.standard_weekly_hours), "standard_workweek": profile.standard_workweek, "rounding_policy": profile.rounding_policy, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier), "leave_policy": profile.leave_policy, "work_policies": [{"id": row.id, "scope_type": row.scope_type, "scope_key": row.scope_key, "code": row.code, "daily_hours": str(row.daily_hours), "weekly_hours": str(row.weekly_hours), "workweek": row.workweek, "hazard_class": row.hazard_class, "overtime_rules": row.overtime_rules, "stacking_policy": row.stacking_policy} for row in frozen_work_policies], "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "calculation_mode": row.calculation_mode, "fixed_amount": str(row.fixed_amount), "base_tax": str(row.base_tax), "base_ceiling_policy": getattr(row, "base_ceiling_policy", "profile"), "formula": row.formula, "exemption_code": row.exemption_code} for row in frozen_shi_rates], "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax), "formula": getattr(row, "formula", None)} for row in frozen_pit_brackets], "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "fixed_amount": str(row.fixed_amount), "amount_basis": row.amount_basis, "formula": row.formula} for row in frozen_reliefs]}
-    run = PayrollRun(organization_id=actor.organization_id, run_number=f"PR-{data.period_end:%Y%m}-{datetime.now(timezone.utc).strftime('%H%M%S%f')[:9]}", run_type=data.run_type, period_start=data.period_start, period_end=data.period_end, settlement_key=data.period_end.strftime("%Y-%m"), tax_point_date=data.tax_point_date, posting_date=data.posting_date or data.tax_point_date, workflow_version="unified_v2", document_status="draft", cost_center_id=data.cost_center_id, statutory_profile_id=profile.id, input_snapshot=snapshot, config_snapshot=config_snapshot, snapshot_checksum=_hash({"input": snapshot, "config": config_snapshot}), created_by_account_id=actor.account_id)
+    period = await db.scalar(select(PayrollPeriod).where(PayrollPeriod.id == data.payroll_period_id, PayrollPeriod.organization_id == actor.organization_id, PayrollPeriod.status == "open"))
+    if not period or period.start_date > data.period_start or period.end_date < data.period_end or period.statutory_profile_id != profile.id:
+        raise HTTPException(status_code=422, detail={"code": "payroll_period_invalid"})
+    run = PayrollRun(organization_id=actor.organization_id, run_number=f"PR-{data.period_end:%Y%m}-{datetime.now(timezone.utc).strftime('%H%M%S%f')[:9]}", run_type=data.run_type, period_start=data.period_start, period_end=data.period_end, settlement_key=data.period_end.strftime("%Y-%m"), tax_point_date=data.tax_point_date, posting_date=data.posting_date or data.tax_point_date, payroll_period_id=period.id, workflow_version="unified_v2", document_status="draft", cost_center_id=data.cost_center_id, statutory_profile_id=profile.id, input_snapshot=snapshot, config_snapshot=config_snapshot, snapshot_checksum=_hash({"input": snapshot, "config": config_snapshot}), created_by_account_id=actor.account_id)
     db.add(run); await db.flush()
     # Resolve confirmed attendance, approved leave, schedules, holidays, and
     # approved work intervals at run creation so calculations consume a
@@ -1152,6 +1171,119 @@ async def reconcile_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
     return report
 
 
+PAYROLL_GL_CLASSIFICATIONS = {
+    "salary_expense": "expense", "employer_shi_expense": "expense",
+    "employee_shi_payable": "liability", "employer_shi_payable": "liability",
+    "pit_payable": "liability", "net_pay_payable": "liability",
+    "bank": "asset", "advance_clearing": "asset",
+    "other_deductions_payable": "liability",
+}
+
+
+async def build_payroll_gl_lines(db: AsyncSession, organization_id: int, run: PayrollRun, roles: dict[str, int]) -> list[dict[str, Any]]:
+    """Build the exact payroll journal used by both preview and posting."""
+    source_run = await db.scalar(select(PayrollRun).where(
+        PayrollRun.id == run.reversal_of_run_id, PayrollRun.organization_id == organization_id,
+    )) if run.reversal_of_run_id else None
+    is_advance = run.run_type == "advance" or (source_run is not None and source_run.run_type == "advance")
+    slips = list((await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all())
+    slip_ids = [row.id for row in slips]
+    total_advance = sum((Decimal(str(row.advance_offset or 0)) for row in slips), Decimal("0"))
+    total_other = sum((Decimal(str(row.gross or 0)) - Decimal(str(row.employee_shi or 0)) - Decimal(str(row.pit or 0)) - Decimal(str(row.net_pay or 0)) - Decimal(str(row.advance_offset or 0)) for row in slips), Decimal("0"))
+    line_items = list((await db.execute(select(PayslipLineItem).where(
+        PayslipLineItem.payslip_id.in_(slip_ids or {-1}),
+        PayslipLineItem.component_kind == "earning", PayslipLineItem.payer == "employee",
+    ))).scalars().all())
+    cost_center_ids = {item.cost_center_id for item in line_items if item.cost_center_id is not None}
+    if cost_center_ids:
+        active_cost_centers = set((await db.execute(select(ERPCostCenter.id).where(
+            ERPCostCenter.organization_id == organization_id,
+            ERPCostCenter.is_active.is_(True), ERPCostCenter.id.in_(cost_center_ids),
+        ))).scalars().all())
+        if active_cost_centers != cost_center_ids:
+            raise HTTPException(status_code=422, detail={"code": "payroll_component_cost_center_invalid", "cost_center_ids": sorted(cost_center_ids - active_cost_centers)})
+    candidate: list[dict[str, Any]] = []
+
+    def add(role: str, amount: Decimal, memo: str, *, debit_nature: bool,
+            account_id: int | None = None, cost_center_id: int | None = None) -> None:
+        amount = Decimal(str(amount or 0))
+        if amount == 0:
+            return
+        debit, credit = ((amount, Decimal("0")) if debit_nature and amount > 0 else
+                         (Decimal("0"), -amount) if debit_nature else
+                         (Decimal("0"), amount) if amount > 0 else (-amount, Decimal("0")))
+        candidate.append({"role": role, "account_id": account_id or roles.get(role),
+            "debit": debit, "credit": credit, "memo": memo, "cost_center_id": cost_center_id})
+
+    if is_advance:
+        add("advance_clearing", run.total_net, "Employee advance clearing", debit_nature=True)
+        add("bank", run.total_net, "Advance bank payment", debit_nature=False)
+    else:
+        salary_split: dict[tuple[int | None, int | None], Decimal] = {}
+        for item in line_items:
+            key = (item.account_id, item.cost_center_id or run.cost_center_id)
+            salary_split[key] = salary_split.get(key, Decimal("0")) + Decimal(str(item.amount))
+        salary_split = {key: amount for key, amount in salary_split.items() if amount}
+        if not salary_split and Decimal(str(run.total_gross or 0)):
+            salary_split[(None, run.cost_center_id)] = Decimal(str(run.total_gross))
+        for (account_id, cost_center_id), amount in salary_split.items():
+            add("salary_expense", amount, "Payroll gross salary expense", debit_nature=True,
+                account_id=account_id, cost_center_id=cost_center_id)
+        add("employer_shi_expense", run.total_employer_shi, "Employer SHI expense",
+            debit_nature=True, cost_center_id=run.cost_center_id)
+
+        fund_totals: dict[str, Decimal] = {}
+        for slip in slips:
+            for fund, amount in ((slip.calculation_trace or {}).get("shi", {}).get("by_fund", {}) or {}).items():
+                fund_totals[fund] = fund_totals.get(fund, Decimal("0")) + Decimal(str(amount))
+        sign = Decimal("-1") if run.run_type == "reversal" else Decimal("1")
+        employee_funds = {fund: amount * sign for fund, amount in fund_totals.items() if fund.startswith("employee:")}
+        employer_funds = {fund: amount * sign for fund, amount in fund_totals.items() if fund.startswith("employer:")}
+        if employee_funds:
+            for fund, amount in employee_funds.items():
+                add("employee_shi_payable", amount, f"Employee SHI payable ({fund.split(':', 1)[1]})", debit_nature=False)
+        else:
+            add("employee_shi_payable", run.total_employee_shi, "Employee SHI payable", debit_nature=False)
+        if employer_funds:
+            for fund, amount in employer_funds.items():
+                add("employer_shi_payable", amount, f"Employer SHI payable ({fund.split(':', 1)[1]})", debit_nature=False)
+        else:
+            add("employer_shi_payable", run.total_employer_shi, "Employer SHI payable", debit_nature=False)
+        add("pit_payable", run.total_pit, "PIT payable", debit_nature=False)
+        add("net_pay_payable", Decimal(str(run.total_net)) + total_advance,
+            "Net salary payable", debit_nature=False)
+        add("other_deductions_payable", total_other, "Other employee deductions payable", debit_nature=False)
+        add("net_pay_payable", total_advance, "Advance offset against net salary payable", debit_nature=True)
+        add("advance_clearing", total_advance, "Employee advance clearing", debit_nature=False)
+
+    required_roles = {line["role"] for line in candidate if line["account_id"] is None}
+    if required_roles:
+        raise HTTPException(status_code=422, detail={"code": "payroll_posting_accounts_incomplete", "missing": sorted(required_roles)})
+    used_ids = {int(line["account_id"]) for line in candidate}
+    accounts = {row.id: row for row in (await db.execute(select(ERPAccount).where(
+        ERPAccount.organization_id == organization_id, ERPAccount.id.in_(used_ids or {-1}),
+    ))).scalars().all()}
+    tags = set((await db.execute(select(PayrollAccountTag.account_id, PayrollAccountTag.purpose).where(
+        PayrollAccountTag.organization_id == organization_id,
+        PayrollAccountTag.account_id.in_(used_ids or {-1}),
+    ))).all())
+    invalid = []
+    for line in candidate:
+        role, account_id = line["role"], int(line["account_id"])
+        account = accounts.get(account_id)
+        expected_class = PAYROLL_GL_CLASSIFICATIONS[role]
+        if (not account or not account.is_active or account.is_group or account.currency != "MNT"
+                or account.classification != expected_class or (account_id, role) not in tags):
+            invalid.append({"role": role, "account_id": account_id})
+    if invalid:
+        raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_invalid", "accounts": invalid})
+    debit = sum((line["debit"] for line in candidate), Decimal("0"))
+    credit = sum((line["credit"] for line in candidate), Decimal("0"))
+    if debit != credit:
+        raise HTTPException(status_code=422, detail={"code": "payroll_posting_unbalanced", "debit": str(debit), "credit": str(credit)})
+    return candidate
+
+
 async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ERPDocument:
     if run.erp_document_id and run.status in {"posted", "payment_prepared", "partially_settled", "settled", "paid"}:
         existing = await db.get(ERPDocument, run.erp_document_id)
@@ -1167,25 +1299,10 @@ async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ER
         raise HTTPException(status_code=409, detail={"code": "payroll_run_requires_approval"})
     posting = await db.scalar(select(PayrollPostingProfile).where(PayrollPostingProfile.organization_id == actor.organization_id, PayrollPostingProfile.code == "default", PayrollPostingProfile.is_active.is_(True)))
     if not posting: raise HTTPException(status_code=422, detail={"code": "payroll_posting_profile_missing"})
+    roles = posting.account_roles or {}
+    lines = await build_payroll_gl_lines(db, actor.organization_id, run, roles)
     source_run = await db.scalar(select(PayrollRun).where(PayrollRun.id == run.reversal_of_run_id, PayrollRun.organization_id == actor.organization_id)) if run.reversal_of_run_id else None
     is_advance = run.run_type == "advance" or (source_run is not None and source_run.run_type == "advance")
-    roles = posting.account_roles or {}
-    # An advance is a clearing balance until the final settlement.  It has no
-    # salary expense or statutory liability of its own, but must have a
-    # dedicated clearing account and bank role so the payout is traceable.
-    required = {"advance_clearing", "bank"} if is_advance else {"salary_expense", "employer_shi_expense", "employee_shi_payable", "employer_shi_payable", "pit_payable", "net_pay_payable"}
-    if not required.issubset(roles): raise HTTPException(status_code=422, detail={"code": "payroll_posting_accounts_incomplete", "missing": sorted(required - set(roles))})
-    accounts = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False), ERPAccount.currency == "MNT", ERPAccount.id.in_(list(roles.values()))))).scalars().all()
-    if len(accounts) != len(set(roles.values())): raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_invalid"})
-    expected_purposes = {
-        "salary_expense": "salary_expense", "employer_shi_expense": "employer_shi_expense",
-        "employee_shi_payable": "employee_shi_payable", "employer_shi_payable": "employer_shi_payable",
-        "pit_payable": "pit_payable", "net_pay_payable": "net_pay_payable", "advance_clearing": "advance_clearing", "bank": "bank",
-    }
-    account_by_id = {row.id: row for row in accounts}
-    for role, purpose in expected_purposes.items():
-        if role in roles and account_by_id[roles[role]].purpose not in {purpose, "general"}:
-            raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_purpose_invalid", "role": role, "account_id": roles[role], "expected": purpose})
     frozen_accounting = (run.config_snapshot or {}).get("accounting_snapshot")
     if frozen_accounting:
         if frozen_accounting.get("posting_profile_id") != posting.id or frozen_accounting.get("account_roles") != roles:
@@ -1196,76 +1313,13 @@ async def post_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> ER
     posting_date = run.posting_date or run.tax_point_date or run.period_end
     document = ERPDocument(organization_id=actor.organization_id, document_type="payroll_run", number=run.run_number, status="submitted", currency="MNT", posting_date=posting_date, net_total=run.total_net if is_advance else run.total_gross, tax_total=Decimal("0") if is_advance else run.total_employee_shi + run.total_pit + run.total_employer_shi, grand_total=run.total_net if is_advance else run.total_gross + run.total_employer_shi, outstanding_amount=Decimal("0") if is_advance else run.total_net, payload={"payroll_run_id": run.id, "run_type": run.run_type, "cost_center_id": run.cost_center_id}, custom={})
     db.add(document); await db.flush()
+    posting_tuples = [(line["account_id"], line["debit"], line["credit"], line["memo"], line["cost_center_id"]) for line in lines]
+    await validate_posting_gate(db, actor.organization_id, posting_date, posting_tuples, currency="MNT")
+    db.add_all([ERPGeneralLedgerEntry(organization_id=actor.organization_id, document_id=document.id,
+        payroll_run_id=run.id, payroll_role=line["role"], account_id=line["account_id"],
+        cost_center_id=line["cost_center_id"], posting_date=posting_date, debit=line["debit"],
+        credit=line["credit"], memo=line["memo"]) for line in lines])
     payslips = (await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all()
-    total_advance = sum((Decimal(str(row.advance_offset or 0)) for row in payslips), Decimal("0"))
-    total_other_deductions = sum((Decimal(str(row.gross or 0)) - Decimal(str(row.employee_shi or 0)) - Decimal(str(row.pit or 0)) - Decimal(str(row.net_pay or 0)) - Decimal(str(row.advance_offset or 0)) for row in payslips), Decimal("0"))
-    line_items = (await db.execute(select(PayslipLineItem).where(PayslipLineItem.payslip_id.in_([row.id for row in payslips]), PayslipLineItem.component_kind == "earning", PayslipLineItem.payer == "employee"))).scalars().all()
-    cost_center_ids = {item.cost_center_id for item in line_items if item.cost_center_id is not None}
-    if cost_center_ids:
-        active_cost_centers = set((await db.execute(select(ERPCostCenter.id).where(ERPCostCenter.organization_id == actor.organization_id, ERPCostCenter.is_active.is_(True), ERPCostCenter.id.in_(cost_center_ids)))).scalars().all())
-        if active_cost_centers != cost_center_ids:
-            raise HTTPException(status_code=422, detail={"code": "payroll_component_cost_center_invalid", "cost_center_ids": sorted(cost_center_ids - active_cost_centers)})
-    component_account_ids = {item.account_id for item in line_items if item.account_id}
-    if component_account_ids - {row.id for row in accounts}:
-        extra_accounts = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False), ERPAccount.currency == "MNT", ERPAccount.id.in_(list(component_account_ids))))).scalars().all()
-        accounts.extend(extra_accounts)
-    active_account_ids = {row.id for row in accounts}
-    salary_split: dict[tuple[int, int | None], Decimal] = {}
-    if not is_advance:
-        for item in line_items:
-            account_id = item.account_id or roles["salary_expense"]
-            if item.account_id and item.account_id not in active_account_ids:
-                raise HTTPException(status_code=422, detail={"code": "payroll_component_account_invalid", "account_id": item.account_id})
-            key = (account_id, item.cost_center_id or run.cost_center_id)
-            salary_split[key] = salary_split.get(key, Decimal("0")) + Decimal(str(item.amount))
-        if not salary_split:
-            salary_split[(roles["salary_expense"], None)] = Decimal(str(run.total_gross))
-    lines: list[tuple[int, Decimal, Decimal, str, int | None]] = []
-
-    def entry(account_id: int, amount: Decimal, memo: str, *, debit_nature: bool, cost_center_id: int | None = None) -> None:
-        amount = Decimal(str(amount or 0))
-        if not amount:
-            return
-        debit, credit = (amount, Decimal("0")) if debit_nature and amount > 0 else (Decimal("0"), -amount) if debit_nature else (Decimal("0"), amount) if amount > 0 else (-amount, Decimal("0"))
-        lines.append((account_id, debit, credit, memo, cost_center_id))
-
-    if is_advance:
-        # The advance run records and pays the employee's cash entitlement
-        # through clearing.  It deliberately has no SHI/PIT or salary-expense
-        # posting; the final run posts the full month's gross.
-        entry(roles["advance_clearing"], run.total_net, "Employee advance clearing", debit_nature=True)
-        entry(roles["bank"], run.total_net, "Advance bank payment", debit_nature=False)
-    else:
-        for (account_id, cost_center_id), amount in salary_split.items():
-            entry(account_id, amount, "Payroll gross salary expense", debit_nature=True, cost_center_id=cost_center_id)
-        entry(roles["employer_shi_expense"], run.total_employer_shi, "Employer SHI expense", debit_nature=True, cost_center_id=run.cost_center_id)
-        fund_totals: dict[str, Decimal] = {}
-        for payslip in payslips:
-            for fund, amount in ((payslip.calculation_trace or {}).get("shi", {}).get("by_fund", {}) or {}).items():
-                fund_totals[fund] = fund_totals.get(fund, Decimal("0")) + Decimal(str(amount))
-        employee_funds = {fund: amount for fund, amount in fund_totals.items() if fund.startswith("employee:")}
-        employer_funds = {fund: amount for fund, amount in fund_totals.items() if fund.startswith("employer:")}
-        if employee_funds:
-            for fund, amount in employee_funds.items():
-                entry(roles["employee_shi_payable"], amount, f"Employee SHI payable ({fund.split(':', 1)[1]})", debit_nature=False)
-        else:
-            entry(roles["employee_shi_payable"], run.total_employee_shi, "Employee SHI payable", debit_nature=False)
-        if employer_funds:
-            for fund, amount in employer_funds.items():
-                entry(roles["employer_shi_payable"], amount, f"Employer SHI payable ({fund.split(':', 1)[1]})", debit_nature=False)
-        else:
-            entry(roles["employer_shi_payable"], run.total_employer_shi, "Employer SHI payable", debit_nature=False)
-        entry(roles["pit_payable"], run.total_pit, "PIT payable", debit_nature=False)
-        entry(roles["net_pay_payable"], run.total_net + total_advance, "Net salary payable", debit_nature=False)
-        if total_other_deductions:
-            if "other_deductions_payable" not in roles: raise HTTPException(status_code=422, detail={"code": "payroll_other_deduction_account_missing"})
-            entry(roles["other_deductions_payable"], total_other_deductions, "Other employee deductions payable", debit_nature=False)
-        if total_advance:
-            if "advance_clearing" not in roles: raise HTTPException(status_code=422, detail={"code": "payroll_advance_clearing_account_missing"})
-            entry(roles["net_pay_payable"], total_advance, "Advance offset against net salary payable", debit_nature=True)
-            entry(roles["advance_clearing"], total_advance, "Employee advance clearing", debit_nature=False)
-    await validate_posting_gate(db, actor.organization_id, posting_date, lines, currency="MNT")
-    db.add_all([ERPGeneralLedgerEntry(organization_id=actor.organization_id, document_id=document.id, account_id=account_id, cost_center_id=cost_center_id, posting_date=posting_date, debit=debit, credit=credit, memo=memo) for account_id, debit, credit, memo, cost_center_id in lines])
     for payslip in payslips:
         if source_run is not None and source_run.run_type == "advance" and Decimal(str(payslip.net_pay or 0)) < 0:
             source_advances = (await db.execute(select(PayrollAdvance).where(
@@ -1339,24 +1393,13 @@ async def posting_preview(db: AsyncSession, actor: ActorContext, run: PayrollRun
     if not posting:
         raise HTTPException(status_code=422, detail={"code": "payroll_posting_profile_missing"})
     roles = posting.account_roles or {}
-    required = {"salary_expense", "employer_shi_expense", "employee_shi_payable", "employer_shi_payable", "pit_payable", "net_pay_payable"}
-    missing = sorted(required - set(roles))
-    if missing:
-        raise HTTPException(status_code=422, detail={"code": "payroll_posting_accounts_incomplete", "missing": missing})
-    slips = list((await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all())
-    total_other = sum((Decimal(str(row.gross or 0)) - Decimal(str(row.employee_shi or 0)) - Decimal(str(row.pit or 0)) - Decimal(str(row.net_pay or 0)) - Decimal(str(row.advance_offset or 0)) for row in slips), Decimal("0"))
-    lines = [
-        {"role": "salary_expense", "account_id": roles["salary_expense"], "debit": str(run.total_gross), "credit": "0", "memo": "Salary expense"},
-        {"role": "employer_shi_expense", "account_id": roles["employer_shi_expense"], "debit": str(run.total_employer_shi), "credit": "0", "memo": "Employer SHI expense"},
-        {"role": "employee_shi_payable", "account_id": roles["employee_shi_payable"], "debit": "0", "credit": str(run.total_employee_shi), "memo": "Employee SHI payable"},
-        {"role": "employer_shi_payable", "account_id": roles["employer_shi_payable"], "debit": "0", "credit": str(run.total_employer_shi), "memo": "Employer SHI payable"},
-        {"role": "pit_payable", "account_id": roles["pit_payable"], "debit": "0", "credit": str(run.total_pit), "memo": "PIT payable"},
-        {"role": "net_pay_payable", "account_id": roles["net_pay_payable"], "debit": "0", "credit": str(run.total_net), "memo": "Net salary payable"},
-    ]
-    if total_other and "other_deductions_payable" in roles:
-        lines.append({"role": "other_deductions_payable", "account_id": roles["other_deductions_payable"], "debit": "0", "credit": str(total_other), "memo": "Other deductions payable"})
-    debit = sum((Decimal(item["debit"]) for item in lines), Decimal("0")); credit = sum((Decimal(item["credit"]) for item in lines), Decimal("0"))
-    return {"run_id": run.id, "currency": "MNT", "lines": lines, "total_debit": str(debit), "total_credit": str(credit), "balanced": debit == credit, "posting_profile_id": posting.id}
+    built = await build_payroll_gl_lines(db, actor.organization_id, run, roles)
+    debit = sum((item["debit"] for item in built), Decimal("0"))
+    credit = sum((item["credit"] for item in built), Decimal("0"))
+    return {"run_id": run.id, "currency": "MNT", "lines": [{**item, "debit": str(item["debit"]), "credit": str(item["credit"])} for item in built],
+        "total_debit": str(debit), "total_credit": str(credit), "balanced": debit == credit,
+        "required_roles": sorted({item["role"] for item in built if item["role"] in roles}),
+        "posting_profile_id": posting.id}
 
 
 def canonical_payout_rows(run: PayrollRun, payslips: list[Payslip], accounts: dict[int, EmployeeBankAccount], employees: dict[int, Employee]) -> list[dict[str, Any]]:
@@ -1386,6 +1429,13 @@ async def create_payment_batch(db: AsyncSession, actor: ActorContext, run: Payro
     ))).scalars().all()
     if len(accounts) != 2:
         raise HTTPException(status_code=422, detail={"code": "payroll_payment_account_invalid"})
+    required_payment_tags = {(payment_account_id, "bank"), (payable_account_id, "net_pay_payable")}
+    available_payment_tags = set((await db.execute(select(PayrollAccountTag.account_id, PayrollAccountTag.purpose).where(
+        PayrollAccountTag.organization_id == actor.organization_id,
+        PayrollAccountTag.account_id.in_([payment_account_id, payable_account_id]),
+    ))).all())
+    if not required_payment_tags.issubset(available_payment_tags):
+        raise HTTPException(status_code=422, detail={"code": "payroll_payment_account_tag_invalid"})
     await _assert_payment_date(db, actor.organization_id, data.posting_date or run.posting_date or run.tax_point_date)
     slips = {row.id: row for row in (await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all()}
     requested = list(data.allocations or [])
@@ -1613,6 +1663,7 @@ async def reverse_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) ->
         tax_point_date=run.tax_point_date,
         status="approved", workflow_version="unified_v2", document_status="draft",
         reversal_of_run_id=run.id,
+        payroll_period_id=run.payroll_period_id,
         statutory_profile_id=run.statutory_profile_id,
         input_snapshot={"reversal_of_run_id": run.id, "source_snapshot_checksum": run.snapshot_checksum},
         config_snapshot={**(run.config_snapshot or {}), "reversal_of_run_id": run.id},

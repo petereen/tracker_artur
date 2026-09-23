@@ -26,6 +26,7 @@ from app.models.models import (
     ERPAccount,
     ERPDocument,
     ERPGeneralLedgerEntry,
+    PayrollAccountTag,
     PayrollBankEntry,
     PayrollPeriod,
     PayrollPostingProfile,
@@ -246,13 +247,13 @@ async def create_payroll_entry(db: AsyncSession, actor: ActorContext, data: Payr
         profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.organization_id == actor.organization_id, StatutoryConfigProfile.status.in_(("published", "active")), StatutoryConfigProfile.effective_from <= data.tax_point_date, (StatutoryConfigProfile.effective_to.is_(None) | (StatutoryConfigProfile.effective_to >= data.tax_point_date))).order_by(StatutoryConfigProfile.effective_from.desc(), StatutoryConfigProfile.version.desc()).limit(1))
     if not profile or profile.organization_id != actor.organization_id:
         raise HTTPException(status_code=409, detail={"code": "payroll_no_active_statutory_profile"})
-    period = None
-    if data.payroll_period_id:
-        period = await db.scalar(select(PayrollPeriod).where(PayrollPeriod.id == data.payroll_period_id, PayrollPeriod.organization_id == actor.organization_id, PayrollPeriod.status == "open"))
-        if not period:
-            raise HTTPException(status_code=409, detail={"code": "payroll_period_not_open"})
-        if period.start_date > data.period_start or period.end_date < data.period_end:
-            raise HTTPException(status_code=422, detail={"code": "payroll_entry_outside_period"})
+    period = await db.scalar(select(PayrollPeriod).where(PayrollPeriod.id == data.payroll_period_id, PayrollPeriod.organization_id == actor.organization_id, PayrollPeriod.status == "open"))
+    if not period:
+        raise HTTPException(status_code=409, detail={"code": "payroll_period_not_open"})
+    if period.start_date > data.period_start or period.end_date < data.period_end:
+        raise HTTPException(status_code=422, detail={"code": "payroll_entry_outside_period"})
+    if period.statutory_profile_id != profile.id:
+        raise HTTPException(status_code=422, detail={"code": "payroll_period_profile_mismatch"})
     snapshot = {"validate_attendance": data.validate_attendance, "attendance_policy": {"basis": "confirmed_hr_attendance_and_approved_leave", "missing_attendance": "error" if data.validate_attendance else "full_day", "timezone": "Asia/Ulaanbaatar"}, "employee_ids": list(dict.fromkeys(data.employee_ids)), "manual_overrides": data.input_overrides, "overrides": data.input_overrides, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": [], "approved_time_entries": [], "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
     config = {"profile_id": profile.id, "profile_version": profile.version, "profile_checksum": profile.checksum, "source_references": profile.source_references, "currency": profile.currency, "pit_withholding_method": profile.pit_withholding_method, "rounding_policy": profile.rounding_policy, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier), "leave_policy": profile.leave_policy}
     run = PayrollRun(organization_id=actor.organization_id, run_number=_run_number("HR-PRUN", data.tax_point_date.year), run_type=data.run_type, period_start=data.period_start, period_end=data.period_end, settlement_key=data.period_end.strftime("%Y-%m"), tax_point_date=data.tax_point_date, status="draft", workflow_version="frappe_v1", document_status="draft", payroll_frequency=data.payroll_frequency, posting_date=data.posting_date, employee_filter=data.employee_filter, salary_slips_created=False, salary_slips_submitted=False, payment_status="unpaid", payment_account_id=data.payment_account_id, cost_center_id=data.cost_center_id, payroll_period_id=period.id if period else None, statutory_profile_id=profile.id, input_snapshot=snapshot, config_snapshot=config, snapshot_checksum="", created_by_account_id=actor.account_id)
@@ -408,6 +409,11 @@ async def make_bank_entry(db: AsyncSession, actor: ActorContext, run: PayrollRun
     account = await db.scalar(select(ERPAccount).where(ERPAccount.id == account_id, ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False)))
     if not account:
         raise HTTPException(status_code=422, detail={"code": "payroll_payment_account_invalid"})
+    if account.currency != "MNT" or account.classification != "asset" or not await db.scalar(select(PayrollAccountTag.id).where(
+        PayrollAccountTag.organization_id == actor.organization_id, PayrollAccountTag.account_id == account.id,
+        PayrollAccountTag.purpose == "bank",
+    )):
+        raise HTTPException(status_code=422, detail={"code": "payroll_payment_account_tag_invalid"})
     run.payment_account_id = account_id
     row = PayrollBankEntry(organization_id=actor.organization_id, number=_run_number("HR-BANK", run.tax_point_date.year), payroll_run_id=run.id, payment_account_id=account_id, posting_date=data.posting_date or run.posting_date or run.period_end, amount=run.total_net, currency="MNT", status="draft", created_by_account_id=actor.account_id)
     db.add(row)
@@ -434,6 +440,12 @@ async def submit_bank_entry(db: AsyncSession, actor: ActorContext, row: PayrollB
     account = await db.scalar(select(ERPAccount).where(ERPAccount.id == row.payment_account_id, ERPAccount.organization_id == actor.organization_id, ERPAccount.is_active.is_(True)))
     if not payable or not account:
         raise HTTPException(status_code=422, detail={"code": "payroll_payment_account_invalid"})
+    tag_pairs = set((await db.execute(select(PayrollAccountTag.account_id, PayrollAccountTag.purpose).where(
+        PayrollAccountTag.organization_id == actor.organization_id,
+        PayrollAccountTag.account_id.in_([payable.id, account.id]),
+    ))).all())
+    if (payable.id, "net_pay_payable") not in tag_pairs or (account.id, "bank") not in tag_pairs:
+        raise HTTPException(status_code=422, detail={"code": "payroll_payment_account_tag_invalid"})
     document = ERPDocument(organization_id=actor.organization_id, document_type="payroll_bank_entry", number=row.number, status="submitted", currency=row.currency, posting_date=row.posting_date, net_total=row.amount, grand_total=row.amount, outstanding_amount=Decimal("0"), source_document_id=run.erp_document_id, payload={"payroll_run_id": run.id, "bank_entry_id": row.id}, custom={})
     db.add(document)
     await db.flush()

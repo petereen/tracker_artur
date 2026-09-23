@@ -19,7 +19,7 @@ export function LoginPage() {
     if (!native) return
     return subscribeToNativeTelegramAuth(setTelegramState)
   }, [native])
-
+2
   useEffect(() => {
     if (native) return
     const code = new URLSearchParams(window.location.search).get('telegram_auth_error')

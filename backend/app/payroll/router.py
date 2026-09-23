@@ -9,14 +9,14 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor
 from app.erp.service import require_capability
 from app.models.models import (
-    AdditionalSalary, Employee, EmployeeBankAccount, EmployeePayrollProfile, EmployeeBenefitApplication, EmployeeBenefitClaim, ERPAccount,
+    AdditionalSalary, Employee, EmployeeBankAccount, EmployeePayrollProfile, EmployeeBenefitApplication, EmployeeBenefitClaim, ERPAccount, ERPGeneralLedgerEntry, ERPDocument, PayrollAccountTag,
     EmployeeTaxExemptionDeclaration, EmployeeTaxExemptionProof, PayrollBankExportProfile,
     PayrollBankEntry, PayrollExportArtifact, PayrollPeriod, PayrollPostingProfile, PayrollRun, PayrollSalaryComponentMaster, Payslip, PayslipLineItem, PayslipStatutoryLine, IdempotencyRecord,
     PayrollPaymentBatch, PayrollPaymentAllocation, PayrollStatementImport, PayrollStatementLine,
@@ -30,7 +30,7 @@ from app.services.user_notifications import create_notifications
 from .exports import nd7_summary, nd7a_summary, nd7b_rows, nd8_rows, render_bank_export, render_protected_payslip, render_report_pdf, tt11_summary
 from .schemas import (
     BankAccountInput, BankExportProfileInput, BankTemplateSampleInput, BankExportRequest, CalculateRunInput,
-    EmployeePayrollInput, PayrollRunInput, PayrollCycleInputCorrection, SHIRateInput, PITBracketInput, ReliefTierInput, PostingProfileInput,
+    EmployeePayrollInput, PayrollRunInput, PayrollCycleInputCorrection, SHIRateInput, PITBracketInput, ReliefTierInput, PostingProfileInput, PayrollAccountTagsInput,
     PublishProfileInput, SalaryStructureInput, StatutoryProfileInput,
     BenefitApplicationInput, BenefitApplicationReviewInput, BenefitClaimInput,
     PayslipPublicationInput, PayrollApprovalInput, ProtectedPayslipInput, ReconciliationResolutionInput,
@@ -73,6 +73,7 @@ PAYROLL_ACCOUNT_ROLE_REQUIREMENTS = {
     "employee_shi_payable": ("employee_shi_payable", "liability"), "employer_shi_payable": ("employer_shi_payable", "liability"),
     "pit_payable": ("pit_payable", "liability"), "net_pay_payable": ("net_pay_payable", "liability"),
     "bank": ("bank", "asset"), "advance_clearing": ("advance_clearing", "asset"),
+    "other_deductions_payable": ("other_deductions_payable", "liability"),
 }
 
 
@@ -80,8 +81,8 @@ def payroll_role_account_is_valid(role: str, account: ERPAccount | None) -> bool
     requirement = PAYROLL_ACCOUNT_ROLE_REQUIREMENTS.get(role)
     if not requirement or not account:
         return False
-    purpose, classification = requirement
-    return bool(account.is_active and not account.is_group and account.currency == "MNT" and account.purpose in {purpose, "general"} and account.classification == classification)
+    _purpose, classification = requirement
+    return bool(account.is_active and not account.is_group and account.currency == "MNT" and account.classification == classification)
 
 
 @router.get("/capabilities")
@@ -1000,25 +1001,71 @@ async def get_posting_profile(db: AsyncSession = Depends(get_db), actor: ActorCo
     return {"id": row.id, "code": row.code, "account_roles": row.account_roles, "is_active": row.is_active}
 
 
+@router.get("/account-tags")
+async def list_payroll_account_tags(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    accounts = (await db.execute(select(ERPAccount).where(
+        ERPAccount.organization_id == actor.organization_id,
+    ).order_by(ERPAccount.code))).scalars().all()
+    tag_rows = (await db.execute(select(PayrollAccountTag).where(
+        PayrollAccountTag.organization_id == actor.organization_id,
+    ))).scalars().all()
+    tags: dict[int, list[str]] = {}
+    for tag in tag_rows:
+        tags.setdefault(tag.account_id, []).append(tag.purpose)
+    return [{"id": account.id, "code": account.code, "name": account.name,
+        "classification": account.classification, "currency": account.currency,
+        "is_group": account.is_group, "is_active": account.is_active,
+        "purposes": sorted(tags.get(account.id, []))} for account in accounts]
+
+
+@router.put("/account-tags/{account_id}")
+async def save_payroll_account_tags(account_id: int, data: PayrollAccountTagsInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "administer")
+    invalid = sorted(set(data.purposes) - set(PAYROLL_ACCOUNT_ROLE_REQUIREMENTS))
+    if invalid:
+        raise HTTPException(status_code=422, detail={"code": "payroll_account_purpose_invalid", "purposes": invalid})
+    account = await db.scalar(select(ERPAccount).where(
+        ERPAccount.id == account_id, ERPAccount.organization_id == actor.organization_id,
+    ).with_for_update())
+    if not account:
+        raise HTTPException(status_code=404, detail={"code": "erp_account_not_found"})
+    await db.execute(delete(PayrollAccountTag).where(
+        PayrollAccountTag.organization_id == actor.organization_id,
+        PayrollAccountTag.account_id == account.id,
+    ))
+    db.add_all(PayrollAccountTag(organization_id=actor.organization_id, account_id=account.id, purpose=purpose)
+        for purpose in data.purposes)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="erp_account", aggregate_id=account.id,
+        operation="payroll_purposes_updated", after={"purposes": sorted(data.purposes)})
+    await db.commit()
+    return {"account_id": account.id, "purposes": sorted(data.purposes)}
+
+
 @router.put("/posting-profiles/default")
 async def save_posting_profile(data: PostingProfileInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "administer")
     invalid_role_keys = set(data.account_roles) - set(PAYROLL_ACCOUNT_ROLE_REQUIREMENTS)
     if invalid_role_keys:
         raise HTTPException(status_code=422, detail={"code": "payroll_posting_role_invalid", "roles": sorted(invalid_role_keys)})
-    account_ids = set(data.account_roles.values())
+    roles = {role: int(account_id) for role, account_id in data.account_roles.items() if int(account_id) > 0}
+    account_ids = set(roles.values())
     accounts = (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.id.in_(account_ids or {-1})))).scalars().all()
     by_id = {account.id: account for account in accounts}
+    tagged = set((await db.execute(select(PayrollAccountTag.account_id, PayrollAccountTag.purpose).where(
+        PayrollAccountTag.organization_id == actor.organization_id,
+        PayrollAccountTag.account_id.in_(account_ids or {-1}),
+    ))).all())
     invalid_roles = []
-    for role, account_id in data.account_roles.items():
+    for role, account_id in roles.items():
         account = by_id.get(account_id)
-        if not payroll_role_account_is_valid(role, account):
+        if not payroll_role_account_is_valid(role, account) or (account_id, role) not in tagged:
             invalid_roles.append(role)
     if invalid_roles:
         raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_invalid", "roles": sorted(invalid_roles)})
     row = await db.scalar(select(PayrollPostingProfile).where(PayrollPostingProfile.organization_id == actor.organization_id, PayrollPostingProfile.code == "default"))
-    if row: row.account_roles = data.account_roles; row.is_active = True
-    else: row = PayrollPostingProfile(organization_id=actor.organization_id, code="default", account_roles=data.account_roles); db.add(row)
+    if row: row.account_roles = roles; row.is_active = True
+    else: row = PayrollPostingProfile(organization_id=actor.organization_id, code="default", account_roles=roles); db.add(row)
     await db.flush()
     await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_posting_profile", aggregate_id=row.id, operation="upserted", after={"code": row.code, "account_role_keys": sorted(row.account_roles)})
     await db.commit(); await db.refresh(row); return {"id": row.id, "code": row.code, "account_roles": row.account_roles, "is_active": row.is_active}
@@ -1116,6 +1163,54 @@ async def list_payroll_periods(db: AsyncSession = Depends(get_db), actor: ActorC
     await payroll_capability(db, actor, "view")
     rows = (await db.execute(select(PayrollPeriod).where(PayrollPeriod.organization_id == actor.organization_id).order_by(PayrollPeriod.start_date.desc()))).scalars().all()
     return [period_out(row) for row in rows]
+
+
+async def payroll_period_gl_totals(db: AsyncSession, organization_id: int, period_id: int) -> dict[str, Any]:
+    rows = (await db.execute(select(
+        ERPGeneralLedgerEntry.payroll_role, ERPGeneralLedgerEntry.debit,
+        ERPGeneralLedgerEntry.credit,
+    ).join(PayrollRun, PayrollRun.id == ERPGeneralLedgerEntry.payroll_run_id).join(
+        ERPDocument, ERPDocument.id == ERPGeneralLedgerEntry.document_id,
+    ).where(
+        PayrollRun.organization_id == organization_id,
+        PayrollRun.payroll_period_id == period_id,
+        ERPGeneralLedgerEntry.organization_id == organization_id,
+        ERPDocument.status.in_(("submitted", "approved")),
+        PayrollRun.status.in_(("posted", "payment_prepared", "partially_settled", "settled", "payslips_released", "paid", "reversed")),
+    ))).all()
+    totals = {role: Decimal("0") for role in PAYROLL_ACCOUNT_ROLE_REQUIREMENTS}
+    unclassified = 0
+    for role, debit, credit in rows:
+        if role not in PAYROLL_ACCOUNT_ROLE_REQUIREMENTS:
+            unclassified += 1
+            continue
+        debit_value, credit_value = Decimal(str(debit or 0)), Decimal(str(credit or 0))
+        if role == "salary_expense" or role == "employer_shi_expense":
+            totals[role] += debit_value - credit_value
+        else:
+            totals[role] += credit_value - debit_value
+    return {
+        "period_id": period_id,
+        "total_salary_expense": str(totals["salary_expense"]),
+        "total_employee_ndsh": str(totals["employee_shi_payable"]),
+        "total_employer_ndsh": str(totals["employer_shi_payable"]),
+        "total_employer_ndsh_expense": str(totals["employer_shi_expense"]),
+        "total_pit_withheld": str(totals["pit_payable"]),
+        "unclassified_lines": unclassified,
+        "classified": unclassified == 0,
+        "source_line_count": len(rows),
+    }
+
+
+@router.get("/payroll-periods/{period_id}/gl-totals")
+async def get_payroll_period_gl_totals(period_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    period = await db.scalar(select(PayrollPeriod).where(
+        PayrollPeriod.id == period_id, PayrollPeriod.organization_id == actor.organization_id,
+    ))
+    if not period:
+        raise HTTPException(status_code=404, detail={"code": "payroll_period_not_found"})
+    return {"period": period_out(period), **await payroll_period_gl_totals(db, actor.organization_id, period.id)}
 
 
 @router.post("/payroll-periods", status_code=status.HTTP_201_CREATED)
@@ -2135,14 +2230,26 @@ async def download_payroll_export(artifact_id: int, db: AsyncSession = Depends(g
 
 
 @router.get("/runs/{run_id}/reports/{report_kind}")
-async def payroll_report(run_id: int, report_kind: str, report_format: Literal["json", "csv", "xlsx", "pdf"] = Query(default="json", alias="format"), tt11_period: Literal["run", "quarter", "annual"] = Query(default="run", alias="period"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def payroll_report(run_id: int, report_kind: str, report_format: Literal["json", "csv", "xlsx", "pdf"] = Query(default="json", alias="format"), tt11_period: Literal["run", "quarter", "annual"] = Query(default="run", alias="period"), period_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "export")
     run = await db.scalar(select(PayrollRun).where(PayrollRun.id == run_id, PayrollRun.organization_id == actor.organization_id))
     if not run: raise HTTPException(status_code=404, detail="Payroll run not found")
     if run.status not in {"approved", "posted", "payment_prepared", "partially_settled", "settled", "payslips_released", "paid"}:
         raise HTTPException(status_code=409, detail={"code": "payroll_run_not_reportable", "status": run.status})
     report_runs = [run]
-    if report_kind == "tt11" and tt11_period != "run":
+    period = None
+    if period_id is not None:
+        period = await db.scalar(select(PayrollPeriod).where(PayrollPeriod.id == period_id, PayrollPeriod.organization_id == actor.organization_id))
+        if not period:
+            raise HTTPException(status_code=404, detail={"code": "payroll_period_not_found"})
+        if run.payroll_period_id != period.id:
+            raise HTTPException(status_code=422, detail={"code": "payroll_run_period_mismatch"})
+        report_runs = list((await db.execute(select(PayrollRun).where(
+            PayrollRun.organization_id == actor.organization_id,
+            PayrollRun.payroll_period_id == period.id,
+            PayrollRun.status.in_(("approved", "posted", "payment_prepared", "partially_settled", "settled", "payslips_released", "paid", "reversed")),
+        ).order_by(PayrollRun.tax_point_date, PayrollRun.id))).scalars().all())
+    elif report_kind == "tt11" and tt11_period != "run":
         run_query = select(PayrollRun).where(
             PayrollRun.organization_id == actor.organization_id,
             PayrollRun.status.in_(("approved", "posted", "payment_prepared", "partially_settled", "settled", "payslips_released", "paid")),
@@ -2183,6 +2290,30 @@ async def payroll_report(run_id: int, report_kind: str, report_format: Literal["
         export_rows = result["rows"]
     else:
         raise HTTPException(status_code=404, detail="Unknown payroll report")
+    period = period or await db.scalar(select(PayrollPeriod).where(
+        PayrollPeriod.id == run.payroll_period_id, PayrollPeriod.organization_id == actor.organization_id,
+    ))
+    if period:
+        gl_totals = await payroll_period_gl_totals(db, actor.organization_id, period.id)
+        payslip_totals = {
+            "salary_expense": sum((Decimal(str(row["gross"])) for row in payload), Decimal("0")),
+            "employee_ndsh": sum((Decimal(str(row["employee_shi"])) for row in payload), Decimal("0")),
+            "employer_ndsh": sum((Decimal(str(row["employer_shi"])) for row in payload), Decimal("0")),
+            "pit_withheld": sum((Decimal(str(row["pit"])) for row in payload), Decimal("0")),
+        }
+        differences = {
+            "salary_expense": Decimal(gl_totals["total_salary_expense"]) - payslip_totals["salary_expense"],
+            "employee_ndsh": Decimal(gl_totals["total_employee_ndsh"]) - payslip_totals["employee_ndsh"],
+            "employer_ndsh": Decimal(gl_totals["total_employer_ndsh"]) - payslip_totals["employer_ndsh"],
+            "pit_withheld": Decimal(gl_totals["total_pit_withheld"]) - payslip_totals["pit_withheld"],
+        }
+        result["gl_totals"] = gl_totals
+        result["gl_reconciliation"] = {
+            "period_id": period.id,
+            "payslip_totals": {key: str(value) for key, value in payslip_totals.items()},
+            "differences": {key: str(value) for key, value in differences.items()},
+            "matched": gl_totals["classified"] and all(value == 0 for value in differences.values()),
+        }
     if report_format == "json":
         return result
     template = await db.scalar(select(PayrollReportTemplate).where(PayrollReportTemplate.organization_id == actor.organization_id, PayrollReportTemplate.kind == report_kind, PayrollReportTemplate.status == "published").order_by(PayrollReportTemplate.version.desc()).limit(1))

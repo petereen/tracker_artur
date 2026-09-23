@@ -25,7 +25,10 @@ def test_payroll_sequence_routes_are_exposed_through_the_dedicated_module():
 
 def test_variable_pay_inputs_are_typed_and_frozen_with_the_run_contract():
     variable = VariablePayInput(employee_id=7, code="sales_bonus", label="Sales bonus", amount="125000", component_kind="earning", source="bonus")
-    run = PayrollRunInput(run_type="single", period_start="2026-08-01", period_end="2026-08-31", tax_point_date="2026-08-31", variable_inputs=[variable])
+    run = PayrollRunInput(run_type="single", payroll_period_id=12, period_start="2026-08-01", period_end="2026-08-31", tax_point_date="2026-08-31", variable_inputs=[variable])
     assert run.variable_inputs[0].amount.as_tuple().exponent == 0
+    assert run.payroll_period_id == 12
+    with pytest.raises(ValidationError):
+        PayrollRunInput(run_type="single", period_start="2026-08-01", period_end="2026-08-31", tax_point_date="2026-08-31")
     with pytest.raises(ValidationError):
         VariablePayInput(employee_id=7, code="Bad code", label="Invalid", amount="0", component_kind="earning")

@@ -2405,12 +2405,17 @@ class ERPDocumentLine(Base):
 
 class ERPGeneralLedgerEntry(Base):
     __tablename__ = "erp_general_ledger_entries"
-    __table_args__ = (Index("ix_erp_gl_org_account_date", "organization_id", "account_id", "posting_date"),)
+    __table_args__ = (
+        Index("ix_erp_gl_org_account_date", "organization_id", "account_id", "posting_date"),
+        Index("ix_erp_gl_org_payroll_run_role", "organization_id", "payroll_run_id", "payroll_role"),
+    )
 
     id = Column(Integer, primary_key=True)
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     document_id = Column(Integer, ForeignKey("erp_documents.id", ondelete="RESTRICT"), nullable=False)
     account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="RESTRICT"), nullable=False)
+    payroll_run_id = Column(Integer, ForeignKey("payroll_runs.id", ondelete="RESTRICT"))
+    payroll_role = Column(String(48))
     cost_center_id = Column(Integer, ForeignKey("erp_cost_centers.id", ondelete="SET NULL"))
     party_id = Column(Integer, ForeignKey("erp_parties.id", ondelete="SET NULL"))
     posting_date = Column(Date, nullable=False)
@@ -2418,6 +2423,17 @@ class ERPGeneralLedgerEntry(Base):
     credit = Column(Numeric(18, 4), nullable=False, server_default="0", default=0)
     memo = Column(Text)
     reversal_of_id = Column(Integer, ForeignKey("erp_general_ledger_entries.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PayrollAccountTag(Base):
+    __tablename__ = "payroll_account_tags"
+    __table_args__ = (UniqueConstraint("organization_id", "account_id", "purpose", name="uq_payroll_account_tag"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="CASCADE"), nullable=False)
+    purpose = Column(String(48), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SHIRateInput(BaseModel):
@@ -207,6 +207,17 @@ class PostingProfileInput(BaseModel):
     account_roles: dict[str, int]
 
 
+class PayrollAccountTagsInput(BaseModel):
+    purposes: list[str] = Field(default_factory=list, max_length=32)
+
+    @field_validator("purposes")
+    @classmethod
+    def unique_purposes(cls, values: list[str]) -> list[str]:
+        if len(set(values)) != len(values):
+            raise ValueError("Payroll account purposes must be unique")
+        return values
+
+
 class BankExportProfileInput(BaseModel):
     bank_code: str = Field(min_length=1, max_length=32)
     version: int = Field(default=1, ge=1)
@@ -241,6 +252,7 @@ class VariablePayInput(BaseModel):
 
 class PayrollRunInput(BaseModel):
     run_type: Literal["advance", "final", "single", "off_cycle"]
+    payroll_period_id: int = Field(gt=0)
     period_start: date
     period_end: date
     posting_date: date | None = None
@@ -431,7 +443,7 @@ class AdditionalSalaryInput(BaseModel):
 
 class PayrollEntryInput(BaseModel):
     run_type: Literal["advance", "final", "single", "off_cycle"] = "single"
-    payroll_period_id: int | None = None
+    payroll_period_id: int = Field(gt=0)
     period_start: date
     period_end: date
     posting_date: date
