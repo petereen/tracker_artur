@@ -214,6 +214,12 @@ class BankExportProfileInput(BaseModel):
     is_provisional: bool = True
 
 
+class BankTemplateSampleInput(BaseModel):
+    bank_sample_reference: str = Field(min_length=1, max_length=255)
+    sample_rows: list[dict[str, str]] = Field(min_length=1, max_length=100)
+    expected_content_base64: str = Field(min_length=1, max_length=1400000)
+
+
 class BankExportRequest(BaseModel):
     bank_code: str = Field(min_length=1, max_length=32)
     format: Literal["csv", "json", "xlsx"] | None = None

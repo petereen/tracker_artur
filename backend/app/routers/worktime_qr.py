@@ -150,6 +150,18 @@ async def _kiosk_from_cookie(cookie: str | None, db: AsyncSession) -> WorktimeQr
     return kiosk
 
 
+def _set_kiosk_cookie(response: Response, cookie_value: str) -> None:
+    response.set_cookie(
+        KIOSK_COOKIE,
+        cookie_value,
+        max_age=settings.WORKTIME_QR_KIOSK_COOKIE_DAYS * 86400,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite="strict",
+        path="/api/v1/worktime-qr",
+    )
+
+
 @router.get("/kiosks")
 async def list_kiosks(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "manager"))):
     rows = (await db.execute(select(WorktimeQrKiosk).where(WorktimeQrKiosk.organization_id == actor.organization_id).order_by(WorktimeQrKiosk.label))).scalars().all()
@@ -210,6 +222,18 @@ async def revoke_kiosk(kiosk_id: int, db: AsyncSession = Depends(get_db), actor:
     return _kiosk_out(kiosk)
 
 
+@router.delete("/kiosks/{kiosk_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_kiosk(kiosk_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "manager"))):
+    kiosk = await db.scalar(select(WorktimeQrKiosk).where(WorktimeQrKiosk.id == kiosk_id, WorktimeQrKiosk.organization_id == actor.organization_id).with_for_update())
+    if not kiosk:
+        raise HTTPException(status_code=404, detail={"code": "kiosk_not_found", "message": "Kiosk not found"})
+    if kiosk.status != "revoked":
+        raise HTTPException(status_code=409, detail={"code": "kiosk_must_be_revoked", "message": "Revoke this display before deleting it"})
+    await db.delete(kiosk)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/pair")
 async def pair_kiosk(data: PairInput, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     address = request.client.host if request.client else "unknown"
@@ -228,7 +252,7 @@ async def pair_kiosk(data: PairInput, request: Request, response: Response, db: 
     kiosk.paired_at = now
     kiosk.last_seen_at = now
     await db.commit()
-    response.set_cookie(KIOSK_COOKIE, f"{kiosk.public_id}.{credential}", max_age=settings.WORKTIME_QR_KIOSK_COOKIE_DAYS * 86400, httponly=True, secure=settings.AUTH_COOKIE_SECURE, samesite="strict", path="/api/v1/worktime-qr")
+    _set_kiosk_cookie(response, f"{kiosk.public_id}.{credential}")
     return {"status": "paired", "kiosk": _kiosk_out(kiosk)}
 
 
@@ -242,6 +266,10 @@ async def display_token(response: Response, kiosk_cookie: str | None = Cookie(de
     payload = {"v": 1, "org": kiosk.organization_id, "kiosk": kiosk.id, "location_id": kiosk.location_id, "iat": int(now.timestamp()), "exp": int((now + timedelta(seconds=ttl)).timestamp()), "nonce": _b64(secrets.token_bytes(16))}
     kiosk.last_seen_at = now
     await db.commit()
+    # Refresh the persistent screen session whenever the active display polls.
+    # This cookie is independent from employee login and is invalidated by the
+    # kiosk status/credential checks performed above.
+    _set_kiosk_cookie(response, kiosk_cookie)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     return {"token": _sign(payload), "issued_at": now, "expires_at": now + timedelta(seconds=ttl), "server_time": now, "location_id": kiosk.location_id, "display_name": kiosk.display_name}

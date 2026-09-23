@@ -1,6 +1,20 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Allow revoked Worktime QR displays to be permanently deleted from admin settings with tenant-scoped API protection (`backend/app/routers/worktime_qr.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/AdministrationSettingsPages.tsx`)
+- [x] Add the Worktime QR screen setup guide with pairing, scan testing, and troubleshooting steps (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/index.css`)
+- [x] Keep Worktime QR screens paired until admin deactivation (`backend/app/routers/worktime_qr.py`, `frontend/src/pages/WorktimeQrPage.tsx`, focused tests)
+  - [x] Renew the persistent kiosk cookie on successful QR refresh without coupling it to employee logout
+  - [x] Show pairing state immediately for revoked/replaced credentials and preserve pairing through network failures
+  - [x] Add backend cookie and frontend revoked/network state coverage
+  - [x] Run focused backend/frontend tests and frontend build
+- [ ] Implement the Payroll Setup and full-cycle unified-v2 workflow redesign (`frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/payroll`, `docs/payroll-setup-workflow.md`, frontend/backend tests); PostgreSQL staging acceptance remains
+  - [x] Reorder setup around workers, components, structures, assignments, rules, and finance; expose effective-dated worker readiness and fix links
+  - [x] Remove v2 period and duplicate tax-category dead ends; separate optional bank/report layouts, expose advance clearing, and filter account roles to valid purposes (`frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/pages/TaxBenefitsWorkspacePage.tsx`)
+  - [x] Align preflight and calculation dates, employment-window eligibility, account gates, single-worker validation, editable run scope, example-profile acknowledgement, and idempotent run/replacement creation
+  - [x] Complete ordered review with loaded reconciliation, payment submission, partial and full-run settlement coverage, worker slip release/download, Finance posting preview, reversal/retry, remaining payment batches, and report navigation
+  - [x] Add focused reconciliation, refreshed payment-detail, and partial remainder tests; pass payroll frontend tests, build, Python compile, and payroll source-contract tests (full frontend suite has one unrelated WorkspaceModeToggle translation assertion failure)
+  - [ ] Complete migrated PostgreSQL browser acceptance: balanced posting, partial/retried settlement with real references, matched statement lines, released worker slips (backend dependencies and Docker daemon unavailable locally)
 - [x] Remove redundant headers and explanatory copy from every payroll settings tab while preserving tab actions (`frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/index.css`)
 - [x] Expose the guarded delete action for payroll salary components in the component list (frontend/src/pages/PayrollSetupHub.tsx)
 - [x] Expand payroll setup view to use the full available workspace width (`frontend/src/index.css`)
