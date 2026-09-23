@@ -171,7 +171,7 @@ def component_master_out(row: PayrollSalaryComponentMaster) -> dict[str, Any]:
 
 
 async def create_component_master(db: AsyncSession, actor: ActorContext, data: SalaryComponentMasterInput) -> PayrollSalaryComponentMaster:
-    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code))
+    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.is_active.is_(True)))
     if duplicate:
         raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
     expression = data.formula if data.amount_mode != "percentage" else f"({data.percentage_basis or 'base_salary'}) * ({data.formula})"
@@ -217,7 +217,7 @@ async def update_component_master(db: AsyncSession, actor: ActorContext, row: Pa
         changed = [key for key in locked if values.get(key) != getattr(row, key)]
         if changed:
             raise HTTPException(status_code=409, detail={"code": "payroll_component_financial_fields_locked", "fields": changed, "usage": usage["references"]})
-    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.id != row.id))
+    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.is_active.is_(True), PayrollSalaryComponentMaster.id != row.id))
     if duplicate:
         raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
     expression = data.formula if data.amount_mode != "percentage" else f"({data.percentage_basis or 'base_salary'}) * ({data.formula})"

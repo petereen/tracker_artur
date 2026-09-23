@@ -1,6 +1,10 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Allow payroll salary component codes to be reused after archive, while preserving uniqueness among active components (`backend/app/payroll/service.py`, `backend/app/payroll/frappe_service.py`, `backend/app/models/models.py`, `backend/alembic/versions`)
+  - [x] Ignore archived components in duplicate-code checks (`backend/app/payroll/service.py`, `backend/app/payroll/frappe_service.py`)
+  - [x] Define active-only code uniqueness in the model (`backend/app/models/models.py`)
+  - [x] Migrate existing databases to the active-only unique index (`backend/alembic/versions`)
 - [ ] Audit and correct payroll attendance inputs, statutory rule handling, reconciliation guards, salary register, and setup UI (`backend/app/payroll`, `backend/app/models/models.py`, `backend/alembic/versions`, `frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/components/payroll/PayrollDocumentsPage.tsx`, payroll tests); 2026 profile publication requires accountant review
   - [ ] Compare live effective payroll profile and assignments with current official 2026 sources; keep any unapproved profile in draft
   - [x] Keep scheduled hours as the configured period denominator and reject a missing or mismatched PIT bracket/relief basis instead of applying monthly thresholds to YTD income (`backend/app/payroll/calculator.py`, `backend/app/payroll/service.py`, `backend/tests/test_payroll_calculator.py`)

@@ -3258,7 +3258,13 @@ class PayrollSalaryComponentMaster(Base):
 
     __tablename__ = "payroll_salary_component_masters"
     __table_args__ = (
-        UniqueConstraint("organization_id", "code", name="uq_payroll_component_master_org_code"),
+        Index(
+            "uq_payroll_component_master_org_code_active",
+            "organization_id",
+            "code",
+            unique=True,
+            postgresql_where=sa_text("is_active IS TRUE"),
+        ),
         Index("ix_payroll_component_master_org_status", "organization_id", "status"),
     )
 

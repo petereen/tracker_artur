@@ -164,7 +164,7 @@ async def create_payroll_period(db: AsyncSession, actor: ActorContext, data: Pay
 
 
 async def create_component_master(db: AsyncSession, actor: ActorContext, data: SalaryComponentMasterInput) -> PayrollSalaryComponentMaster:
-    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code))
+    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.is_active.is_(True)))
     if duplicate:
         raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
     row = PayrollSalaryComponentMaster(organization_id=actor.organization_id, created_by_account_id=actor.account_id, **data.model_dump())
@@ -178,7 +178,7 @@ async def update_component_master(db: AsyncSession, actor: ActorContext, row: Pa
         raise HTTPException(status_code=404, detail="Salary component not found")
     if row.status != "active":
         raise HTTPException(status_code=409, detail={"code": "payroll_component_master_inactive"})
-    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.id != row.id))
+    duplicate = await db.scalar(select(PayrollSalaryComponentMaster.id).where(PayrollSalaryComponentMaster.organization_id == actor.organization_id, PayrollSalaryComponentMaster.code == data.code, PayrollSalaryComponentMaster.is_active.is_(True), PayrollSalaryComponentMaster.id != row.id))
     if duplicate:
         raise HTTPException(status_code=409, detail={"code": "payroll_component_master_exists"})
     for key, value in data.model_dump().items():
