@@ -50,8 +50,13 @@ def payment_days(start: date, end: date, *, employment_start=None, employment_en
         payable += fraction
         unpaid += 1 - fraction if source != "missing" else 0
         unpaid_leave_ids.update(leave["id"] for leave in applicable if leave["type"] == "unpaid")
-        worked = (row or {}).get("minutes") or approved_work.get(day) or hours_per_day * 60
-        hours += Decimal(str(hours_per_day)) * fraction if applicable or not row else min(Decimal(str(worked)) / 60, Decimal(str(hours_per_day)) * fraction)
+        # Hour based payroll must consume measured attendance only. A full-day
+        # attendance status or leave day is not evidence of actual hours.
+        worked_minutes = (row or {}).get("minutes")
+        if worked_minutes is not None:
+            hours += max(Decimal("0"), Decimal(str(worked_minutes))) / Decimal("60")
+        elif day in approved_work:
+            hours += max(Decimal("0"), Decimal(str(approved_work[day]))) / Decimal("60")
         days.append({"date": day.isoformat(), "fraction": str(fraction), "source": source,
                      "attendance_id": (row or {}).get("id"), "leave_ids": [leave["id"] for leave in applicable]})
     return {"scheduled_workdays": str(scheduled), "payable_workdays": str(payable),
@@ -88,6 +93,21 @@ async def build_employee_inputs(db, run, employees, profiles):
             leaves=[{"id": row.id, "start": row.starts_on, "end": row.ends_on, "type": row.time_off_type, "minutes": row.partial_day_minutes} for row in leaves if row.employee_id == employee.id],
             approved_work=work_minutes, validate_attendance=(run.input_snapshot or {}).get("validate_attendance", True),
             workweek=workweek, hours_per_day=hours_per_day)
+        def scheduled_days(first: date, last: date) -> int:
+            return sum(1 for offset in range(max(0, (last - first).days + 1)) if (first + timedelta(days=offset)).weekday() in workweek)
+        annual_leave_days = Decimal("0")
+        for leave in leaves:
+            if leave.employee_id != employee.id or leave.status != "approved" or leave.time_off_type != "annual":
+                continue
+            overlap_start, overlap_end = max(start, leave.starts_on), min(end, leave.ends_on)
+            full_days = scheduled_days(leave.starts_on, leave.ends_on)
+            overlap_days = scheduled_days(overlap_start, overlap_end) if overlap_end >= overlap_start else 0
+            if full_days and overlap_days:
+                annual_leave_days += Decimal(str(leave.working_days or 0)) * Decimal(overlap_days) / Decimal(full_days)
+        inputs["approved_annual_leave_days"] = str(annual_leave_days)
+        inputs["leave_days"] = str(annual_leave_days)
+        inputs["actual_worked_hours"] = inputs["payable_hours"]
+        inputs["payable_hours_source"] = "confirmed_attendance_minutes_or_approved_intervals"
         if inputs["missing_dates"]:
             errors.append({"employee_id": employee.id, "name": employee.name, "code": "payroll_attendance_missing", "dates": inputs["missing_dates"], "message": "Confirm attendance or approve leave for the missing dates."})
         inputs["employee_profile_id"] = profile.id

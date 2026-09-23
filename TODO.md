@@ -1,6 +1,33 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [ ] Audit and correct payroll attendance inputs, statutory rule handling, reconciliation guards, salary register, and setup UI (`backend/app/payroll`, `backend/app/models/models.py`, `backend/alembic/versions`, `frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/components/payroll/PayrollDocumentsPage.tsx`, payroll tests); 2026 profile publication requires accountant review
+  - [ ] Compare live effective payroll profile and assignments with current official 2026 sources; keep any unapproved profile in draft
+  - [x] Keep scheduled hours as the configured period denominator and reject a missing or mismatched PIT bracket/relief basis instead of applying monthly thresholds to YTD income (`backend/app/payroll/calculator.py`, `backend/app/payroll/service.py`, `backend/tests/test_payroll_calculator.py`)
+  - [x] Source hourly proration from measured attendance minutes or approved work intervals; a full-day attendance status no longer fabricates hours (`backend/app/payroll/inputs.py`, `backend/app/payroll/service.py`, `backend/tests/test_payroll_inputs.py`)
+  - [ ] Complete categorized overtime premiums and monthly/YTD regression coverage
+    - [x] Apply every configured overtime category concurrently and preserve night hours as an overlapping premium (`backend/app/payroll/service.py`)
+    - [x] Validate configured premiums against labor-law minimums and test below-floor values (`backend/app/payroll/calculator.py`, `backend/app/payroll/service.py`, `backend/app/payroll/router.py`, `backend/tests/test_payroll_policy_rules.py`)
+    - [ ] Add mixed overtime/night overlap integration coverage
+  - [x] Accept approved categorized overtime overrides in calculation inputs and block run calculation while manual cycle corrections await approval (`backend/app/payroll/schemas.py`, `backend/app/payroll/service.py`)
+  - [x] Freeze confirmed attendance, approved leave, schedules, holidays, and approved work intervals into unified-v2 run inputs (`backend/app/payroll/service.py`, `backend/app/payroll/inputs.py`)
+  - [x] Feed approved annual-leave days from HR leave records into vacation-pay calculation (`backend/app/payroll/inputs.py`, `backend/app/payroll/service.py`)
+  - [x] Document external ownership for temporary-incapacity/maternity claim registers and leave-pay inputs (`docs/payroll-architecture.md`)
+  - [ ] Add period-scoped approved cycle hours/overtime inputs and freeze them in each run
+    - [x] Add run-scoped cycle input read, evidence-backed correction revisions, second-person approval, a calculation gate, and clearing of corrected attendance blockers (`backend/app/payroll/schemas.py`, `backend/app/payroll/router.py`, `backend/app/payroll/service.py`)
+    - [x] Add the accountant-facing Cycle Inputs editor for actual hours, overtime categories, evidence, and separate approval (`frontend/src/pages/PayrollSetupHub.tsx`, `frontend/src/api/enterprise.ts`, `backend/app/payroll/router.py`)
+  - [ ] Add contributor-code defaults, employer injury classes, and explicit employer/employee SHI bases
+    - [x] Default new worker assignments to insured code 01001 while leaving existing assignments and employee snapshots untouched; correct only the inactive example's employer SHI split and uncapped employer base (`backend/app/payroll/schemas.py`, `backend/app/models/models.py`, `frontend/src/pages/PayrollSetupHub.tsx`, `backend/alembic/versions/p9q0r1s2t3u4_payroll_draft_2026_seed_corrections.py`)
+    - [x] Configure an effective company/job-title injury class on work policies and use it for employer SHI lookup (`backend/app/models/models.py`, `backend/app/payroll/schemas.py`, `backend/app/payroll/service.py`, `backend/app/payroll/router.py`, `frontend/src/pages/PayrollSetupHub.tsx`, `backend/alembic/versions/p9q0r1s2t3u4_payroll_draft_2026_seed_corrections.py`)
+    - [x] Track separate employee-capped and employer-configured SHI bases in calculation trace and payslip base (`backend/app/payroll/calculator.py`, `backend/tests/test_payroll_calculator.py`)
+  - [x] Block excess advances and negative net pay at reconciliation (`backend/app/payroll/service.py`)
+  - [ ] Add frozen department/component details to the salary register and guided non-formula statutory editing
+    - [x] Freeze employee and department identity into new slips, expose component lines and calculation trace in register JSON, and add grouped subtotals/drill-down (`backend/app/payroll/service.py`, `backend/app/payroll/router.py`, `frontend/src/components/payroll/PayrollDocumentsPage.tsx`, `frontend/src/api/enterprise.ts`, `frontend/src/index.css`)
+    - [x] Gate expression editing behind the developer formula capability and keep accountant setup limited to numeric/tier fields (`backend/app/erp/service.py`, `backend/app/payroll/router.py`, `frontend/src/pages/PayrollSetupHub.tsx`)
+    - [ ] Add a worked-example preview and accountant-friendly plain-language validation for tier changes
+  - [ ] Verify worked examples, focused payroll tests, frontend build, and migrated PostgreSQL browser acceptance
+    - [x] Verify 147/168-hour monthly example and 13m/18m one-off gross bracket/cap fixtures (`backend/tests/test_payroll_calculator.py`)
+    - [x] Pass focused calculator tests, Python compilation, frontend production build, and diff whitespace check
 - [x] Allow revoked Worktime QR displays to be permanently deleted from admin settings with tenant-scoped API protection (`backend/app/routers/worktime_qr.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/AdministrationSettingsPages.tsx`)
 - [x] Add the Worktime QR screen setup guide with pairing, scan testing, and troubleshooting steps (`frontend/src/pages/AdministrationSettingsPages.tsx`, `frontend/src/index.css`)
 - [x] Keep Worktime QR screens paired until admin deactivation (`backend/app/routers/worktime_qr.py`, `frontend/src/pages/WorktimeQrPage.tsx`, focused tests)

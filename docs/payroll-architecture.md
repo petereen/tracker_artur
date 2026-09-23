@@ -217,6 +217,14 @@ SHI deduction, taxable income, relief, and PIT withheld. Canonical JSON is alway
 rendering is template-driven and never embeds statutory columns in calculator
 code.
 
+The workbook's ХЧТАТ temporary-incapacity register and maternity benefit
+register are claim-based Social Insurance Fund workflows. They remain owned by
+the Tax Benefits workspace and the external fund process; this payroll module
+does not add duplicate payroll-run reports for them. Approved vacation records
+and eligible frozen payslip history feed leave-pay calculations. The workbook's
+“Листний мөнгө” column is intentionally excluded because its settlement meaning
+is unresolved and the Pay stage already records partial settlements.
+
 ## Tax and benefits workflow
 
 The `/erp/payroll/tax-benefits` workspace adapts Frappe HR's Tax & Benefits

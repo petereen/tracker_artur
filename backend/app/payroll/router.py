@@ -30,7 +30,7 @@ from app.services.user_notifications import create_notifications
 from .exports import nd7_summary, nd7a_summary, nd7b_rows, nd8_rows, render_bank_export, render_protected_payslip, render_report_pdf, tt11_summary
 from .schemas import (
     BankAccountInput, BankExportProfileInput, BankTemplateSampleInput, BankExportRequest, CalculateRunInput,
-    EmployeePayrollInput, PayrollRunInput, SHIRateInput, PITBracketInput, ReliefTierInput, PostingProfileInput,
+    EmployeePayrollInput, PayrollRunInput, PayrollCycleInputCorrection, SHIRateInput, PITBracketInput, ReliefTierInput, PostingProfileInput,
     PublishProfileInput, SalaryStructureInput, StatutoryProfileInput,
     BenefitApplicationInput, BenefitApplicationReviewInput, BenefitClaimInput,
     PayslipPublicationInput, PayrollApprovalInput, ProtectedPayslipInput, ReconciliationResolutionInput,
@@ -47,7 +47,7 @@ from .service import (
     create_payment_batch, settle_payment_allocation, reject_payment_allocation, payment_coverage,
     bump_salary_structure, bump_statutory_profile, create_replacement_run, create_run, create_salary_structure, create_statutory_profile,
     delete_component_master, archive_component_master, component_master_out, component_master_usage, delete_salary_structure, delete_statutory_profile, load_rules, post_run, preflight_run, profile_out, publish_profile, reconcile_run, reverse_run,
-    posting_preview, reverse_payment_allocation, update_component_master, update_salary_structure, update_statutory_profile,
+    posting_preview, reverse_payment_allocation, update_component_master, update_salary_structure, update_statutory_profile, validate_overtime_rules,
 )
 from .calculator import CalculationInput, ComponentDefinition, _SafeFormula, _relief_for_income, calculate_payslip, compute_progressive_pit, compute_shi, money
 from .frappe_service import (
@@ -71,7 +71,7 @@ async def payroll_capability(db: AsyncSession, actor: ActorContext, action: str)
 @router.get("/capabilities")
 async def payroll_effective_capabilities(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     """Expose the effective payroll capability set for capability-driven UI."""
-    actions = ("view", "view_salary", "create", "administer", "edit_setup", "calculate", "approve", "review", "approve_payroll_manager", "approve_hr_director", "approve_finance", "post", "pay", "export", "release_slips")
+    actions = ("view", "view_salary", "create", "administer", "edit_setup", "edit_formula", "calculate", "approve", "review", "approve_payroll_manager", "approve_hr_director", "approve_finance", "post", "pay", "export", "release_slips")
     result: dict[str, bool] = {}
     for action in actions:
         try:
@@ -82,7 +82,7 @@ async def payroll_effective_capabilities(db: AsyncSession = Depends(get_db), act
                 result[action] = False
             else:
                 raise
-    return {"capabilities": result}
+    return {"capabilities": result, "account_id": actor.account_id}
 
 
 def _contributor_type_out(row: SocialInsuranceContributorType) -> dict[str, Any]:
@@ -90,7 +90,7 @@ def _contributor_type_out(row: SocialInsuranceContributorType) -> dict[str, Any]
 
 
 def _work_policy_out(row: PayrollWorkPolicy) -> dict[str, Any]:
-    return {"id": row.id, "code": row.code, "name": row.name, "scope_type": row.scope_type, "scope_key": row.scope_key, "effective_from": row.effective_from.isoformat(), "effective_to": row.effective_to.isoformat() if row.effective_to else None, "daily_hours": str(row.daily_hours), "weekly_hours": str(row.weekly_hours), "workweek": row.workweek or [], "overtime_rules": row.overtime_rules or {}, "stacking_policy": row.stacking_policy, "source_references": row.source_references or [], "status": row.status}
+    return {"id": row.id, "code": row.code, "name": row.name, "scope_type": row.scope_type, "scope_key": row.scope_key, "effective_from": row.effective_from.isoformat(), "effective_to": row.effective_to.isoformat() if row.effective_to else None, "daily_hours": str(row.daily_hours), "weekly_hours": str(row.weekly_hours), "workweek": row.workweek or [], "hazard_class": row.hazard_class, "overtime_rules": row.overtime_rules or {}, "stacking_policy": row.stacking_policy, "source_references": row.source_references or [], "status": row.status}
 
 
 def _report_template_out(row: PayrollReportTemplate) -> dict[str, Any]:
@@ -165,6 +165,7 @@ async def list_payroll_shi_rules(profile_id: int, db: AsyncSession = Depends(get
 @router.post("/statutory-profiles/{profile_id}/shi-rules", status_code=status.HTTP_201_CREATED)
 async def add_payroll_shi_rule(profile_id: int, data: SHIRateInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "edit_setup")
+    if data.calculation_mode == "formula": await payroll_capability(db, actor, "edit_formula")
     await _draft_payroll_profile(db, actor, profile_id)
     if data.upper_bound is not None and data.upper_bound <= data.lower_bound:
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_shi_tier", "path": "upper_bound", "message": "Upper bound must be greater than lower bound.", "remediation": "Correct the tier bounds."})
@@ -212,6 +213,7 @@ async def list_payroll_relief_rules(profile_id: int, db: AsyncSession = Depends(
 @router.post("/statutory-profiles/{profile_id}/relief-rules", status_code=status.HTTP_201_CREATED)
 async def add_payroll_relief_rule(profile_id: int, data: ReliefTierInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "edit_setup")
+    if data.formula: await payroll_capability(db, actor, "edit_formula")
     await _draft_payroll_profile(db, actor, profile_id)
     if data.upper_bound is not None and data.upper_bound <= data.lower_bound:
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_relief_tier", "path": "upper_bound", "message": "Upper bound must be greater than lower bound.", "remediation": "Correct the relief tier bounds."})
@@ -242,6 +244,7 @@ async def create_payroll_work_policy(data: WorkPolicyInput, db: AsyncSession = D
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_effective_range", "path": "effective_to", "message": "Effective end date cannot precede the start date.", "remediation": "Choose an end date on or after effective_from."})
     if sorted(set(data.workweek)) != data.workweek or any(day < 1 or day > 7 for day in data.workweek):
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_workweek", "path": "workweek", "message": "Workweek values must be unique ISO weekdays from 1 to 7.", "remediation": "Enter a sorted list such as [1, 2, 3, 4, 5]."})
+    validate_overtime_rules(data.overtime_rules)
     overlap = await db.scalar(select(PayrollWorkPolicy.id).where(PayrollWorkPolicy.organization_id == actor.organization_id, PayrollWorkPolicy.scope_type == data.scope_type, PayrollWorkPolicy.scope_key == data.scope_key, PayrollWorkPolicy.effective_from <= (data.effective_to or date.max), (PayrollWorkPolicy.effective_to.is_(None) | (PayrollWorkPolicy.effective_to >= data.effective_from))).limit(1))
     if overlap:
         raise HTTPException(status_code=409, detail={"code": "payroll_work_policy_effective_overlap", "path": "effective_from", "message": "Another policy overlaps this effective range.", "remediation": "Use a non-overlapping date or revise the existing draft."})
@@ -252,7 +255,7 @@ async def create_payroll_work_policy(data: WorkPolicyInput, db: AsyncSession = D
 
 @router.post("/formulas/validate")
 async def validate_payroll_formula(data: FormulaValidationInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    await payroll_capability(db, actor, "edit_setup")
+    await payroll_capability(db, actor, "edit_formula")
     try:
         formula = _SafeFormula(data.formula)
         unknown = sorted(formula.dependencies - set(data.variables))
@@ -263,7 +266,7 @@ async def validate_payroll_formula(data: FormulaValidationInput, db: AsyncSessio
 
 @router.post("/formula-context/preview")
 async def preview_payroll_formula(data: FormulaPreviewInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    await payroll_capability(db, actor, "edit_setup")
+    await payroll_capability(db, actor, "edit_formula")
     try:
         compiled = _SafeFormula(data.formula)
         value = compiled.evaluate(data.context, data.quantum)
@@ -304,6 +307,7 @@ async def create_payroll_formula_variable(data: FormulaVariableInput, db: AsyncS
 @router.post("/statutory-profiles/{profile_id}/simulate")
 async def simulate_payroll_statutory_rules(profile_id: int, data: StatutorySimulationInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "edit_setup")
+    if any(item.get("amount_mode") == "formula" for item in data.components): await payroll_capability(db, actor, "edit_formula")
     profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
     if not profile:
         raise HTTPException(status_code=404, detail="Statutory profile not found")
@@ -488,6 +492,7 @@ async def list_profiles(db: AsyncSession = Depends(get_db), actor: ActorContext 
 @router.post("/profiles", status_code=status.HTTP_201_CREATED)
 async def create_profile(data: StatutoryProfileInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "administer")
+    if data.pit_calculation_mode == "formula" or data.pit_formula or any(row.calculation_mode == "formula" for row in data.shi_rates) or any(row.formula for row in data.relief_tiers): await payroll_capability(db, actor, "edit_formula")
     profile = await create_statutory_profile(db, actor, data)
     await record_change(db, actor=actor, topic="payroll", aggregate_type="statutory_config_profile", aggregate_id=profile.id, operation="created", after={"code": profile.code, "version": profile.version, "is_example": profile.is_example})
     await db.commit(); await db.refresh(profile)
@@ -508,6 +513,7 @@ async def publish_profile_route(profile_id: int, data: PublishProfileInput = Pub
 @router.put("/profiles/{profile_id}")
 async def update_profile_route(profile_id: int, data: StatutoryProfileInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "administer")
+    if data.pit_calculation_mode == "formula" or data.pit_formula or any(row.calculation_mode == "formula" for row in data.shi_rates) or any(row.formula for row in data.relief_tiers): await payroll_capability(db, actor, "edit_formula")
     profile = await db.scalar(select(StatutoryConfigProfile).where(StatutoryConfigProfile.id == profile_id, StatutoryConfigProfile.organization_id == actor.organization_id))
     if not profile: raise HTTPException(status_code=404, detail="Profile not found")
     if profile.status in {"published", "active"}:
@@ -558,6 +564,7 @@ async def list_salary_structures(db: AsyncSession = Depends(get_db), actor: Acto
 @router.post("/salary-structures", status_code=status.HTTP_201_CREATED)
 async def create_structure(data: SalaryStructureInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "administer")
+    if any(row.amount_mode == "formula" for row in data.components): await payroll_capability(db, actor, "edit_formula")
     structure = await create_salary_structure(db, actor, data)
     await record_change(db, actor=actor, topic="payroll", aggregate_type="salary_structure", aggregate_id=structure.id, operation="created", after={"code": structure.code, "version": structure.version})
     await db.commit(); await db.refresh(structure)
@@ -601,6 +608,7 @@ async def publish_structure(structure_id: int, db: AsyncSession = Depends(get_db
 @router.put("/salary-structures/{structure_id}")
 async def update_structure_route(structure_id: int, data: SalaryStructureInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "administer")
+    if any(row.amount_mode == "formula" for row in data.components): await payroll_capability(db, actor, "edit_formula")
     structure = await db.scalar(select(SalaryStructure).where(SalaryStructure.id == structure_id, SalaryStructure.organization_id == actor.organization_id))
     if not structure: raise HTTPException(status_code=404, detail="Salary structure not found")
     if structure.status in {"published", "active"}:
@@ -1117,6 +1125,7 @@ async def get_salary_component_usage(component_id: int, db: AsyncSession = Depen
 @router.post("/salary-components", status_code=status.HTTP_201_CREATED)
 async def create_salary_component_master_route(data: SalaryComponentMasterInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "administer")
+    if data.amount_mode == "formula": await payroll_capability(db, actor, "edit_formula")
     row = await create_component_master(db, actor, data)
     await record_change(db, actor=actor, topic="payroll", aggregate_type="salary_component_master", aggregate_id=row.id, operation="created", after={"code": row.code})
     await db.commit(); await db.refresh(row)
@@ -1126,6 +1135,7 @@ async def create_salary_component_master_route(data: SalaryComponentMasterInput,
 @router.put("/salary-components/{component_id}")
 async def update_salary_component_master_route(component_id: int, data: SalaryComponentMasterInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "administer")
+    if data.amount_mode == "formula": await payroll_capability(db, actor, "edit_formula")
     row = await db.scalar(select(PayrollSalaryComponentMaster).where(PayrollSalaryComponentMaster.id == component_id, PayrollSalaryComponentMaster.organization_id == actor.organization_id))
     if not row:
         raise HTTPException(status_code=404, detail="Salary component not found")
@@ -1162,6 +1172,7 @@ async def archive_salary_component_master_route(component_id: int, db: AsyncSess
 @router.post("/salary-components/{component_id}/clone", status_code=status.HTTP_201_CREATED)
 async def clone_salary_component_master_route(component_id: int, data: SalaryComponentMasterInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await payroll_capability(db, actor, "edit_setup")
+    if data.amount_mode == "formula": await payroll_capability(db, actor, "edit_formula")
     source = await db.scalar(select(PayrollSalaryComponentMaster).where(PayrollSalaryComponentMaster.id == component_id, PayrollSalaryComponentMaster.organization_id == actor.organization_id))
     if not source:
         raise HTTPException(status_code=404, detail="Salary component not found")
@@ -1427,12 +1438,16 @@ async def salary_register_report(run_id: int | None = None, report_format: Liter
     if run_id is not None:
         query = query.where(Payslip.payroll_run_id == run_id)
     rows = (await db.execute(query.order_by(Payslip.employee_id))).all()
-    payload = [{"salary_slip_id": slip.id, "payroll_entry_id": run.id, "payroll_entry_number": run.run_number, "employee_id": slip.employee_id, "gross": str(slip.gross), "taxable_income": str(slip.taxable_income), "employee_shi": str(slip.employee_shi), "employer_shi": str(slip.employer_shi), "pit": str(slip.pit), "net_pay": str(slip.net_pay), "status": slip.document_status} for slip, run in rows]
+    line_items = (await db.execute(select(PayslipLineItem).where(PayslipLineItem.payslip_id.in_([slip.id for slip, _ in rows])).order_by(PayslipLineItem.payslip_id, PayslipLineItem.position))).scalars().all() if rows else []
+    lines_by_slip: dict[int, list[dict[str, Any]]] = {}
+    for line in line_items:
+        lines_by_slip.setdefault(line.payslip_id, []).append({"code": line.component_code, "label": line.label, "kind": line.component_kind, "amount": str(line.amount), "trace": line.trace or {}})
+    payload = [{"salary_slip_id": slip.id, "payroll_entry_id": run.id, "payroll_entry_number": run.run_number, "employee_id": slip.employee_id, "employee_name": (slip.employee_profile_snapshot or {}).get("employee_name"), "department": (slip.employee_profile_snapshot or {}).get("department"), "job_title": (slip.employee_profile_snapshot or {}).get("job_title"), "gross": str(slip.gross), "taxable_income": str(slip.taxable_income), "employee_shi": str(slip.employee_shi), "employer_shi": str(slip.employer_shi), "pit": str(slip.pit), "pit_relief": str(slip.pit_relief), "advance_offset": str(slip.advance_offset), "net_pay": str(slip.net_pay), "status": slip.document_status, "lines": lines_by_slip.get(slip.id, []), "calculation_trace": slip.calculation_trace or {}} for slip, run in rows]
     if report_format == "json":
         return payload
     template = await db.scalar(select(PayrollReportTemplate).where(PayrollReportTemplate.organization_id == actor.organization_id, PayrollReportTemplate.kind == "salary_register", PayrollReportTemplate.status == "published").order_by(PayrollReportTemplate.version.desc()).limit(1))
     columns = (template.template or {}).get("columns") if template else None
-    columns = columns or [{"key": key, "header": key} for key in (list(payload[0].keys()) if payload else [])]
+    columns = columns or [{"key": key, "header": key} for key in ("salary_slip_id", "payroll_entry_id", "payroll_entry_number", "employee_id", "gross", "taxable_income", "employee_shi", "employer_shi", "pit", "net_pay", "status")]
     required = set((template.required_keys if template else []) or [])
     configured = {column.get("key") for column in columns if isinstance(column, dict)}
     if required - configured:
@@ -1477,6 +1492,70 @@ async def create_payroll_run(data: PayrollRunInput, idempotency_key: str | None 
     if idempotency_key:
         db.add(IdempotencyRecord(account_id=actor.account_id, operation="payroll.run.create", key=idempotency_key, request_hash=request_hash, response_status=201, response_body=result, expires_at=datetime.now(timezone.utc) + timedelta(days=1)))
     await db.commit(); await db.refresh(run); return result
+
+
+@router.get("/runs/{run_id}/cycle-inputs")
+async def get_payroll_cycle_inputs(run_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "view")
+    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == run_id, PayrollRun.organization_id == actor.organization_id, PayrollRun.workflow_version == "unified_v2"))
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    snapshot = run.input_snapshot or {}
+    employees = {row.id: row for row in (await db.execute(select(Employee).where(Employee.organization_id == actor.organization_id, Employee.id.in_(snapshot.get("employee_ids") or [])))).scalars().all()}
+    canonical = snapshot.get("canonical_inputs") or {}
+    corrections = snapshot.get("cycle_input_corrections") or {}
+    return {"run_id": run.id, "period_start": run.period_start.isoformat(), "period_end": run.period_end.isoformat(), "status": run.status, "employees": [{"employee_id": int(key), "employee_name": employees.get(int(key)).name if employees.get(int(key)) else None, "scheduled_hours": inputs.get("scheduled_hours", "0"), "actual_worked_hours": inputs.get("actual_worked_hours", "0"), "payable_workdays": inputs.get("payable_workdays", "0"), "source": inputs.get("payable_hours_source"), "days": inputs.get("days", []), "correction": corrections.get(key), "editable": run.status == "draft"} for key, inputs in canonical.items()]}
+
+
+@router.put("/runs/{run_id}/cycle-inputs")
+async def save_payroll_cycle_input(run_id: int, data: PayrollCycleInputCorrection, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "edit_setup")
+    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == run_id, PayrollRun.organization_id == actor.organization_id, PayrollRun.workflow_version == "unified_v2").with_for_update())
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status != "draft":
+        raise HTTPException(status_code=409, detail={"code": "payroll_run_immutable", "status": run.status})
+    snapshot = dict(run.input_snapshot or {})
+    employee_key = str(data.employee_id)
+    if data.employee_id not in (snapshot.get("employee_ids") or []):
+        raise HTTPException(status_code=422, detail={"code": "payroll_cycle_input_employee_not_in_run"})
+    corrections = dict(snapshot.get("cycle_input_corrections") or {})
+    prior = corrections.get(employee_key) or {}
+    corrections[employee_key] = {"revision": int(prior.get("revision", 0)) + 1, "status": "pending_approval", "submitted_by_account_id": actor.account_id, "actual_worked_hours": str(data.actual_worked_hours), "overtime_by_type": {key: str(value) for key, value in data.overtime_by_type.items()}, "evidence_reference": data.evidence_reference.strip(), "reason": data.reason.strip(), "submitted_at": datetime.now(timezone.utc).isoformat()}
+    snapshot["cycle_input_corrections"] = corrections
+    run.input_snapshot = snapshot
+    run.snapshot_checksum = hashlib.sha256(json.dumps({"input": snapshot, "config": run.config_snapshot or {}}, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+    await db.flush()
+    return {"employee_id": data.employee_id, **corrections[employee_key]}
+
+
+@router.post("/runs/{run_id}/cycle-inputs/{employee_id}/approve")
+async def approve_payroll_cycle_input(run_id: int, employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await payroll_capability(db, actor, "approve")
+    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == run_id, PayrollRun.organization_id == actor.organization_id, PayrollRun.workflow_version == "unified_v2").with_for_update())
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status != "draft":
+        raise HTTPException(status_code=409, detail={"code": "payroll_run_immutable", "status": run.status})
+    snapshot = dict(run.input_snapshot or {})
+    employee_key = str(employee_id)
+    corrections = dict(snapshot.get("cycle_input_corrections") or {})
+    correction = corrections.get(employee_key)
+    if not correction or correction.get("status") != "pending_approval":
+        raise HTTPException(status_code=409, detail={"code": "payroll_cycle_input_not_pending"})
+    if correction.get("submitted_by_account_id") == actor.account_id:
+        raise HTTPException(status_code=403, detail={"code": "payroll_cycle_input_separation_of_duties", "message": "A different approver must approve this correction."})
+    correction = {**correction, "status": "approved", "approved_by_account_id": actor.account_id, "approved_at": datetime.now(timezone.utc).isoformat()}
+    corrections[employee_key] = correction
+    overrides = dict(snapshot.get("overrides") or {})
+    overrides[employee_key] = {**(overrides.get(employee_key) or {}), "actual_worked_hours": correction["actual_worked_hours"], "overtime_by_type": correction["overtime_by_type"], "cycle_input_correction_revision": correction["revision"]}
+    snapshot["cycle_input_corrections"] = corrections
+    snapshot["overrides"] = overrides
+    snapshot["attendance_input_errors"] = [item for item in (snapshot.get("attendance_input_errors") or []) if int(item.get("employee_id", -1)) != employee_id]
+    run.input_snapshot = snapshot
+    run.snapshot_checksum = hashlib.sha256(json.dumps({"input": snapshot, "config": run.config_snapshot or {}}, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+    await db.flush()
+    return {"employee_id": employee_id, **correction}
 
 
 @router.post("/runs/preflight")

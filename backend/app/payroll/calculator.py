@@ -156,6 +156,24 @@ class FormulaError(ValueError):
     pass
 
 
+def overtime_rule_errors(overtime_rules: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Return plain validation errors for statutory overtime premium floors."""
+    minimums = {"weekday": Decimal("1.5"), "rest_day": Decimal("1.5"), "public_holiday": Decimal("2"), "night": Decimal("0.2")}
+    errors = []
+    for code, minimum in minimums.items():
+        raw = overtime_rules.get(code)
+        if raw in (None, ""):
+            continue
+        try:
+            value = Decimal(str(raw))
+        except Exception:
+            errors.append({"code": "payroll_invalid_overtime_multiplier", "path": f"overtime_rules.{code}", "minimum": str(minimum)})
+            continue
+        if not value.is_finite() or value < minimum:
+            errors.append({"code": "payroll_overtime_below_legal_minimum", "path": f"overtime_rules.{code}", "minimum": str(minimum)})
+    return errors
+
+
 class _SafeFormula:
     """Allowlisted expression compiler; never calls Python ``eval``."""
 
@@ -329,7 +347,8 @@ def compute_shi(subject_gross: Decimal, rules: StatutoryRules, *, prior_month_ba
     remaining = max(ZERO, cap - money(prior_month_base, rules.rounding_quantum))
     uncapped_base = max(ZERO, money(subject_gross, rules.rounding_quantum))
     base = min(uncapped_base, remaining)
-    effective_base = uncapped_base if any(tier.base_ceiling_policy == "none" for tier in rules.shi_rates) else base
+    employee_base = uncapped_base if any(tier.payer == "employee" and tier.base_ceiling_policy == "none" for tier in rules.shi_rates) else base
+    employer_base = uncapped_base if any(tier.payer == "employer" and tier.base_ceiling_policy == "none" for tier in rules.shi_rates) else base
     employee = ZERO; employer = ZERO; by_fund: dict[str, Decimal] = {}; rule_trace: list[dict[str, Any]] = []
     for tier in rules.shi_rates:
         if tier.exemption_code and tier.exemption_code in exemption_codes: continue
@@ -373,7 +392,8 @@ def compute_shi(subject_gross: Decimal, rules: StatutoryRules, *, prior_month_ba
         if (tier.calculation_mode or "flat_percent") == "marginal_tiers" and not (tier.exemption_code and tier.exemption_code in exemption_codes):
             marginal_groups.setdefault((tier.payer, tier.insurance_fund), []).append(tier)
     for (payer, fund), tiers in marginal_groups.items():
-        containing = next((row for row in sorted(tiers, key=lambda item: item.lower_bound, reverse=True) if effective_base > row.lower_bound), None)
+        group_base = employer_base if payer == "employer" else employee_base
+        containing = next((row for row in sorted(tiers, key=lambda item: item.lower_bound, reverse=True) if group_base > row.lower_bound), None)
         if containing and containing.base_tax:
             key = f"{payer}:{fund}"
             delta = money(containing.base_tax, rules.rounding_quantum)
@@ -386,7 +406,7 @@ def compute_shi(subject_gross: Decimal, rules: StatutoryRules, *, prior_month_ba
                         item["base_tax"] = str(containing.base_tax)
                         item["amount"] = str(money(Decimal(item["amount"]) + delta, rules.rounding_quantum))
                         break
-    return money(effective_base, rules.rounding_quantum), money(employee, rules.rounding_quantum), money(employer, rules.rounding_quantum), {"by_fund": {key: money(value, rules.rounding_quantum) for key, value in by_fund.items()}, "rules": rule_trace}
+    return money(employee_base, rules.rounding_quantum), money(employee, rules.rounding_quantum), money(employer, rules.rounding_quantum), {"employee_base": money(employee_base, rules.rounding_quantum), "employer_base": money(employer_base, rules.rounding_quantum), "by_fund": {key: money(value, rules.rounding_quantum) for key, value in by_fund.items()}, "rules": rule_trace}
 
 
 def compute_progressive_pit(income: Decimal, brackets: Iterable[PITBracket], *, mode: str = "marginal_tiers", formula: str | None = None, quantum: Decimal = MONEY_QUANTUM) -> Decimal:
@@ -454,6 +474,11 @@ def _relief_for_income(income: Decimal, eligibilities: frozenset[str], rules: St
 
 def calculate_payslip(data: CalculationInput, rules: StatutoryRules) -> CalculationResult:
     quantum = rules.rounding_quantum
+    required_pit_basis = "annual" if rules.pit_withholding_method == "ytd_cumulative" else "monthly"
+    if rules.pit_brackets and any(bracket.period_basis != required_pit_basis for bracket in rules.pit_brackets):
+        raise FormulaError(f"{rules.pit_withholding_method} PIT requires {required_pit_basis} brackets")
+    if rules.relief_tiers and any(tier.amount_basis != required_pit_basis for tier in rules.relief_tiers):
+        raise FormulaError(f"{rules.pit_withholding_method} PIT requires {required_pit_basis} relief tiers")
     context = {"base_salary": money(data.base_salary, quantum), "payable_workdays": data.payable_workdays, "scheduled_workdays": data.scheduled_workdays, "payable_calendar_days": data.payable_calendar_days, "scheduled_calendar_days": data.scheduled_calendar_days, "payable_hours": data.payable_hours, "scheduled_hours": data.scheduled_hours, "prior_ytd_gross": data.prior_ytd_gross, "prior_ytd_taxable": data.prior_ytd_taxable, "prior_ytd_pit": data.prior_ytd_pit, "prior_month_shi_base": data.prior_month_shi_base, "minimum_wage": rules.minimum_wage, "shi_ceiling_multiplier": rules.shi_ceiling_multiplier, "periods_per_year": rules.periods_per_year, **data.context}
     lines = list(evaluate_components(data.components, context, quantum=quantum, payable_workdays=data.payable_workdays, scheduled_workdays=data.scheduled_workdays, payable_calendar_days=data.payable_calendar_days, scheduled_calendar_days=data.scheduled_calendar_days, payable_hours=data.payable_hours, scheduled_hours=data.scheduled_hours))
     if data.leave_days > 0:

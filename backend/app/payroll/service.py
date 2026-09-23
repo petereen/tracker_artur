@@ -24,13 +24,14 @@ from app.erp.service import validate_posting_gate
 from app.services.secret_box import encrypt_secret
 from .calculator import (
     CalculationInput, ComponentDefinition, LeaveMonth, PITBracket, ReliefTier as CalcReliefTier, SHIRate,
-    StatutoryRules, _SafeFormula, calculate_payslip, money, snapshot_checksum,
+    StatutoryRules, _SafeFormula, calculate_payslip, money, overtime_rule_errors, snapshot_checksum,
 )
 from .schemas import (
     BankAccountInput, EmployeePayrollInput, PayrollRunInput, PostingProfileInput,
     SalaryComponentMasterInput, SalaryStructureInput, StatutoryProfileInput,
 )
 from .tax_benefits import approved_tax_adjustments, grouped_benefit_claims, mark_run_benefits_paid, reserve_benefit_claims
+from .inputs import build_employee_inputs
 
 
 def _hash(value: Any) -> str:
@@ -44,6 +45,16 @@ def _profile_payload(data: StatutoryProfileInput) -> dict[str, Any]:
 def _validate_date_range(start: date, end: date | None) -> None:
     if end and end < start:
         raise HTTPException(status_code=422, detail={"code": "payroll_invalid_effective_range"})
+
+
+def validate_overtime_rules(overtime_rules: dict[str, Any]) -> None:
+    """Check configured multipliers against statutory premium floors."""
+    errors = overtime_rule_errors(overtime_rules)
+    if errors:
+        error = errors[0]
+        minimum = error.get("minimum")
+        message = "Enter a numeric overtime premium." if error["code"] == "payroll_invalid_overtime_multiplier" else f"The configured {error['path'].rsplit('.', 1)[-1]} premium must be at least {minimum}."
+        raise HTTPException(status_code=422, detail={**error, "message": message})
 
 
 def _validate_rule_modes(data: StatutoryProfileInput) -> None:
@@ -417,12 +428,16 @@ async def load_rules(db: AsyncSession, profile: StatutoryConfigProfile, *, insur
     # alternate withholding methods. Never mix bases in one calculation.
     preferred_basis = "annual" if profile.pit_withholding_method == "ytd_cumulative" else "monthly"
     available_bases = {row.period_basis for row in pit_candidates}
-    selected_basis = preferred_basis if preferred_basis in available_bases else ("monthly" if "monthly" in available_bases else next(iter(available_bases), preferred_basis))
+    if pit_candidates and preferred_basis not in available_bases:
+        raise HTTPException(status_code=422, detail={"code": "payroll_pit_basis_missing", "path": "pit_brackets", "message": f"This profile requires {preferred_basis} PIT brackets for its withholding method.", "remediation": "Add effective-dated brackets for the selected withholding basis."})
+    selected_basis = preferred_basis
     pit_rows = [row for row in pit_candidates if row.period_basis == selected_basis]
     relief_candidates = (await db.execute(select(TaxReliefTier).where(TaxReliefTier.profile_id == profile.id).order_by(TaxReliefTier.position, TaxReliefTier.id))).scalars().all()
     relief_basis = "annual" if profile.pit_withholding_method == "ytd_cumulative" else "monthly"
     available_relief_bases = {row.amount_basis for row in relief_candidates}
-    selected_relief_basis = relief_basis if relief_basis in available_relief_bases else ("monthly" if "monthly" in available_relief_bases else next(iter(available_relief_bases), relief_basis))
+    if relief_candidates and relief_basis not in available_relief_bases:
+        raise HTTPException(status_code=422, detail={"code": "payroll_relief_basis_missing", "path": "relief_tiers", "message": f"This profile requires {relief_basis} relief tiers for its withholding method.", "remediation": "Add effective-dated relief tiers for the selected withholding basis."})
+    selected_relief_basis = relief_basis
     relief_rows = [row for row in relief_candidates if row.amount_basis == selected_relief_basis]
     return StatutoryRules(
         minimum_wage=Decimal(str(profile.minimum_wage)), shi_ceiling_multiplier=Decimal(str(profile.shi_ceiling_multiplier)),
@@ -845,14 +860,32 @@ async def create_run(db: AsyncSession, actor: ActorContext, data: PayrollRunInpu
     approved_time_ids = [entry.id for entry in approved_entries]
     approved_time_snapshot = [{"id": entry.id, "employee_id": entry.employee_id, "local_work_date": entry.local_work_date.isoformat() if entry.local_work_date else None, "started_at": entry.started_at.isoformat(), "ended_at": entry.ended_at.isoformat() if entry.ended_at else None, "approval_status": entry.approval_status, "hours": str(Decimal(str((entry.ended_at - entry.started_at).total_seconds())) / Decimal("3600")) if entry.ended_at else "0"} for entry in approved_entries]
     snapshot = {"employee_ids": employee_ids, "employee_filter": data.employee_filter, "overrides": data.input_overrides, "attendance_policy": data.attendance_policy, "validate_attendance": data.validate_attendance, "posting_date": (data.posting_date or data.tax_point_date).isoformat(), "cost_center_id": data.cost_center_id, "variable_inputs": [row.model_dump(mode="json") for row in data.variable_inputs], "approved_time_entry_ids": approved_time_ids, "approved_time_entries": approved_time_snapshot, "preflight": preflight, "calendar": {"period_start": data.period_start.isoformat(), "period_end": data.period_end.isoformat(), "timezone": "Asia/Ulaanbaatar"}}
-    config_snapshot = {"profile_id": profile.id, "profile_version": profile.version, "profile_checksum": profile.checksum, "source_references": profile.source_references, "is_example": profile.is_example, "currency": profile.currency, "pit_withholding_method": profile.pit_withholding_method, "pit_calculation_mode": profile.pit_calculation_mode, "pit_formula": profile.pit_formula, "standard_daily_hours": str(profile.standard_daily_hours), "standard_weekly_hours": str(profile.standard_weekly_hours), "standard_workweek": profile.standard_workweek, "rounding_policy": profile.rounding_policy, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier), "leave_policy": profile.leave_policy, "work_policies": [{"id": row.id, "scope_type": row.scope_type, "scope_key": row.scope_key, "code": row.code, "daily_hours": str(row.daily_hours), "weekly_hours": str(row.weekly_hours), "workweek": row.workweek, "overtime_rules": row.overtime_rules, "stacking_policy": row.stacking_policy} for row in frozen_work_policies], "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "calculation_mode": row.calculation_mode, "fixed_amount": str(row.fixed_amount), "base_tax": str(row.base_tax), "base_ceiling_policy": getattr(row, "base_ceiling_policy", "profile"), "formula": row.formula, "exemption_code": row.exemption_code} for row in frozen_shi_rates], "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax), "formula": getattr(row, "formula", None)} for row in frozen_pit_brackets], "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "fixed_amount": str(row.fixed_amount), "amount_basis": row.amount_basis, "formula": row.formula} for row in frozen_reliefs]}
+    config_snapshot = {"profile_id": profile.id, "profile_version": profile.version, "profile_checksum": profile.checksum, "source_references": profile.source_references, "is_example": profile.is_example, "currency": profile.currency, "pit_withholding_method": profile.pit_withholding_method, "pit_calculation_mode": profile.pit_calculation_mode, "pit_formula": profile.pit_formula, "standard_daily_hours": str(profile.standard_daily_hours), "standard_weekly_hours": str(profile.standard_weekly_hours), "standard_workweek": profile.standard_workweek, "rounding_policy": profile.rounding_policy, "minimum_wage": str(profile.minimum_wage), "shi_ceiling_multiplier": str(profile.shi_ceiling_multiplier), "leave_policy": profile.leave_policy, "work_policies": [{"id": row.id, "scope_type": row.scope_type, "scope_key": row.scope_key, "code": row.code, "daily_hours": str(row.daily_hours), "weekly_hours": str(row.weekly_hours), "workweek": row.workweek, "hazard_class": row.hazard_class, "overtime_rules": row.overtime_rules, "stacking_policy": row.stacking_policy} for row in frozen_work_policies], "shi_rates": [{"payer": row.payer, "insurance_fund": row.insurance_fund, "insured_category": row.insured_category, "hazard_class": row.hazard_class, "rate": str(row.rate), "base_floor": str(row.base_floor), "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "calculation_mode": row.calculation_mode, "fixed_amount": str(row.fixed_amount), "base_tax": str(row.base_tax), "base_ceiling_policy": getattr(row, "base_ceiling_policy", "profile"), "formula": row.formula, "exemption_code": row.exemption_code} for row in frozen_shi_rates], "pit_brackets": [{"period_basis": row.period_basis, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "marginal_rate": str(row.marginal_rate), "base_tax": str(row.base_tax), "formula": getattr(row, "formula", None)} for row in frozen_pit_brackets], "relief_tiers": [{"eligibility_code": row.eligibility_code, "lower_bound": str(row.lower_bound), "upper_bound": str(row.upper_bound) if row.upper_bound is not None else None, "fixed_amount": str(row.fixed_amount), "amount_basis": row.amount_basis, "formula": row.formula} for row in frozen_reliefs]}
     run = PayrollRun(organization_id=actor.organization_id, run_number=f"PR-{data.period_end:%Y%m}-{datetime.now(timezone.utc).strftime('%H%M%S%f')[:9]}", run_type=data.run_type, period_start=data.period_start, period_end=data.period_end, settlement_key=data.period_end.strftime("%Y-%m"), tax_point_date=data.tax_point_date, posting_date=data.posting_date or data.tax_point_date, workflow_version="unified_v2", document_status="draft", cost_center_id=data.cost_center_id, statutory_profile_id=profile.id, input_snapshot=snapshot, config_snapshot=config_snapshot, snapshot_checksum=_hash({"input": snapshot, "config": config_snapshot}), created_by_account_id=actor.account_id)
-    db.add(run); await db.flush(); return run
+    db.add(run); await db.flush()
+    # Resolve confirmed attendance, approved leave, schedules, holidays, and
+    # approved work intervals at run creation so calculations consume a
+    # period snapshot instead of inferring worked hours from payable days.
+    employees = list((await db.execute(select(Employee).where(Employee.organization_id == actor.organization_id, Employee.id.in_(employee_ids)))).scalars().all())
+    profile_rows = (await db.execute(select(EmployeePayrollProfile).where(EmployeePayrollProfile.organization_id == actor.organization_id, EmployeePayrollProfile.employee_id.in_(employee_ids), EmployeePayrollProfile.effective_from <= data.tax_point_date, (EmployeePayrollProfile.effective_to.is_(None) | (EmployeePayrollProfile.effective_to >= data.tax_point_date))))).scalars().all()
+    profiles_by_employee = {row.employee_id: row for row in profile_rows}
+    canonical, attendance_errors = await build_employee_inputs(db, run, employees, profiles_by_employee)
+    manual = data.input_overrides
+    snapshot["canonical_inputs"] = canonical
+    snapshot["attendance_input_errors"] = attendance_errors
+    snapshot["overrides"] = {key: {**(canonical.get(key) or {}), **(manual.get(key) or {})} for key in canonical}
+    run.input_snapshot = snapshot
+    run.snapshot_checksum = _hash({"input": snapshot, "config": config_snapshot})
+    await db.flush()
+    return run
 
 
 async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) -> list[Payslip]:
     if run.organization_id != actor.organization_id: raise HTTPException(status_code=404, detail="Run not found")
     if run.status != "draft": raise HTTPException(status_code=409, detail={"code": "payroll_run_immutable", "status": run.status})
+    pending_cycle_reviews = [employee_id for employee_id, item in ((run.input_snapshot or {}).get("cycle_input_corrections") or {}).items() if item.get("status") != "approved"]
+    if pending_cycle_reviews:
+        raise HTTPException(status_code=409, detail={"code": "payroll_cycle_inputs_pending_approval", "employee_ids": pending_cycle_reviews, "message": "Approve manual cycle input corrections before calculating this run."})
     profile = await ensure_profile_active(db, run.statutory_profile_id, run.tax_point_date)
     await db.execute(delete(Payslip).where(Payslip.payroll_run_id == run.id))
     employee_ids = list((run.input_snapshot or {}).get("employee_ids") or [])
@@ -877,7 +910,7 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
         if work_policy is None:
             work_policy = await resolve_work_policy(db, actor.organization_id, employee_id, run.tax_point_date, job_title=employee_row.job_title if employee_row else None)
         structure = await db.get(SalaryStructure, employee_profile.salary_structure_id)
-        rules = await load_rules(db, profile, insured_category=employee_profile.insured_category, hazard_class=employee_profile.hazard_class, effective_date=run.tax_point_date)
+        rules = await load_rules(db, profile, insured_category=employee_profile.insured_category, hazard_class=(work_policy.hazard_class if work_policy else employee_profile.hazard_class), effective_date=run.tax_point_date)
         components = (await db.execute(select(SalaryComponent).where(SalaryComponent.salary_structure_id == structure.id).order_by(SalaryComponent.position, SalaryComponent.id))).scalars().all()
         prior = await db.execute(select(func.coalesce(func.sum(Payslip.gross), 0), func.coalesce(func.sum(Payslip.taxable_income), 0), func.coalesce(func.sum(Payslip.pit), 0)).join(PayrollRun, PayrollRun.id == Payslip.payroll_run_id).where(Payslip.organization_id == actor.organization_id, Payslip.employee_id == employee_id, PayrollRun.tax_point_date >= date(run.tax_point_date.year, 1, 1), PayrollRun.tax_point_date < date(run.tax_point_date.year + 1, 1, 1), PayrollRun.status.in_(("posted", "paid")), PayrollRun.tax_point_date <= run.tax_point_date, PayrollRun.run_type != "advance", PayrollRun.id != run.id))
         prior_gross, prior_taxable, prior_pit = prior.one()
@@ -923,9 +956,12 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
         default_payable_workdays = Decimal(str(len(approved_dates))) if approved_dates else max(Decimal("0"), Decimal(str(scheduled_workdays)) - unpaid_leave_days)
         payable_workdays = Decimal(str(override.get("payable_workdays", default_payable_workdays)))
         scheduled_workdays_value = Decimal(str(override.get("scheduled_workdays", scheduled_workdays)))
-        payable_hours = Decimal(str(override.get("payable_hours", approved_hours)))
+        payable_hours = Decimal(str(override.get("actual_worked_hours", override.get("payable_hours", approved_hours))))
         daily_hours = Decimal(str(work_policy.daily_hours if work_policy else profile.standard_daily_hours))
-        scheduled_hours = Decimal(str(override.get("scheduled_hours", approved_hours if approved_hours > 0 else scheduled_workdays_value * daily_hours)))
+        # Scheduled hours are a policy denominator, not a derivative of the
+        # employee's attendance. Using approved actual hours here cancelled
+        # hour based proration for every partial month.
+        scheduled_hours = Decimal(str(override.get("scheduled_hours", scheduled_workdays_value * daily_hours)))
         overtime_hours = max(Decimal("0"), payable_hours - scheduled_hours)
         weekday_overtime = rest_day_overtime = public_holiday_overtime = night_overtime = Decimal("0")
         public_holidays = set((run.input_snapshot or {}).get("attendance_policy", {}).get("public_holidays") or [])
@@ -944,7 +980,13 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
                     rest_day_overtime += hours
                 if started.hour >= 22 or started.hour < 6:
                     night_overtime += hours
-        overtime_context = {"overtime_hours": overtime_hours, "weekday_overtime_hours": min(overtime_hours, weekday_overtime), "rest_day_overtime_hours": min(overtime_hours, rest_day_overtime), "public_holiday_overtime_hours": min(overtime_hours, public_holiday_overtime), "night_overtime_hours": min(overtime_hours, night_overtime)}
+        categorized_overtime = override.get("overtime_by_type") or {}
+        if categorized_overtime:
+            weekday_overtime = Decimal(str(categorized_overtime.get("weekday", 0)))
+            rest_day_overtime = Decimal(str(categorized_overtime.get("rest_day", 0)))
+            public_holiday_overtime = Decimal(str(categorized_overtime.get("public_holiday", 0)))
+            night_overtime = Decimal(str(categorized_overtime.get("night", 0)))
+        overtime_context = {"overtime_hours": overtime_hours, "weekday_overtime_hours": weekday_overtime, "rest_day_overtime_hours": rest_day_overtime, "public_holiday_overtime_hours": public_holiday_overtime, "night_overtime_hours": night_overtime}
         leave_month_payload = override.get("leave_months")
         if leave_month_payload is None:
             lookback_months = int((rules.leave_policy or {}).get("lookback_months", 12))
@@ -976,21 +1018,6 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
         overtime_defs: list[ComponentDefinition] = []
         overtime_rules = (work_policy.overtime_rules if work_policy else {}) or {}
         premium_candidates = [("weekday_overtime_hours", "weekday", "Weekday overtime"), ("rest_day_overtime_hours", "rest_day", "Rest-day overtime"), ("public_holiday_overtime_hours", "public_holiday", "Public-holiday overtime"), ("night_overtime_hours", "night", "Night overtime")]
-        if (work_policy.stacking_policy if work_policy else "exclusive") == "exclusive":
-            available = []
-            for hours_code, rule_code, label in premium_candidates:
-                raw_multiplier = overtime_rules.get(rule_code)
-                if raw_multiplier in (None, "", 0, "0"):
-                    continue
-                try:
-                    multiplier_value = Decimal(str(raw_multiplier))
-                except Exception as exc:
-                    raise HTTPException(status_code=422, detail={"code": "payroll_invalid_overtime_multiplier", "path": f"work_policy.overtime_rules.{rule_code}"}) from exc
-                if multiplier_value < 0:
-                    raise HTTPException(status_code=422, detail={"code": "payroll_invalid_overtime_multiplier", "path": f"work_policy.overtime_rules.{rule_code}"})
-                if Decimal(str(overtime_context.get(hours_code, 0))) > 0:
-                    available.append((hours_code, rule_code, label, multiplier_value))
-            premium_candidates = [(hours_code, rule_code, label) for hours_code, rule_code, label, _ in sorted(available, key=lambda item: item[3], reverse=True)[:1]]
         for index, (hours_code, rule_code, label) in enumerate(premium_candidates):
             multiplier = overtime_rules.get(rule_code)
             if multiplier in (None, "", 0, "0"):
@@ -1004,8 +1031,8 @@ async def calculate_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
             overtime_defs.append(ComponentDefinition(code=f"overtime_{rule_code}", label=label, component_kind="earning", formula=f"if_else(scheduled_hours > 0, {hours_code} * base_salary / scheduled_hours * {multiplier_decimal}, 0)", taxable=True, shi_subject=True, leave_average_eligible=False, payer="employee", position=len(components) + len(benefit_defs) + len(variable_defs) + index))
         defs = tuple(base_defs + benefit_defs + variable_defs + overtime_defs)
         calc = calculate_payslip(CalculationInput(base_salary=Decimal(str(override.get("base_salary", employee_profile.base_salary))), payable_workdays=payable_workdays, scheduled_workdays=scheduled_workdays_value, payable_calendar_days=Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1))), scheduled_calendar_days=Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1))), payable_hours=payable_hours, scheduled_hours=scheduled_hours, context={**context, **overtime_context, **benefit_context}, components=defs, prior_ytd_gross=Decimal(str(prior_gross or 0)), prior_ytd_taxable=Decimal(str(prior_taxable or 0)), prior_ytd_pit=Decimal(str(prior_pit or 0)), prior_ytd_relief=Decimal(str(prior_relief or 0)), prior_month_shi_base=Decimal(str(prior_month_base or 0)), current_advance=current_advance if run.run_type != "advance" else Decimal("0"), other_tax_deductible=Decimal(str(override.get("other_tax_deductible", 0))) + declared_deduction, other_tax_credit=declared_credit, other_deductions=Decimal(str(override.get("other_deductions", 0))), relief_eligibilities=frozenset(employee_profile.tax_relief_eligibility or []), leave_months=leave_months, leave_days=Decimal(str(override.get("leave_days", 0))), exemption_codes=frozenset((employee_profile.exemption_flags or {}).get("shi", [])), withhold_statutory=run.run_type != "advance"))
-        profile_snapshot = {"employee_id": employee_id, "base_salary": str(employee_profile.base_salary), "salary_structure_id": structure.id, "salary_structure_version": structure.version, "salary_structure_checksum": structure.checksum, "components": [{"code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "amount_mode": row.amount_mode, "percentage_basis": row.percentage_basis, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly), "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components], "insured_category": employee_profile.insured_category, "hazard_class": employee_profile.hazard_class, "residency_status": employee_profile.residency_status, "tax_relief_eligibility": employee_profile.tax_relief_eligibility, "exemption_flags": employee_profile.exemption_flags, "insured_code": employee_profile.insured_category}
-        input_snapshot = {"override": override, "variable_inputs": employee_variable_inputs, "profile_id": employee_profile.id, "advance_ids": [row.id for row in advance_rows], "unapplied_advance": str(unapplied_advance), "current_advance": str(current_advance), "tax_adjustments": {**tax_adjustments, "deduction": str(tax_adjustments["deduction"]), "credit": str(tax_adjustments["credit"]), "applied_deduction": str(declared_deduction), "applied_credit": str(declared_credit)}, "benefit_claims": benefit_claims, "work_policy": {"id": work_policy.id, "code": work_policy.code, "daily_hours": str(work_policy.daily_hours), "weekly_hours": str(work_policy.weekly_hours), "workweek": work_policy.workweek, "overtime_rules": work_policy.overtime_rules, "stacking_policy": work_policy.stacking_policy} if work_policy else {"daily_hours": str(profile.standard_daily_hours), "weekly_hours": str(profile.standard_weekly_hours), "workweek": sorted(workweek)}, "resolved_units": {"payable_workdays": str(payable_workdays), "scheduled_workdays": str(scheduled_workdays_value), "payable_calendar_days": str(Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1)))), "scheduled_calendar_days": str(Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1)))), "payable_hours": str(payable_hours), "scheduled_hours": str(scheduled_hours), "overtime_hours": str(overtime_hours)}}
+        profile_snapshot = {"employee_id": employee_id, "employee_name": employee_row.name if employee_row else None, "department": (employee_row.work_direction or employee_row.work_branch) if employee_row else None, "job_title": employee_row.job_title if employee_row else None, "base_salary": str(employee_profile.base_salary), "salary_structure_id": structure.id, "salary_structure_version": structure.version, "salary_structure_checksum": structure.checksum, "components": [{"code": row.code, "name": row.name, "component_kind": row.component_kind, "formula": row.formula, "amount_mode": row.amount_mode, "percentage_basis": row.percentage_basis, "proration_basis": row.proration_basis, "is_taxable": row.is_taxable, "is_shi_subject": row.is_shi_subject, "is_non_taxable_allowance": row.is_non_taxable_allowance, "is_leave_average_eligible": row.is_leave_average_eligible, "is_flexible_benefit": row.is_flexible_benefit, "max_benefit_amount_yearly": str(row.max_benefit_amount_yearly), "pay_against_benefit_claim": row.pay_against_benefit_claim, "only_tax_impact": row.only_tax_impact, "payer": row.payer, "position": row.position, "account_id": row.account_id, "cost_center_id": row.cost_center_id} for row in components], "insured_category": employee_profile.insured_category, "hazard_class": employee_profile.hazard_class, "residency_status": employee_profile.residency_status, "tax_relief_eligibility": employee_profile.tax_relief_eligibility, "exemption_flags": employee_profile.exemption_flags, "insured_code": employee_profile.insured_category}
+        input_snapshot = {"override": override, "variable_inputs": employee_variable_inputs, "profile_id": employee_profile.id, "advance_ids": [row.id for row in advance_rows], "unapplied_advance": str(unapplied_advance), "current_advance": str(current_advance), "tax_adjustments": {**tax_adjustments, "deduction": str(tax_adjustments["deduction"]), "credit": str(tax_adjustments["credit"]), "applied_deduction": str(declared_deduction), "applied_credit": str(declared_credit)}, "benefit_claims": benefit_claims, "work_policy": {"id": work_policy.id, "code": work_policy.code, "daily_hours": str(work_policy.daily_hours), "weekly_hours": str(work_policy.weekly_hours), "workweek": work_policy.workweek, "hazard_class": work_policy.hazard_class, "overtime_rules": work_policy.overtime_rules, "stacking_policy": work_policy.stacking_policy} if work_policy else {"daily_hours": str(profile.standard_daily_hours), "weekly_hours": str(profile.standard_weekly_hours), "workweek": sorted(workweek)}, "resolved_units": {"payable_workdays": str(payable_workdays), "scheduled_workdays": str(scheduled_workdays_value), "payable_calendar_days": str(Decimal(str(override.get("payable_calendar_days", (run.period_end - run.period_start).days + 1)))), "scheduled_calendar_days": str(Decimal(str(override.get("scheduled_calendar_days", (run.period_end - run.period_start).days + 1)))), "payable_hours": str(payable_hours), "scheduled_hours": str(scheduled_hours), "overtime_hours": str(overtime_hours)}}
         payslip = Payslip(payroll_run_id=run.id, organization_id=actor.organization_id, employee_id=employee_id, document_status="draft", employee_profile_snapshot=profile_snapshot, input_snapshot=input_snapshot, calculation_trace=calc.trace, ytd_snapshot={key: str(value) for key, value in calc.ytd.items()}, gross=calc.gross, taxable_income=calc.taxable_income, shi_subject_gross=calc.shi_subject_gross, shi_base=calc.shi_base, employee_shi=calc.employee_shi, employer_shi=calc.employer_shi, pit=calc.pit, pit_relief=calc.relief, advance_offset=calc.advance_offset, net_pay=calc.net_pay, snapshot_checksum=snapshot_checksum({"profile": profile_snapshot, "input": input_snapshot, "result": calc.trace, "gross": str(calc.gross), "taxable_income": str(calc.taxable_income), "net": str(calc.net_pay)}))
         db.add(payslip); await db.flush()
         component_by_code = {row.code: row for row in components}
@@ -1042,6 +1069,9 @@ async def reconcile_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
         key = f"{code}:{employee_id or 'run'}"
         issues.append({"key": key, "code": code, "severity": severity, "employee_id": employee_id, "message": message, "resolved": key in resolved})
 
+    for item in (run.input_snapshot or {}).get("attendance_input_errors") or []:
+        add_issue(item.get("code", "payroll_attendance_missing"), "error", item.get("message", "Confirm attendance or approve leave before approval."), item.get("employee_id"))
+
     employee_ids = [row.employee_id for row in slips]
     profiles = list((await db.execute(select(EmployeePayrollProfile).where(
         EmployeePayrollProfile.organization_id == actor.organization_id,
@@ -1067,9 +1097,14 @@ async def reconcile_run(db: AsyncSession, actor: ActorContext, run: PayrollRun) 
         units = (slip.input_snapshot or {}).get("resolved_units") or {}
         payable_hours = Decimal(str(units.get("payable_hours", 0)))
         scheduled_hours = Decimal(str(units.get("scheduled_hours", 0)))
-        prorated = any(item.get("proration_basis") in {"hours", "working_days"} for item in ((slip.employee_profile_snapshot or {}).get("components") or []))
-        if prorated and not Decimal(str(units.get("payable_workdays", 0))) and not payable_hours:
+        component_bases = {item.get("proration_basis") for item in ((slip.employee_profile_snapshot or {}).get("components") or [])}
+        if "hours" in component_bases and (payable_hours <= 0 or scheduled_hours <= 0):
+            add_issue("missing_approved_hours", "error", "Approved actual hours and scheduled hours are required for hourly proration.", slip.employee_id)
+        elif "working_days" in component_bases and not Decimal(str(units.get("payable_workdays", 0))):
             add_issue("missing_approved_time", "error", "No approved time or payable-day override was frozen for a prorated employee.", slip.employee_id)
+        advance_requested = Decimal(str(((slip.calculation_trace or {}).get("advance") or {}).get("requested", 0)))
+        if advance_requested > Decimal(str(slip.gross)):
+            add_issue("advance_exceeds_gross", "error", "Requested advance exceeds gross pay and must be corrected before approval.", slip.employee_id)
         if scheduled_hours > 0 and payable_hours > scheduled_hours * Decimal("1.25"):
             add_issue("overtime_spike", "warning", "Approved hours exceed scheduled hours by more than 25%.", slip.employee_id)
         prior = prior_by_employee.get(slip.employee_id)

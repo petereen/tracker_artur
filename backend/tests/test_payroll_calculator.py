@@ -45,13 +45,84 @@ def test_shi_cap_is_applied_before_rate():
     assert employer == Decimal("115000.00")
 
 
+def test_uncapped_employer_shi_preserves_the_employee_cap_base():
+    mixed_rules = StatutoryRules(
+        minimum_wage=Decimal("792000"), shi_ceiling_multiplier=Decimal("10"),
+        shi_rates=(SHIRate("employee", "pension", Decimal(".115")), SHIRate("employer", "pension", Decimal(".125"), base_ceiling_policy="none")),
+    )
+    base, employee, employer, trace = compute_shi(Decimal("10000000"), mixed_rules)
+    assert base == Decimal("7920000.00")
+    assert employee == Decimal("910800.00")
+    assert employer == Decimal("1250000.00")
+    assert trace["employee_base"] == Decimal("7920000.00")
+    assert trace["employer_base"] == Decimal("10000000.00")
+
+
 def test_progressive_brackets_and_ytd_withholding():
     assert compute_progressive_pit(Decimal("12000000"), rules().pit_brackets) == Decimal("1300000.00")
     components = (ComponentDefinition("base", "Base", "earning", "base_salary"),)
-    ytd_rules = rules("ytd_cumulative")
+    base_rules = rules("isolated_period")
+    ytd_rules = StatutoryRules(
+        minimum_wage=base_rules.minimum_wage, shi_ceiling_multiplier=base_rules.shi_ceiling_multiplier,
+        shi_rates=base_rules.shi_rates,
+        pit_brackets=(
+            PITBracket(Decimal("0"), Decimal("120000000"), Decimal(".10"), period_basis="annual"),
+            PITBracket(Decimal("120000000"), Decimal("180000000"), Decimal(".15"), period_basis="annual"),
+            PITBracket(Decimal("180000000"), None, Decimal(".20"), period_basis="annual"),
+        ),
+        pit_withholding_method="ytd_cumulative",
+    )
     first = calculate_payslip(CalculationInput(base_salary=Decimal("10000000"), components=components), ytd_rules)
     second = calculate_payslip(CalculationInput(base_salary=Decimal("2000000"), components=components, prior_ytd_taxable=first.taxable_income, prior_ytd_pit=first.pit), ytd_rules)
-    assert second.pit == Decimal("208000.00")
+    # Annual thresholds are selected for YTD withholding: the cumulative base
+    # remains in the first annual bracket, so only 10% of current taxable pay
+    # (1,770,000) is due in this period after prior withholding.
+    assert second.pit == Decimal("177000.00")
+
+
+def test_ytd_calculation_rejects_monthly_brackets():
+    with pytest.raises(FormulaError, match="requires annual brackets"):
+        calculate_payslip(CalculationInput(base_salary=Decimal("1000000"), components=(ComponentDefinition("base", "Base", "earning", "base_salary"),)), rules("ytd_cumulative"))
+
+
+def test_partial_month_hourly_proration_matches_monthly_example():
+    monthly_rules = StatutoryRules(
+        minimum_wage=Decimal("792000"), shi_ceiling_multiplier=Decimal("10"),
+        shi_rates=(SHIRate("employee", "all", Decimal(".115")), SHIRate("employer", "all", Decimal(".125"))),
+        pit_brackets=(PITBracket(Decimal("0"), Decimal("10000000"), Decimal(".10"), period_basis="monthly"),),
+        relief_tiers=(ReliefTier("ordinary", Decimal("1500000"), Decimal("2000000"), Decimal("14000"), amount_basis="monthly"),),
+        pit_withholding_method="isolated_period",
+    )
+    result = calculate_payslip(CalculationInput(
+        base_salary=Decimal("2000000"), payable_hours=Decimal("147"), scheduled_hours=Decimal("168"),
+        components=(ComponentDefinition("base", "Base", "earning", "base_salary", proration_basis="hours"),),
+        relief_eligibilities=frozenset({"ordinary"}), current_advance=Decimal("750000"),
+    ), monthly_rules)
+    assert result.gross == Decimal("1750000.00")
+    assert result.employee_shi == Decimal("201250.00")
+    assert result.taxable_income == Decimal("1548750.00")
+    assert result.relief == Decimal("14000.00")
+    assert result.pit == Decimal("140875.00")
+    assert result.net_pay == Decimal("657875.00")
+
+
+def test_hourly_proration_requires_a_scheduled_hours_denominator():
+    with pytest.raises(ValueError, match="empty denominator"):
+        prorate_amount(Decimal("2000000"), "hours", payable_hours=Decimal("147"), scheduled_hours=Decimal("0"))
+
+
+@pytest.mark.parametrize(("gross", "expected_taxable", "expected_pit"), [
+    ("13000000", "12089200.00", "1313380.00"),
+    ("18000000", "17089200.00", "2167840.00"),
+])
+def test_one_off_gross_exercises_monthly_pit_brackets_and_period_cap(gross, expected_taxable, expected_pit):
+    result = calculate_payslip(CalculationInput(
+        base_salary=Decimal(gross),
+        components=(ComponentDefinition("base", "Base and bonus", "earning", "base_salary"),),
+    ), rules("isolated_period"))
+    assert result.employee_shi == Decimal("910800.00")
+    assert result.taxable_income == Decimal(expected_taxable)
+    assert result.pit == Decimal(expected_pit)
 
 
 def test_advance_is_offset_once_and_does_not_change_tax():

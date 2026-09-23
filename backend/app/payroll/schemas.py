@@ -118,8 +118,9 @@ class WorkPolicyInput(BaseModel):
     daily_hours: Decimal = Field(gt=0, le=24)
     weekly_hours: Decimal = Field(gt=0, le=168)
     workweek: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5], min_length=1, max_length=7)
+    hazard_class: str = Field(default="standard", min_length=1, max_length=16)
     overtime_rules: dict[str, Any] = Field(default_factory=dict)
-    stacking_policy: Literal["exclusive", "stack"] = "exclusive"
+    stacking_policy: Literal["exclusive", "stack"] = "stack"
     source_references: list[str] = Field(default_factory=list)
 
 
@@ -182,7 +183,7 @@ class EmployeePayrollInput(BaseModel):
     effective_from: date
     effective_to: date | None = None
     base_salary: Decimal = Field(ge=0)
-    insured_category: str = "employee"
+    insured_category: str = "01001"
     hazard_class: str = "standard"
     residency_status: str = "resident"
     tax_relief_eligibility: list[str] = Field(default_factory=list)
@@ -252,6 +253,14 @@ class PayrollRunInput(BaseModel):
     cost_center_id: int | None = None
     input_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
     variable_inputs: list[VariablePayInput] = Field(default_factory=list)
+
+
+class PayrollCycleInputCorrection(BaseModel):
+    employee_id: int
+    actual_worked_hours: Decimal = Field(ge=0)
+    overtime_by_type: dict[Literal["weekday", "rest_day", "public_holiday", "night"], Decimal] = Field(default_factory=dict)
+    evidence_reference: str = Field(min_length=1, max_length=500)
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 class CalculateRunInput(BaseModel):

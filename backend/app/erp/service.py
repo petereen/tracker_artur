@@ -56,7 +56,7 @@ ERP_MODULES = {
     "assets_maintenance": "Assets & maintenance",
 }
 MODULE_SETTINGS_KEY = "erp_modules"
-VALID_ACTIONS = frozenset({"view", "view_salary", "edit_setup", "create", "edit", "calculate", "review", "approve", "approve_payroll_manager", "approve_hr_director", "approve_finance", "post", "pay", "release_slips", "submit", "cancel", "archive", "export", "administer"})
+VALID_ACTIONS = frozenset({"view", "view_salary", "edit_setup", "edit_formula", "create", "edit", "calculate", "review", "approve", "approve_payroll_manager", "approve_hr_director", "approve_finance", "post", "pay", "release_slips", "submit", "cancel", "archive", "export", "administer"})
 DOCUMENT_MODULES = {
     "journal_entry": "accounting", "payment_entry": "accounting", "budget": "accounting", "fiscal_period": "accounting",
     "quotation": "selling", "sales_order": "selling", "delivery": "selling", "sales_invoice": "selling", "sales_credit_note": "selling",
