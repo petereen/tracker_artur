@@ -127,7 +127,7 @@ def upgrade() -> None:
     """))
     op.execute(sa.text("""
         INSERT INTO monthly_payroll_salary_history (profile_id, monthly_salary, valid_from, created_by_account_id)
-        SELECT monthly.id, legacy.base_salary, legacy.effective_from, legacy.created_by_account_id
+        SELECT monthly.id, legacy.base_salary, legacy.effective_from, NULL
         FROM employee_payroll_profiles AS legacy
         JOIN monthly_payroll_profiles AS monthly
           ON monthly.organization_id = legacy.organization_id
