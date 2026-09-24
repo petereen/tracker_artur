@@ -147,7 +147,7 @@ def upgrade() -> None:
           '["https://legalinfo.mn/mn/detail?lawId=14410","https://legalinfo.mn/mn/detail?lawId=16760148379551"]'::jsonb
         FROM organizations
         ON CONFLICT (organization_id, version) DO NOTHING
-    """))
+    """.replace(":", "\\:")))
 
 
 def downgrade() -> None:
