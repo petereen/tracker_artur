@@ -254,18 +254,16 @@ def calculate_monthly_run(
             allowed = profile.pay_days[:-1] if profile.payment_frequency in {"BIWEEKLY", "WEEKLY"} else ()
             if advance_pay_day not in allowed:
                 raise ValueError("Worker is not due for an advance on this pay day")
+        # FIXED and PERCENT are per-pay-day instalments typed by HR; only
+        # WORKED-TO-DATE is cumulative and nets off earlier approved advances.
         if profile.advance_basis is AdvanceBasis.FIXED:
-            earned = whole_tugrik(profile.advance_amount)
-        elif profile.advance_basis is AdvanceBasis.PERCENT:
-            earned = whole_tugrik(amount(profile.base_salary) * amount(profile.advance_percent) / Decimal("100"))
+            return PayrollRunResult(run_type=run_type, advance=max(ZERO, whole_tugrik(profile.advance_amount)))
+        if profile.advance_basis is AdvanceBasis.PERCENT:
+            return PayrollRunResult(run_type=run_type, advance=max(ZERO, whole_tugrik(amount(profile.base_salary) * amount(profile.advance_percent) / Decimal("100"))))
+        if profile.salary_type == "PRORATION":
+            earned = whole_tugrik(amount(profile.base_salary) / planned_hours * amount(worked_to_date_hours))
         else:
-            if profile.salary_type == "PRORATION":
-                denominator = planned_hours
-                if denominator <= ZERO:
-                    raise ValueError("WORKED-TO-DATE requires planned hours")
-                earned = whole_tugrik(amount(profile.base_salary) / denominator * amount(worked_to_date_hours))
-            else:
-                earned = whole_tugrik(amount(profile.base_salary) * Decimal(elapsed_planned_days) / Decimal(planned_days))
+            earned = whole_tugrik(amount(profile.base_salary) * Decimal(elapsed_planned_days) / Decimal(planned_days))
         previous = sum((whole_tugrik(value) for value in prior_approved_advances), ZERO)
         return PayrollRunResult(run_type=run_type, advance=max(ZERO, whole_tugrik(earned - previous)))
 
@@ -374,6 +372,79 @@ def classify_work_hours(
     normal = min(total_hours, norm)
     buckets["weekday"] = max(ZERO, total_hours - norm)
     return normal, buckets
+
+
+def overtime_day_lines(
+    *,
+    day_lines: Sequence[Mapping[str, object]],
+    aggregate_hours: Mapping[str, Decimal | int | str],
+    bucket_totals: Mapping[str, Decimal | int | str],
+    salary_segments: Sequence[Mapping[str, object]],
+    base_salary: Decimal | int | str,
+    planned_hours: Decimal | int | str,
+    multipliers: Mapping[str, Decimal | int | str],
+) -> list[dict[str, object]]:
+    """Explain each overtime cell as dated lines whose amounts sum to the cell.
+
+    Rates follow the engine: the salary in force on that date divided by the
+    whole month's planned hours. When the accountant edited aggregate hours
+    so the dated lines no longer reconcile, one manual line per bucket is
+    returned instead. Per-line rounding differences are absorbed by the
+    largest line so every bucket total equals the engine's cell exactly.
+    """
+    planned = amount(planned_hours)
+    default_rate = amount(base_salary) / planned if planned > ZERO else ZERO
+    aggregate = {bucket: amount(hours) for bucket, hours in aggregate_hours.items() if amount(hours) > ZERO}
+    dated: dict[str, Decimal] = {}
+    for line in day_lines:
+        for bucket, hours in (line.get("overtime_hours") or {}).items():  # type: ignore[union-attr]
+            dated[bucket] = dated.get(bucket, ZERO) + amount(hours)
+    dated = {bucket: hours for bucket, hours in dated.items() if hours > ZERO}
+
+    def rate_on(day: date | None) -> Decimal:
+        if day is None:
+            return default_rate
+        for segment in salary_segments:
+            if date.fromisoformat(str(segment["valid_from"])) <= day <= date.fromisoformat(str(segment["valid_to"])):
+                return amount(segment["monthly_salary"]) / planned if planned > ZERO else ZERO  # type: ignore[arg-type]
+        return default_rate
+
+    raw: list[dict[str, object]] = []
+    if dated and dated == aggregate:
+        for line in sorted(day_lines, key=lambda item: str(item.get("date"))):
+            day = date.fromisoformat(str(line["date"]))
+            for bucket, hours in (line.get("overtime_hours") or {}).items():  # type: ignore[union-attr]
+                hours_value = amount(hours)
+                if hours_value <= ZERO:
+                    continue
+                multiplier = amount(multipliers.get(bucket, 1))
+                rate = rate_on(day)
+                raw.append({
+                    "date": day.isoformat(), "weekday": day.weekday(), "day_type": line.get("day_type"),
+                    "bucket": bucket, "hours": hours_value, "multiplier": multiplier,
+                    "rate": rate, "exact": hours_value * multiplier * rate, "source": line.get("source") or "time",
+                })
+    else:
+        for bucket, hours_value in aggregate.items():
+            multiplier = amount(multipliers.get(bucket, 1))
+            raw.append({
+                "date": None, "weekday": None, "day_type": None, "bucket": bucket, "hours": hours_value,
+                "multiplier": multiplier, "rate": default_rate,
+                "exact": hours_value * multiplier * default_rate, "source": "manual",
+            })
+    for line in raw:
+        line["amount"] = whole_tugrik(line.pop("exact"))  # type: ignore[arg-type]
+    for bucket in {str(line["bucket"]) for line in raw}:
+        lines = [line for line in raw if line["bucket"] == bucket]
+        difference = whole_tugrik(bucket_totals.get(bucket, 0)) - sum((amount(line["amount"]) for line in lines), ZERO)  # type: ignore[arg-type]
+        if difference:
+            largest = max(lines, key=lambda line: amount(line["amount"]))  # type: ignore[arg-type]
+            largest["amount"] = amount(largest["amount"]) + difference  # type: ignore[arg-type]
+    return [
+        {**line, "hours": str(line["hours"]), "multiplier": str(line["multiplier"]),
+         "rate": str(amount(line["rate"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)), "amount": str(line["amount"])}  # type: ignore[arg-type]
+        for line in raw
+    ]
 
 
 def advance_snapshot_warning(

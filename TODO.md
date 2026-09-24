@@ -1,6 +1,23 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Restrict company file uploads/folder creation to admin, manager, and supervisor roles; add inherited folder sharing with read/edit access (`backend/app/routers/company_files.py`, `backend/app/services/file_search_service.py`, `frontend/src/pages/CompanyFilesPage.tsx`, `backend/alembic/versions/f2a3b4c5d6e7_company_file_edit_grants.py`, `backend/tests/test_company_files.py`)
+- [ ] Close payroll design-plan gaps (review 2026-09-24): P0 bugs → P1 workflow → P2 screens → P3 export/closing → P4 tests
+  - [x] P0: approve-all skips already-approved rows; blocked-row errors name the worker (`backend/app/payroll/monthly_workflow.py`)
+  - [x] P0: advance due-check uses month-clamped pay days; one-off advances no longer crash; off-schedule rows get blocking `advance_not_due` (`monthly_workflow.py`, `backend/app/hr/router.py`)
+  - [x] P0: FIXED/PERCENT advance instalments are not reduced by earlier advances; only WORKED-TO-DATE nets them (`backend/app/payroll/monthly_engine.py`)
+  - [x] P0: Excel import keeps existing values for blank cells; blank/None inputs treated as zero instead of 500 (`monthly_workflow.py`)
+  - [x] P0: mid-month hires/leavers — salary segments clipped to employment window, zero-salary filler prorates FIXED pay (`monthly_workflow.py`)
+  - [x] P0: export overtime lines use the engine's hourly rate so lines reconcile to the cell (`monthly_workflow.py`)
+  - [x] P0: month unlock restores Approved/Paid; admin `POST /runs/{id}/reopen` with reason; close refuses an already-closed month (`monthly_workflow.py`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] P0: default 2026 rule set auto-published for organizations without one (month open + HR preview)
+  - [x] P0: readable structured error toasts, full warning label map, final register gross column label (`MonthlyPayrollWorkspace.tsx`)
+  - [x] P0 verification against PostgreSQL (`backend/tests/test_payroll_monthly_workflow_db.py`, disposable local PG16)
+  - [x] P1: partial approve-all, row/run unapprove, two-way Paid, admin run reopen, close waivers, «HR changed» + accept, «Ажилтан нэмэх», multi-line deductions, prefilled import template, new-run dialog counts/cutoff/department, profile strip, final checklist
+  - [x] P2: Excel-order register with grouped headers, subtotals, sticky/frozen columns and presets; advance register; status chips; overtime colours + info box; tabbed row drawer; dashboard with trend; settings/archive pages; legacy page cleanup (`frontend/src/pages/monthly-payroll/`)
+  - [x] P3: §12 workbooks (`backend/app/payroll/monthly_exports.py`), extended closing stats and accounting summary, Mongolian report headers
+  - [x] P4: engine/export unit tests, PostgreSQL end-to-end test, frontend helper/chart tests; browser walkthrough at desktop and phone width
+  - [ ] Merge Alembic heads once the concurrent company-files migration (`f2a3b4c5d6e7`) lands (`tests/test_alembic_graph.py`)
 - [ ] Complete monthly payroll cutover and retire the previous workflow
   - [x] Fix mid-month salary segment proration and overtime denominators (`backend/app/payroll/monthly_engine.py`)
   - [x] Add the missing mid-month PRORATION and segment-rate overtime regression fixture (`backend/tests/test_payroll_monthly_engine.py`)

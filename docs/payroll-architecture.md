@@ -323,6 +323,39 @@ approved final run and no unapproved advance run; previewed closing statistics
 are archived with every run and audit row. Administrators can unlock with a
 reason while earlier archive versions stay readable.
 
+### Review behaviour (2026-09 gap closure)
+
+- **Approval.** «Бүгдийг батлах» approves every row without a blocking issue and
+  reports the rest; the run becomes Approved only when every row is. Rows and
+  unpaid runs can be unapproved («Батлалт цуцлах»); editing an approved row returns
+  it to draft. Paid toggles both ways while the month is open. An administrator can
+  reopen an approved or paid run with a reason.
+- **Advances.** FIXED and PERCENT advances are per-pay-day instalments; only
+  WORKED-TO-DATE nets earlier approved advances. Pay days beyond month end clamp to
+  the last day. «Урьдчилгаа бодоогүй» is a warning; «Урьдчилгаа өөрчлөгдсөн» blocks
+  the row and is flagged as soon as an advance run enters or leaves approval.
+  «Ажилтан нэмэх» adds a one-off advance to an existing advance run.
+- **HR changes.** «Ажилчид шинэчлэх» adds newly due workers and parks changed HR
+  profiles on existing rows as «HR changed»; nothing is overwritten until the
+  accountant accepts the change on that row.
+- **Employment window.** Salary segments are limited to the days employed in the
+  month, so a mid-month hire or leaver on a FIXED salary is prorated by working days.
+- **Overtime explanation.** `overtime_day_lines` (engine) turns each overtime cell
+  into dated lines at the engine's rate; the register info box, the drawer and the
+  «Илүү цаг» export sheet all read these lines, and they always sum to the cell.
+- **Close.** An unapproved advance run can be waived with a reason at close; it
+  stays draft and uncounted, and the archive records the waiver. A closed month is
+  read-only for every run. Unlock returns runs to Approved/Paid.
+- **Exports.** `monthly_exports.build_run_workbook` produces the §12 workbooks: the
+  Excel-ordered final register with grouped headers, department SUBTOTAL rows and
+  footnote, the «Дүн» sheet with accounts A/B/C and department split, overtime, SHI
+  split, payment list grouped by pay day, and other deductions.
+- **Organizations without rules** get the seeded 2026 rule set on first use.
+
+Verification: `tests/test_payroll_monthly_workflow_db.py` drives the full §18 flow
+through the API against a disposable PostgreSQL when `PAYROLL_TEST_DATABASE_URL` is
+set (it creates only the payroll tables, so pgvector is not required).
+
 The monthly flow is separate from unified v2's ledger posting and payment
 allocation workflow. Direct bank integration and automatic HR leave-pay
 synchronization remain follow-up work. It does not change the unified-v2

@@ -34,5 +34,9 @@ def test_v2_frontend_only_queries_unified_runs():
     api = (ROOT.parent / "frontend/src/api/enterprise.ts").read_text()
     assert "usePayrollEntries" not in page
     assert "workflow_version: 'unified_v2'" in api
-    for route in ("/erp/payroll/setup", "/erp/payroll/runs/new", "/erp/payroll/runs/"):
+    # The unified-v2 wizard routes are retired from the product and redirect to
+    # the run-based monthly payroll dashboard.
+    for route in ("'/setup'", "'/runs'", "'/payroll-entries'"):
         assert route in page
+    assert "<Navigate to=\"/erp/payroll\" replace />" in page
+    assert "MonthlyPayrollDashboard" in page

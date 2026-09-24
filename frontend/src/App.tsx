@@ -135,6 +135,8 @@ function AuthenticatedApp() {
           <Route path="erp/payroll/monthly" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/monthly/reports" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/monthly/runs/:runId" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/monthly/settings" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/monthly/archive" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/tax-benefits" element={<Navigate to="/erp/payroll" replace />} />
           <Route path="erp/payroll/runs/new" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/runs/:runId" element={<PayrollWorkspacePage />} />

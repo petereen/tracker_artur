@@ -534,11 +534,21 @@ export interface MonthlyPayrollProfileView extends MonthlyPayrollProfilePayload 
 export interface MonthlyPayrollPreview { month: string; gross: string; employee_shi: string; taxable_income: string; pit_before_relief: string; relief: string; pit: string; net_pay: string; advance_schedule: Array<{ pay_date: string; basis: string; value: string | null; estimated_amount: string }> }
 
 export interface MonthlyPayrollRunRow {
-  id: number; employee_id: number; status: string; identity: { name?: string; rd?: string | null; job_title?: string | null; department_id?: number | null }
+  id: number; employee_id: number; status: string; identity: { name?: string; rd?: string | null; job_title?: string | null; department_id?: number | null; department?: string; pay_date?: string; last_name?: string | null; first_name?: string | null }
   profile: Record<string, unknown>; inputs: Record<string, any>; result: Record<string, any>; warnings: string[]; approved_at: string | null
   audit?: Array<{ field: string; old: unknown; new: unknown; reason: string | null; account_id: number | null; at: string }>
 }
-export interface MonthlyPayrollRun { id: number; month_id: number; run_type: 'advance' | 'final'; pay_date: string; cutoff_date: string | null; department_id: number | null; status: string; note: string | null; advance_snapshot: Record<string, unknown>; rows?: MonthlyPayrollRunRow[] }
+export interface MonthlyPayrollRun { id: number; month_id: number; run_type: 'advance' | 'final'; pay_date: string; cutoff_date: string | null; department_id: number | null; status: string; note: string | null; advance_snapshot: Record<string, unknown>; approved_at?: string | null; paid_at?: string | null; rows?: MonthlyPayrollRunRow[] }
+export interface MonthlyPayrollApprovalSummary { approved: number; skipped: Array<{ employee_id: number; employee_name?: string; issues: string[]; message?: string }> }
+export interface MonthlyPayrollAdvanceDate { day: number; date: string; workers: number; worked_to_date_workers: number; run_exists: boolean }
+export interface MonthlyPayrollDashboard {
+  month: string; month_id: number | null; status: string | null; has_final: boolean
+  pipeline: Array<MonthlyPayrollRun & { workers: number; approved_rows: number; total: string; gross: string | null }>
+  stats: Record<string, any> | null; advance: { paid: string; planned: string }
+  upcoming: Array<{ pay_date: string; run_type: 'advance' | 'final'; run_id: number | null; workers: number; amount: string | null; status: string }>
+  alerts: Record<'blocking_rows' | 'warning_rows' | 'incomplete_profiles' | 'hr_changed' | 'advance_changed' | 'advance_not_calculated' | 'flagged', number>
+  trend: Array<{ month: string; status: string; gross: string; company_cost: string; headcount: number }>
+}
 export interface MonthlyPayrollMonth { id: number; year: number; month: number; status: string; rule_set_id: number; rule_snapshot: Record<string, unknown>; calendar_snapshot: Record<string, string>; runs: MonthlyPayrollRun[] }
 export interface MonthlyPayrollCalendarDay { date: string; day_type: 'working' | 'weekly_rest' | 'public_holiday'; holiday_name: string | null }
 export interface MonthlyPayrollCompanySettings { legal_company_name: string | null; daily_norm_hours: string; employer_injury_rate: string; weekday_overtime_multiplier: string; rest_day_overtime_multiplier: string; public_holiday_overtime_multiplier: string; default_advance_basis: 'FIXED' | 'PERCENT' | 'WORKED-TO-DATE'; default_advance_percent: string; deduction_types: string[]; salary_expense_account_id: number | null; employer_shi_account_id: number | null; advance_clearing_account_id: number | null }
@@ -548,7 +558,7 @@ export function useMonthlyPayrollMonths() { return useQuery<MonthlyPayrollMonth[
 export function useCreateMonthlyPayrollMonth() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { year: number; month: number }) => api.post('/v1/erp/payroll/monthly/months', input).then((r) => r.data as MonthlyPayrollMonth), onSuccess: () => qc.invalidateQueries({ queryKey: monthlyPayrollKey }) }) }
 export function useCreateMonthlyPayrollRun() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ monthId, ...input }: { monthId: number; run_type: 'advance' | 'final'; pay_date: string; cutoff_date?: string; department_id?: number | null; employee_ids?: number[]; note?: string }) => api.post(`/v1/erp/payroll/monthly/months/${monthId}/runs`, input).then((r) => r.data as MonthlyPayrollRun), onSuccess: () => qc.invalidateQueries({ queryKey: monthlyPayrollKey }) }) }
 export function useMonthlyPayrollMonth(id?: number) { return useQuery<MonthlyPayrollMonth>({ queryKey: [...monthlyPayrollKey, 'months', id], queryFn: () => api.get(`/v1/erp/payroll/monthly/months/${id}`).then((r) => r.data), enabled: Boolean(id), retry: false }) }
-export function useMonthlyPayrollAdvanceDates(id?: number) { return useQuery<Array<{ day: number; date: string }>>({ queryKey: [...monthlyPayrollKey, 'advance-dates', id], queryFn: () => api.get(`/v1/erp/payroll/monthly/months/${id}/advance-dates`).then((r) => r.data), enabled: Boolean(id), retry: false }) }
+export function useMonthlyPayrollAdvanceDates(id?: number) { return useQuery<MonthlyPayrollAdvanceDate[]>({ queryKey: [...monthlyPayrollKey, 'advance-dates', id], queryFn: () => api.get(`/v1/erp/payroll/monthly/months/${id}/advance-dates`).then((r) => r.data), enabled: Boolean(id), retry: false }) }
 export function useMonthlyPayrollRun(id?: number) { return useQuery<MonthlyPayrollRun & { rows: MonthlyPayrollRunRow[] }>({ queryKey: [...monthlyPayrollKey, 'runs', id], queryFn: () => api.get(`/v1/erp/payroll/monthly/runs/${id}`).then((r) => r.data), enabled: Boolean(id), retry: false }) }
 export function useSaveMonthlyPayrollRow(runId: number) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ employeeId, ...input }: { employeeId: number; [key: string]: unknown }) => api.put(`/v1/erp/payroll/monthly/runs/${runId}/rows/${employeeId}`, input).then((r) => r.data as MonthlyPayrollRunRow), onSuccess: () => qc.invalidateQueries({ queryKey: [...monthlyPayrollKey, 'runs', runId] }) }) }
 export function useRevertMonthlyPayrollRowOverrides(runId: number) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ employeeId, reason }: { employeeId: number; reason: string }) => api.post(`/v1/erp/payroll/monthly/runs/${runId}/rows/${employeeId}/revert-overrides`, { reason }).then((r) => r.data as MonthlyPayrollRunRow), onSuccess: () => qc.invalidateQueries({ queryKey: [...monthlyPayrollKey, 'runs', runId] }) }) }
@@ -556,16 +566,25 @@ export function useOverrideMonthlyPayrollComputedCell(runId: number) { const qc 
 export function useRevertMonthlyPayrollComputedCell(runId: number) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ employeeId, field, reason }: { employeeId: number; field: string; reason: string }) => api.post(`/v1/erp/payroll/monthly/runs/${runId}/rows/${employeeId}/computed-overrides/revert`, { field, reason }).then((r) => r.data as MonthlyPayrollRunRow), onSuccess: () => qc.invalidateQueries({ queryKey: [...monthlyPayrollKey, 'runs', runId] }) }) }
 export function useApproveMonthlyPayrollRow(runId: number) { const qc = useQueryClient(); return useMutation({ mutationFn: (employeeId: number) => api.post(`/v1/erp/payroll/monthly/runs/${runId}/rows/${employeeId}/approve`).then((r) => r.data as MonthlyPayrollRunRow), onSuccess: () => qc.invalidateQueries({ queryKey: [...monthlyPayrollKey, 'runs', runId] }) }) }
 function useMonthlyPayrollAction<T = unknown>(path: (id: number) => string) { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.post(path(id)).then((r) => r.data as T), onSuccess: (_data, id) => { qc.invalidateQueries({ queryKey: monthlyPayrollKey }); qc.invalidateQueries({ queryKey: [...monthlyPayrollKey, 'runs', id] }) } }) }
+export function useMonthlyPayrollArchiveIndex() { return useQuery<Array<{ month_id: number; month: string; archive_id: number; version: number; closed_at: string; headcount: number; gross: string; company_cost: string; runs: number; runs_paid: number }>>({ queryKey: [...monthlyPayrollKey, 'archive-index'], queryFn: () => api.get('/v1/erp/payroll/monthly/archives').then((r) => r.data) }) }
+export function useMonthlyPayrollDashboard(month: string) { return useQuery<MonthlyPayrollDashboard>({ queryKey: [...monthlyPayrollKey, 'dashboard', month], queryFn: () => api.get('/v1/erp/payroll/monthly/dashboard', { params: { month } }).then((r) => r.data) }) }
+function useMonthlyPayrollRowAction(runId: number, action: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (employeeId: number) => api.post(`/v1/erp/payroll/monthly/runs/${runId}/rows/${employeeId}/${action}`).then((r) => r.data as MonthlyPayrollRunRow), onSuccess: () => qc.invalidateQueries({ queryKey: monthlyPayrollKey }) }) }
+export function useUnapproveMonthlyPayrollRow(runId: number) { return useMonthlyPayrollRowAction(runId, 'unapprove') }
+export function useAcceptMonthlyPayrollHRChange(runId: number) { return useMonthlyPayrollRowAction(runId, 'accept-hr') }
+export function useAddMonthlyPayrollRunWorkers(runId: number) { const qc = useQueryClient(); return useMutation({ mutationFn: (employeeIds: number[]) => api.post(`/v1/erp/payroll/monthly/runs/${runId}/add-workers`, { employee_ids: employeeIds }).then((r) => r.data as { added_workers: number }), onSuccess: () => qc.invalidateQueries({ queryKey: monthlyPayrollKey }) }) }
 export function useCalculateMonthlyPayrollRun() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/calculate`) }
-export function useApproveMonthlyPayrollRun() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/approve`) }
+export function useApproveMonthlyPayrollRun() { return useMonthlyPayrollAction<MonthlyPayrollRun & { approval_summary?: MonthlyPayrollApprovalSummary }>((id) => `/v1/erp/payroll/monthly/runs/${id}/approve`) }
+export function useUnapproveMonthlyPayrollRun() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/unapprove`) }
+export function useMarkMonthlyPayrollUnpaid() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/unpaid`) }
 export function useMarkMonthlyPayrollPaid() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/paid`) }
 export function useRefreshMonthlyPayrollAdvances() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/refresh-advances`) }
 export function useRefreshMonthlyPayrollTime() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/refresh-time`) }
-export function useSyncMonthlyPayrollWorkers() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/sync-workers`) }
+export function useSyncMonthlyPayrollWorkers() { return useMonthlyPayrollAction<{ added_workers: number; hr_changed_rows: number }>((id) => `/v1/erp/payroll/monthly/runs/${id}/sync-workers`) }
 export function useImportMonthlyPayrollInputs(runId: number) { const qc = useQueryClient(); return useMutation({ mutationFn: (file: File) => { const body = new FormData(); body.append('file', file); return api.post(`/v1/erp/payroll/monthly/runs/${runId}/import-xlsx`, body).then((r) => r.data as { updated_rows: number }) }, onSuccess: () => qc.invalidateQueries({ queryKey: [...monthlyPayrollKey, 'runs', runId] }) }) }
 export function useFlagMonthlyPayrollRow(runId: number) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ employeeId, reason }: { employeeId: number; reason: string }) => api.post(`/v1/erp/payroll/monthly/runs/${runId}/rows/${employeeId}/flag`, { reason }).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: [...monthlyPayrollKey, 'runs', runId] }) }) }
 export function useUnflagMonthlyPayrollRow(runId: number) { const qc = useQueryClient(); return useMutation({ mutationFn: (employeeId: number) => api.post(`/v1/erp/payroll/monthly/runs/${runId}/rows/${employeeId}/unflag`).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: [...monthlyPayrollKey, 'runs', runId] }) }) }
-export function useCloseMonthlyPayrollMonth() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.post(`/v1/erp/payroll/monthly/months/${id}/close`).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: monthlyPayrollKey }) }) }
+export function useCloseMonthlyPayrollMonth() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, waivers = {} }: { id: number; waivers?: Record<number, string> }) => api.post(`/v1/erp/payroll/monthly/months/${id}/close`, { waivers }).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: monthlyPayrollKey }) }) }
+export function useReopenMonthlyPayrollRun() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, reason }: { id: number; reason: string }) => api.post(`/v1/erp/payroll/monthly/runs/${id}/reopen`, { reason }).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: monthlyPayrollKey }) }) }
 export function useUnlockMonthlyPayrollMonth() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, reason }: { id: number; reason: string }) => api.post(`/v1/erp/payroll/monthly/months/${id}/unlock`, { reason }).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: monthlyPayrollKey }) }) }
 export function useMonthlyPayrollArchives(id?: number) { return useQuery<Array<{ id: number; version: number; closed_at: string; snapshot: Record<string, any> }>>({ queryKey: [...monthlyPayrollKey, 'archives', id], queryFn: () => api.get(`/v1/erp/payroll/monthly/months/${id}/archives`).then((r) => r.data), enabled: Boolean(id), retry: false }) }
 export function useMonthlyPayrollClosingStats(id?: number, enabled = true) { return useQuery<Record<string, any>>({ queryKey: [...monthlyPayrollKey, 'closing-stats', id], queryFn: () => api.get(`/v1/erp/payroll/monthly/months/${id}/closing-stats`).then((r) => r.data), enabled: Boolean(id) && enabled, retry: false }) }
@@ -1895,6 +1914,7 @@ export interface CompanyLibraryItem {
   created_at: string
   updated_at: string
   deleted_at: string | null
+  can_edit?: boolean
 }
 
 export interface CompanyFilesPageData {
@@ -1934,6 +1954,18 @@ function useCompanyFilesMutation<T>(mutationFn: (input: T) => Promise<unknown>, 
 
 export function useCreateCompanyFolder() {
   return useCompanyFilesMutation((input: { name: string; parent_id: number | null }) => api.post('/v1/company-files/folders', input).then((response) => response.data), 'Хавтас үүслээ')
+}
+
+export interface CompanyFileShareGrant { account_id: number; email?: string; access_level: 'read' | 'edit' }
+export interface CompanyFileShareAccount { id: number; email: string }
+export function useCompanyFileShareAccounts(enabled = true) {
+  return useQuery<CompanyFileShareAccount[]>({ queryKey: ['v1', 'company-files', 'share-accounts'], queryFn: () => api.get('/v1/company-files/share-accounts').then((response) => response.data), enabled })
+}
+export function useCompanyFolderAccess(folderId?: number, enabled = true) {
+  return useQuery<{ folder_id: number; grants: CompanyFileShareGrant[] }>({ queryKey: ['v1', 'company-files', folderId, 'access'], queryFn: () => api.get(`/v1/company-files/${folderId}/access`).then((response) => response.data), enabled: enabled && Boolean(folderId) })
+}
+export function useUpdateCompanyFolderAccess() {
+  return useCompanyFilesMutation((input: { folderId: number; grants: CompanyFileShareGrant[] }) => api.put(`/v1/company-files/${input.folderId}/access`, { grants: input.grants.map(({ account_id, access_level }) => ({ account_id, access_level })) }).then((response) => response.data), 'Хандалтын эрх шинэчлэгдлээ')
 }
 
 export function useUploadCompanyFile() {

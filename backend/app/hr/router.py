@@ -79,6 +79,7 @@ from app.payroll.monthly_engine import (
     month_calendar,
     pay_dates_for_month,
 )
+from app.payroll.monthly_workflow import ensure_default_rule_set
 from app.payroll.schemas import BankAccountInput
 from app.payroll.service import create_bank_account
 
@@ -626,6 +627,7 @@ async def preview_monthly_payroll_profile(employee_id: int, data: MonthlyPayroll
         raise HTTPException(status_code=422, detail={"code": "payroll_preview_month_invalid"}) from exc
     next_month = date(year + (month_number == 12), 1 if month_number == 12 else month_number + 1, 1)
     period_end = next_month - timedelta(days=1)
+    await ensure_default_rule_set(db, actor.organization_id)
     rule_set = await db.scalar(select(MonthlyPayrollRuleSet).where(MonthlyPayrollRuleSet.organization_id == actor.organization_id, MonthlyPayrollRuleSet.status == "published", MonthlyPayrollRuleSet.valid_from <= period_start, (MonthlyPayrollRuleSet.valid_to.is_(None) | (MonthlyPayrollRuleSet.valid_to >= period_start))).order_by(MonthlyPayrollRuleSet.valid_from.desc(), MonthlyPayrollRuleSet.version.desc()).limit(1))
     if not rule_set:
         raise HTTPException(status_code=409, detail={"code": "payroll_monthly_rules_missing", "message": "Нийтлэгдсэн татварын дүрэм алга."})
@@ -672,7 +674,7 @@ async def preview_monthly_payroll_profile(employee_id: int, data: MonthlyPayroll
         value = data.advance_values[index] if index < len(data.advance_values) else Decimal("0")
         advance_profile = replace(profile, advance_amount=value if data.advance_basis == "FIXED" else Decimal("0"), advance_percent=value if data.advance_basis == "PERCENT" else Decimal("40"))
         elapsed_days = sum(1 for day in working_dates if day < pay_date)
-        advance_result = calculate_monthly_run(PayrollRunType.ADVANCE, advance_profile, rules=rules, planned_days=len(working_dates), planned_hours=planned_hours, worked_to_date_hours=Decimal(elapsed_days) * data.daily_norm_hours, elapsed_planned_days=elapsed_days, advance_pay_day=pay_date.day)
+        advance_result = calculate_monthly_run(PayrollRunType.ADVANCE, advance_profile, rules=rules, planned_days=len(working_dates), planned_hours=planned_hours, worked_to_date_hours=Decimal(elapsed_days) * data.daily_norm_hours, elapsed_planned_days=elapsed_days, advance_pay_day=profile.pay_days[index])
         advance_schedule.append({"pay_date": pay_date.isoformat(), "basis": data.advance_basis, "value": str(value) if data.advance_basis != "WORKED-TO-DATE" else None, "estimated_amount": str(advance_result.advance)})
     return {"month": period_start.strftime("%Y-%m"), "gross": str(final.gross), "employee_shi": str(final.employee_shi), "taxable_income": str(final.taxable_income), "pit_before_relief": str(final.pit_before_relief), "relief": str(final.relief), "pit": str(final.pit), "net_pay": str(final.net_pay), "advance_schedule": advance_schedule}
 

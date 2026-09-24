@@ -254,3 +254,31 @@ def test_manual_contribution_override_recalculates_taxable_income_and_pit():
     assert result["taxable_income"] == "150000"
     assert result["pit"] == "15000"
     assert result["net_pay"] == "135000"
+
+
+@pytest.mark.parametrize(
+    ("basis", "field", "value", "expected"),
+    [(AdvanceBasis.FIXED, "advance_amount", D("200000"), D("200000")), (AdvanceBasis.PERCENT, "advance_percent", D("20"), D("300000"))],
+)
+def test_weekly_fixed_and_percent_instalments_are_not_reduced_by_earlier_advances(basis, field, value, expected):
+    profile = PayrollProfile(base_salary=D("1500000"), payment_frequency="WEEKLY", pay_days=(7, 14, 21, 28), advance_basis=basis, **{field: value})
+    second = calculate_monthly_run(
+        PayrollRunType.ADVANCE, profile, rules=default_2026_rules(), planned_days=21, planned_hours=168,
+        advance_pay_day=14, prior_approved_advances=(expected,),
+    )
+    assert second.advance == expected
+
+
+def test_advance_without_pay_day_check_supports_one_off_monthly_worker():
+    profile = PayrollProfile(base_salary=D("1000000"), advance_basis=AdvanceBasis.FIXED, advance_amount=D("250000"))
+    result = calculate_monthly_run(PayrollRunType.ADVANCE, profile, rules=default_2026_rules(), planned_days=21, planned_hours=168)
+    assert result.advance == D("250000")
+
+
+def test_fixed_salary_with_unemployed_zero_segment_prorates_partial_month():
+    profile = PayrollProfile(base_salary=D("1500000"), salary_type="FIXED")
+    result = calculate_monthly_run(
+        PayrollRunType.FINAL, profile, rules=default_2026_rules(), planned_days=21, planned_hours=168,
+        salary_segments=(SalarySegment(D("1500000"), 11, D("88")), SalarySegment(D("0"), 10, D("0"))),
+    )
+    assert result.base_pay == D("785714")

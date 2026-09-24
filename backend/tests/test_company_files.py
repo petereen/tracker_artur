@@ -23,6 +23,8 @@ def test_company_file_schema_and_routes_are_registered():
         "/v1/company-files",
         "/v1/company-files/folders",
         "/v1/company-files/upload",
+        "/v1/company-files/share-accounts",
+        "/v1/company-files/{folder_id}/access",
         "/v1/company-files/{item_id}",
         "/v1/company-files/{item_id}/restore",
         "/v1/company-files/{item_id}/permanent",
@@ -32,9 +34,9 @@ def test_company_file_schema_and_routes_are_registered():
     }.issubset(paths)
 
 
-def test_every_authenticated_account_can_upload_company_files():
+def test_company_file_upload_uses_a_role_guard():
     actor_parameter = inspect.signature(upload_company_file).parameters["actor"]
-    assert actor_parameter.default.dependency is get_actor
+    assert actor_parameter.default.dependency is not get_actor
 
 
 def test_company_file_names_are_sanitized_and_invalid_names_rejected():

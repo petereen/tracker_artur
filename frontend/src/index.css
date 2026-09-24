@@ -8395,6 +8395,17 @@ html.capacitor-native .native-boot-error {
   gap: 8px;
   justify-content: flex-end;
 }
+.company-file-access-dialog { max-width: 560px; }
+.company-file-access-dialog header { align-items: flex-start; gap: 12px; }
+.company-file-access-dialog header small { color: var(--color-muted); display: block; font-size: .75rem; margin-top: 4px; }
+.company-file-access-help { color: var(--color-muted); font-size: .76rem; margin: 0; }
+.company-file-access-add { align-items: end; display: grid; gap: 8px; grid-template-columns: minmax(140px, 1fr) minmax(125px, .65fr) auto; }
+.company-file-access-add label { color: var(--color-muted); display: grid; font-size: .7rem; font-weight: 680; gap: 5px; }
+.company-file-access-list { display: grid; gap: 6px; max-height: 260px; overflow: auto; }
+.company-file-access-list > p { color: var(--color-muted); font-size: .75rem; margin: 8px 0; }
+.company-file-access-row { align-items: center; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 9px; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 155px 34px; padding: 7px 8px; }
+.company-file-access-row > span { font-size: .77rem; overflow: hidden; text-overflow: ellipsis; }
+.company-file-access-row button { align-items: center; background: transparent; border: 0; color: var(--color-muted); display: inline-flex; justify-content: center; min-height: 30px; }
 @media (max-width: 760px) {
   .company-files-toolbar {
     align-items: stretch;
@@ -8417,6 +8428,9 @@ html.capacitor-native .native-boot-error {
   .company-files-filters select {
     flex: 1;
   }
+  .company-file-access-add { grid-template-columns: 1fr 1fr; }
+  .company-file-access-add > button { grid-column: 1 / -1; }
+  .company-file-access-row { grid-template-columns: minmax(0, 1fr) 125px 30px; }
   .company-file-list-head {
     display: none;
   }

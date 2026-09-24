@@ -1626,6 +1626,7 @@ class ResourceGrant(Base):
     __tablename__ = "resource_grants"
     __table_args__ = (
         CheckConstraint("principal_type IN ('role','team','project','account')", name="ck_resource_grant_principal"),
+        CheckConstraint("access_level IN ('read','edit')", name="ck_resource_grant_access_level"),
         UniqueConstraint("policy_id", "principal_type", "principal_key", name="uq_resource_grant_principal"),
     )
 
@@ -1633,6 +1634,7 @@ class ResourceGrant(Base):
     policy_id = Column(Integer, ForeignKey("resource_policies.id", ondelete="CASCADE"), nullable=False, index=True)
     principal_type = Column(String(16), nullable=False)
     principal_key = Column(String(128), nullable=False)
+    access_level = Column(String(8), nullable=False, server_default="read", default="read")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

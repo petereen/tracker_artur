@@ -26,19 +26,24 @@ from app.models.models import (
     AttendanceLog, Department, Employee, EmployeeBankAccount, EmployeeDetails, HolidayRecord, MonthlyPayrollArchive, MonthlyPayrollCalendarDay, MonthlyPayrollCompanySettings,
     MonthlyPayrollMonth, MonthlyPayrollProfile, MonthlyPayrollRowAudit,
     MonthlyPayrollRuleSet, MonthlyPayrollRun, MonthlyPayrollRunRow, ERPAccount,
-    MonthlyPayrollSalaryHistory, Schedule, TimeOff, WorkTimeEntry,
+    MonthlyPayrollSalaryHistory, Organization, Schedule, TimeOff, WorkTimeEntry,
 )
 from app.services.enterprise_events import record_change
 from app.services.secret_box import decrypt_secret, encrypt_secret
 from .inputs import payment_days
+from .monthly_exports import build_run_workbook
 from .monthly_engine import (
     AdvanceBasis, CalendarDayType, PayrollProfile, PayrollRunType, PayrollRules, apply_computed_overrides,
     SalarySegment, amount, calculate_monthly_run, classify_work_hours, default_2026_rules, month_calendar,
+    overtime_day_lines,
 )
 
 
 router = APIRouter()
-BLOCKING_ROW_WARNINGS = {"negative_final_pay", "profile_missing", "salary_history_missing_or_incomplete", "row_flagged", "advance_changed", "advance_not_calculated"}
+# «Урьдчилгаа бодоогүй» (advance_not_calculated) is a warning by design: the
+# accountant may knowingly settle a worker whose advance run was never made.
+BLOCKING_ROW_WARNINGS = {"negative_final_pay", "profile_missing", "salary_history_missing_or_incomplete", "row_flagged", "advance_changed", "advance_not_due", "advance_not_positive"}
+TIME_INPUT_KEYS = ("worked_normal_hours", "worked_to_date_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")
 
 
 class MonthInput(BaseModel):
@@ -121,74 +126,167 @@ class MonthlyRuleSetInput(BaseModel):
     source_references: list[str] = Field(min_length=1, max_length=20)
 
 
-async def _closing_stats(db: AsyncSession, month: MonthlyPayrollMonth, organization_id: int) -> dict[str, Any]:
+APPROVED_RUN_STATUSES = ("approved", "paid", "closed")
+
+
+def _money(value: Any) -> Decimal:
+    return Decimal(str(value or 0))
+
+
+async def _account_label(db: AsyncSession, organization_id: int, account_id: int | None) -> dict[str, Any] | None:
+    if not account_id:
+        return None
+    account = await db.scalar(select(ERPAccount).where(ERPAccount.id == account_id, ERPAccount.organization_id == organization_id))
+    return {"id": account_id, "code": account.code, "name": account.name} if account else {"id": account_id, "code": None, "name": None}
+
+
+async def _closing_stats(db: AsyncSession, month: MonthlyPayrollMonth, organization_id: int, *, waived_run_ids: set[int] | None = None) -> dict[str, Any]:
+    """Month statistics for the dashboard, closing review, «Дүн» sheet and archive."""
+    waived_run_ids = waived_run_ids or set()
     runs = (await db.execute(select(MonthlyPayrollRun).where(
         MonthlyPayrollRun.month_id == month.id, MonthlyPayrollRun.organization_id == organization_id,
     ).order_by(MonthlyPayrollRun.pay_date, MonthlyPayrollRun.run_type))).scalars().all()
     run_rows: dict[int, list[MonthlyPayrollRunRow]] = {}
     for run in runs:
         run_rows[run.id] = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id))).scalars().all()
+    first = date(month.year, month.month, 1)
+    last = date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])
     final_run = next((run for run in runs if run.run_type == "final"), None)
     final_rows = run_rows.get(final_run.id, []) if final_run else []
-    fields = ("gross", "employee_shi", "employer_shi", "pit", "relief", "advance", "other_deductions", "net_pay")
-    totals = {key: sum((Decimal(str((row.result or {}).get(key, 0))) for row in final_rows), Decimal("0")) for key in fields}
-    gross_values = [Decimal(str((row.result or {}).get("gross", 0))) for row in final_rows]
-    net_values = [Decimal(str((row.result or {}).get("net_pay", 0))) for row in final_rows]
-    advance_rows = [(run, row) for run in runs if run.run_type == "advance" for row in run_rows.get(run.id, [])]
+    fields = ("gross", "base_pay", "overtime_pay", "meal_commute", "employee_shi", "employer_shi", "taxable_income", "pit_before_relief", "relief", "pit", "advance", "other_deductions", "total_deductions", "net_pay")
+    totals = {key: sum((_money((row.result or {}).get(key)) for row in final_rows), Decimal("0")) for key in fields}
+    totals["leave_pay"] = sum((_money((row.inputs or {}).get("leave_pay")) for row in final_rows), Decimal("0"))
+    totals["bonus"] = sum((_money((row.inputs or {}).get("bonus")) for row in final_rows), Decimal("0"))
+    gross_values = sorted(_money((row.result or {}).get("gross")) for row in final_rows)
+    net_values = [_money((row.result or {}).get("net_pay")) for row in final_rows]
+    advance_runs = [run for run in runs if run.run_type == "advance"]
+    counted_advance_runs = [run for run in advance_runs if run.status in APPROVED_RUN_STATUSES and run.id not in waived_run_ids]
+    advance_by_run = [{
+        "run_id": run.id, "pay_date": run.pay_date, "status": run.status, "waived": run.id in waived_run_ids,
+        "workers": len(run_rows.get(run.id, [])),
+        "total": sum((_money((row.result or {}).get("advance")) for row in run_rows.get(run.id, [])), Decimal("0")),
+    } for run in advance_runs]
+    advance_total = sum((item["total"] for item in advance_by_run if item["run_id"] in {run.id for run in counted_advance_runs}), Decimal("0"))
     overtime_hours: dict[str, Decimal] = {}
     overtime_amounts: dict[str, Decimal] = {}
+    overtime_workers: list[dict[str, Any]] = []
     deduction_totals: dict[str, Decimal] = {}
     departments: dict[str, dict[str, Any]] = {}
-    extra_workers, manual_rows, cap_hits, warned_rows = set(), 0, 0, 0
-    cap = Decimal(str(month.rule_snapshot.get("minimum_wage", 0))) * Decimal(str(month.rule_snapshot.get("shi_cap_multiplier", 10)))
+    new_workers = left_workers = cap_hits = warned_rows = overridden_rows = 0
+    cap = _money(month.rule_snapshot.get("minimum_wage")) * _money(month.rule_snapshot.get("shi_cap_multiplier", 10))
     for row in final_rows:
         identity, inputs, result = row.identity_snapshot or {}, row.inputs or {}, row.result or {}
         department = identity.get("department") or "Бусад"
-        group = departments.setdefault(department, {key: Decimal("0") for key in ("headcount", "gross", "employee_shi", "pit", "employer_shi", "net_pay")})
+        group = departments.setdefault(department, {key: Decimal("0") for key in ("headcount", "gross", "employee_shi", "pit", "employer_shi", "other_deductions", "advance", "net_pay", "company_cost")})
         group["headcount"] += 1
-        for key in ("gross", "employee_shi", "pit", "employer_shi", "net_pay"):
-            group[key] += Decimal(str(result.get(key, 0)))
-        if any(Decimal(str(value)) > 0 for value in (inputs.get("overtime_hours") or {}).values()):
-            extra_workers.add(row.employee_id)
+        for key in ("gross", "employee_shi", "pit", "employer_shi", "other_deductions", "advance", "net_pay"):
+            group[key] += _money(result.get(key))
+        group["company_cost"] += _money(result.get("gross")) + _money(result.get("employer_shi"))
+        hours = {kind: _money(value) for kind, value in (inputs.get("overtime_hours") or {}).items()}
+        if sum(hours.values(), Decimal("0")) > 0:
+            overtime_workers.append({"employee_id": row.employee_id, "name": identity.get("name"), "department": department, "hours": sum(hours.values(), Decimal("0")), "amount": _money(result.get("overtime_pay"))})
+        for kind, value in hours.items():
+            overtime_hours[kind] = overtime_hours.get(kind, Decimal("0")) + value
+        for kind, value in (result.get("overtime_by_bucket") or {}).items():
+            overtime_amounts[kind] = overtime_amounts.get(kind, Decimal("0")) + _money(value)
+        for line in inputs.get("other_deductions") or []:
+            label = line.get("type") or "Төрөлгүй"
+            deduction_totals[label] = deduction_totals.get(label, Decimal("0")) + _money(line.get("amount"))
+        if identity.get("start_date") and first <= date.fromisoformat(identity["start_date"]) <= last:
+            new_workers += 1
+        if identity.get("end_date") and first <= date.fromisoformat(identity["end_date"]) <= last:
+            left_workers += 1
+        if cap > 0 and _money(result.get("shi_base")) >= cap and _money(result.get("gross")) > cap:
+            cap_hits += 1
         if row.warnings:
             warned_rows += 1
-        if Decimal(str(result.get("shi_base", 0))) >= cap and cap > 0:
-            cap_hits += 1
-        for kind, hours in (inputs.get("overtime_hours") or {}).items():
-            overtime_hours[kind] = overtime_hours.get(kind, Decimal("0")) + Decimal(str(hours))
-        for kind, value in (result.get("overtime_by_bucket") or {}).items():
-            overtime_amounts[kind] = overtime_amounts.get(kind, Decimal("0")) + Decimal(str(value))
-        for line in inputs.get("other_deductions", []):
-            label = line.get("type") or "Төрөлгүй"
-            deduction_totals[label] = deduction_totals.get(label, Decimal("0")) + Decimal(str(line.get("amount", 0)))
-    # Count accountant-edited rows from the immutable field audit records.
-    audit_rows = (await db.execute(select(MonthlyPayrollRowAudit.row_id).where(
-        MonthlyPayrollRowAudit.organization_id == organization_id,
-        MonthlyPayrollRowAudit.run_id.in_([run.id for run in runs] or [-1]),
+        if result.get("computed_overrides"):
+            overridden_rows += 1
+    company_cost = totals["gross"] + totals["employer_shi"]
+    for group in departments.values():
+        group["share"] = (group["company_cost"] * 100 / company_cost).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP) if company_cost else Decimal("0")
+    run_ids = [run.id for run in runs] or [-1]
+    audits = (await db.execute(select(MonthlyPayrollRowAudit).where(
+        MonthlyPayrollRowAudit.organization_id == organization_id, MonthlyPayrollRowAudit.run_id.in_(run_ids),
     ))).scalars().all()
-    manual_rows = len(set(audit_rows))
-    advance_total = sum((Decimal(str((row.result or {}).get("advance", 0))) for _, row in advance_rows), Decimal("0"))
+    edited_rows = {audit.row_id for audit in audits if audit.field_name in {"inputs", "excel_import", "overrides_reverted"} or audit.field_name.startswith("computed:")}
+    flagged_rows = {audit.row_id for audit in audits if audit.field_name == "status" and isinstance(audit.new_value, dict) and audit.new_value.get("status") == "flagged"}
+    currently_flagged = {row.id for rows in run_rows.values() for row in rows if row.status == "flagged"}
+    settings = await db.scalar(select(MonthlyPayrollCompanySettings).where(MonthlyPayrollCompanySettings.organization_id == organization_id))
+    account_a = totals["total_deductions"] + totals["net_pay"]
+    accounting = {
+        "account_a": {
+            "account": await _account_label(db, organization_id, settings.salary_expense_account_id if settings else None),
+            "total": account_a, "equals_gross": account_a == totals["gross"],
+            "lines": {"advance": totals["advance"], "pit": totals["pit"], "employee_shi": totals["employee_shi"], "other_deductions": deduction_totals, "net_pay": totals["net_pay"]},
+        },
+        "account_b": {"account": await _account_label(db, organization_id, settings.employer_shi_account_id if settings else None), "total": totals["employer_shi"]},
+        "account_c": {"account": await _account_label(db, organization_id, settings.advance_clearing_account_id if settings else None), "total": advance_total} if settings and settings.advance_clearing_account_id else None,
+        "advance_reconciliation": {"pulled_into_final": totals["advance"], "approved_advance_runs": advance_total, "matches": totals["advance"] == advance_total},
+        "by_department": {name: {"account_a": group["gross"], "account_b": group["employer_shi"]} for name, group in departments.items()},
+    }
+    previous_month = await db.scalar(select(MonthlyPayrollMonth).where(
+        MonthlyPayrollMonth.organization_id == organization_id, MonthlyPayrollMonth.status == "closed",
+        (MonthlyPayrollMonth.year * 100 + MonthlyPayrollMonth.month) < month.year * 100 + month.month,
+    ).order_by(MonthlyPayrollMonth.year.desc(), MonthlyPayrollMonth.month.desc()).limit(1))
+    comparison = None
+    if previous_month:
+        archive = await db.scalar(select(MonthlyPayrollArchive).where(MonthlyPayrollArchive.month_id == previous_month.id).order_by(MonthlyPayrollArchive.version.desc()).limit(1))
+        previous = (archive.snapshot or {}).get("closing_stats", {}) if archive else {}
+        current_values = {"gross": totals["gross"], "company_cost": company_cost, "headcount": Decimal(len(final_rows)), "overtime_amount": sum(overtime_amounts.values(), Decimal("0"))}
+        previous_values = {
+            "gross": _money((previous.get("totals") or {}).get("gross")), "company_cost": _money((previous.get("totals") or {}).get("company_cost")),
+            "headcount": _money((previous.get("headcount") or {}).get("on_register")),
+            "overtime_amount": sum((_money(value) for value in ((previous.get("overtime") or {}).get("amounts") or {}).values()), Decimal("0")),
+        }
+        comparison = {"month": f"{previous_month.year:04d}-{previous_month.month:02d}", "metrics": {
+            key: {"current": current_values[key], "previous": previous_values[key], "change": current_values[key] - previous_values[key],
+                  "change_pct": ((current_values[key] - previous_values[key]) * 100 / previous_values[key]).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP) if previous_values[key] else None}
+            for key in current_values
+        }}
     return _json_value({
-        "headcount": {"on_register": len(final_rows), "paid": len([row for row in final_rows if any(run.status == "paid" for run in runs if run.run_type == "final")]), "with_extra_work": len(extra_workers), "manually_edited": manual_rows},
-        "totals": {**totals, "advance_total": advance_total, "company_cost": totals["gross"] + totals["employer_shi"], "account_a": totals["gross"], "account_b": totals["employer_shi"]},
-        "averages": {"average_gross": sum(gross_values, Decimal("0")) / len(gross_values) if gross_values else 0, "median_gross": statistics.median(gross_values) if gross_values else 0, "average_take_home": sum(net_values, Decimal("0")) / len(net_values) if net_values else 0, "highest_gross": max(gross_values) if gross_values else 0, "lowest_gross": min(gross_values) if gross_values else 0},
-        "overtime": {"hours": overtime_hours, "amounts": overtime_amounts, "workers": len(extra_workers)},
+        "headcount": {
+            "on_register": len(final_rows), "paid": len(final_rows) if final_run and final_run.paid_at else 0,
+            "new": new_workers, "left": left_workers, "with_extra_work": len(overtime_workers), "manually_edited": len(edited_rows),
+        },
+        "totals": {**totals, "advance_total": advance_total, "company_cost": company_cost, "account_a": account_a, "account_b": totals["employer_shi"]},
+        "averages": {
+            "average_gross": (sum(gross_values, Decimal("0")) / len(gross_values)).quantize(Decimal("1"), rounding=ROUND_HALF_UP) if gross_values else 0,
+            "median_gross": Decimal(str(statistics.median(gross_values))).quantize(Decimal("1"), rounding=ROUND_HALF_UP) if gross_values else 0,
+            "average_take_home": (sum(net_values, Decimal("0")) / len(net_values)).quantize(Decimal("1"), rounding=ROUND_HALF_UP) if net_values else 0,
+            "highest_gross": gross_values[-1] if gross_values else 0, "lowest_gross": gross_values[0] if gross_values else 0,
+        },
+        "overtime": {"hours": overtime_hours, "amounts": overtime_amounts, "workers": len(overtime_workers), "top": sorted(overtime_workers, key=lambda item: item["amount"], reverse=True)[:5]},
+        "advance_by_run": advance_by_run,
         "other_deductions_by_type": deduction_totals,
         "by_department": departments,
-        "quality": {"manual_rows": manual_rows, "shi_cap_hits": cap_hits, "rows_with_warnings": warned_rows, "workers_without_advance": sum("advance_not_calculated" in (row.warnings or []) for row in final_rows)},
+        "accounting": accounting,
+        "comparison": comparison,
+        "quality": {
+            "manual_rows": len(edited_rows), "computed_overrides": overridden_rows, "shi_cap_hits": cap_hits, "rows_with_warnings": warned_rows,
+            "workers_without_advance": sum("advance_not_calculated" in (row.warnings or []) for row in final_rows),
+            "flagged_then_resolved": len(flagged_rows - currently_flagged),
+        },
+        "meta": {
+            "rule_set_id": month.rule_set_id, "rule_version": (month.rule_snapshot or {}).get("version"),
+            "approvers": sorted({run.approved_by_account_id for run in runs if run.approved_by_account_id}),
+            "calendar_working_days": sum(value == CalendarDayType.WORKING.value for value in (month.calendar_snapshot or {}).values()),
+        },
         "run_statuses": {str(run.id): run.status for run in runs},
     })
 
 
-async def _month_close_issues(db: AsyncSession, actor: ActorContext, month: MonthlyPayrollMonth, runs: list[MonthlyPayrollRun]) -> list[str]:
+async def _month_close_issues(db: AsyncSession, actor: ActorContext, month: MonthlyPayrollMonth, runs: list[MonthlyPayrollRun], *, waived_run_ids: set[int] | None = None) -> list[str]:
+    waived_run_ids = waived_run_ids or set()
     issues: list[str] = []
-    finals = [run for run in runs if run.run_type == "final"]
+    counted = [run for run in runs if run.id not in waived_run_ids]
+    finals = [run for run in counted if run.run_type == "final"]
     if len(finals) != 1:
         issues.append("final_run_required")
-    if any(run.status not in {"approved", "paid", "closed"} for run in runs):
+    if any(run.status not in APPROVED_RUN_STATUSES for run in counted):
         issues.append("all_runs_must_be_approved")
     all_rows: dict[int, list[MonthlyPayrollRunRow]] = {}
-    for run in runs:
+    for run in counted:
         rows = list((await db.execute(select(MonthlyPayrollRunRow).where(
             MonthlyPayrollRunRow.run_id == run.id,
             MonthlyPayrollRunRow.organization_id == actor.organization_id,
@@ -203,12 +301,14 @@ async def _month_close_issues(db: AsyncSession, actor: ActorContext, month: Mont
         result = row.result or {}
         if not row.profile_snapshot.get("complete", True):
             issues.append("profile_incomplete")
-        if Decimal(str(result.get("net_pay", 0))) < 0:
+        if _money(result.get("net_pay")) < 0:
             issues.append("negative_final_pay")
-        if Decimal(str(result.get("total_deductions", 0))) + Decimal(str(result.get("net_pay", 0))) != Decimal(str(result.get("gross", 0))):
+        if _money(result.get("total_deductions")) + _money(result.get("net_pay")) != _money(result.get("gross")):
             issues.append("row_payroll_equation_mismatch")
-    final_advance = sum((Decimal(str((row.result or {}).get("advance", 0))) for row in final_rows), Decimal("0"))
-    approved_advance = sum((Decimal(str((row.result or {}).get("advance", 0))) for run in runs if run.run_type == "advance" and run.status in {"approved", "paid", "closed"} for row in all_rows.get(run.id, [])), Decimal("0"))
+        if "advance_changed" in (row.warnings or []):
+            issues.append("advance_changed")
+    final_advance = sum((_money((row.result or {}).get("advance")) for row in final_rows), Decimal("0"))
+    approved_advance = sum((_money((row.result or {}).get("advance")) for run in counted if run.run_type == "advance" and run.status in APPROVED_RUN_STATUSES for row in all_rows.get(run.id, [])), Decimal("0"))
     if final_advance != approved_advance:
         issues.append("advance_reconciliation_mismatch")
     return sorted(set(issues))
@@ -312,6 +412,27 @@ def _rule_input_default() -> dict[str, Any]:
             "https://legalinfo.mn/mn/detail?lawId=16760148379551",
         ],
     }
+
+
+async def ensure_default_rule_set(db: AsyncSession, organization_id: int) -> None:
+    """Publish the seeded 2026 rules for an organization that has no rule set yet.
+
+    The migration seeds organizations that existed at deploy time; this covers
+    organizations created later. An admin's own versions are never touched.
+    """
+    existing = await db.scalar(select(MonthlyPayrollRuleSet.id).where(MonthlyPayrollRuleSet.organization_id == organization_id).limit(1))
+    if existing:
+        return
+    defaults = _json_value(_rule_input_default())
+    db.add(MonthlyPayrollRuleSet(
+        organization_id=organization_id, version=1, status="published",
+        valid_from=date(2026, 1, 1), valid_to=None,
+        minimum_wage=Decimal(defaults["minimum_wage"]), shi_cap_multiplier=Decimal(defaults["shi_cap_multiplier"]),
+        employee_rates=defaults["employee_rates"], employer_rates=defaults["employer_rates"],
+        pit_brackets=defaults["pit_brackets"], relief_tiers=defaults["relief_tiers"],
+        overtime_multipliers=defaults["overtime_multipliers"], source_references=defaults["source_references"],
+    ))
+    await db.flush()
 
 
 @router.get("/rule-sets")
@@ -583,6 +704,12 @@ async def _run(db: AsyncSession, actor: ActorContext, run_id: int, *, lock: bool
     row = await db.scalar(query)
     if row is None:
         raise HTTPException(status_code=404, detail="Payroll run not found")
+    if lock:
+        # Every write locks its run: a closed month is read-only for all runs,
+        # including an advance run that was waived at close.
+        month_status = await db.scalar(select(MonthlyPayrollMonth.status).where(MonthlyPayrollMonth.id == row.month_id))
+        if month_status != "open":
+            raise HTTPException(status_code=409, detail={"code": "monthly_payroll_month_closed", "message": "Хаагдсан сарын бодолтыг өөрчлөх боломжгүй."})
     return row
 
 
@@ -619,16 +746,20 @@ async def _profiles_for_month(db: AsyncSession, actor: ActorContext, month: Mont
         ).order_by(MonthlyPayrollSalaryHistory.valid_from, MonthlyPayrollSalaryHistory.id))).scalars().all()
         active_history = [item for item in history if item.valid_from <= last]
         current_salary = active_history[-1] if active_history else None
+        # Segments cover only the employment window inside this month, so a
+        # mid-month hire or leaver is paid for their own days only.
+        employed_from = max(first, details.start_date) if details and details.start_date else first
+        employed_to = min(last, details.end_date) if details and details.end_date else last
         segments = []
         for item in active_history:
-            segment_start = max(first, item.valid_from)
+            segment_start = max(employed_from, item.valid_from)
             later = [entry.valid_from for entry in active_history if entry.valid_from > item.valid_from]
-            segment_end = min(last, (min(later) - date.resolution) if later else last)
-            if segment_end < first or segment_start > last:
+            segment_end = min(employed_to, (min(later) - date.resolution) if later else last)
+            if segment_end < segment_start:
                 continue
             segments.append({"monthly_salary": str(item.monthly_salary), "valid_from": segment_start.isoformat(), "valid_to": segment_end.isoformat()})
         covered_from = min((date.fromisoformat(item["valid_from"]) for item in segments), default=None)
-        output.append((employee, details, profile, current_salary if covered_from is None or covered_from <= first else None, segments))
+        output.append((employee, details, profile, current_salary if covered_from is not None and covered_from <= employed_from else None, segments))
     return output
 
 
@@ -712,9 +843,10 @@ async def _approved_advances(db: AsyncSession, run: MonthlyPayrollRun, employee_
         MonthlyPayrollRun.month_id == run.month_id,
         MonthlyPayrollRun.organization_id == run.organization_id,
         MonthlyPayrollRun.run_type == "advance",
+        MonthlyPayrollRun.id != run.id,
         MonthlyPayrollRun.status.in_(("approved", "paid", "closed")),
         MonthlyPayrollRun.pay_date <= (through_date or run.pay_date),
-    ))).scalars().all()
+    ).order_by(MonthlyPayrollRun.pay_date, MonthlyPayrollRun.id))).scalars().all()
     values, ids = [], []
     for advance_run in runs:
         row = await db.scalar(select(MonthlyPayrollRunRow).where(
@@ -730,13 +862,20 @@ async def _approved_advances(db: AsyncSession, run: MonthlyPayrollRun, employee_
 async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: MonthlyPayrollRun, row: MonthlyPayrollRunRow) -> dict[str, Any]:
     profile_data = row.profile_snapshot
     inputs = dict(row.inputs or {})
+    # Blank cells from the register or an import mean zero, never a crash.
+    for key in ("worked_normal_hours", "worked_to_date_hours", "leave_pay", "bonus"):
+        if inputs.get(key) in (None, ""):
+            inputs[key] = "0"
+    inputs["overtime_hours"] = {bucket: hours for bucket, hours in (inputs.get("overtime_hours") or {}).items() if hours not in (None, "")}
     if not profile_data.get("complete", True):
         row.result = {
             "run_type": run.run_type, "gross": "0", "advance": "0",
             "employee_shi": "0", "employer_shi": "0", "pit": "0",
             "net_pay": "0", "total_deductions": "0",
         }
-        row.warnings = profile_data.get("validation_issues") or ["profile_incomplete"]
+        row.warnings = list(profile_data.get("validation_issues") or ["profile_incomplete"])
+        if inputs.get("_hr_pending"):
+            row.warnings.append("hr_changed")
         return row.result
     profile = PayrollProfile(
         base_salary=amount(profile_data["base_salary"]), salary_type=profile_data["salary_type"],
@@ -746,11 +885,16 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         advance_percent=amount(profile_data.get("advance_percent", 40)), daily_norm_hours=amount(profile_data.get("daily_norm_hours", 8)),
         insured_type=profile_data.get("insured_type", "01001"), tax_relief_eligible=bool(profile_data.get("tax_relief_eligible", False)),
     )
+    advance_not_due = False
+    advance_reference: dict[str, Any] = {}
     if run.run_type == "advance":
-        basis = AdvanceBasis(inputs.get("advance_basis", profile.advance_basis.value))
+        basis = AdvanceBasis(inputs.get("advance_basis") or profile.advance_basis.value)
         adjustments = {**asdict(profile), "advance_basis": basis}
-        advance_days = list(profile.pay_days[:-1])
+        advance_days = list(profile.pay_days[:-1]) if profile.payment_frequency != "MONTHLY" else []
         slot = next((index for index, day in enumerate(advance_days) if min(day, calendar.monthrange(month.year, month.month)[1]) == run.pay_date.day), None)
+        # Pay days are clamped to month end here, so the engine's raw-day
+        # check is not used; one-off advances are allowed off schedule.
+        advance_not_due = slot is None and not inputs.get("one_off_advance")
         slot_values = profile_data.get("advance_values") or []
         slot_value = amount(slot_values[slot]) if slot is not None and slot < len(slot_values) and slot_values[slot] not in (None, "") else None
         if slot_value is not None and basis is AdvanceBasis.FIXED:
@@ -762,6 +906,11 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         if inputs.get("advance_percent") is not None:
             adjustments["advance_percent"] = amount(inputs["advance_percent"])
         profile = PayrollProfile(**adjustments)
+        advance_reference = {
+            "advance_basis": basis.value,
+            "advance_value": str(profile.advance_amount if basis is AdvanceBasis.FIXED else profile.advance_percent if basis is AdvanceBasis.PERCENT else ""),
+            "scheduled_slot": slot,
+        }
     rule_snapshot = month.rule_snapshot
     rules = _rules(rule_snapshot)
     calendar_snapshot = month.calendar_snapshot
@@ -816,6 +965,10 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
                 amount(segment["monthly_salary"]), segment_days,
                 worked_hours, overtime_values,
             ))
+        # Working days outside employment earn nothing but still count in the
+        # month, so FIXED pay is prorated by days employed.
+        if total_segment_days < planned_days:
+            segment_objects.append(SalarySegment(Decimal("0"), planned_days - total_segment_days, Decimal("0"), {}))
     advance_snapshot = (run.advance_snapshot or {}).get(str(row.employee_id), {}) if run.run_type == "final" else {}
     approved_advances = advance_snapshot.get("amounts", [])
     advance_ids = advance_snapshot.get("run_ids", [])
@@ -829,17 +982,30 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
             raise HTTPException(status_code=422, detail={"code": "payroll_deduction_positive", "message": "Бусад суутгалын дүн 0-ээс их байх ёстой."})
     result = calculate_monthly_run(
         run.run_type, profile, rules=rules, planned_days=planned_days, planned_hours=planned_hours,
-        worked_normal_hours=inputs.get("worked_normal_hours", 0),
-        overtime_hours=inputs.get("overtime_hours", {}), leave_pay=inputs.get("leave_pay", 0),
-        bonus=inputs.get("bonus", 0), approved_advances=approved_advances,
+        worked_normal_hours=inputs.get("worked_normal_hours") or 0,
+        overtime_hours=inputs.get("overtime_hours") or {}, leave_pay=inputs.get("leave_pay") or 0,
+        bonus=inputs.get("bonus") or 0, approved_advances=approved_advances,
         prior_approved_advances=prior_advances,
         other_deductions=[item["amount"] for item in deductions],
-        advance_pay_day=run.pay_date.day if run.run_type == "advance" else None,
-        worked_to_date_hours=inputs.get("worked_to_date_hours", 0),
-        elapsed_planned_days=int(inputs.get("elapsed_planned_days", 0)), salary_segments=segment_objects or None,
+        worked_to_date_hours=inputs.get("worked_to_date_hours") or 0,
+        elapsed_planned_days=int(inputs.get("elapsed_planned_days") or 0), salary_segments=segment_objects or None,
     )
     result_data = _json_value(asdict(result))
     result_data["advance_run_ids"] = advance_ids
+    result_data["advance_lines"] = [
+        {"run_id": run_id, "amount": value, "pay_date": pay_date}
+        for run_id, value, pay_date in zip(advance_ids, approved_advances, advance_snapshot.get("pay_dates") or [None] * len(advance_ids))
+    ]
+    result_data["planned_days"] = planned_days
+    result_data["planned_hours"] = str(planned_hours)
+    result_data["hourly_rate"] = str((profile.base_salary / planned_hours).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    result_data.update(advance_reference)
+    if run.run_type == "final":
+        result_data["overtime_lines"] = overtime_day_lines(
+            day_lines=inputs.get("day_lines") or [], aggregate_hours=inputs.get("overtime_hours") or {},
+            bucket_totals=result.overtime_by_bucket, salary_segments=profile_data.get("salary_segments") or [],
+            base_salary=profile.base_salary, planned_hours=planned_hours, multipliers=rules.overtime_multipliers,
+        )
     warnings = []
     computed_overrides = inputs.get("_computed_overrides") or {}
     if computed_overrides:
@@ -870,15 +1036,27 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         approved_dates = {item.pay_date for item in current_rows if item.pay_date in scheduled_dates}
         if scheduled_dates - approved_dates:
             warnings.append("advance_not_calculated")
-    if result.net_pay < 0:
+    if amount(result_data.get("net_pay", 0)) < 0:
         warnings.append("negative_final_pay")
+    if advance_not_due:
+        warnings.append("advance_not_due")
     if run.run_type == "advance":
+        # Reference only: a full month on the HR profile, so each salary
+        # segment is credited with all of its planned hours (plan §6.1).
+        full_month_segments = [
+            SalarySegment(segment.monthly_salary, segment.planned_days, amount(profile.daily_norm_hours) * segment.planned_days, {})
+            for segment in segment_objects
+        ]
         estimated = calculate_monthly_run(
             PayrollRunType.FINAL, profile, rules=rules, planned_days=planned_days, planned_hours=planned_hours,
-            worked_normal_hours=planned_hours, salary_segments=segment_objects or None,
+            worked_normal_hours=planned_hours, salary_segments=full_month_segments or None,
         )
-        if result.advance > estimated.net_pay:
+        result_data["estimated_net"] = str(estimated.net_pay)
+        result_data["advance_pct_of_estimated_net"] = str((amount(result_data["advance"]) * 100 / estimated.net_pay).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)) if estimated.net_pay > 0 else None
+        if amount(result_data["advance"]) > estimated.net_pay:
             warnings.append("advance_above_estimated_net")
+        if amount(result_data["advance"]) <= 0:
+            warnings.append("advance_not_positive")
     if sum((amount(value) for value in inputs.get("overtime_hours", {}).values()), Decimal("0")) > 0:
         warnings.append("overtime_work")
     if profile.base_salary < rules.minimum_wage:
@@ -889,11 +1067,55 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         warnings.append("zero_worked_hours")
     if run.run_type == "advance" and profile.advance_basis is AdvanceBasis.WORKED_TO_DATE and not inputs.get("day_lines"):
         warnings.append("worked_to_date_without_time")
+    if result.shi_base and result.gross > result.shi_base:
+        warnings.append("shi_cap_hit")
+    if inputs.get("_hr_pending"):
+        warnings.append("hr_changed")
     if any(not line.get("type") or not line.get("note") for line in deductions):
         warnings.append("deduction_details_missing")
     row.result = result_data
     row.warnings = warnings
     return result_data
+
+
+async def _flag_final_advance_changes(db: AsyncSession, month_id: int, organization_id: int) -> None:
+    """Mark final-run rows whose pulled advances no longer match approved advance runs.
+
+    Called whenever an advance run enters or leaves approval, so the final
+    register shows «Урьдчилгаа өөрчлөгдсөн» without waiting for a recalculation.
+    """
+    await db.flush()
+    final = await db.scalar(select(MonthlyPayrollRun).where(MonthlyPayrollRun.month_id == month_id, MonthlyPayrollRun.organization_id == organization_id, MonthlyPayrollRun.run_type == "final"))
+    if final is None:
+        return
+    current = await _approved_advance_snapshot(db, month_id, organization_id)
+    rows = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == final.id, MonthlyPayrollRunRow.organization_id == organization_id))).scalars().all()
+    for row in rows:
+        pulled = (final.advance_snapshot or {}).get(str(row.employee_id), {})
+        latest = current.get(str(row.employee_id), {})
+        changed = (pulled.get("run_ids") or [], pulled.get("amounts") or []) != (latest.get("run_ids") or [], latest.get("amounts") or [])
+        warnings = [warning for warning in (row.warnings or []) if warning != "advance_changed"]
+        if changed:
+            warnings.append("advance_changed")
+        if warnings != (row.warnings or []):
+            row.warnings = warnings
+
+
+async def _calculate_row_or_422(db: AsyncSession, month: MonthlyPayrollMonth, run: MonthlyPayrollRun, row: MonthlyPayrollRunRow) -> dict[str, Any]:
+    try:
+        return await _calculate_row(db, month, run, row)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "payroll_row_invalid", "employee_id": row.employee_id, "employee_name": (row.identity_snapshot or {}).get("name"), "message": str(exc)}) from exc
+
+
+def _reset_approval(row: MonthlyPayrollRunRow) -> bool:
+    """Editing an approved row returns it to draft (shown as Засварласан)."""
+    if row.status != "approved":
+        return False
+    row.status = "draft"
+    row.approved_by_account_id = None
+    row.approved_at = None
+    return True
 
 
 @router.post("/months", status_code=status.HTTP_201_CREATED)
@@ -906,6 +1128,7 @@ async def create_month(data: MonthInput, db: AsyncSession = Depends(get_db), act
     if existing:
         return _month_out(existing, [])
     effective = date(data.year, data.month, 1)
+    await ensure_default_rule_set(db, actor.organization_id)
     rule = await db.scalar(select(MonthlyPayrollRuleSet).where(
         MonthlyPayrollRuleSet.organization_id == actor.organization_id,
         MonthlyPayrollRuleSet.status == "published", MonthlyPayrollRuleSet.valid_from <= effective,
@@ -967,14 +1190,119 @@ async def get_month(month_id: int, db: AsyncSession = Depends(get_db), actor: Ac
     return _month_out(month, runs)
 
 
+def _identity_snapshot(employee: Employee, details: EmployeeDetails | None, department_name: str | None, payout_date: date) -> dict[str, Any]:
+    return {
+        "employee_id": employee.id, "name": employee.name, "last_name": employee.last_name, "first_name": employee.first_name,
+        "rd": (employee.metadata_json or {}).get("rd"), "job_title": details.job_title if details else employee.job_title,
+        "department_id": details.department_id if details else None, "department": department_name or "Бусад",
+        "pay_date": payout_date.isoformat(),
+        "start_date": details.start_date.isoformat() if details and details.start_date else None,
+        "end_date": details.end_date.isoformat() if details and details.end_date else None,
+    }
+
+
+def _profile_snapshot(profile: MonthlyPayrollProfile | None, history: MonthlyPayrollSalaryHistory | None, segments: list[dict[str, Any]]) -> dict[str, Any]:
+    if profile is None:
+        return {"complete": False, "validation_issues": ["profile_missing"], "base_salary": "0", "salary_segments": [], "salary_type": "PRORATION", "meal_allowance": "0", "commute_allowance": "0", "payment_frequency": "MONTHLY", "pay_days": [25], "advance_basis": "FIXED", "advance_amount": "0", "advance_percent": "40", "advance_values": [], "daily_norm_hours": "8", "insured_type": "01001", "tax_relief_eligible": True}
+    issues = ["salary_history_missing_or_incomplete"] if history is None else []
+    return _json_value({
+        "complete": not issues, "validation_issues": issues, "base_salary": str(history.monthly_salary if history else 0),
+        "salary_segments": segments, "salary_type": profile.salary_type,
+        "meal_allowance": str(profile.meal_allowance), "commute_allowance": str(profile.commute_allowance),
+        "payment_frequency": profile.payment_frequency, "pay_days": list(profile.pay_days or []),
+        "advance_basis": profile.advance_basis, "advance_amount": str(profile.advance_amount),
+        "advance_percent": str(profile.advance_percent), "advance_values": [str(value) for value in (profile.advance_values or [])],
+        "daily_norm_hours": str(profile.daily_norm_hours), "insured_type": profile.insured_type,
+        "tax_relief_eligible": profile.tax_relief_eligible,
+    })
+
+
+async def _department_name(db: AsyncSession, organization_id: int, details: EmployeeDetails | None) -> str | None:
+    if not details or not details.department_id:
+        return None
+    return await db.scalar(select(Department.name).where(Department.id == details.department_id, Department.organization_id == organization_id))
+
+
+def _row_payout_date(month: MonthlyPayrollMonth, run: MonthlyPayrollRun, profile: MonthlyPayrollProfile | None) -> date:
+    last_day = calendar.monthrange(month.year, month.month)[1]
+    if run.run_type == "final" and profile is not None and profile.pay_days:
+        return date(month.year, month.month, min(int(profile.pay_days[-1]), last_day))
+    return run.pay_date
+
+
+async def _fresh_snapshots(db: AsyncSession, actor: ActorContext, month: MonthlyPayrollMonth, run: MonthlyPayrollRun, employee: Employee, details: EmployeeDetails | None, profile: MonthlyPayrollProfile | None, history: MonthlyPayrollSalaryHistory | None, segments: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
+    identity = _identity_snapshot(employee, details, await _department_name(db, actor.organization_id, details), _row_payout_date(month, run, profile))
+    return identity, _profile_snapshot(profile, history, segments)
+
+
+async def _build_row(db: AsyncSession, actor: ActorContext, month: MonthlyPayrollMonth, run: MonthlyPayrollRun, employee: Employee, details: EmployeeDetails | None, profile: MonthlyPayrollProfile | None, history: MonthlyPayrollSalaryHistory | None, segments: list[dict[str, Any]], *, one_off: bool = False) -> MonthlyPayrollRunRow:
+    """Snapshot one worker into a run: identity, HR profile, time and payout."""
+    identity, profile_data = await _fresh_snapshots(db, actor, month, run, employee, details, profile, history, segments)
+    payout_date = date.fromisoformat(identity["pay_date"])
+    calendar_overrides = {date.fromisoformat(key): value for key, value in month.calendar_snapshot.items()}
+    attendance = await _attendance_inputs(
+        db, actor.organization_id, employee.id, month,
+        run.cutoff_date if run.run_type == "advance" else None,
+        amount(profile_data["daily_norm_hours"]), calendar_overrides,
+    )
+    attendance["_source_snapshot"] = {key: attendance.get(key) for key in TIME_INPUT_KEYS}
+    payout = await db.scalar(select(EmployeeBankAccount).where(
+        EmployeeBankAccount.employee_id == employee.id,
+        EmployeeBankAccount.is_primary.is_(True), EmployeeBankAccount.valid_from <= payout_date,
+        (EmployeeBankAccount.valid_to.is_(None) | (EmployeeBankAccount.valid_to >= payout_date)),
+    ).order_by(EmployeeBankAccount.valid_from.desc(), EmployeeBankAccount.id.desc()).limit(1))
+    payout_snapshot = encrypt_secret(json.dumps({
+        "bank_code": payout.bank_code,
+        "account_number": decrypt_secret(payout.account_number_ciphertext),
+        "account_holder": decrypt_secret(payout.account_holder_ciphertext) if payout.account_holder_ciphertext else employee.name,
+    }, ensure_ascii=False)) if payout else None
+    row = MonthlyPayrollRunRow(
+        organization_id=actor.organization_id, run_id=run.id, employee_id=employee.id,
+        identity_snapshot=identity, profile_snapshot=profile_data,
+        payout_snapshot_ciphertext=payout_snapshot,
+        inputs={**attendance, "leave_pay": "0", "bonus": "0", "other_deductions": [], **({"one_off_advance": True} if one_off else {})},
+    )
+    db.add(row)
+    return row
+
+
+async def _approved_advance_snapshot(db: AsyncSession, month_id: int, organization_id: int) -> dict[str, dict[str, list[str]]]:
+    """Per-worker approved advance lines of a month, in pay-date order."""
+    lines = (await db.execute(select(MonthlyPayrollRun.id, MonthlyPayrollRun.pay_date, MonthlyPayrollRunRow.employee_id, MonthlyPayrollRunRow.result).join(
+        MonthlyPayrollRunRow, MonthlyPayrollRunRow.run_id == MonthlyPayrollRun.id,
+    ).where(
+        MonthlyPayrollRun.month_id == month_id, MonthlyPayrollRun.organization_id == organization_id,
+        MonthlyPayrollRunRow.organization_id == organization_id,
+        MonthlyPayrollRun.run_type == "advance", MonthlyPayrollRun.status.in_(("approved", "paid", "closed")),
+    ).order_by(MonthlyPayrollRun.pay_date, MonthlyPayrollRun.id))).all()
+    snapshot: dict[str, dict[str, list[str]]] = {}
+    for line in lines:
+        item = snapshot.setdefault(str(line.employee_id), {"amounts": [], "run_ids": [], "pay_dates": []})
+        item["amounts"].append(str((line.result or {}).get("advance", "0")))
+        item["run_ids"].append(str(line.id))
+        item["pay_dates"].append(line.pay_date.isoformat())
+    return snapshot
+
+
 @router.get("/months/{month_id}/advance-dates")
 async def get_advance_dates(month_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "payroll", "view")
     month = await _month(db, actor, month_id)
     last = date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])
     workers = await _profiles_for_month(db, actor, month, None)
-    days = sorted({min(int(day), last.day) for _, _, profile, _, _ in workers if profile is not None for day in (profile.pay_days or [])[:-1] if int(day) > 0})
-    return [{"day": day, "date": date(month.year, month.month, day).isoformat()} for day in days]
+    counts: dict[int, dict[str, int]] = {}
+    for _, _, profile, _, _ in workers:
+        if profile is None or profile.payment_frequency == "MONTHLY":
+            continue
+        for day in (profile.pay_days or [])[:-1]:
+            item = counts.setdefault(min(int(day), last.day), {"workers": 0, "worked_to_date_workers": 0})
+            item["workers"] += 1
+            if profile.advance_basis == AdvanceBasis.WORKED_TO_DATE.value:
+                item["worked_to_date_workers"] += 1
+    existing = set((await db.execute(select(MonthlyPayrollRun.pay_date).where(
+        MonthlyPayrollRun.month_id == month.id, MonthlyPayrollRun.run_type == "advance",
+    ))).scalars().all())
+    return [{"day": day, "date": date(month.year, month.month, day).isoformat(), **item, "run_exists": date(month.year, month.month, day) in existing} for day, item in sorted(counts.items())]
 
 
 @router.post("/months/{month_id}/runs", status_code=status.HTTP_201_CREATED)
@@ -988,8 +1316,8 @@ async def create_run(month_id: int, data: RunInput, db: AsyncSession = Depends(g
         raise HTTPException(status_code=422, detail="Төлбөрийн өдөр сонгосон сард багтах ёстой.")
     if data.cutoff_date and data.cutoff_date > data.pay_date:
         raise HTTPException(status_code=422, detail="Таслах өдөр төлбөрийн өдрөөс хойш байж болохгүй.")
-    if data.run_type == "final" and data.employee_ids:
-        raise HTTPException(status_code=422, detail="Сүүл цалингийн бодолт бүх eligible ажилтныг хамарна.")
+    if data.run_type == "final" and (data.employee_ids or data.department_id):
+        raise HTTPException(status_code=422, detail="Сүүл цалингийн бодолт сарын бүх ажилтныг нэг хүснэгтэд хамарна; хэлтсээр хүснэгт дотор шүүнэ үү.")
     if data.run_type == "final":
         prior_final = await db.scalar(select(MonthlyPayrollRun.id).where(
             MonthlyPayrollRun.month_id == month.id, MonthlyPayrollRun.run_type == "final",
@@ -1002,10 +1330,11 @@ async def create_run(month_id: int, data: RunInput, db: AsyncSession = Depends(g
             MonthlyPayrollRun.pay_date == data.pay_date,
         ))
         if duplicate:
-            raise HTTPException(status_code=409, detail="Энэ төлбөрийн өдөр урьдчилгааны бодолт байна.")
+            raise HTTPException(status_code=409, detail="Энэ төлбөрийн өдөр урьдчилгааны бодолт байна. «Ажилтан нэмэх»-ээр нэмнэ үү.")
     workers = await _profiles_for_month(db, actor, month, data.department_id)
     eligible = []
-    for employee, details, profile, history, segments in workers:
+    for worker in workers:
+        employee, _details, profile, _history, _segments = worker
         # One final register covers every worker in the earning month;
         # individual payment dates stay on the HR profiles.
         if data.run_type == "advance":
@@ -1014,26 +1343,10 @@ async def create_run(month_id: int, data: RunInput, db: AsyncSession = Depends(g
             if data.employee_ids is not None:
                 if employee.id not in data.employee_ids:
                     continue
-            else:
-                days = profile.pay_days or []
-                expected_day = next((day for day in days[:-1] if min(day, last.day) == data.pay_date.day), None)
-                if expected_day is None:
-                    continue
-        department_id = details.department_id if details else None
-        department_name = await db.scalar(select(Department.name).where(Department.id == department_id, Department.organization_id == actor.organization_id)) if department_id else None
-        final_pay_date = None
-        if data.run_type == "final" and profile is not None and profile.pay_days:
-            final_pay_date = date(month.year, month.month, min(profile.pay_days[-1], last.day))
-        payout_date = final_pay_date or data.pay_date
-        identity = {"employee_id": employee.id, "name": employee.name, "rd": (employee.metadata_json or {}).get("rd"), "job_title": details.job_title if details else employee.job_title, "department_id": department_id, "department": department_name or "Бусад", "pay_date": payout_date.isoformat()}
-        if profile is None:
-            profile_data = {"complete": False, "validation_issues": ["profile_missing"], "base_salary": "0", "salary_segments": [], "salary_type": "PRORATION", "meal_allowance": "0", "commute_allowance": "0", "payment_frequency": "MONTHLY", "pay_days": [25], "advance_basis": "FIXED", "advance_amount": "0", "advance_percent": "40", "advance_values": [], "daily_norm_hours": "8", "insured_type": "01001", "tax_relief_eligible": True}
-        else:
-            days = profile.pay_days or []
-            issues = ["salary_history_missing_or_incomplete"] if history is None else []
-            profile_data = {"complete": not issues, "validation_issues": issues, "base_salary": str(history.monthly_salary if history else 0), "salary_segments": segments, "salary_type": profile.salary_type, "meal_allowance": str(profile.meal_allowance), "commute_allowance": str(profile.commute_allowance), "payment_frequency": profile.payment_frequency, "pay_days": days, "advance_basis": profile.advance_basis, "advance_amount": str(profile.advance_amount), "advance_percent": str(profile.advance_percent), "advance_values": profile.advance_values or [], "daily_norm_hours": str(profile.daily_norm_hours), "insured_type": profile.insured_type, "tax_relief_eligible": profile.tax_relief_eligible}
-        eligible.append((employee, identity, profile_data))
-    eligible_ids = {employee.id for employee, _, _ in eligible}
+            elif profile.payment_frequency == "MONTHLY" or not any(min(int(day), last.day) == data.pay_date.day for day in (profile.pay_days or [])[:-1]):
+                continue
+        eligible.append(worker)
+    eligible_ids = {worker[0].id for worker in eligible}
     if data.employee_ids and eligible_ids != set(data.employee_ids):
         raise HTTPException(status_code=422, detail={"code": "monthly_payroll_advance_worker_invalid", "employee_ids": sorted(set(data.employee_ids) - eligible_ids), "message": "Нэг удаагийн урьдчилгаанд цалингийн профайлтай ажилтныг сонгоно уу."})
     if not eligible:
@@ -1046,51 +1359,14 @@ async def create_run(month_id: int, data: RunInput, db: AsyncSession = Depends(g
     db.add(run)
     await db.flush()
     if data.run_type == "final":
-        advance_runs = (await db.execute(select(MonthlyPayrollRun).where(
-            MonthlyPayrollRun.month_id == month.id, MonthlyPayrollRun.run_type == "advance",
-            MonthlyPayrollRun.status.in_(("approved", "paid", "closed")), MonthlyPayrollRun.pay_date <= last,
-        ).order_by(MonthlyPayrollRun.pay_date))).scalars().all()
-        snapshot: dict[str, dict[str, list[str]]] = {}
-        for advance_run in advance_runs:
-            advance_rows = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == advance_run.id))).scalars().all()
-            for advance_row in advance_rows:
-                item = snapshot.setdefault(str(advance_row.employee_id), {"amounts": [], "run_ids": []})
-                item["amounts"].append(str(advance_row.result.get("advance", "0")))
-                item["run_ids"].append(str(advance_run.id))
-        run.advance_snapshot = snapshot
-    calendar_overrides = {date.fromisoformat(key): value for key, value in month.calendar_snapshot.items()}
-    new_rows = []
-    for employee, identity, profile_data in eligible:
-        payout_date = date.fromisoformat(identity["pay_date"])
-        attendance = await _attendance_inputs(
-            db, actor.organization_id, employee.id, month,
-            run.cutoff_date if run.run_type == "advance" else None,
-            amount(profile_data["daily_norm_hours"]), calendar_overrides,
-        )
-        payout = await db.scalar(select(EmployeeBankAccount).where(
-            EmployeeBankAccount.employee_id == employee.id,
-            EmployeeBankAccount.is_primary.is_(True), EmployeeBankAccount.valid_from <= payout_date,
-            (EmployeeBankAccount.valid_to.is_(None) | (EmployeeBankAccount.valid_to >= payout_date)),
-        ).order_by(EmployeeBankAccount.valid_from.desc(), EmployeeBankAccount.id.desc()).limit(1))
-        payout_snapshot = None
-        if payout:
-            payout_snapshot = encrypt_secret(json.dumps({
-                "bank_code": payout.bank_code,
-                "account_number": decrypt_secret(payout.account_number_ciphertext),
-                "account_holder": decrypt_secret(payout.account_holder_ciphertext) if payout.account_holder_ciphertext else employee.name,
-            }, ensure_ascii=False))
-        attendance["_source_snapshot"] = {key: attendance.get(key) for key in ("worked_normal_hours", "worked_to_date_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")}
-        row = MonthlyPayrollRunRow(
-            organization_id=actor.organization_id, run_id=run.id, employee_id=employee.id,
-            identity_snapshot=identity, profile_snapshot=profile_data,
-            payout_snapshot_ciphertext=payout_snapshot,
-            inputs={**attendance, "leave_pay": "0", "bonus": "0", "other_deductions": [], **({"one_off_advance": True} if run.run_type == "advance" and data.employee_ids is not None else {})},
-        )
-        db.add(row)
-        new_rows.append(row)
+        run.advance_snapshot = await _approved_advance_snapshot(db, month.id, actor.organization_id)
+    new_rows = [
+        await _build_row(db, actor, month, run, employee, details, profile, history, segments, one_off=run.run_type == "advance" and data.employee_ids is not None)
+        for employee, details, profile, history, segments in eligible
+    ]
     await db.flush()
     for row in new_rows:
-        await _calculate_row(db, month, run, row)
+        await _calculate_row_or_422(db, month, run, row)
     await db.commit()
     await db.refresh(run)
     return _run_out(run)
@@ -1125,8 +1401,7 @@ async def update_row(run_id: int, employee_id: int, data: RowInput, db: AsyncSes
     ).with_for_update())
     if not row:
         raise HTTPException(status_code=404, detail="Бодолтын ажилтан олдсонгүй.")
-    if row.status != "draft":
-        raise HTTPException(status_code=409, detail="Баталсан мөрийг засах боломжгүй.")
+    _reset_approval(row)
     changes = data.model_dump(exclude_unset=True, exclude={"reason"})
     before = dict(row.inputs or {})
     after = {**before, **_json_value(changes)}
@@ -1137,10 +1412,7 @@ async def update_row(run_id: int, employee_id: int, data: RowInput, db: AsyncSes
     row.inputs = after
     db.add(MonthlyPayrollRowAudit(organization_id=actor.organization_id, run_id=run.id, row_id=row.id, account_id=actor.account_id, field_name="inputs", old_value=before, new_value=after, reason=data.reason))
     month = await _month(db, actor, run.month_id)
-    try:
-        await _calculate_row(db, month, run, row)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"code": "payroll_row_invalid", "message": str(exc)}) from exc
+    await _calculate_row_or_422(db, month, run, row)
     await db.commit()
     await db.refresh(row)
     return _row_out(row)
@@ -1153,8 +1425,9 @@ async def revert_row_overrides(run_id: int, employee_id: int, data: UnlockInput,
     if run.status != "draft":
         raise HTTPException(status_code=409, detail="Зөвхөн ноорог бодолтын оролтыг буцаах боломжтой.")
     row = await db.scalar(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id, MonthlyPayrollRunRow.employee_id == employee_id, MonthlyPayrollRunRow.organization_id == actor.organization_id).with_for_update())
-    if row is None or row.status != "draft":
-        raise HTTPException(status_code=404 if row is None else 409, detail="Ноорог ажилтны мөр олдсонгүй.")
+    if row is None:
+        raise HTTPException(status_code=404, detail="Бодолтын ажилтан олдсонгүй.")
+    _reset_approval(row)
     before = dict(row.inputs or {})
     source = dict(before.get("_source_snapshot") or {})
     after = {**before, **source, "leave_pay": "0", "bonus": "0", "other_deductions": []}
@@ -1176,8 +1449,9 @@ async def override_computed_cell(run_id: int, employee_id: int, data: ComputedOv
     if run.status != "draft":
         raise HTTPException(status_code=409, detail="Зөвхөн ноорог бодолтын тооцсон дүнг засна.")
     row = await db.scalar(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id, MonthlyPayrollRunRow.employee_id == employee_id, MonthlyPayrollRunRow.organization_id == actor.organization_id).with_for_update())
-    if row is None or row.status != "draft":
-        raise HTTPException(status_code=404 if row is None else 409, detail="Ноорог ажилтны мөр олдсонгүй.")
+    if row is None:
+        raise HTTPException(status_code=404, detail="Бодолтын ажилтан олдсонгүй.")
+    _reset_approval(row)
     if not row.profile_snapshot.get("complete", True):
         raise HTTPException(status_code=409, detail={"code": "monthly_payroll_profile_incomplete", "employee_id": employee_id})
     before_result, before_inputs = dict(row.result or {}), dict(row.inputs or {})
@@ -1199,8 +1473,9 @@ async def revert_computed_cell_override(run_id: int, employee_id: int, data: Com
     if run.status != "draft":
         raise HTTPException(status_code=409, detail="Зөвхөн ноорог бодолтын тооцсон дүнг буцаана.")
     row = await db.scalar(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id, MonthlyPayrollRunRow.employee_id == employee_id, MonthlyPayrollRunRow.organization_id == actor.organization_id).with_for_update())
-    if row is None or row.status != "draft":
-        raise HTTPException(status_code=404 if row is None else 409, detail="Ноорог ажилтны мөр олдсонгүй.")
+    if row is None:
+        raise HTTPException(status_code=404, detail="Бодолтын ажилтан олдсонгүй.")
+    _reset_approval(row)
     before_result, inputs = dict(row.result or {}), dict(row.inputs or {})
     overrides = dict(inputs.get("_computed_overrides") or {})
     if data.field not in overrides:
@@ -1303,8 +1578,16 @@ async def refresh_run_time(run_id: int, db: AsyncSession = Depends(get_db), acto
     return {"run_id": run.id, "updated_rows": changed, "rows": [_row_out(row) for row in rows]}
 
 
+HR_IDENTITY_KEYS = ("name", "last_name", "first_name", "rd", "job_title", "department_id", "department", "pay_date")
+
+
 @router.post("/runs/{run_id}/sync-workers")
 async def sync_run_workers(run_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """«Ажилчид шинэчлэх»: add newly due workers and flag HR changes.
+
+    Existing rows are snapshots and are never overwritten here; a changed HR
+    profile is parked on the row as «HR changed» until the accountant accepts.
+    """
     await require_capability(db, actor, "payroll", "create")
     run = await _run(db, actor, run_id, lock=True)
     if run.status != "draft":
@@ -1312,34 +1595,93 @@ async def sync_run_workers(run_id: int, db: AsyncSession = Depends(get_db), acto
     month = await _month(db, actor, run.month_id, lock=True)
     if month.status != "open":
         raise HTTPException(status_code=409, detail="Хаагдсан сарын бодолтыг шинэчлэх боломжгүй.")
-    existing_ids = set((await db.execute(select(MonthlyPayrollRunRow.employee_id).where(MonthlyPayrollRunRow.run_id == run.id))).scalars().all())
+    existing = {row.employee_id: row for row in (await db.execute(select(MonthlyPayrollRunRow).where(
+        MonthlyPayrollRunRow.run_id == run.id, MonthlyPayrollRunRow.organization_id == actor.organization_id,
+    ).with_for_update())).scalars().all()}
     last = date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])
     workers = await _profiles_for_month(db, actor, month, run.department_id)
-    calendar_overrides = {date.fromisoformat(key): value for key, value in month.calendar_snapshot.items()}
+    added: list[MonthlyPayrollRunRow] = []
+    hr_changed = 0
+    for employee, details, profile, history, segments in workers:
+        row = existing.get(employee.id)
+        if row is not None:
+            identity, profile_data = await _fresh_snapshots(db, actor, month, run, employee, details, profile, history, segments)
+            current_identity = {key: (row.identity_snapshot or {}).get(key) for key in HR_IDENTITY_KEYS}
+            fresh_identity = {key: identity.get(key) for key in HR_IDENTITY_KEYS}
+            inputs = dict(row.inputs or {})
+            if fresh_identity != current_identity or profile_data != (row.profile_snapshot or {}):
+                if inputs.get("_hr_pending") != {"identity": identity, "profile": profile_data}:
+                    inputs["_hr_pending"] = {"identity": identity, "profile": profile_data}
+                    row.inputs = inputs
+                    row.warnings = list(dict.fromkeys([*(row.warnings or []), "hr_changed"]))
+                    hr_changed += 1
+            elif inputs.pop("_hr_pending", None) is not None:
+                row.inputs = inputs
+                row.warnings = [warning for warning in (row.warnings or []) if warning != "hr_changed"]
+            continue
+        if run.run_type == "advance" and (profile is None or profile.payment_frequency == "MONTHLY" or not any(min(int(day), last.day) == run.pay_date.day for day in (profile.pay_days or [])[:-1])):
+            continue
+        row = await _build_row(db, actor, month, run, employee, details, profile, history, segments)
+        await db.flush()
+        await _calculate_row_or_422(db, month, run, row)
+        db.add(MonthlyPayrollRowAudit(organization_id=actor.organization_id, run_id=run.id, row_id=row.id, account_id=actor.account_id, field_name="worker_sync", old_value=None, new_value={"employee_id": employee.id, "pay_date": row.identity_snapshot["pay_date"]}, reason="Ажилтны жагсаалтыг HR бүртгэлээс шинэчлэв"))
+        added.append(row)
+    await db.commit()
+    return {"run_id": run.id, "added_workers": len(added), "hr_changed_rows": hr_changed, "run": await get_run(run.id, db, actor)}
+
+
+@router.post("/runs/{run_id}/rows/{employee_id}/accept-hr")
+async def accept_hr_change(run_id: int, employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "payroll", "create")
+    run = await _run(db, actor, run_id, lock=True)
+    if run.status != "draft":
+        raise HTTPException(status_code=409, detail="Зөвхөн ноорог бодолтод HR өөрчлөлт хүлээн авна.")
+    row = await db.scalar(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id, MonthlyPayrollRunRow.employee_id == employee_id, MonthlyPayrollRunRow.organization_id == actor.organization_id).with_for_update())
+    if row is None:
+        raise HTTPException(status_code=404, detail="Бодолтын ажилтан олдсонгүй.")
+    inputs = dict(row.inputs or {})
+    pending = inputs.pop("_hr_pending", None)
+    if not pending:
+        raise HTTPException(status_code=409, detail="Хүлээн авах HR өөрчлөлт алга.")
+    before = {"identity": row.identity_snapshot, "profile": row.profile_snapshot}
+    row.identity_snapshot = pending["identity"]
+    row.profile_snapshot = pending["profile"]
+    row.inputs = inputs
+    _reset_approval(row)
+    month = await _month(db, actor, run.month_id)
+    await _calculate_row_or_422(db, month, run, row)
+    db.add(MonthlyPayrollRowAudit(organization_id=actor.organization_id, run_id=run.id, row_id=row.id, account_id=actor.account_id, field_name="hr_profile_accepted", old_value=before, new_value=pending, reason="HR-ийн өөрчлөлтийг хүлээн авав"))
+    await db.commit()
+    await db.refresh(row)
+    return _row_out(row)
+
+
+class AddWorkersInput(BaseModel):
+    employee_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+@router.post("/runs/{run_id}/add-workers")
+async def add_run_workers(run_id: int, data: AddWorkersInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """«Ажилтан нэмэх»: a one-off advance for a worker not scheduled that day."""
+    await require_capability(db, actor, "payroll", "create")
+    run = await _run(db, actor, run_id, lock=True)
+    if run.run_type != "advance" or run.status != "draft":
+        raise HTTPException(status_code=409, detail="Зөвхөн ноорог урьдчилгааны бодолтод ажилтан нэмнэ.")
+    month = await _month(db, actor, run.month_id, lock=True)
+    if month.status != "open":
+        raise HTTPException(status_code=409, detail="Хаагдсан сарын бодолтыг өөрчлөх боломжгүй.")
+    existing_ids = set((await db.execute(select(MonthlyPayrollRunRow.employee_id).where(MonthlyPayrollRunRow.run_id == run.id))).scalars().all())
+    requested = set(data.employee_ids) - existing_ids
+    workers = [worker for worker in await _profiles_for_month(db, actor, month, None) if worker[0].id in requested and worker[2] is not None]
+    missing = sorted(requested - {worker[0].id for worker in workers})
+    if missing:
+        raise HTTPException(status_code=422, detail={"code": "monthly_payroll_advance_worker_invalid", "employee_ids": missing, "message": "Цалингийн профайлтай, энэ сард ажилласан ажилтныг сонгоно уу."})
     added = []
     for employee, details, profile, history, segments in workers:
-        if employee.id in existing_ids:
-            continue
-        if run.run_type == "advance" and (profile is None or not any(min(day, last.day) == run.pay_date.day for day in (profile.pay_days or [])[:-1])):
-            continue
-        department_id = details.department_id if details else None
-        department_name = await db.scalar(select(Department.name).where(Department.id == department_id, Department.organization_id == actor.organization_id)) if department_id else None
-        payout_date = date(month.year, month.month, min(profile.pay_days[-1], last.day)) if run.run_type == "final" and profile and profile.pay_days else run.pay_date
-        identity = {"employee_id": employee.id, "name": employee.name, "rd": (employee.metadata_json or {}).get("rd"), "job_title": details.job_title if details else employee.job_title, "department_id": department_id, "department": department_name or "Бусад", "pay_date": payout_date.isoformat()}
-        if profile is None:
-            profile_data = {"complete": False, "validation_issues": ["profile_missing"], "base_salary": "0", "salary_segments": [], "salary_type": "PRORATION", "meal_allowance": "0", "commute_allowance": "0", "payment_frequency": "MONTHLY", "pay_days": [25], "advance_basis": "FIXED", "advance_amount": "0", "advance_percent": "40", "advance_values": [], "daily_norm_hours": "8", "insured_type": "01001", "tax_relief_eligible": True}
-        else:
-            issues = ["salary_history_missing_or_incomplete"] if history is None else []
-            profile_data = {"complete": not issues, "validation_issues": issues, "base_salary": str(history.monthly_salary if history else 0), "salary_segments": segments, "salary_type": profile.salary_type, "meal_allowance": str(profile.meal_allowance), "commute_allowance": str(profile.commute_allowance), "payment_frequency": profile.payment_frequency, "pay_days": profile.pay_days or [], "advance_basis": profile.advance_basis, "advance_amount": str(profile.advance_amount), "advance_percent": str(profile.advance_percent), "advance_values": profile.advance_values or [], "daily_norm_hours": str(profile.daily_norm_hours), "insured_type": profile.insured_type, "tax_relief_eligible": profile.tax_relief_eligible}
-        attendance = await _attendance_inputs(db, actor.organization_id, employee.id, month, run.cutoff_date if run.run_type == "advance" else None, amount(profile_data["daily_norm_hours"]), calendar_overrides)
-        attendance["_source_snapshot"] = {key: attendance.get(key) for key in ("worked_normal_hours", "worked_to_date_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")}
-        payout = await db.scalar(select(EmployeeBankAccount).where(EmployeeBankAccount.employee_id == employee.id, EmployeeBankAccount.is_primary.is_(True), EmployeeBankAccount.valid_from <= payout_date, (EmployeeBankAccount.valid_to.is_(None) | (EmployeeBankAccount.valid_to >= payout_date))).order_by(EmployeeBankAccount.valid_from.desc(), EmployeeBankAccount.id.desc()).limit(1))
-        payout_snapshot = encrypt_secret(json.dumps({"bank_code": payout.bank_code, "account_number": decrypt_secret(payout.account_number_ciphertext), "account_holder": decrypt_secret(payout.account_holder_ciphertext) if payout.account_holder_ciphertext else employee.name}, ensure_ascii=False)) if payout else None
-        row = MonthlyPayrollRunRow(organization_id=actor.organization_id, run_id=run.id, employee_id=employee.id, identity_snapshot=identity, profile_snapshot=profile_data, payout_snapshot_ciphertext=payout_snapshot, inputs={**attendance, "leave_pay": "0", "bonus": "0", "other_deductions": []})
-        db.add(row)
+        row = await _build_row(db, actor, month, run, employee, details, profile, history, segments, one_off=True)
         await db.flush()
-        await _calculate_row(db, month, run, row)
-        db.add(MonthlyPayrollRowAudit(organization_id=actor.organization_id, run_id=run.id, row_id=row.id, account_id=actor.account_id, field_name="worker_sync", old_value=None, new_value={"employee_id": employee.id, "pay_date": payout_date.isoformat()}, reason="Ажилтны жагсаалтыг HR бүртгэлээс шинэчлэв"))
+        await _calculate_row_or_422(db, month, run, row)
+        db.add(MonthlyPayrollRowAudit(organization_id=actor.organization_id, run_id=run.id, row_id=row.id, account_id=actor.account_id, field_name="worker_added", old_value=None, new_value={"employee_id": employee.id, "one_off_advance": True}, reason="Нэг удаагийн урьдчилгаа нэмэв"))
         added.append(row)
     await db.commit()
     return {"run_id": run.id, "added_workers": len(added), "run": await get_run(run.id, db, actor)}
@@ -1348,12 +1690,23 @@ async def sync_run_workers(run_id: int, db: AsyncSession = Depends(get_db), acto
 @router.get("/runs/{run_id}/import-template")
 async def payroll_input_template(run_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "payroll", "export")
-    await _run(db, actor, run_id)
+    run = await _run(db, actor, run_id)
+    rows = (await db.execute(select(MonthlyPayrollRunRow).where(
+        MonthlyPayrollRunRow.run_id == run.id, MonthlyPayrollRunRow.organization_id == actor.organization_id,
+    ))).scalars().all()
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Оролтын засвар"
-    sheet.append(["employee_id", "worked_normal_hours", "worked_to_date_hours", "overtime_weekday", "overtime_rest_day", "overtime_public_holiday", "leave_pay", "bonus", "deduction_type", "deduction_amount", "deduction_note", "reason"])
-    sheet.append(["Ажилтны ID", "Ердийн цаг", "Урьдчилгааны цаг", "Ажлын өдрийн илүү цаг", "Амралтын өдрийн илүү цаг", "Баярын өдрийн илүү цаг", "Амралтын олговор", "Урамшуулал", "Суутгалын төрөл", "Суутгалын дүн", "Суутгалын тайлбар", "Засварын шалтгаан"])
+    sheet.append(["employee_id", "employee_name", "worked_normal_hours", "worked_to_date_hours", "overtime_weekday", "overtime_rest_day", "overtime_public_holiday", "leave_pay", "bonus", "deduction_type", "deduction_amount", "deduction_note", "reason"])
+    sheet.append(["Ажилтны ID", "Ажилтан (зөвхөн харах)", "Ердийн цаг", "Урьдчилгааны цаг", "Ажлын өдрийн илүү цаг", "Амралтын өдрийн илүү цаг", "Баярын өдрийн илүү цаг", "Ээлжийн амралтын мөнгө", "Урамшуулал", "Суутгалын төрөл", "Суутгалын дүн", "Суутгалын тайлбар", "Засварын шалтгаан"])
+    for cell in sheet[2]:
+        cell.font = Font(bold=True)
+    # One row per worker; blank cells keep the register's current value.
+    for row in sorted(rows, key=lambda item: ((item.identity_snapshot or {}).get("department") or "", (item.identity_snapshot or {}).get("name") or "")):
+        sheet.append([row.employee_id, (row.identity_snapshot or {}).get("name", "")])
+    sheet.freeze_panes = "C3"
+    for column in "ABCDEFGHIJKLM":
+        sheet.column_dimensions[column].width = 18
     stream = io.BytesIO()
     workbook.save(stream)
     return Response(content=stream.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="monthly-payroll-{run_id}-input-template.xlsx"'})
@@ -1395,23 +1748,38 @@ async def import_payroll_inputs(run_id: int, file: UploadFile = File(...), db: A
     changed = 0
     for record, employee_id in zip(records, employee_ids):
         row = by_employee[employee_id]
-        if row.status != "draft":
-            raise HTTPException(status_code=409, detail={"code": "monthly_payroll_import_row_locked", "employee_id": employee_id})
-        def text_value(key: str, default: str = "0") -> str:
+        def text_value(key: str) -> str | None:
             value = record.get(key)
-            return default if value in (None, "") else str(value).strip()
-        overtime = {key: text_value(f"overtime_{key}") for key in ("weekday", "rest_day", "public_holiday")}
-        deduction_amount = text_value("deduction_amount")
-        try:
-            deductions = [{"type": text_value("deduction_type", "Бусад"), "amount": deduction_amount, "note": text_value("deduction_note", "")} ] if amount(deduction_amount) > 0 else []
-            input_data = RowInput.model_validate({"worked_normal_hours": text_value("worked_normal_hours") if run.run_type == "final" else None, "worked_to_date_hours": text_value("worked_to_date_hours"), "overtime_hours": overtime, "leave_pay": text_value("leave_pay"), "bonus": text_value("bonus"), "other_deductions": deductions, "reason": text_value("reason", "").strip()})
-        except (ValueError, TypeError) as exc:
-            raise HTTPException(status_code=422, detail={"code": "monthly_payroll_import_value_invalid", "employee_id": employee_id}) from exc
-        if not input_data.reason:
-            raise HTTPException(status_code=422, detail={"code": "monthly_payroll_import_reason_required", "employee_id": employee_id})
+            return None if value in (None, "") else str(value).strip()
         before = dict(row.inputs or {})
+        # A blank cell keeps the row's current value; only filled cells change.
+        provided: dict[str, Any] = {"reason": text_value("reason") or ""}
+        hour_keys = ("worked_normal_hours", "leave_pay", "bonus") if run.run_type == "final" else ("worked_to_date_hours",)
+        for key in hour_keys:
+            if text_value(key) is not None:
+                provided[key] = text_value(key)
+        overtime = {key: text_value(f"overtime_{key}") for key in ("weekday", "rest_day", "public_holiday")}
+        if run.run_type == "final" and any(value is not None for value in overtime.values()):
+            provided["overtime_hours"] = {**(before.get("overtime_hours") or {}), **{key: value for key, value in overtime.items() if value is not None}}
+        try:
+            if run.run_type == "final" and text_value("deduction_amount") is not None:
+                deduction_amount = amount(text_value("deduction_amount"))
+                provided["other_deductions"] = [{"type": text_value("deduction_type") or "Бусад", "amount": str(deduction_amount), "note": text_value("deduction_note") or ""}] if deduction_amount > 0 else []
+            if set(provided) == {"reason"}:
+                continue
+            input_data = RowInput.model_validate(provided)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail={"code": "monthly_payroll_import_value_invalid", "employee_id": employee_id, "message": f"{row.identity_snapshot.get('name') or employee_id}: Excel-ийн утга буруу байна."}) from exc
+        if row.status == "flagged":
+            raise HTTPException(status_code=409, detail={"code": "monthly_payroll_import_row_locked", "employee_id": employee_id, "message": f"{row.identity_snapshot.get('name')}: шалгах тэмдэглэгээтэй мөрийг эхлээд цэвэрлэнэ үү."})
+        if not input_data.reason:
+            raise HTTPException(status_code=422, detail={"code": "monthly_payroll_import_reason_required", "employee_id": employee_id, "message": f"{row.identity_snapshot.get('name') or employee_id}: засварын шалтгаан бичнэ үү."})
         row.inputs = {**before, **_json_value(input_data.model_dump(exclude_unset=True, exclude={"reason"}))}
-        await _calculate_row(db, month, run, row)
+        _reset_approval(row)
+        try:
+            await _calculate_row(db, month, run, row)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "payroll_row_invalid", "employee_id": employee_id, "message": str(exc)}) from exc
         db.add(MonthlyPayrollRowAudit(organization_id=actor.organization_id, run_id=run.id, row_id=row.id, account_id=actor.account_id, field_name="excel_import", old_value=before, new_value=row.inputs, reason=input_data.reason))
         changed += 1
     await db.commit()
@@ -1460,13 +1828,19 @@ async def calculate_run(run_id: int, db: AsyncSession = Depends(get_db), actor: 
         raise HTTPException(status_code=409, detail="Ноорог төлөвтэй бодолтыг дахин тооцно.")
     month = await _month(db, actor, run.month_id)
     rows = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id).with_for_update())).scalars().all()
-    try:
-        for row in rows:
-            await _calculate_row(db, month, run, row)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"code": "payroll_calculation_invalid", "message": str(exc)}) from exc
+    # «Дахин бодох» never touches approved rows (plan §6.4).
+    for row in rows:
+        if row.status != "approved":
+            await _calculate_row_or_422(db, month, run, row)
     await db.commit()
     return await get_run(run.id, db, actor)
+
+
+async def _company_name(db: AsyncSession, organization_id: int) -> str | None:
+    settings = await db.scalar(select(MonthlyPayrollCompanySettings).where(MonthlyPayrollCompanySettings.organization_id == organization_id))
+    if settings and settings.legal_company_name:
+        return settings.legal_company_name
+    return await db.scalar(select(Organization.name).where(Organization.id == organization_id))
 
 
 @router.get("/runs/{run_id}/export")
@@ -1478,114 +1852,19 @@ async def export_run(run_id: int, db: AsyncSession = Depends(get_db), actor: Act
     month = await _month(db, actor, run.month_id)
     rows = (await db.execute(select(MonthlyPayrollRunRow).where(
         MonthlyPayrollRunRow.run_id == run.id, MonthlyPayrollRunRow.organization_id == actor.organization_id,
-    ).order_by(MonthlyPayrollRunRow.identity_snapshot["department_id"].astext, MonthlyPayrollRunRow.identity_snapshot["name"].astext))).scalars().all()
-    workbook = Workbook()
-    workbook.remove(workbook.active)
-    title = f"{run.pay_date.year} оны {run.pay_date.month} сарын {run.pay_date.day}-ны {'урьдчилгаа цалин' if run.run_type == 'advance' else 'сүүл цалин'}"
-
-    def add_sheet(name: str, headers: list[str], data: list[list[Any]], total_columns: list[int] | None = None) -> None:
-        sheet = workbook.create_sheet(name)
-        sheet.append([title])
-        sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(1, len(headers)))
-        sheet.cell(1, 1).font = Font(bold=True, size=14)
-        sheet.append(headers)
-        for cell in sheet[2]:
-            cell.font = Font(bold=True)
-            cell.alignment = Alignment(wrap_text=True, vertical="center")
-        for values in data:
-            sheet.append(values)
-        for row_cells in sheet.iter_rows(min_row=3):
-            for cell in row_cells:
-                if isinstance(cell.value, (int, float, Decimal)):
-                    cell.number_format = "#,##0"
-        if data and total_columns:
-            sheet.append(["НИЙТ"] + [f"=SUM({sheet.cell(3, index).column_letter}3:{sheet.cell(sheet.max_row, index).column_letter}{sheet.max_row})" if index in total_columns else "" for index in range(2, len(headers) + 1)])
-            for cell in sheet[sheet.max_row]:
-                cell.font = Font(bold=True)
-        sheet.freeze_panes = "A3"
-        sheet.sheet_properties.pageSetUpPr.fitToPage = True
-        sheet.page_setup.orientation = "landscape"
-        sheet.page_setup.fitToWidth = 1
-        sheet.page_setup.fitToHeight = 0
-        for column in sheet.columns:
-            letter = column[0].column_letter
-            width = min(34, max(12, max(len(str(cell.value or "")) for cell in column) + 2))
-            sheet.column_dimensions[letter].width = width
-
-    def number(value: Any) -> Decimal:
-        return Decimal(str(value or 0))
-
-    payment_rows: list[list[Any]] = []
-    register_rows: list[list[Any]] = []
-    overtime_rows: list[list[Any]] = []
-    shi_rows: list[list[Any]] = []
-    deduction_rows: list[list[Any]] = []
-    summary_totals: dict[str, Decimal] = {key: Decimal("0") for key in ("gross", "employee_shi", "employer_shi", "pit", "advance", "other_deductions", "net_pay")}
-    for row in rows:
-        identity, profile, result, inputs = row.identity_snapshot or {}, row.profile_snapshot or {}, row.result or {}, row.inputs or {}
-        name = identity.get("name", "")
-        rd = identity.get("rd") or ""
-        amount_key = "advance" if run.run_type == "advance" else "net_pay"
-        payout = json.loads(decrypt_secret(row.payout_snapshot_ciphertext)) if row.payout_snapshot_ciphertext else {}
-        payment_rows.append([name, rd, payout.get("bank_code", ""), payout.get("account_number", ""), number(result.get(amount_key)), "" if payout else "Банкны мэдээлэл дутуу"])
-        if run.run_type == "advance":
-            register_rows.append([identity.get("department", "Бусад"), name, rd, number(profile.get("base_salary")), number(result.get("advance"))])
-            continue
-        columns = ("gross", "employee_shi", "employer_shi", "pit", "advance", "other_deductions", "net_pay")
-        for key in columns:
-            summary_totals[key] += number(result.get(key))
-        register_rows.append([identity.get("department", "Бусад"), name, rd, number(profile.get("base_salary")), number(result.get("gross")), number(result.get("employee_shi")), number(result.get("taxable_income")), number(result.get("pit")), number(result.get("relief")), number(result.get("advance")), number(result.get("other_deductions")), number(result.get("net_pay")), number(result.get("employer_shi"))])
-        daily_norm = number(profile.get("daily_norm_hours", 8))
-        planned_days = sum(value == CalendarDayType.WORKING.value for value in month.calendar_snapshot.values())
-        planned_hours = daily_norm * max(1, planned_days)
-        hourly_rate = number(profile.get("base_salary")) / planned_hours if planned_hours else Decimal("0")
-        multipliers = month.rule_snapshot.get("overtime_multipliers", {})
-        day_lines = inputs.get("day_lines") or []
-        line_totals: dict[str, Decimal] = {}
-        for day_line in day_lines:
-            for bucket, hours in day_line.get("overtime_hours", {}).items():
-                line_totals[bucket] = line_totals.get(bucket, Decimal("0")) + number(hours)
-        aggregate_hours = {key: number(value) for key, value in (inputs.get("overtime_hours") or {}).items()}
-        if day_lines and all(line_totals.get(key, Decimal("0")) == aggregate_hours.get(key, Decimal("0")) for key in set(line_totals) | set(aggregate_hours)):
-            for day_line in day_lines:
-                for bucket, hours in day_line.get("overtime_hours", {}).items():
-                    multiplier = number(multipliers.get(bucket, 1))
-                    line_rate = hourly_rate
-                    work_date = date.fromisoformat(day_line["date"])
-                    for segment in profile.get("salary_segments", []):
-                        if date.fromisoformat(segment["valid_from"]) <= work_date <= date.fromisoformat(segment["valid_to"]):
-                            segment_days = sum(value == CalendarDayType.WORKING.value and date.fromisoformat(day) >= date.fromisoformat(segment["valid_from"]) and date.fromisoformat(day) <= date.fromisoformat(segment["valid_to"]) for day, value in month.calendar_snapshot.items())
-                            if segment_days:
-                                line_rate = number(segment["monthly_salary"]) / (daily_norm * segment_days)
-                            break
-                    overtime_rows.append([name, day_line.get("date"), bucket, number(hours), multiplier, line_rate, (number(hours) * multiplier * line_rate).quantize(Decimal("1"))])
-        else:
-            for bucket, hours in (inputs.get("overtime_hours") or {}).items():
-                multiplier = number(multipliers.get(bucket, 1))
-                overtime_rows.append([name, "", bucket, number(hours), multiplier, hourly_rate, number(result.get("overtime_by_bucket", {}).get(bucket, 0))])
-        shi_base = number(result.get("shi_base"))
-        month_snapshot = month.rule_snapshot
-        for payer, rate_map in (("Ажилтан", month_snapshot.get("employee_rates", {})), ("Байгууллага", month_snapshot.get("employer_rates", {}))):
-            for fund, rate in rate_map.items():
-                shi_rows.append([name, payer, fund, shi_base, number(rate), (shi_base * number(rate)).quantize(Decimal("1"))])
-        for line in inputs.get("other_deductions", []):
-            deduction_rows.append([name, line.get("type", ""), number(line.get("amount")), line.get("note", "")])
-
-    if run.run_type == "advance":
-        add_sheet("Урьдчилгаа", ["Хэлтэс", "Ажилтан", "РД", "Үндсэн цалин", "Урьдчилгаа"], register_rows, [4, 5])
-        add_sheet("Төлбөрийн жагсаалт", ["Ажилтан", "РД", "Банк", "Данс", "Дүн", "Төлөв"], payment_rows, [5])
-    else:
-        add_sheet("Цалингийн хүснэгт", ["Хэлтэс", "Ажилтан", "РД", "Үндсэн цалин", "Олговол зохих", "НДШ", "Татвар ногдох", "ХХОАТ", "ХХОАТ ХӨН", "Урьдчилгаа", "Бусад суутгал", "Сүүл цалин", "БНДШ"], register_rows, list(range(4, 14)))
-        summary_data = [["Нийт цалин", summary_totals["gross"]], ["Ажилтны НДШ", summary_totals["employee_shi"]], ["Ажил олгогчийн НДШ", summary_totals["employer_shi"]], ["ХХОАТ", summary_totals["pit"]], ["Урьдчилгаа", summary_totals["advance"]], ["Бусад суутгал", summary_totals["other_deductions"]], ["Сүүл цалин", summary_totals["net_pay"]], ["Account A · Нийт олговол зохих", summary_totals["gross"]], ["Account B · Байгууллагын НДШ", summary_totals["employer_shi"]], ["Нийт компанийн зардал", summary_totals["gross"] + summary_totals["employer_shi"]]]
-        add_sheet("Дүн", ["Үзүүлэлт", "Дүн"], summary_data)
-        add_sheet("Илүү цаг", ["Ажилтан", "Огноо", "Ангилал", "Цаг", "Үржүүлэгч", "Цагийн үнэлгээ", "Дүн"], overtime_rows, [4, 7])
-        add_sheet("НДШ задаргаа", ["Ажилтан", "Төлөгч", "Сан", "Суурь", "Хувь", "Дүн"], shi_rows, [4, 6])
-        add_sheet("Төлбөрийн жагсаалт", ["Ажилтан", "РД", "Банк", "Данс", "Сүүл цалин", "Төлөв"], payment_rows, [5])
-        add_sheet("Бусад суутгал", ["Ажилтан", "Төрөл", "Дүн", "Тайлбар"], deduction_rows, [3])
-    output = io.BytesIO()
-    workbook.save(output)
-    filename = f"monthly-payroll-{run.pay_date:%Y-%m-%d}.xlsx"
-    return Response(content=output.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    ))).scalars().all()
+    export_rows = [{
+        "identity": row.identity_snapshot or {}, "profile": row.profile_snapshot or {}, "inputs": row.inputs or {}, "result": row.result or {},
+        "payout": json.loads(decrypt_secret(row.payout_snapshot_ciphertext)) if row.payout_snapshot_ciphertext else None,
+    } for row in rows]
+    stats = await _closing_stats(db, month, actor.organization_id) if run.run_type == "final" else None
+    content = build_run_workbook(
+        run_type=run.run_type, pay_date=run.pay_date, year=month.year, month=month.month, rows=export_rows,
+        company=await _company_name(db, actor.organization_id), rule_snapshot=month.rule_snapshot or {}, stats=stats,
+    )
+    kind = "advance" if run.run_type == "advance" else "final"
+    filename = f"monthly-payroll-{kind}-{run.pay_date:%Y-%m-%d}.xlsx"
+    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.post("/runs/{run_id}/refresh-advances")
@@ -1596,49 +1875,97 @@ async def refresh_advances(run_id: int, db: AsyncSession = Depends(get_db), acto
         raise HTTPException(status_code=409, detail="Зөвхөн ноорог сүүл цалингийн бодолтод урьдчилгаа дахин татна.")
     month = await _month(db, actor, run.month_id)
     rows = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id).with_for_update())).scalars().all()
-    snapshot: dict[str, dict[str, list[str]]] = {}
+    run.advance_snapshot = await _approved_advance_snapshot(db, month.id, actor.organization_id)
     for row in rows:
-        approved, run_ids = await _approved_advances(db, run, row.employee_id)
-        snapshot[str(row.employee_id)] = {"amounts": approved, "run_ids": run_ids}
-    run.advance_snapshot = snapshot
-    for row in rows:
-        await _calculate_row(db, month, run, row)
+        previous_advance = ((row.result or {}).get("advance"), (row.result or {}).get("advance_run_ids"))
+        await _calculate_row_or_422(db, month, run, row)
+        if (row.result.get("advance"), row.result.get("advance_run_ids")) == previous_advance:
+            continue
+        _reset_approval(row)
+        db.add(MonthlyPayrollRowAudit(organization_id=actor.organization_id, run_id=run.id, row_id=row.id, account_id=actor.account_id, field_name="advances_refreshed", old_value=None, new_value=row.result.get("advance_lines"), reason="Урьдчилгаа дахин татав"))
     await db.commit()
     return await get_run(run.id, db, actor)
 
 
 @router.post("/runs/{run_id}/approve")
 async def approve_run(run_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """«Бүгдийг батлах»: approve every row without a blocking issue.
+
+    Flagged or blocked rows stay in review and are reported back; the run
+    itself becomes Approved only once every row is approved.
+    """
     await require_capability(db, actor, "payroll", "approve")
     run = await _run(db, actor, run_id, lock=True)
     if run.status != "draft":
         raise HTTPException(status_code=409, detail="Зөвхөн ноорог бодолтыг батална.")
     month = await _month(db, actor, run.month_id)
     rows = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id).with_for_update())).scalars().all()
-    try:
-        for row in rows:
-            if row.status != "draft":
-                raise HTTPException(status_code=409, detail={"code": "monthly_payroll_row_flagged", "employee_id": row.employee_id, "message": "Тэмдэглэсэн мөрийг эхлээд шалгаж цэвэрлэнэ үү."})
+    approved_now = 0
+    skipped: list[dict[str, Any]] = []
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        if row.status == "approved":
+            continue
+        name = (row.identity_snapshot or {}).get("name")
+        if row.status == "flagged":
+            skipped.append({"employee_id": row.employee_id, "employee_name": name, "issues": ["row_flagged"]})
+            continue
+        try:
             await _calculate_row(db, month, run, row)
-            result = row.result or {}
-            blocking = sorted(set(row.warnings or []) & BLOCKING_ROW_WARNINGS)
-            if blocking:
-                raise HTTPException(status_code=422, detail={"code": "monthly_payroll_row_blocked", "employee_id": row.employee_id, "issues": blocking})
-            if run.run_type == "advance" and Decimal(result.get("advance", "0")) <= 0:
-                raise HTTPException(status_code=422, detail={"code": "advance_positive", "message": f"{row.identity_snapshot.get('name')}: урьдчилгаа 0-ээс их байх ёстой."})
-            if run.run_type == "final" and Decimal(result.get("net_pay", "0")) < 0:
-                raise HTTPException(status_code=422, detail={"code": "negative_final_pay", "message": f"{row.identity_snapshot.get('name')}: сүүл цалин сөрөг байна."})
-            row.status = "approved"
-            row.approved_by_account_id = actor.account_id
-            row.approved_at = datetime.now(timezone.utc)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"code": "payroll_approval_invalid", "message": str(exc)}) from exc
-    run.status = "approved"
-    run.approved_by_account_id = actor.account_id
-    run.approved_at = datetime.now(timezone.utc)
-    run.advance_snapshot = run.advance_snapshot or {}
+        except (ValueError, HTTPException) as exc:
+            message = exc.detail.get("message") if isinstance(exc, HTTPException) and isinstance(exc.detail, dict) else str(exc)
+            skipped.append({"employee_id": row.employee_id, "employee_name": name, "issues": ["invalid_input"], "message": message})
+            continue
+        blocking = sorted(set(row.warnings or []) & BLOCKING_ROW_WARNINGS)
+        if blocking:
+            skipped.append({"employee_id": row.employee_id, "employee_name": name, "issues": blocking})
+            continue
+        row.status = "approved"
+        row.approved_by_account_id = actor.account_id
+        row.approved_at = now
+        approved_now += 1
+    if rows and all(row.status == "approved" for row in rows):
+        run.status = "approved"
+        run.approved_by_account_id = actor.account_id
+        run.approved_at = now
+        if run.run_type == "advance":
+            await _flag_final_advance_changes(db, run.month_id, actor.organization_id)
     await db.commit()
-    return await get_run(run.id, db, actor)
+    return {**(await get_run(run.id, db, actor)), "approval_summary": {"approved": approved_now, "skipped": skipped}}
+
+
+@router.post("/runs/{run_id}/rows/{employee_id}/unapprove")
+async def unapprove_row(run_id: int, employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "payroll", "approve")
+    run = await _run(db, actor, run_id, lock=True)
+    if run.status != "draft":
+        raise HTTPException(status_code=409, detail="Бодолтын батлалтыг эхлээд цуцална уу.")
+    row = await db.scalar(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id, MonthlyPayrollRunRow.employee_id == employee_id, MonthlyPayrollRunRow.organization_id == actor.organization_id).with_for_update())
+    if row is None or row.status != "approved":
+        raise HTTPException(status_code=404 if row is None else 409, detail="Батлагдсан мөр олдсонгүй.")
+    _reset_approval(row)
+    db.add(MonthlyPayrollRowAudit(organization_id=actor.organization_id, run_id=run.id, row_id=row.id, account_id=actor.account_id, field_name="status", old_value={"status": "approved"}, new_value={"status": "draft"}, reason="Батлалт цуцлав"))
+    await db.commit()
+    return _row_out(row)
+
+
+@router.post("/runs/{run_id}/unapprove")
+async def unapprove_run(run_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """«Батлалт цуцлах»: an approved, unpaid run returns to draft; rows keep their approval."""
+    await require_capability(db, actor, "payroll", "approve")
+    run = await _run(db, actor, run_id, lock=True)
+    month = await _month(db, actor, run.month_id)
+    if month.status != "open" or run.status != "approved":
+        raise HTTPException(status_code=409, detail="Зөвхөн нээлттэй сарын баталсан, төлөөгүй бодолтын батлалтыг цуцална.")
+    before = {"status": run.status, "approved_at": run.approved_at.isoformat() if run.approved_at else None}
+    run.status = "draft"
+    run.approved_by_account_id = None
+    run.approved_at = None
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="monthly_payroll_run", aggregate_id=run.id, operation="unapproved", before=before, after={"status": run.status})
+    if run.run_type == "advance":
+        await _flag_final_advance_changes(db, run.month_id, actor.organization_id)
+    await db.commit()
+    return _run_out(run)
 
 
 @router.post("/runs/{run_id}/paid")
@@ -1654,51 +1981,98 @@ async def mark_paid(run_id: int, db: AsyncSession = Depends(get_db), actor: Acto
     return _run_out(run)
 
 
+@router.post("/runs/{run_id}/unpaid")
+async def mark_unpaid(run_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "payroll", "pay")
+    run = await _run(db, actor, run_id, lock=True)
+    month = await _month(db, actor, run.month_id)
+    if month.status != "open" or run.status != "paid":
+        raise HTTPException(status_code=409, detail="Зөвхөн нээлттэй сарын төлсөн бодолтыг төлөөгүй болгоно.")
+    before = {"status": run.status, "paid_at": run.paid_at.isoformat() if run.paid_at else None}
+    run.status = "approved"
+    run.paid_by_account_id = None
+    run.paid_at = None
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="monthly_payroll_run", aggregate_id=run.id, operation="marked_unpaid", before=before, after={"status": run.status})
+    await db.commit()
+    return _run_out(run)
+
+
+class CloseInput(BaseModel):
+    waivers: dict[int, str] = Field(default_factory=dict)
+
+
+async def _validated_waivers(runs: list[MonthlyPayrollRun], waivers: dict[int, str]) -> dict[int, str]:
+    by_id = {run.id: run for run in runs}
+    clean: dict[int, str] = {}
+    for run_id, reason in waivers.items():
+        run = by_id.get(int(run_id))
+        if run is None or run.run_type != "advance" or run.status in APPROVED_RUN_STATUSES:
+            raise HTTPException(status_code=422, detail={"code": "monthly_payroll_waiver_invalid", "message": "Зөвхөн батлагдаагүй урьдчилгааны бодолтыг чөлөөлнө."})
+        if not str(reason or "").strip():
+            raise HTTPException(status_code=422, detail={"code": "monthly_payroll_waiver_reason_required", "message": "Чөлөөлөх шалтгаан бичнэ үү."})
+        clean[run.id] = str(reason).strip()
+    return clean
+
+
 @router.post("/months/{month_id}/close")
-async def close_month(month_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def close_month(month_id: int, data: CloseInput | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "payroll", "approve")
     await require_capability(db, actor, "payroll", "export")
     month = await _month(db, actor, month_id, lock=True)
+    if month.status != "open":
+        raise HTTPException(status_code=409, detail={"code": "monthly_payroll_month_closed", "message": "Сар аль хэдийн хаагдсан байна."})
     runs = (await db.execute(select(MonthlyPayrollRun).where(MonthlyPayrollRun.month_id == month.id).order_by(MonthlyPayrollRun.pay_date, MonthlyPayrollRun.run_type).with_for_update())).scalars().all()
-    issues = await _month_close_issues(db, actor, month, runs)
+    waivers = await _validated_waivers(runs, (data or CloseInput()).waivers)
+    issues = await _month_close_issues(db, actor, month, runs, waived_run_ids=set(waivers))
     if issues:
         raise HTTPException(status_code=409, detail={"code": "monthly_payroll_close_blocked", "issues": issues, "message": "Хаалтын шалгалтын алдааг засна уу."})
-    closing_stats = await _closing_stats(db, month, actor.organization_id)
-    settings = await db.scalar(select(MonthlyPayrollCompanySettings).where(MonthlyPayrollCompanySettings.organization_id == actor.organization_id))
-    totals = closing_stats.get("totals", {})
-    closing_stats["accounting_summary"] = {
-        "salary_expense": {"account_id": settings.salary_expense_account_id if settings else None, "debit": totals.get("gross", "0")},
-        "employer_shi_expense": {"account_id": settings.employer_shi_account_id if settings else None, "debit": totals.get("employer_shi", "0")},
-        "advance_clearing": {"account_id": settings.advance_clearing_account_id if settings else None, "credit": totals.get("advance_total", "0")},
-    }
+    closing_stats = await _closing_stats(db, month, actor.organization_id, waived_run_ids=set(waivers))
+    closing_stats["waivers"] = {str(run_id): reason for run_id, reason in waivers.items()}
+    closing_stats["accounting_summary"] = closing_stats["accounting"]
     snapshots = []
     stored_exports: dict[str, str] = {}
     for run in runs:
-        run.status = "closed"
+        if run.id in waivers:
+            run.note = "\n".join(filter(None, [run.note, f"Сар хаахад чөлөөлсөн: {waivers[run.id]}"]))
+        # A waived advance run was never approved: it stays draft (never counted
+        # as paid) and the closed month blocks any further edits to it.
+        if run.id not in waivers:
+            run.status = "closed"
         rows = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id).order_by(MonthlyPayrollRunRow.id))).scalars().all()
-        snapshots.append({"run": _run_out(run), "rows": [_row_out(row, include_payout_snapshot=True) for row in rows]})
-        exported = await export_run(run.id, db, actor)
-        stored_exports[str(run.id)] = base64.b64encode(exported.body).decode("ascii")
-    audits = (await db.execute(select(MonthlyPayrollRowAudit).where(MonthlyPayrollRowAudit.organization_id == actor.organization_id, MonthlyPayrollRowAudit.run_id.in_([run.id for run in runs])).order_by(MonthlyPayrollRowAudit.id))).scalars().all()
+        snapshots.append({"run": {**_run_out(run), "waived": run.id in waivers}, "rows": [_row_out(row, include_payout_snapshot=True) for row in rows]})
+        if run.id not in waivers:
+            exported = await export_run(run.id, db, actor)
+            stored_exports[str(run.id)] = base64.b64encode(exported.body).decode("ascii")
+    audits = (await db.execute(select(MonthlyPayrollRowAudit).where(MonthlyPayrollRowAudit.organization_id == actor.organization_id, MonthlyPayrollRowAudit.run_id.in_([run.id for run in runs] or [-1])).order_by(MonthlyPayrollRowAudit.id))).scalars().all()
     previous = await db.scalar(select(MonthlyPayrollArchive.version).where(MonthlyPayrollArchive.month_id == month.id).order_by(MonthlyPayrollArchive.version.desc()).limit(1)) or 0
+    closed_at = datetime.now(timezone.utc)
+    closing_stats["meta"] = {**closing_stats.get("meta", {}), "closed_by_account_id": actor.account_id, "closed_at": closed_at.isoformat(), "archive_version": previous + 1}
     archive = MonthlyPayrollArchive(
         organization_id=actor.organization_id, month_id=month.id, version=previous + 1,
         closed_by_account_id=actor.account_id,
-        snapshot={"month": {"year": month.year, "month": month.month, "rule_snapshot": month.rule_snapshot, "calendar_snapshot": month.calendar_snapshot}, "runs": snapshots, "closing_stats": closing_stats, "accounting_summary": closing_stats["accounting_summary"], "row_audit": [{"row_id": row.row_id, "field": row.field_name, "old": row.old_value, "new": row.new_value, "reason": row.reason, "account_id": row.account_id, "at": row.created_at.isoformat()} for row in audits], "exports_base64": stored_exports},
+        snapshot={"month": {"year": month.year, "month": month.month, "rule_snapshot": month.rule_snapshot, "calendar_snapshot": month.calendar_snapshot}, "runs": snapshots, "closing_stats": closing_stats, "accounting_summary": closing_stats["accounting"], "waivers": closing_stats["waivers"], "row_audit": [{"row_id": row.row_id, "field": row.field_name, "old": row.old_value, "new": row.new_value, "reason": row.reason, "account_id": row.account_id, "at": row.created_at.isoformat()} for row in audits], "exports_base64": stored_exports},
     )
     db.add(archive)
     month.status = "closed"
     month.closed_by_account_id = actor.account_id
-    month.closed_at = datetime.now(timezone.utc)
+    month.closed_at = closed_at
     await db.commit()
     return {"month_id": month.id, "archive_version": archive.version, "closed_at": month.closed_at.isoformat(), "closing_stats": closing_stats}
 
 
 @router.get("/months/{month_id}/closing-stats")
 async def get_closing_stats(month_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Closing review: statistics plus the checks «Сар хаах» will run."""
     await require_capability(db, actor, "payroll", "view_salary")
     month = await _month(db, actor, month_id)
-    return await _closing_stats(db, month, actor.organization_id)
+    runs = (await db.execute(select(MonthlyPayrollRun).where(MonthlyPayrollRun.month_id == month.id, MonthlyPayrollRun.organization_id == actor.organization_id).order_by(MonthlyPayrollRun.pay_date))).scalars().all()
+    unapproved_advances = [run for run in runs if run.run_type == "advance" and run.status not in APPROVED_RUN_STATUSES]
+    stats = await _closing_stats(db, month, actor.organization_id)
+    if month.status == "open":
+        stats["close_issues"] = await _month_close_issues(db, actor, month, runs)
+        stats["close_issues_with_waivers"] = await _month_close_issues(db, actor, month, runs, waived_run_ids={run.id for run in unapproved_advances})
+    stats["unapproved_advance_runs"] = [{"run_id": run.id, "pay_date": run.pay_date.isoformat(), "status": run.status} for run in unapproved_advances]
+    return stats
 
 
 @router.post("/months/{month_id}/unlock")
@@ -1710,18 +2084,42 @@ async def unlock_month(month_id: int, data: UnlockInput, db: AsyncSession = Depe
     runs = (await db.execute(select(MonthlyPayrollRun).where(MonthlyPayrollRun.month_id == month.id).with_for_update())).scalars().all()
     before = {"status": month.status, "run_statuses": {str(run.id): run.status for run in runs}}
     month.status = "open"
+    # Runs return to their pre-close state; money already paid stays locked
+    # until an administrator reopens that specific run with a reason.
     for run in runs:
-        run.status = "draft"
-        run.approved_by_account_id = None
-        run.approved_at = None
-        rows = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id).with_for_update())).scalars().all()
-        for row in rows:
-            row.status = "draft"
-            row.approved_by_account_id = None
-            row.approved_at = None
+        if run.status == "closed":
+            run.status = "paid" if run.paid_at else "approved"
     await record_change(db, actor=actor, topic="payroll", aggregate_type="monthly_payroll_month", aggregate_id=month.id, operation="unlocked", before=before, after={"status": month.status, "reason": data.reason.strip()})
     await db.commit()
     return {"month_id": month.id, "status": month.status, "reason": data.reason.strip()}
+
+
+@router.post("/runs/{run_id}/reopen")
+async def reopen_run(run_id: int, data: UnlockInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "payroll", "administer")
+    run = await _run(db, actor, run_id, lock=True)
+    month = await _month(db, actor, run.month_id)
+    if month.status != "open":
+        raise HTTPException(status_code=409, detail={"code": "monthly_payroll_month_closed", "message": "Эхлээд сарыг шалтгаантайгаар нээнэ үү."})
+    if run.status not in {"approved", "paid"}:
+        raise HTTPException(status_code=409, detail={"code": "monthly_payroll_run_not_locked", "message": "Зөвхөн баталсан эсвэл төлсөн бодолтыг нээнэ."})
+    before = {"status": run.status, "approved_at": run.approved_at.isoformat() if run.approved_at else None, "paid_at": run.paid_at.isoformat() if run.paid_at else None}
+    run.status = "draft"
+    run.approved_by_account_id = None
+    run.approved_at = None
+    run.paid_by_account_id = None
+    run.paid_at = None
+    rows = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id, MonthlyPayrollRunRow.organization_id == actor.organization_id).with_for_update())).scalars().all()
+    for row in rows:
+        if row.status == "approved":
+            row.status = "draft"
+            row.approved_by_account_id = None
+            row.approved_at = None
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="monthly_payroll_run", aggregate_id=run.id, operation="reopened", before=before, after={"status": run.status, "reason": data.reason.strip()})
+    if run.run_type == "advance":
+        await _flag_final_advance_changes(db, run.month_id, actor.organization_id)
+    await db.commit()
+    return _run_out(run)
 
 
 @router.get("/months/{month_id}/archives")
@@ -1734,6 +2132,30 @@ async def list_archives(month_id: int, db: AsyncSession = Depends(get_db), actor
     def public_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         return {key: value for key, value in snapshot.items() if key != "exports_base64"}
     return [{"id": row.id, "version": row.version, "closed_at": row.closed_at.isoformat(), "snapshot": public_snapshot(row.snapshot)} for row in rows]
+
+
+@router.get("/archives")
+async def list_closed_month_archives(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """«Цалин → Архив»: latest archive version of every closed month."""
+    await require_capability(db, actor, "payroll", "view_salary")
+    months = (await db.execute(select(MonthlyPayrollMonth).where(
+        MonthlyPayrollMonth.organization_id == actor.organization_id, MonthlyPayrollMonth.status == "closed",
+    ).order_by(MonthlyPayrollMonth.year.desc(), MonthlyPayrollMonth.month.desc()))).scalars().all()
+    output = []
+    for month in months:
+        archive = await db.scalar(select(MonthlyPayrollArchive).where(MonthlyPayrollArchive.month_id == month.id, MonthlyPayrollArchive.organization_id == actor.organization_id).order_by(MonthlyPayrollArchive.version.desc()).limit(1))
+        if not archive:
+            continue
+        snapshot = archive.snapshot or {}
+        stats = snapshot.get("closing_stats") or {}
+        runs = [item.get("run") or {} for item in snapshot.get("runs") or []]
+        output.append({
+            "month_id": month.id, "month": f"{month.year:04d}-{month.month:02d}", "archive_id": archive.id, "version": archive.version,
+            "closed_at": archive.closed_at.isoformat(), "headcount": (stats.get("headcount") or {}).get("on_register", 0),
+            "gross": (stats.get("totals") or {}).get("gross", "0"), "company_cost": (stats.get("totals") or {}).get("company_cost", "0"),
+            "runs": len(runs), "runs_paid": sum(bool(run.get("paid_at")) for run in runs),
+        })
+    return output
 
 
 @router.get("/archives/{archive_id}/runs/{run_id}/export")
@@ -1750,6 +2172,94 @@ async def download_archived_run_export(archive_id: int, run_id: int, db: AsyncSe
         raise HTTPException(status_code=404, detail="Archived export not found")
     payload = base64.b64decode(encoded)
     return Response(content=payload, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="monthly-payroll-archive-{archive.version}-{run_id}.xlsx"'})
+
+
+@router.get("/dashboard")
+async def payroll_dashboard(month: str | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """«Цалин → Хянах самбар» (plan §9) for one month."""
+    await require_capability(db, actor, "payroll", "view_salary")
+    try:
+        year, month_num = (int(part) for part in (month or date.today().strftime("%Y-%m")).split("-"))
+        first = date(year, month_num, 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Сарыг YYYY-MM форматаар оруулна уу.") from exc
+    last = date(year, month_num, calendar.monthrange(year, month_num)[1])
+    month_row = await db.scalar(select(MonthlyPayrollMonth).where(MonthlyPayrollMonth.organization_id == actor.organization_id, MonthlyPayrollMonth.year == year, MonthlyPayrollMonth.month == month_num))
+    pipeline: list[dict[str, Any]] = []
+    alerts = {"blocking_rows": 0, "warning_rows": 0, "incomplete_profiles": 0, "hr_changed": 0, "advance_changed": 0, "advance_not_calculated": 0, "flagged": 0}
+    stats: dict[str, Any] | None = None
+    runs: list[MonthlyPayrollRun] = []
+    if month_row:
+        runs = (await db.execute(select(MonthlyPayrollRun).where(MonthlyPayrollRun.month_id == month_row.id, MonthlyPayrollRun.organization_id == actor.organization_id).order_by(MonthlyPayrollRun.run_type, MonthlyPayrollRun.pay_date))).scalars().all()
+        runs = sorted(runs, key=lambda run: (run.run_type == "final", run.pay_date))
+        for run in runs:
+            rows = (await db.execute(select(MonthlyPayrollRunRow).where(MonthlyPayrollRunRow.run_id == run.id))).scalars().all()
+            amount_key = "advance" if run.run_type == "advance" else "net_pay"
+            for row in rows:
+                warnings = set(row.warnings or [])
+                alerts["blocking_rows"] += bool(warnings & BLOCKING_ROW_WARNINGS)
+                alerts["warning_rows"] += bool(warnings - BLOCKING_ROW_WARNINGS)
+                alerts["incomplete_profiles"] += bool(warnings & {"profile_missing", "salary_history_missing_or_incomplete", "profile_incomplete"})
+                for key in ("hr_changed", "advance_changed", "advance_not_calculated"):
+                    alerts[key] += key in warnings
+                alerts["flagged"] += row.status == "flagged"
+            pipeline.append({
+                **_run_out(run), "workers": len(rows), "approved_rows": sum(row.status == "approved" for row in rows),
+                "total": sum((_money((row.result or {}).get(amount_key)) for row in rows), Decimal("0")),
+                "gross": sum((_money((row.result or {}).get("gross")) for row in rows), Decimal("0")) if run.run_type == "final" else None,
+            })
+        stats = await _closing_stats(db, month_row, actor.organization_id)
+    # Upcoming payments: unpaid runs plus HR pay days that have no run yet.
+    month_open = bool(month_row and month_row.status == "open")
+    upcoming = [{"pay_date": item["pay_date"], "run_type": item["run_type"], "run_id": item["id"], "workers": item["workers"], "amount": item["total"], "status": item["status"]} for item in pipeline if month_open and item["status"] in {"draft", "approved"}]
+    probe = month_row or MonthlyPayrollMonth(organization_id=actor.organization_id, year=year, month=month_num, calendar_snapshot={}, rule_snapshot={})
+    workers = await _profiles_for_month(db, actor, probe, None)
+    planned: dict[tuple[str, str], int] = {}
+    for _employee, _details, profile, history, _segments in workers:
+        if profile is None or history is None:
+            if not month_row:
+                alerts["incomplete_profiles"] += 1
+            continue
+        days = [min(int(day), last.day) for day in (profile.pay_days or [])]
+        for index, day in enumerate(days):
+            kind = "final" if index == len(days) - 1 else "advance"
+            planned[(date(year, month_num, day).isoformat(), kind)] = planned.get((date(year, month_num, day).isoformat(), kind), 0) + 1
+    existing = {(run.pay_date.isoformat(), run.run_type) for run in runs}
+    has_final = any(run.run_type == "final" for run in runs)
+    for (pay_date, kind), count in sorted(planned.items()):
+        if (month_row and not month_open) or (kind == "final" and has_final) or (pay_date, kind) in existing:
+            continue
+        upcoming.append({"pay_date": pay_date, "run_type": kind, "run_id": None, "workers": count, "amount": None, "status": "not_created"})
+    upcoming.sort(key=lambda item: str(item["pay_date"]))
+    # Trend: closed months read their archive; open months are live.
+    history_months = (await db.execute(select(MonthlyPayrollMonth).where(
+        MonthlyPayrollMonth.organization_id == actor.organization_id,
+        (MonthlyPayrollMonth.year * 100 + MonthlyPayrollMonth.month) <= year * 100 + month_num,
+    ).order_by(MonthlyPayrollMonth.year.desc(), MonthlyPayrollMonth.month.desc()).limit(12))).scalars().all()
+    trend = []
+    for item in reversed(history_months):
+        if item.status == "closed":
+            archive = await db.scalar(select(MonthlyPayrollArchive).where(MonthlyPayrollArchive.month_id == item.id).order_by(MonthlyPayrollArchive.version.desc()).limit(1))
+            item_stats = (archive.snapshot or {}).get("closing_stats", {}) if archive else {}
+        else:
+            item_stats = stats if month_row and item.id == month_row.id else await _closing_stats(db, item, actor.organization_id)
+        trend.append({"month": f"{item.year:04d}-{item.month:02d}", "status": item.status, "gross": (item_stats.get("totals") or {}).get("gross", "0"), "company_cost": (item_stats.get("totals") or {}).get("company_cost", "0"), "headcount": (item_stats.get("headcount") or {}).get("on_register", 0)})
+    advance_paid = sum((item["total"] for item in pipeline if item["run_type"] == "advance" and item["status"] in {"paid", "closed"}), Decimal("0"))
+    advance_planned = sum((item["total"] for item in pipeline if item["run_type"] == "advance"), Decimal("0"))
+    return _json_value({
+        "month": f"{year:04d}-{month_num:02d}", "month_id": month_row.id if month_row else None, "status": month_row.status if month_row else None,
+        "pipeline": pipeline, "stats": stats, "advance": {"paid": advance_paid, "planned": advance_planned},
+        "has_final": any(run.run_type == "final" for run in runs), "upcoming": upcoming, "alerts": alerts, "trend": trend,
+    })
+
+
+REPORT_COLUMN_LABELS = {
+    "month": "Сар", "employee_id": "Ажилтны ID", "employee_name": "Ажилтан", "department": "Хэлтэс", "run_type": "Бодолт", "pay_date": "Төлбөрийн өдөр",
+    "gross": "Олговол зохих", "taxable_income": "Татвар ногдох орлого", "employee_shi": "Ажилтны НДШ", "employer_shi": "БНДШ", "pit": "ХХОАТ", "relief": "ХХОАТ ХӨН",
+    "advance": "Урьдчилгаа", "other_deductions": "Бусад суутгал", "net_pay": "Сүүл цалин", "bucket": "Ангилал", "hours": "Цаг", "amount": "Дүн",
+    "company_cost": "Нийт зардал", "total": "Дүн", "type": "Төрөл", "note": "Тайлбар",
+    "ytd_gross": "Оны эхнээс · олговол зохих", "ytd_employee_shi": "Оны эхнээс · НДШ", "ytd_employer_shi": "Оны эхнээс · БНДШ", "ytd_pit": "Оны эхнээс · ХХОАТ",
+}
 
 
 async def _report_data(db: AsyncSession, actor: ActorContext, report_kind: str, from_month: str, to_month: str, department_id: int | None) -> dict[str, Any]:
@@ -1782,6 +2292,8 @@ async def _report_data(db: AsyncSession, actor: ActorContext, report_kind: str, 
             source_runs.append({**_run_out(run), "rows": [_row_out(row) for row in rows], "month": f"{month.year:04d}-{month.month:02d}"})
     output: list[dict[str, Any]] = []
     for run in source_runs:
+        if run.get("waived"):
+            continue
         if report_kind == "advance-final" and run["run_type"] == "advance":
             output.append({"month": run["month"], "run_type": run["run_type"], "pay_date": run["pay_date"], "total": sum((Decimal(str(row.get("result", {}).get("advance", 0))) for row in run["rows"]), Decimal("0"))})
             continue
@@ -1832,13 +2344,34 @@ async def export_monthly_report(report_kind: str, from_month: str, to_month: str
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Тайлан"
-    sheet.append([f"{report_kind} · {from_month} — {to_month}"])
+    titles = {"salary-register": "Цалингийн бүртгэл", "tax-shi": "Татвар, НДШ (оны эхнээс)", "overtime": "Илүү цаг", "department-cost": "Хэлтсийн зардал", "advance-final": "Урьдчилгаа ба сүүл цалин", "other-deductions": "Бусад суутгал"}
+    sheet.append([f"{titles.get(report_kind, report_kind)} · {from_month} — {to_month}"])
+    sheet.cell(1, 1).font = Font(bold=True, size=13)
     keys = list(rows[0]) if rows else ["month", "employee_name"]
-    sheet.append(keys)
+    sheet.append([REPORT_COLUMN_LABELS.get(key, key) for key in keys])
     for cell in sheet[2]:
         cell.font = Font(bold=True)
+    run_labels = {"advance": "Урьдчилгаа", "final": "Сүүл цалин"}
     for row in rows:
-        sheet.append([json.dumps(row.get(key), ensure_ascii=False) if isinstance(row.get(key), (dict, list)) else row.get(key, "") for key in keys])
+        values = []
+        for key in keys:
+            value = row.get(key, "")
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False)
+            elif key == "run_type":
+                value = run_labels.get(value, value)
+            elif key not in {"month", "pay_date", "employee_id", "employee_name", "department", "bucket", "type", "note"} and isinstance(value, str):
+                try:
+                    number = Decimal(value)
+                    value = int(number) if number == number.to_integral_value() else float(number)
+                except ArithmeticError:
+                    pass
+            values.append(value)
+        sheet.append(values)
+    for row_cells in sheet.iter_rows(min_row=3):
+        for cell in row_cells:
+            if isinstance(cell.value, (int, float)):
+                cell.number_format = "#,##0"
     sheet.freeze_panes = "A3"
     output = io.BytesIO()
     workbook.save(output)

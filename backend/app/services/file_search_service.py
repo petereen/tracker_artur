@@ -299,6 +299,7 @@ async def policy_for_item(db: AsyncSession, item: CompanyLibraryItem) -> Resourc
     """Resolve the nearest inherited policy without crossing a tenant."""
     current: CompanyLibraryItem | None = item
     seen: set[int] = set()
+    fallback: ResourcePolicy | None = None
     while current and current.id not in seen:
         seen.add(current.id)
         policy = await db.scalar(select(ResourcePolicy).where(
@@ -306,21 +307,30 @@ async def policy_for_item(db: AsyncSession, item: CompanyLibraryItem) -> Resourc
             ResourcePolicy.resource_type == "company_file",
             ResourcePolicy.resource_id == current.id,
         ))
-        if policy and (current.id == item.id or policy.inherit_from_parent):
-            return policy
+        if policy:
+            # Internal is the seeded default for every library row. Let the
+            # nearest explicit classification on an ancestor govern those
+            # rows; a non-inheriting policy remains an explicit exception.
+            if policy.classification != "internal" or not policy.inherit_from_parent:
+                return policy
+            fallback = fallback or policy
         if not current.parent_id:
             break
         current = await db.scalar(select(CompanyLibraryItem).where(
             CompanyLibraryItem.organization_id == item.organization_id,
             CompanyLibraryItem.id == current.parent_id,
         ))
-    return None
+    return fallback
 
 
 async def can_read_policy(db: AsyncSession, principal: FileSearchPrincipal, policy: ResourcePolicy | None) -> bool:
     if policy is None or policy.classification in {"internal", "public_link_safe"}:
         return True
-    if "admin" in principal.roles or policy.classification == "confidential" and "manager" in principal.roles:
+    if "admin" in principal.roles:
+        return True
+    if policy.classification == "confidential" and "manager" in principal.roles:
+        return True
+    if policy.resource_type == "company_file" and policy.classification == "confidential" and "team_lead" in principal.roles:
         return True
     grants = list((await db.execute(select(ResourceGrant).where(ResourceGrant.policy_id == policy.id))).scalars().all())
     team_ids = set((await db.execute(select(TeamMember.team_id).where(TeamMember.employee_id == principal.employee_id))).scalars().all()) if principal.employee_id else set()
@@ -336,6 +346,28 @@ async def can_read_policy(db: AsyncSession, principal: FileSearchPrincipal, poli
             return True
     # Restricted resources deliberately require a matching grant.  The same
     # grant loop above also permits team/project/role grants when configured.
+    return False
+
+
+async def can_edit_policy(db: AsyncSession, principal: FileSearchPrincipal, policy: ResourcePolicy | None) -> bool:
+    """Return whether this principal has an explicit edit grant on a resource."""
+    if policy is None:
+        return False
+    grants = list((await db.execute(select(ResourceGrant).where(
+        ResourceGrant.policy_id == policy.id,
+        ResourceGrant.access_level == "edit",
+    ))).scalars().all())
+    team_ids = set((await db.execute(select(TeamMember.team_id).where(TeamMember.employee_id == principal.employee_id))).scalars().all()) if principal.employee_id else set()
+    project_ids = set((await db.execute(select(ProjectMember.project_id).where(ProjectMember.employee_id == principal.employee_id))).scalars().all()) if principal.employee_id else set()
+    for grant in grants:
+        if grant.principal_type == "account" and principal.account_id is not None and grant.principal_key == str(principal.account_id):
+            return True
+        if grant.principal_type == "role" and grant.principal_key in principal.roles:
+            return True
+        if grant.principal_type == "team" and grant.principal_key.isdigit() and int(grant.principal_key) in team_ids:
+            return True
+        if grant.principal_type == "project" and grant.principal_key.isdigit() and int(grant.principal_key) in project_ids:
+            return True
     return False
 
 

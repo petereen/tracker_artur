@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,13 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
-from app.models.models import CompanyLibraryItem, JobQueue, KnowledgeDocument
+from app.models.models import CompanyLibraryItem, JobQueue, KnowledgeDocument, ResourceGrant, ResourcePolicy, UserAccount
 from app.services.attachment_storage import delete_attachment, get_attachment, iter_attachment_chunks, put_attachment
 from app.services.enterprise_events import record_change
 from app.services.file_search_service import (
     FileSearchPrincipal,
     FileSearchServiceError,
     authorized_file,
+    can_edit_policy,
     compact_search_text,
     search_files,
 )
@@ -53,6 +54,15 @@ class ItemPatch(BaseModel):
     title: str | None = None
     parent_id: int | None = None
     move_to_root: bool = False
+
+
+class FolderShareGrantInput(BaseModel):
+    account_id: int
+    access_level: Literal["read", "edit"]
+
+
+class FolderShareInput(BaseModel):
+    grants: list[FolderShareGrantInput] = Field(default_factory=list, max_length=200)
 
 
 def _clean_name(value: str) -> str:
@@ -131,6 +141,18 @@ async def _item_for_actor(db: AsyncSession, item_id: int, actor: ActorContext) -
     if not item or item.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Library item not found")
     return item
+
+
+async def _can_edit_item(db: AsyncSession, item: CompanyLibraryItem, actor: ActorContext) -> bool:
+    if actor.has_any_role(*MANAGEMENT_ROLES):
+        return True
+    policy = await _policy_for_file(db, item)
+    return await can_edit_policy(db, FileSearchPrincipal.from_actor(actor), policy)
+
+
+async def _require_item_edit(db: AsyncSession, item: CompanyLibraryItem, actor: ActorContext) -> None:
+    if not await _can_edit_item(db, item, actor):
+        raise HTTPException(status_code=403, detail="Edit access is required")
 
 
 async def _ensure_name_available(
@@ -251,7 +273,7 @@ async def browse_company_files(
     if not can_manage:
         visible: list[CompanyLibraryItem] = []
         for item in items:
-            if item.kind == "folder" or await can_read_policy(db, actor, await _policy_for_file(db, item)):
+            if await can_read_policy(db, actor, await _policy_for_file(db, item)):
                 visible.append(item)
         items = visible
     if sort == "newest":
@@ -264,12 +286,17 @@ async def browse_company_files(
         items.sort(key=lambda item: (item.kind != "folder", item.name.casefold()))
     folders = [item for item in all_items if item.kind == "folder" and item.deleted_at is None and not _has_deleted_ancestor(item, by_id)]
     folders.sort(key=lambda item: item.name.casefold())
+    items_out = []
+    for item in items:
+        item_data = _item_out(item)
+        item_data["can_edit"] = await _can_edit_item(db, item, actor)
+        items_out.append(item_data)
     return {
         "current_folder": _item_out(parent) if parent else None,
         "breadcrumbs": _breadcrumbs(parent, by_id),
-        "items": [_item_out(item) for item in items],
+        "items": items_out,
         "folders": [{"id": item.id, "parent_id": item.parent_id, "name": item.name} for item in folders],
-        "can_upload": True,
+        "can_upload": can_manage,
         "can_manage": can_manage,
         "is_search": bool(q and q.strip()),
         "is_trash": trash,
@@ -300,12 +327,114 @@ async def create_folder(
     return _item_out(item)
 
 
+@router.get("/share-accounts")
+async def list_folder_share_accounts(
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
+):
+    accounts = (await db.execute(
+        select(UserAccount).where(
+            UserAccount.organization_id == actor.organization_id,
+            UserAccount.status == "active",
+        ).order_by(UserAccount.email)
+    )).scalars().all()
+    return [{"id": account.id, "email": account.email} for account in accounts if account.id != actor.account_id]
+
+
+@router.get("/{folder_id}/access")
+async def get_folder_access(
+    folder_id: int,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
+):
+    folder = await _item_for_actor(db, folder_id, actor)
+    if folder.kind != "folder":
+        raise HTTPException(status_code=404, detail="Folder not found")
+    policy = await db.scalar(select(ResourcePolicy).where(
+        ResourcePolicy.organization_id == actor.organization_id,
+        ResourcePolicy.resource_type == "company_file",
+        ResourcePolicy.resource_id == folder.id,
+    ))
+    grants: list[dict] = []
+    if policy:
+        rows = (await db.execute(select(ResourceGrant).where(
+            ResourceGrant.policy_id == policy.id,
+            ResourceGrant.principal_type == "account",
+        ))).scalars().all()
+        grants_by_id = {int(grant.principal_key): grant for grant in rows if grant.principal_key.isdigit()}
+        accounts = (await db.execute(select(UserAccount).where(
+            UserAccount.organization_id == actor.organization_id,
+            UserAccount.id.in_(list(grants_by_id) or [-1]),
+        ).order_by(UserAccount.email))).scalars().all()
+        grants = [{"account_id": account.id, "email": account.email, "access_level": grants_by_id[account.id].access_level} for account in accounts]
+    return {"folder_id": folder.id, "grants": grants}
+
+
+@router.put("/{folder_id}/access")
+async def update_folder_access(
+    folder_id: int,
+    data: FolderShareInput,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
+):
+    folder = await _item_for_actor(db, folder_id, actor)
+    if folder.kind != "folder" or folder.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    account_ids = [grant.account_id for grant in data.grants]
+    if len(account_ids) != len(set(account_ids)):
+        raise HTTPException(status_code=422, detail="Each user can only be added once")
+    valid_ids = set((await db.execute(select(UserAccount.id).where(
+        UserAccount.organization_id == actor.organization_id,
+        UserAccount.status == "active",
+        UserAccount.id.in_(account_ids or [-1]),
+    ))).scalars().all())
+    if valid_ids != set(account_ids):
+        raise HTTPException(status_code=422, detail="Choose active users from this company")
+
+    policy = await db.scalar(select(ResourcePolicy).where(
+        ResourcePolicy.organization_id == actor.organization_id,
+        ResourcePolicy.resource_type == "company_file",
+        ResourcePolicy.resource_id == folder.id,
+    ))
+    if policy is None:
+        policy = ResourcePolicy(
+            organization_id=actor.organization_id,
+            resource_type="company_file",
+            resource_id=folder.id,
+            classification="confidential",
+            inherit_from_parent=True,
+            created_by_account_id=actor.account_id,
+        )
+        db.add(policy)
+        await db.flush()
+    else:
+        policy.classification = "confidential"
+        policy.inherit_from_parent = True
+    existing = (await db.execute(select(ResourceGrant).where(
+        ResourceGrant.policy_id == policy.id,
+        ResourceGrant.principal_type == "account",
+    ))).scalars().all()
+    for grant in existing:
+        await db.delete(grant)
+    await db.flush()
+    for grant in data.grants:
+        db.add(ResourceGrant(
+            policy_id=policy.id,
+            principal_type="account",
+            principal_key=str(grant.account_id),
+            access_level=grant.access_level,
+        ))
+    await record_change(db, actor=actor, topic="company_files", aggregate_type="company_library_item", aggregate_id=folder.id, operation="access_updated", after={"grants": [{"account_id": grant.account_id, "access_level": grant.access_level} for grant in data.grants]})
+    await db.commit()
+    return {"folder_id": folder.id, "grants": [{"account_id": grant.account_id, "access_level": grant.access_level} for grant in data.grants]}
+
+
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_company_file(
     files: list[UploadFile] = File(...),
     parent_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    actor: ActorContext = Depends(get_actor),
+    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
 ):
     await _active_folder(db, parent_id, actor)
     if not files:
@@ -394,14 +523,17 @@ async def update_company_item(
     item_id: int,
     data: ItemPatch,
     db: AsyncSession = Depends(get_db),
-    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
+    actor: ActorContext = Depends(get_actor),
 ):
     item = await _item_for_actor(db, item_id, actor)
+    await _require_item_edit(db, item, actor)
     if item.deleted_at is not None:
         raise HTTPException(status_code=409, detail="Restore the item before changing it")
     new_name = _clean_name(data.name) if data.name is not None else item.name
     target_parent_id = None if data.move_to_root else data.parent_id if data.parent_id is not None else item.parent_id
     target_parent = await _active_folder(db, target_parent_id, actor)
+    if target_parent is not None and not actor.has_any_role(*MANAGEMENT_ROLES):
+        await _require_item_edit(db, target_parent, actor)
     if target_parent and target_parent.id == item.id:
         raise HTTPException(status_code=409, detail="A folder cannot contain itself")
     if item.kind == "folder" and target_parent:
@@ -442,9 +574,10 @@ async def update_company_item(
 async def trash_company_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
-    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
+    actor: ActorContext = Depends(get_actor),
 ):
     item = await _item_for_actor(db, item_id, actor)
+    await _require_item_edit(db, item, actor)
     if item.deleted_at is not None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     item.deleted_at = datetime.now(timezone.utc)
@@ -458,9 +591,10 @@ async def trash_company_item(
 async def restore_company_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
-    actor: ActorContext = Depends(require_roles(*MANAGEMENT_ROLES)),
+    actor: ActorContext = Depends(get_actor),
 ):
     item = await _item_for_actor(db, item_id, actor)
+    await _require_item_edit(db, item, actor)
     if item.deleted_at is None:
         return _item_out(item)
     await _active_folder(db, item.parent_id, actor)

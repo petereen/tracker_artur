@@ -1,19 +1,23 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react'
-import { ArchiveRestore, ChevronRight, Download, Eye, File, FileArchive, FileAudio, FileCode2, FileImage, FileText, FileVideo, Folder, FolderPlus, Grid2X2, HardDrive, List, LoaderCircle, MoreHorizontal, Pencil, Search, Trash2, Upload, X } from 'lucide-react'
+import { ArchiveRestore, ChevronRight, Download, Eye, File, FileArchive, FileAudio, FileCode2, FileImage, FileText, FileVideo, Folder, FolderPlus, Grid2X2, HardDrive, List, LoaderCircle, MoreHorizontal, Pencil, Search, Trash2, Upload, Users, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 import {
   CompanyLibraryItem,
+  CompanyFileShareGrant,
   downloadCompanyFile,
   downloadCompanyFolder,
   getCompanyFileBlob,
   getCompanyFilePreview,
   useCompanyFiles,
+  useCompanyFileShareAccounts,
+  useCompanyFolderAccess,
   useCreateCompanyFolder,
   useDeleteCompanyItemPermanently,
   useRestoreCompanyItem,
   useTrashCompanyItem,
   useUpdateCompanyItem,
+  useUpdateCompanyFolderAccess,
   useUploadCompanyFile,
 } from '../api/enterprise'
 import { DropdownSelect } from '../components/DropdownSelect'
@@ -91,6 +95,7 @@ function GridCard({ item, disabled, onOpen, onDownload, onMenu }: { item: Compan
     <div className="company-file-card-actions">
       <button onClick={item.kind === 'folder' ? onDownload : isPreviewable(item) ? onOpen : onDownload} disabled={disabled} aria-label={`${item.name} ${isPreviewable(item) ? 'preview' : 'download'}`}>{item.kind === 'file' && isPreviewable(item) ? <Eye size={16} /> : <Download size={16} />}</button>
       {item.kind === 'file' && isPreviewable(item) && <button onClick={onDownload} disabled={disabled} aria-label={`${item.name} download`}><Download size={17} /></button>}
+      <button onClick={onMenu} aria-label={`${item.name} More actions`} aria-haspopup="menu"><MoreHorizontal size={17} /></button>
     </div>
   </article>
 }
@@ -115,6 +120,38 @@ function FilePreviewModal({ item, onClose }: { item: CompanyLibraryItem; onClose
   </section></div>
 }
 
+function FolderAccessDialog({ folder, onClose }: { folder: CompanyLibraryItem; onClose: () => void }) {
+  const { t } = useTranslation()
+  const accounts = useCompanyFileShareAccounts()
+  const access = useCompanyFolderAccess(folder.id)
+  const saveAccess = useUpdateCompanyFolderAccess()
+  const [grants, setGrants] = useState<CompanyFileShareGrant[]>([])
+  const [accountId, setAccountId] = useState('')
+  const [accessLevel, setAccessLevel] = useState<'read' | 'edit'>('read')
+  useEffect(() => { if (access.data) setGrants(access.data.grants) }, [access.data])
+  const addUser = () => {
+    const id = Number(accountId)
+    const account = accounts.data?.find((item) => item.id === id)
+    if (!account || grants.some((grant) => grant.account_id === id)) return
+    setGrants((current) => [...current, { account_id: id, email: account.email, access_level: accessLevel }])
+    setAccountId('')
+  }
+  const updateLevel = (id: number, level: 'read' | 'edit') => setGrants((current) => current.map((grant) => grant.account_id === id ? { ...grant, access_level: level } : grant))
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault()
+    try { await saveAccess.mutateAsync({ folderId: folder.id, grants }); onClose() } catch {}
+  }
+  return <div className="sheet-backdrop company-file-dialog-backdrop" onMouseDown={onClose}><form className="panel company-file-dialog company-file-access-dialog" role="dialog" aria-modal="true" aria-labelledby="company-file-access-title" onSubmit={save} onMouseDown={(event) => event.stopPropagation()}>
+    <header><div><h3 id="company-file-access-title">{t('files.accessTitle')}</h3><small>{folder.name}</small></div><button type="button" onClick={onClose} aria-label={t('files.close')}><X size={18} /></button></header>
+    {accounts.isLoading || access.isLoading ? <p>{t('files.loading')}</p> : accounts.isError || access.isError ? <p>{t('files.accessLoadError')}</p> : <>
+      <p className="company-file-access-help">{t('files.accessHelp')}</p>
+      <div className="company-file-access-add"><label>{t('files.user')}<select value={accountId} onChange={(event) => setAccountId(event.target.value)}><option value="">{t('files.chooseUser')}</option>{accounts.data?.filter((account) => !grants.some((grant) => grant.account_id === account.id)).map((account) => <option key={account.id} value={account.id}>{account.email}</option>)}</select></label><label>{t('files.permission')}<select value={accessLevel} onChange={(event) => setAccessLevel(event.target.value as 'read' | 'edit')}><option value="read">{t('files.readAccess')}</option><option value="edit">{t('files.editAccess')}</option></select></label><button type="button" className="secondary-action" disabled={!accountId} onClick={addUser}>{t('files.addUser')}</button></div>
+      <div className="company-file-access-list">{grants.map((grant) => <div className="company-file-access-row" key={grant.account_id}><span>{grant.email || `#${grant.account_id}`}</span><select aria-label={`${grant.email || grant.account_id} ${t('files.permission')}`} value={grant.access_level} onChange={(event) => updateLevel(grant.account_id, event.target.value as 'read' | 'edit')}><option value="read">{t('files.readAccess')}</option><option value="edit">{t('files.editAccess')}</option></select><button type="button" className="danger" onClick={() => setGrants((current) => current.filter((item) => item.account_id !== grant.account_id))} aria-label={`${t('files.removeUser')} ${grant.email || grant.account_id}`}><X size={16} /></button></div>)}{grants.length === 0 && <p>{t('files.noSharedUsers')}</p>}</div>
+    </>}
+    <footer><button type="button" className="secondary-action" onClick={onClose}>{t('files.cancel')}</button><button className="primary-action" disabled={access.isLoading || accounts.isLoading || access.isError || accounts.isError || saveAccess.isPending}>{t('files.save')}</button></footer>
+  </form></div>
+}
+
 export function CompanyFilesPage() {
   const { t, i18n } = useTranslation()
   const params = new URLSearchParams(location.search)
@@ -128,6 +165,7 @@ export function CompanyFilesPage() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [layout, setLayout] = useState<Layout>(() => localStorage.getItem('company-files-layout') === 'grid' ? 'grid' : 'list')
   const [previewItem, setPreviewItem] = useState<CompanyLibraryItem | null>(null)
+  const [accessFolder, setAccessFolder] = useState<CompanyLibraryItem | null>(null)
   const [actionItem, setActionItem] = useState<CompanyLibraryItem | null>(null)
   const [archivePending, setArchivePending] = useState(false)
   const uploadInput = useRef<HTMLInputElement>(null)
@@ -145,14 +183,15 @@ export function CompanyFilesPage() {
   const archive = async (folder: CompanyLibraryItem) => { setArchivePending(true); try { await downloadCompanyFolder(folder); toast.success(t('files.archiveReady')) } catch (error: any) { toast.error(error.response?.data?.detail || t('files.archiveError')) } finally { setArchivePending(false); setActionItem(null) } }
   const openFile = (item: CompanyLibraryItem) => { if (item.kind === 'folder') navigateTo(item.id); else if (isPreviewable(item)) setPreviewItem(item); else download(item) }
   const moveToTrash = (item: CompanyLibraryItem) => { if (window.confirm(t(item.kind === 'folder' ? 'files.confirmTrashFolder' : 'files.confirmTrashFile'))) trashItem.mutate(item.id) }
-  const actionMenu = (item: CompanyLibraryItem) => actionItem?.id === item.id && <div className="company-file-action-menu" role="menu"><button role="menuitem" onClick={() => item.kind === 'folder' ? archive(item) : download(item)}><Download size={15} />{item.kind === 'folder' ? t('files.downloadFolder') : t('files.download')}</button>{files.data?.can_manage && <><button role="menuitem" onClick={() => { openDialog({ mode: 'rename', item }); setActionItem(null) }}><Pencil size={15} />{t('files.rename')}</button><button role="menuitem" onClick={() => { openDialog({ mode: 'move', item }); setActionItem(null) }}><MoreHorizontal size={15} />{t('files.move')}</button><button role="menuitem" className="danger company-file-icon-action" aria-label={t('files.trash')} title={t('files.trash')} onClick={() => { moveToTrash(item); setActionItem(null) }}><Trash2 size={15} /></button></>}</div>
+  const actionMenu = (item: CompanyLibraryItem) => actionItem?.id === item.id && <div className="company-file-action-menu" role="menu"><button role="menuitem" onClick={() => item.kind === 'folder' ? archive(item) : download(item)}><Download size={15} />{item.kind === 'folder' ? t('files.downloadFolder') : t('files.download')}</button>{files.data?.can_manage && item.kind === 'folder' && !trashOpen && <button role="menuitem" onClick={() => { setAccessFolder(item); setActionItem(null) }}><Users size={15} />{t('files.manageAccess')}</button>}{(item.can_edit || files.data?.can_manage) && !trashOpen && <><button role="menuitem" onClick={() => { openDialog({ mode: 'rename', item }); setActionItem(null) }}><Pencil size={15} />{t('files.rename')}</button><button role="menuitem" onClick={() => { openDialog({ mode: 'move', item }); setActionItem(null) }}><MoreHorizontal size={15} />{t('files.move')}</button><button role="menuitem" className="danger company-file-icon-action" onClick={() => { moveToTrash(item); setActionItem(null) }}><Trash2 size={15} />{t('files.trash')}</button></>}</div>
   return <div className="company-files-page">
     <section className="panel company-files-browser" aria-busy={files.isLoading || uploadFile.isPending || archivePending}><div className="company-files-toolbar"><nav className="file-breadcrumbs" aria-label={t('files.breadcrumbs')}><button onClick={() => navigateTo()}><HardDrive size={15} />{t('files.root')}</button>{!trashOpen && files.data?.breadcrumbs.map((crumb) => <span key={crumb.id}><ChevronRight size={14} /><button onClick={() => navigateTo(crumb.id)}>{crumb.name}</button></span>)}{trashOpen && <span><ChevronRight size={14} /><strong>{t('files.trash')}</strong></span>}</nav><div className="company-files-filters">{!trashOpen && files.data?.can_manage && <button className="secondary-action company-file-icon-action" onClick={() => openDialog({ mode: 'create' })} aria-label={t('files.newFolder')} title={t('files.newFolder')}><FolderPlus size={16} /></button>}{!trashOpen && files.data?.can_upload && <><button className="primary-action company-file-icon-action" onClick={() => uploadInput.current?.click()} aria-label={t('files.upload')} title={t('files.upload')} disabled={uploadFile.isPending}><Upload size={16} /></button><input ref={uploadInput} className="sr-only" type="file" multiple onChange={(event) => upload(event.target.files)} /></>}{!trashOpen && <label className="company-file-search"><Search size={15} /><span className="sr-only">{t('files.search')}</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('files.search')} /></label>}<DropdownSelect ariaLabel={t('files.sort')} value={sort} onChange={setSort} options={[{ value: 'name', label: t('files.sortName') }, { value: 'newest', label: t('files.sortNewest') }, { value: 'oldest', label: t('files.sortOldest') }, { value: 'size', label: t('files.sortSize') }]} />{!trashOpen && <div className="company-file-layout-toggle" aria-label={t('files.layout')}><button className={layout === 'list' ? 'active' : ''} onClick={() => chooseLayout('list')} aria-label={t('files.listView')}><List size={16} /></button><button className={layout === 'grid' ? 'active' : ''} onClick={() => chooseLayout('grid')} aria-label={t('files.gridView')}><Grid2X2 size={16} /></button></div>}{files.data?.can_manage && <button className="secondary-action company-file-icon-action" onClick={() => { setTrashOpen((value) => !value); setSearch('') }} aria-label={trashOpen ? t('files.back') : t('files.trash')} title={trashOpen ? t('files.back') : t('files.trash')}><Trash2 size={15} /></button>}</div></div>
       {!trashOpen && files.data?.current_folder && <div className="company-file-current-actions"><span>{files.data.current_folder.name}</span><button className="secondary-action" onClick={() => archive(files.data!.current_folder!)} disabled={archivePending}><Download size={15} />{t('files.downloadFolder')}</button></div>}
       {(uploadProgress !== null || archivePending) && <div className="file-upload-progress indeterminate"><span /><small>{archivePending ? t('files.archiving') : uploadProgress === 100 ? t('files.processing') : `${t('files.uploading')} ${uploadProgress}%`}</small>{uploadProgress !== null && <button type="button" onClick={() => uploadAbort.current?.abort()}>{t('files.cancelUpload')}</button>}</div>}
       {files.isLoading && <div className="company-files-state">{t('files.loading')}</div>}{files.isError && <div className="company-files-state error"><p>{t('files.loadError')}</p><button className="secondary-action" onClick={() => files.refetch()}>{t('files.retry')}</button></div>}{search && files.data?.search_status === 'indexing' && <div className="company-files-search-status" role="status">Файлын мета мэдээлэл таарлаа. Агуулгын индексжүүлэлт үргэлжилж байна.</div>}{search && files.data?.search_status === 'partial' && <div className="company-files-search-status" role="status">Файл олдлоо. Агуулгын баяжуулалт бүрэн дуусаагүй байна.</div>}{!files.isLoading && !files.isError && files.data?.items.length === 0 && <div className="company-files-state"><Folder size={42} strokeWidth={1.3} /><h3>{trashOpen ? t('files.emptyTrash') : search ? t('files.noResults') : t('files.emptyFolder')}</h3><p>{trashOpen ? t('files.emptyTrashHelp') : t('files.emptyHelp')}</p></div>}
-      {!!files.data?.items.length && (layout === 'list' ? <div className="company-file-list" role="list"><div className="company-file-list-head" aria-hidden><span>{t('files.name')}</span><span>{t('files.size')}</span><span>{t('files.updated')}</span><span /></div>{files.data.items.map((item) => <article className="company-file-row" role="listitem" key={item.id}><button className="company-file-open" onClick={() => openFile(item)} disabled={trashOpen}><span className={`company-file-icon ${item.kind}`}><ItemIcon item={item} /></span><span><strong>{item.name}</strong><small>{item.kind === 'folder' ? t('files.folder') : item.content_type || t('files.file')}</small></span></button><span className="company-file-size">{formatSize(item.size)}</span><time dateTime={item.updated_at}>{new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }).format(new Date(item.updated_at))}</time><div className="company-file-actions">{!trashOpen && (item.kind === 'folder' ? <button onClick={() => archive(item)} disabled={archivePending} aria-label={`${item.name} download`}><Download size={16} /></button> : <button onClick={() => download(item)} aria-label={`${item.name} download`}><Download size={16} /></button>)}{files.data?.can_manage && trashOpen && <><button onClick={() => restoreItem.mutate(item.id)} aria-label={`${item.name} ${t('files.restore')}`}><ArchiveRestore size={16} /></button><button className="danger" onClick={() => deleteItem.mutate(item.id)} aria-label={`${item.name} ${t('files.deleteForever')}`}><Trash2 size={16} /></button></>} {actionMenu(item)}</div></article>)}</div> : <div className="company-file-grid" role="list">{files.data.items.map((item) => <div className="company-file-card-wrap" key={item.id}><GridCard item={item} disabled={trashOpen} onOpen={() => openFile(item)} onDownload={() => item.kind === 'folder' ? archive(item) : download(item)} onMenu={() => setActionItem(actionItem?.id === item.id ? null : item)} />{!trashOpen && actionMenu(item)}</div>)}</div>)}</section>
+      {!!files.data?.items.length && (layout === 'list' ? <div className="company-file-list" role="list"><div className="company-file-list-head" aria-hidden><span>{t('files.name')}</span><span>{t('files.size')}</span><span>{t('files.updated')}</span><span /></div>{files.data.items.map((item) => <article className="company-file-row" role="listitem" key={item.id}><button className="company-file-open" onClick={() => openFile(item)} disabled={trashOpen}><span className={`company-file-icon ${item.kind}`}><ItemIcon item={item} /></span><span><strong>{item.name}</strong><small>{item.kind === 'folder' ? t('files.folder') : item.content_type || t('files.file')}</small></span></button><span className="company-file-size">{formatSize(item.size)}</span><time dateTime={item.updated_at}>{new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }).format(new Date(item.updated_at))}</time><div className="company-file-actions">{!trashOpen && (item.kind === 'folder' ? <button onClick={() => archive(item)} disabled={archivePending} aria-label={`${item.name} download`}><Download size={16} /></button> : <button onClick={() => download(item)} aria-label={`${item.name} download`}><Download size={16} /></button>)}{files.data?.can_manage && trashOpen && <><button onClick={() => restoreItem.mutate(item.id)} aria-label={`${item.name} ${t('files.restore')}`}><ArchiveRestore size={16} /></button><button className="danger" onClick={() => deleteItem.mutate(item.id)} aria-label={`${item.name} ${t('files.deleteForever')}`}><Trash2 size={16} /></button></>}{!trashOpen && <button onClick={() => setActionItem(actionItem?.id === item.id ? null : item)} aria-label={`${item.name} ${t('files.moreActions')}`} aria-haspopup="menu"><MoreHorizontal size={17} /></button>}{actionMenu(item)}</div></article>)}</div> : <div className="company-file-grid" role="list">{files.data.items.map((item) => <div className="company-file-card-wrap" key={item.id}><GridCard item={item} disabled={trashOpen} onOpen={() => openFile(item)} onDownload={() => item.kind === 'folder' ? archive(item) : download(item)} onMenu={() => setActionItem(actionItem?.id === item.id ? null : item)} />{!trashOpen && actionMenu(item)}</div>)}</div>)}</section>
     {dialog && <div className="sheet-backdrop company-file-dialog-backdrop" onMouseDown={() => setDialog(null)}><form className="panel company-file-dialog" role="dialog" aria-modal="true" aria-labelledby="company-file-dialog-title" onSubmit={submitDialog} onMouseDown={(event) => event.stopPropagation()}><header><h3 id="company-file-dialog-title">{t(`files.${dialog.mode}`)}</h3><button type="button" onClick={() => setDialog(null)} aria-label={t('files.close')}><X size={18} /></button></header>{dialog.mode === 'move' ? <label>{t('files.destination')}<select autoFocus value={dialogValue} onChange={(event) => setDialogValue(event.target.value)}><option value="">{t('files.root')}</option>{files.data?.folders.filter((folder) => folder.id !== dialog.item.id).map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label> : <label>{t('files.name')}<input autoFocus required maxLength={240} value={dialogValue} onChange={(event) => setDialogValue(event.target.value)} /></label>}<footer><button type="button" className="secondary-action" onClick={() => setDialog(null)}>{t('files.cancel')}</button><button className="primary-action" disabled={busy}>{t('files.save')}</button></footer></form></div>}
     {previewItem && <FilePreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />}
+    {accessFolder && <FolderAccessDialog folder={accessFolder} onClose={() => setAccessFolder(null)} />}
   </div>
 }
