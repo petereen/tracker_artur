@@ -1,6 +1,79 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [ ] Complete monthly payroll cutover and retire the previous workflow
+  - [x] Fix mid-month salary segment proration and overtime denominators (`backend/app/payroll/monthly_engine.py`)
+  - [x] Add the missing mid-month PRORATION and segment-rate overtime regression fixture (`backend/tests/test_payroll_monthly_engine.py`)
+  - [x] Cover weekly scheduled advances and statutory contribution-cap/rate boundaries (`backend/tests/test_payroll_monthly_engine.py`)
+  - [x] Unify date-level HR attendance, approved work time, leave, holidays, and employment windows; surface incomplete final-run profiles as blocking rows (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Calculate monthly run rows on creation, include all workers in the single final register, and use actual day lines to allocate salary segments (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Snapshot and compare all scheduled advance runs through month end when calculating the final register (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Expose only pay-profile scheduled advance dates and use each worker's own frozen pay date for payout account selection (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Return row-level field audit history and expose refresh, flag, unflag, department report-filter, and exact archive download API clients (`backend/app/payroll/monthly_workflow.py`, `frontend/src/api/enterprise.ts`)
+  - [x] Add scheduled date selection, row calculation/audit drawer, time refresh and flag controls, report department filter, and archived workbook download to the Mongolian workspace (`frontend/src/pages/MonthlyPayrollWorkspace.tsx`, `frontend/src/index.css`)
+  - [x] Group the register by department and add worker/department/status filters, approval counts, overtime emphasis, and sticky totals (`frontend/src/pages/MonthlyPayrollWorkspace.tsx`, `frontend/src/index.css`)
+  - [x] Add tenant-validated salary, employer contribution, and advance clearing account mappings to payroll settings (`backend/app/payroll/monthly_workflow.py`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Freeze account IDs and mapped expense/clearing totals into each month-close archive (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Expose company daily norm, advance basis, deduction types, and account mapping controls in settings (`backend/app/payroll/monthly_workflow.py`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Add reason-required revert of manual row input overrides and preserve the before/after audit record (`backend/app/payroll/monthly_workflow.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Compare per-worker advance run IDs, amounts, and scheduled dates; block final-row approval until missing or changed advances are reconciled (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Update architecture notes to identify the monthly workflow as current and legacy Payroll routes as retired (`docs/payroll-architecture.md`)
+  - [x] Retire the previous HR-side payroll generation endpoint while keeping HR profile and bank-account APIs available (`backend/app/hr/router.py`)
+  - [x] Add static regression checks for legacy 410 responses and frozen archive workbook downloads (`backend/tests/test_payroll_retirement_contract.py`)
+  - [x] Assert the worker-sync, Excel-import, and computed-override/revert API contracts (`backend/tests/test_payroll_retirement_contract.py`)
+  - [x] Verify computed result overrides preserve the gross-to-net equation and whole-tugrik rounding (`backend/tests/test_payroll_monthly_engine.py`)
+  - [x] Parse the Alembic revision graph statically and confirm one head with no missing parents (`w2x3y4z5a6b7`)
+  - [x] Add draft time refresh that preserves manually edited inputs, plus auditable row flag/unflag actions and blocking approval guards (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Freeze each worker's scheduled final pay date and matching bank account in the final register (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Add server-side month close checks for approved rows, incomplete profiles, negative net pay, row equations, and advance reconciliation (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Archive the close-time Excel bytes, approval actors, closing totals, and auditable rows; add an export-gated archive download route (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Complete scheduled run creation, editable inputs, flags, refresh/sync, override history, advance reconciliation, and close/archive guards
+  - [x] Finish the Mongolian payroll register, row explanation drawer, company settings, reports, and archive downloads
+  - [x] Add a dedicated Mongolian monthly payroll dashboard and pipeline (`frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Route Payroll and HR entry points through the monthly workflow and remove old setup, payslip, and tax-benefit pages from active navigation (`frontend/src/App.tsx`, `frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/pages/HRWorkspacePage.tsx`)
+  - [x] Move worker bank account endpoints to HR and return explicit 410 responses from retired payroll API routes (`backend/app/main.py`, `backend/app/hr/router.py`, `frontend/src/api/enterprise.ts`)
+  - [x] Verify the TypeScript production build and UI suite (124 passed), monthly engine/retirement/HR contract suite (29 passed), Python compilation, and whitespace checks
+  - [x] Redirect old payroll routes and HR actions; disable legacy payroll endpoints while retaining database records
+  - [x] Add worker sync, one-off advance creation, and auditable spreadsheet input template/import (`backend/app/payroll/monthly_workflow.py`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Add reasoned computed-cell overrides with recomputed deductions/net, audit history, and per-field revert (`backend/app/payroll/monthly_workflow.py`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Add tenant-scoped draft, validation, source-reference, successor-boundary adjustment, overlap checking, and publication APIs for effective-dated statutory rule-set versions (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Add admin UI for effective-dated rule drafts, editable contribution/tax tier rows, source references, validation, and publication (`frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Add responsive controls and read-only styling for published statutory rule versions (`frontend/src/index.css`)
+  - [x] Style dense, responsive rate and bracket editors with accessible row controls (`frontend/src/index.css`)
+  - [x] Display statutory rates as familiar percentage values while retaining decimal engine inputs (`frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Keep dynamic tier-row editing compatible with the configured TypeScript target (`frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Recalculate contribution bases, employer/employee SHI, taxable income, PIT relief, PIT, deductions, and net pay after audited computed-cell overrides (`backend/app/payroll/monthly_engine.py`, `backend/app/payroll/monthly_workflow.py`)
+  - [x] Document statutory rule versioning, successor boundary audit, dependent override recalculation, and backend API contract checks (`docs/payroll-architecture.md`, `backend/tests/test_payroll_retirement_contract.py`)
+  - [x] Add runtime unit coverage for effective dates, mandatory sources, rate bounds, and tier continuity (`backend/tests/test_payroll_monthly_rules.py`)
+  - [x] Seed the new-version form from the current official legal information source links (`backend/app/payroll/monthly_workflow.py`)
+  - [x] Exercise rule draft, validation, publication, successor boundary, and tenant-scoped listing against a disposable PostgreSQL table through FastAPI (`/private/tmp` rehearsal)
+  - [ ] Complete full PostgreSQL migration and browser journey; full migration stops at the earlier `vector` extension because it is absent and Homebrew is blocked by the unaccepted Xcode license; production backup/restore still needs a configured target database
+- [x] Resolve monthly payroll validation failures (frontend build/types, Alembic head assertion, and current UI test copy)
+- [x] Complete the run-based monthly payroll flow from the design plan (`backend/app/payroll/monthly_engine.py`, monthly payroll models/API, `frontend/src/pages/PayrollWorkspacePage.tsx`)
+  - [x] Audit the design plan against current payroll models, routes, frontend screens, and existing monthly calculation/HR profile foundation
+  - [x] Add persisted payroll month/run/row/audit/archive workflow with sequencing, editable inputs, approval, payment status, and month close
+    - [x] Define organization-scoped month, run, row, audit, and versioned archive models (`backend/app/models/models.py`)
+    - [x] Add the deployable schema migration for monthly runs and archives (`backend/alembic/versions/w2x3y4z5a6b7_monthly_payroll_runs.py`)
+  - [x] Add monthly run APIs, calculations, register/export and archive reads using the shared monthly calculation engine
+    - [x] Add organization-scoped month creation/listing, type-first advance/final runs, row edits and audit, deterministic calculation, approval, paid status, advance refresh, close, and versioned archive reads (`backend/app/payroll/monthly_workflow.py`, `backend/app/payroll/router.py`)
+    - [x] Add individual row approval and run-wide approval with negative-net and advance validation (`backend/app/payroll/monthly_workflow.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+    - [x] Freeze encrypted payout details when rows are created and export the advance/final multi-sheet workbooks, including bank flags, overtime, statutory contribution and deduction detail (`backend/app/models/models.py`, `backend/alembic/versions/w2x3y4z5a6b7_monthly_payroll_runs.py`, `backend/app/payroll/monthly_workflow.py`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+    - [x] Expose company premium settings and effective monthly work calendar before a month snapshot is created (`backend/app/payroll/monthly_workflow.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+    - [x] Add pre-close statistics, versioned read-only archive rows, cross-month worker history, six monthly report presets, and Excel report exports (`backend/app/payroll/monthly_workflow.py`, `frontend/src/api/enterprise.ts`, `frontend/src/pages/MonthlyPayrollWorkspace.tsx`)
+  - [x] Add Mongolian month board and advance/final run screens using existing worker, capability, and account systems
+    - [x] Add the month board, type-first run creation, editable advance/final register, approvals, paid toggle, archive view, export, and admin unlock (`frontend/src/pages/MonthlyPayrollWorkspace.tsx`, `frontend/src/pages/PayrollWorkspacePage.tsx`, `frontend/src/App.tsx`)
+  - [x] Document monthly workflow routes, snapshots, archive versions, and known report/payment follow-ups (`docs/payroll-architecture.md`)
+  - [x] Complete a static implementation review (Python AST parsing and `git diff --check` passed; application tests/build were not run)
+- [x] Implement payroll design plan phase 2 HR payroll form and live preview
+  - [x] Add HR APIs for monthly payroll profile and salary history with validation
+  - [x] Replace salary-structure worker editor with pay frequency, pay days, advance options, and shared-engine estimate
+  - [x] Run focused backend/frontend validation
+    - [x] Align stale HR migration contract assertions with the existing typed revision and index names (`backend/tests/test_hr_contract.py`)
+    - [x] Add HR payroll schedule validation and shared preview contract coverage (`backend/tests/test_hr_contract.py`)
+- [x] Implement payroll design plan phase 1 foundation only (`backend/app/payroll/monthly_engine.py`, payroll models/migration, acceptance tests)
+  - [x] Add section 18 monthly advance/final calculation engine and acceptance tests
+  - [x] Add shared-worker payroll profile, salary history, company settings, effective-dated rule set, and work calendar persistence
+  - [x] Run targeted payroll acceptance tests and stop before phase 2
 - [ ] Unify worker lifecycle across People/Users, HR, and Payroll and add editable payroll preview before freeze
   - [x] Add employee archive state and assignment-level component method overrides with conservative status backfill and migration-head merge (`backend/app/models/models.py`, `backend/alembic/versions/r9s0t1u2v3w4_shared_worker_lifecycle.py`, `backend/alembic/versions/s0t1u2v3w4x5_merge_worker_lifecycle.py`)
   - [x] Reconcile HR employment status to Employee.is_active; share tenant-scoped worker actions and archived-worker restoration

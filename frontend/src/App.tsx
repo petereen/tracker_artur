@@ -24,7 +24,6 @@ const StatsWorkspacePage = lazy(() => import('./pages/StatsWorkspacePage').then(
 const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
 const ERPWorkspacePage = lazy(() => import('./pages/ERPWorkspacePage').then((module) => ({ default: module.ERPWorkspacePage })))
 const PayrollWorkspacePage = lazy(() => import('./pages/PayrollWorkspacePage').then((module) => ({ default: module.PayrollWorkspacePage })))
-const TaxBenefitsWorkspacePage = lazy(() => import('./pages/TaxBenefitsWorkspacePage').then((module) => ({ default: module.TaxBenefitsWorkspacePage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
 const PlansPage = lazy(() => import('./pages/PlansPage').then((module) => ({ default: module.PlansPage })))
 const ContractsWorkspacePage = lazy(() => import('./pages/ContractsWorkspacePage').then((module) => ({ default: module.ContractsWorkspacePage })))
@@ -133,7 +132,10 @@ function AuthenticatedApp() {
           <Route path="erp/payroll/setup" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/inputs" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/reports" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/tax-benefits" element={<TaxBenefitsWorkspacePage />} />
+          <Route path="erp/payroll/monthly" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/monthly/reports" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/monthly/runs/:runId" element={<PayrollWorkspacePage />} />
+          <Route path="erp/payroll/tax-benefits" element={<Navigate to="/erp/payroll" replace />} />
           <Route path="erp/payroll/runs/new" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/runs/:runId" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/payroll-entries" element={<PayrollWorkspacePage />} />

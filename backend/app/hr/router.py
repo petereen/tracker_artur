@@ -4,8 +4,9 @@ import csv
 import io
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from dataclasses import replace
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,12 +16,16 @@ from app.models.models import (
     AttendanceLog,
     Department,
     Employee,
+    EmployeeBankAccount,
     EmployeeCompensationItem,
     EmployeeDetails,
     EmployeePayrollProfile,
     HolidayRecord,
+    MonthlyPayrollCalendarDay,
+    MonthlyPayrollProfile,
+    MonthlyPayrollRuleSet,
+    MonthlyPayrollSalaryHistory,
     LeaveBalance,
-    PayrollRun,
     PayrollSalaryComponentMaster,
     AdditionalSalary,
     RoleAssignment,
@@ -28,8 +33,6 @@ from app.models.models import (
     UserAccount,
     WorkerInvite,
 )
-from app.payroll.frappe_service import create_payroll_entry
-from app.payroll.schemas import PayrollEntryInput
 from app.services.enterprise_events import record_change
 from app.services.user_notifications import create_notifications
 from .schemas import (
@@ -45,7 +48,7 @@ from .schemas import (
     LeaveDecisionInput,
     LeaveRequestInput,
     LeaveRequestPatch,
-    PayrollGenerateInput,
+    MonthlyPayrollProfileInput,
 )
 from .service import (
     ATTENDANCE_STATUSES,
@@ -65,6 +68,19 @@ from .service import (
     set_worker_active,
     suggested_attendance,
 )
+from app.payroll.monthly_engine import (
+    AdvanceBasis,
+    CalendarDayType,
+    PayrollProfile,
+    PayrollRunType,
+    PayrollRules,
+    SalarySegment,
+    calculate_monthly_run,
+    month_calendar,
+    pay_dates_for_month,
+)
+from app.payroll.schemas import BankAccountInput
+from app.payroll.service import create_bank_account
 
 
 router = APIRouter()
@@ -540,6 +556,148 @@ async def export_attendance(month: str | None = None, db: AsyncSession = Depends
     return Response(content=output.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="attendance-{data["month"]}.csv"'})
 
 
+def _monthly_payroll_profile_out(profile: MonthlyPayrollProfile | None, history: list[MonthlyPayrollSalaryHistory], employee_id: int) -> dict:
+    today = date.today()
+    current = next((row for row in history if row.valid_from <= today), history[0] if history else None)
+    return {
+        "employee_id": employee_id,
+        "base_salary": str(current.monthly_salary if current else 0),
+        "effective_from": current.valid_from.isoformat() if current else today.isoformat(),
+        "salary_type": profile.salary_type if profile else "PRORATION",
+        "meal_allowance": str(profile.meal_allowance if profile else 0),
+        "commute_allowance": str(profile.commute_allowance if profile else 0),
+        "payment_frequency": profile.payment_frequency if profile else "MONTHLY",
+        "pay_days": profile.pay_days if profile else [25],
+        "advance_basis": profile.advance_basis if profile else "FIXED",
+        "advance_values": [str(value) for value in (profile.advance_values if profile else [])],
+        "daily_norm_hours": str(profile.daily_norm_hours if profile else 8),
+        "insured_type": profile.insured_type if profile else "01001",
+        "tax_relief_eligible": profile.tax_relief_eligible if profile else True,
+        "salary_history": [{"monthly_salary": str(row.monthly_salary), "valid_from": row.valid_from.isoformat()} for row in history],
+    }
+
+
+@router.get("/employees/{employee_id}/payroll-profile")
+async def get_monthly_payroll_profile(employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if not can_manage_hr(actor): raise HTTPException(status_code=403, detail="Payroll profile is restricted to HR")
+    await employee_in_scope(db, actor, employee_id)
+    profile = await db.scalar(select(MonthlyPayrollProfile).where(MonthlyPayrollProfile.organization_id == actor.organization_id, MonthlyPayrollProfile.employee_id == employee_id))
+    history = list((await db.execute(select(MonthlyPayrollSalaryHistory).join(MonthlyPayrollProfile, MonthlyPayrollProfile.id == MonthlyPayrollSalaryHistory.profile_id).where(MonthlyPayrollProfile.organization_id == actor.organization_id, MonthlyPayrollProfile.employee_id == employee_id).order_by(MonthlyPayrollSalaryHistory.valid_from.desc()))).scalars())
+    return _monthly_payroll_profile_out(profile, history, employee_id)
+
+
+@router.put("/employees/{employee_id}/payroll-profile")
+async def save_monthly_payroll_profile(employee_id: int, data: MonthlyPayrollProfileInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
+    employee = await employee_in_scope(db, actor, employee_id, write=True)
+    if not employee.is_active or employee.deleted_at is not None:
+        raise HTTPException(status_code=409, detail={"code": "payroll_profile_inactive_worker"})
+    profile = await db.scalar(select(MonthlyPayrollProfile).where(MonthlyPayrollProfile.organization_id == actor.organization_id, MonthlyPayrollProfile.employee_id == employee_id).with_for_update())
+    values = data.model_dump(exclude={"base_salary", "effective_from"})
+    values["advance_values"] = [str(value) for value in data.advance_values]
+    if profile is None:
+        profile = MonthlyPayrollProfile(organization_id=actor.organization_id, employee_id=employee_id, **values)
+        db.add(profile)
+        await db.flush()
+    else:
+        for key, value in values.items(): setattr(profile, key, value)
+    salary = await db.scalar(select(MonthlyPayrollSalaryHistory).where(MonthlyPayrollSalaryHistory.profile_id == profile.id, MonthlyPayrollSalaryHistory.valid_from == data.effective_from).with_for_update())
+    if salary is None:
+        salary = MonthlyPayrollSalaryHistory(profile_id=profile.id, monthly_salary=data.base_salary, valid_from=data.effective_from, created_by_account_id=actor.account_id)
+        db.add(salary)
+    else:
+        salary.monthly_salary = data.base_salary
+        salary.created_by_account_id = actor.account_id
+    await record_change(db, actor=actor, topic="hr", aggregate_type="monthly_payroll_profile", aggregate_id=profile.id, operation="saved", after={"employee_id": employee_id, "effective_from": data.effective_from.isoformat(), "salary_type": data.salary_type, "payment_frequency": data.payment_frequency, "pay_days": data.pay_days})
+    await db.commit()
+    history = list((await db.execute(select(MonthlyPayrollSalaryHistory).where(MonthlyPayrollSalaryHistory.profile_id == profile.id).order_by(MonthlyPayrollSalaryHistory.valid_from.desc()))).scalars())
+    return _monthly_payroll_profile_out(profile, history, employee_id)
+
+
+@router.post("/employees/{employee_id}/payroll-profile/preview")
+async def preview_monthly_payroll_profile(employee_id: int, data: MonthlyPayrollProfileInput, month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if not can_manage_hr(actor): raise HTTPException(status_code=403, detail="Payroll preview is restricted to HR")
+    employee = await employee_in_scope(db, actor, employee_id)
+    if not employee.is_active or employee.deleted_at is not None:
+        raise HTTPException(status_code=409, detail={"code": "payroll_profile_inactive_worker"})
+    try:
+        year, month_number = (int(value) for value in (month or date.today().strftime("%Y-%m")).split("-"))
+        period_start = date(year, month_number, 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "payroll_preview_month_invalid"}) from exc
+    next_month = date(year + (month_number == 12), 1 if month_number == 12 else month_number + 1, 1)
+    period_end = next_month - timedelta(days=1)
+    rule_set = await db.scalar(select(MonthlyPayrollRuleSet).where(MonthlyPayrollRuleSet.organization_id == actor.organization_id, MonthlyPayrollRuleSet.status == "published", MonthlyPayrollRuleSet.valid_from <= period_start, (MonthlyPayrollRuleSet.valid_to.is_(None) | (MonthlyPayrollRuleSet.valid_to >= period_start))).order_by(MonthlyPayrollRuleSet.valid_from.desc(), MonthlyPayrollRuleSet.version.desc()).limit(1))
+    if not rule_set:
+        raise HTTPException(status_code=409, detail={"code": "payroll_monthly_rules_missing", "message": "Нийтлэгдсэн татварын дүрэм алга."})
+    rules = PayrollRules(
+        minimum_wage=Decimal(str(rule_set.minimum_wage)),
+        shi_cap_multiplier=Decimal(str(rule_set.shi_cap_multiplier)),
+        employee_shi_rates={key: Decimal(str(value)) for key, value in rule_set.employee_rates.items()},
+        employer_shi_rates={key: Decimal(str(value)) for key, value in rule_set.employer_rates.items()},
+        pit_brackets=tuple((Decimal(str(row["lower"])), Decimal(str(row["upper"])) if row.get("upper") is not None else None, Decimal(str(row["rate"])), Decimal(str(row.get("base_tax", 0))) ) for row in rule_set.pit_brackets),
+        relief_tiers=tuple((Decimal(str(row["lower"])), Decimal(str(row["upper"])) if row.get("upper") is not None else None, Decimal(str(row["amount"]))) for row in rule_set.relief_tiers),
+        overtime_multipliers={key: Decimal(str(value)) for key, value in rule_set.overtime_multipliers.items()},
+    )
+    calendar_rows = list((await db.execute(select(MonthlyPayrollCalendarDay).where(MonthlyPayrollCalendarDay.organization_id == actor.organization_id, MonthlyPayrollCalendarDay.calendar_date.between(period_start, period_end)))).scalars())
+    holiday_rows = list((await db.execute(select(HolidayRecord).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.is_active.is_(True), HolidayRecord.holiday_date.between(period_start, period_end)))).scalars())
+    calendar_days = month_calendar(year, month_number, overrides={row.calendar_date: row.day_type for row in calendar_rows}, public_holidays={row.holiday_date: row.local_name or row.name for row in holiday_rows})
+    working_dates = [day for day, kind in calendar_days.items() if kind is CalendarDayType.WORKING]
+    if not working_dates:
+        raise HTTPException(status_code=422, detail={"code": "payroll_calendar_has_no_working_days"})
+    old_history = list((await db.execute(select(MonthlyPayrollSalaryHistory).join(MonthlyPayrollProfile, MonthlyPayrollProfile.id == MonthlyPayrollSalaryHistory.profile_id).where(MonthlyPayrollProfile.organization_id == actor.organization_id, MonthlyPayrollProfile.employee_id == employee_id, MonthlyPayrollSalaryHistory.valid_from <= period_end).order_by(MonthlyPayrollSalaryHistory.valid_from))).scalars())
+    salary_changes = {row.valid_from: Decimal(str(row.monthly_salary)) for row in old_history}
+    salary_changes[data.effective_from] = data.base_salary
+    ordered_changes = sorted(salary_changes.items())
+    segments: list[SalarySegment] = []
+    for index, (effective, salary_amount) in enumerate(ordered_changes):
+        next_effective = ordered_changes[index + 1][0] if index + 1 < len(ordered_changes) else period_end + timedelta(days=1)
+        days = sum(1 for day in working_dates if effective <= day < next_effective)
+        if days:
+            segments.append(SalarySegment(salary_amount, days, Decimal(days) * data.daily_norm_hours))
+    if not segments:
+        segments = [SalarySegment(data.base_salary, len(working_dates), Decimal(len(working_dates)) * data.daily_norm_hours)]
+    profile = PayrollProfile(
+        base_salary=data.base_salary, salary_type=data.salary_type,
+        meal_allowance=data.meal_allowance, commute_allowance=data.commute_allowance,
+        payment_frequency=data.payment_frequency, pay_days=tuple(data.pay_days),
+        advance_basis=AdvanceBasis(data.advance_basis), daily_norm_hours=data.daily_norm_hours,
+        insured_type=data.insured_type, tax_relief_eligible=data.tax_relief_eligible,
+    )
+    planned_hours = Decimal(len(working_dates)) * data.daily_norm_hours
+    final = calculate_monthly_run(PayrollRunType.FINAL, profile, rules=rules, planned_days=len(working_dates), planned_hours=planned_hours, worked_normal_hours=planned_hours, salary_segments=segments)
+    pay_dates = pay_dates_for_month(profile, year, month_number)
+    advance_schedule = []
+    advance_dates = pay_dates[:-1]
+    for index, pay_date in enumerate(advance_dates):
+        value = data.advance_values[index] if index < len(data.advance_values) else Decimal("0")
+        advance_profile = replace(profile, advance_amount=value if data.advance_basis == "FIXED" else Decimal("0"), advance_percent=value if data.advance_basis == "PERCENT" else Decimal("40"))
+        elapsed_days = sum(1 for day in working_dates if day < pay_date)
+        advance_result = calculate_monthly_run(PayrollRunType.ADVANCE, advance_profile, rules=rules, planned_days=len(working_dates), planned_hours=planned_hours, worked_to_date_hours=Decimal(elapsed_days) * data.daily_norm_hours, elapsed_planned_days=elapsed_days, advance_pay_day=pay_date.day)
+        advance_schedule.append({"pay_date": pay_date.isoformat(), "basis": data.advance_basis, "value": str(value) if data.advance_basis != "WORKED-TO-DATE" else None, "estimated_amount": str(advance_result.advance)})
+    return {"month": period_start.strftime("%Y-%m"), "gross": str(final.gross), "employee_shi": str(final.employee_shi), "taxable_income": str(final.taxable_income), "pit_before_relief": str(final.pit_before_relief), "relief": str(final.relief), "pit": str(final.pit), "net_pay": str(final.net_pay), "advance_schedule": advance_schedule}
+
+
+@router.get("/employees/{employee_id}/payroll-bank-accounts")
+async def list_monthly_payroll_bank_accounts(employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    if not can_manage_hr(actor):
+        raise HTTPException(status_code=403, detail="Payroll bank details are restricted to HR")
+    await employee_in_scope(db, actor, employee_id)
+    accounts = (await db.execute(select(EmployeeBankAccount).where(
+        EmployeeBankAccount.employee_id == employee_id,
+    ).order_by(EmployeeBankAccount.is_primary.desc(), EmployeeBankAccount.valid_from.desc()))).scalars().all()
+    return [{"id": item.id, "bank_code": item.bank_code, "account_last4": item.account_last4, "is_primary": item.is_primary, "valid_from": item.valid_from.isoformat(), "valid_to": item.valid_to.isoformat() if item.valid_to else None} for item in accounts]
+
+
+@router.post("/employees/{employee_id}/payroll-bank-accounts", status_code=status.HTTP_201_CREATED)
+async def save_monthly_payroll_bank_account(employee_id: int, data: BankAccountInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
+    await employee_in_scope(db, actor, employee_id, write=True)
+    account = await create_bank_account(db, actor, employee_id, data)
+    await record_change(db, actor=actor, topic="hr", aggregate_type="employee_bank_account", aggregate_id=account.id, operation="created", after={"employee_id": employee_id, "bank_code": account.bank_code, "account_last4": account.account_last4, "is_primary": account.is_primary})
+    await db.commit()
+    await db.refresh(account)
+    return {"id": account.id, "bank_code": account.bank_code, "account_last4": account.account_last4, "is_primary": account.is_primary, "valid_from": account.valid_from.isoformat(), "valid_to": account.valid_to.isoformat() if account.valid_to else None}
+
+
 @router.get("/employees/{employee_id}/compensation")
 async def list_compensation(employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if not can_manage_hr(actor): raise HTTPException(status_code=403, detail="Compensation is restricted to HR")
@@ -565,23 +723,8 @@ async def deactivate_compensation(item_id: int, db: AsyncSession = Depends(get_d
 
 
 @router.post("/payroll/generate")
-async def generate_hr_payroll(data: PayrollGenerateInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES)), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
-    employee_ids = data.employee_ids or list((await db.execute(select(Employee.id).where(Employee.organization_id == actor.organization_id, Employee.is_active.is_(True)))).scalars().all())
-    employee_ids = sorted(set(employee_ids)); key = idempotency_key or f"{data.period_start}:{data.period_end}:{','.join(map(str, employee_ids))}"
-    existing = await db.scalar(select(PayrollRun).where(PayrollRun.organization_id == actor.organization_id, PayrollRun.hr_generation_key == key))
-    if existing: return {"run_id": existing.id, "run_number": existing.run_number, "idempotent": True, "period_start": existing.period_start, "period_end": existing.period_end}
-    run_input = PayrollEntryInput(run_type="final", period_start=data.period_start, period_end=data.period_end, posting_date=data.period_end, tax_point_date=data.tax_point_date or data.period_end, statutory_profile_id=data.statutory_profile_id, employee_ids=employee_ids, validate_attendance=False)
-    run = await create_payroll_entry(db, actor, run_input)
-    run.hr_generation_key = key
-    from app.payroll.frappe_service import get_employees
-    from app.payroll.schemas import GetEmployeesInput
-    selection = await get_employees(db, actor, run, GetEmployeesInput(employee_ids=employee_ids, validate_attendance=False))
-    overrides = (run.input_snapshot or {}).get("overrides", {})
-    leaves = sorted({leave_id for value in overrides.values() for leave_id in value.get("unpaid_leave_ids", [])})
-    run.input_snapshot = {**run.input_snapshot, "hr_generated": True}
-    await record_change(db, actor=actor, topic="hr", aggregate_type="payroll_run", aggregate_id=run.id, operation="hr_generated", after={"run_id": run.id, "employee_count": len(employee_ids), "unpaid_leave_ids": leaves})
-    await db.commit()
-    return {"run_id": run.id, "run_number": run.run_number, "idempotent": False, "employee_ids": selection["employee_ids"], "unpaid_leave_ids": leaves, "unpaid_leave_days": {key: str(value["unpaid_leave_days"]) for key, value in overrides.items()}, "next": f"/erp/payroll/payroll-entries/{run.id}"}
+async def generate_hr_payroll():
+    raise HTTPException(status_code=410, detail={"code": "payroll_workflow_retired", "message": "HR цалингийн хуучин үүсгэх урсгал хаагдсан. Сарын цалингийн самбарыг ашиглана уу.", "monthly_path": "/erp/payroll/monthly"})
 
 
 @router.get("/me")

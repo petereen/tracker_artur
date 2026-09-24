@@ -1260,6 +1260,228 @@ class EmployeeCompensationItem(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class MonthlyPayrollProfile(Base):
+    """Payroll terms attached to the shared Employee identity for monthly runs."""
+
+    __tablename__ = "monthly_payroll_profiles"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "employee_id", name="uq_monthly_payroll_profile_employee"),
+        CheckConstraint("salary_type IN ('PRORATION','FIXED')", name="ck_monthly_payroll_salary_type"),
+        CheckConstraint("payment_frequency IN ('MONTHLY','BIWEEKLY','WEEKLY')", name="ck_monthly_payroll_frequency"),
+        CheckConstraint("advance_basis IN ('FIXED','PERCENT','WORKED-TO-DATE')", name="ck_monthly_payroll_advance_basis"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
+    salary_type = Column(String(16), nullable=False, server_default="PRORATION", default="PRORATION")
+    meal_allowance = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    commute_allowance = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    payment_frequency = Column(String(16), nullable=False, server_default="MONTHLY", default="MONTHLY")
+    pay_days = Column(JSONB, nullable=False, server_default=sa_text("'[25]'::jsonb"), default=lambda: [25])
+    advance_basis = Column(String(24), nullable=False, server_default="FIXED", default="FIXED")
+    advance_amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    advance_percent = Column(Numeric(8, 4), nullable=False, server_default="40", default=40)
+    advance_values = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    daily_norm_hours = Column(Numeric(8, 4), nullable=False, server_default="8", default=8)
+    insured_type = Column(String(32), nullable=False, server_default="01001", default="01001")
+    tax_relief_eligible = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class MonthlyPayrollSalaryHistory(Base):
+    """Effective-dated salary changes for a worker's monthly payroll profile."""
+
+    __tablename__ = "monthly_payroll_salary_history"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "valid_from", name="uq_monthly_payroll_salary_start"),
+        Index("ix_monthly_payroll_salary_effective", "profile_id", "valid_from"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    profile_id = Column(Integer, ForeignKey("monthly_payroll_profiles.id", ondelete="CASCADE"), nullable=False)
+    monthly_salary = Column(Numeric(20, 4), nullable=False)
+    valid_from = Column(Date, nullable=False)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MonthlyPayrollCompanySettings(Base):
+    """Organization-wide defaults and payroll account mappings."""
+
+    __tablename__ = "monthly_payroll_company_settings"
+    __table_args__ = (CheckConstraint("employer_injury_rate >= 0.005 AND employer_injury_rate <= 0.025", name="ck_monthly_payroll_injury_rate"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True)
+    legal_company_name = Column(Text)
+    daily_norm_hours = Column(Numeric(8, 4), nullable=False, server_default="8", default=8)
+    employer_injury_rate = Column(Numeric(8, 6), nullable=False, server_default="0.005", default=0.005)
+    weekday_overtime_multiplier = Column(Numeric(8, 4), nullable=False, server_default="1.5", default=1.5)
+    rest_day_overtime_multiplier = Column(Numeric(8, 4), nullable=False, server_default="1.5", default=1.5)
+    public_holiday_overtime_multiplier = Column(Numeric(8, 4), nullable=False, server_default="2", default=2)
+    default_advance_basis = Column(String(24), nullable=False, server_default="FIXED", default="FIXED")
+    default_advance_percent = Column(Numeric(8, 4), nullable=False, server_default="40", default=40)
+    deduction_types = Column(JSONB, nullable=False, server_default=sa_text("'[\"Торгууль / сахилгын шийтгэл\", \"Хохирол / ажилтнаас авах авлага\", \"Бусад\"]'::jsonb"), default=list)
+    salary_expense_account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+    employer_shi_account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+    advance_clearing_account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class MonthlyPayrollRuleSet(Base):
+    """Effective-dated statutory values used by the monthly calculation engine."""
+
+    __tablename__ = "monthly_payroll_rule_sets"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "version", name="uq_monthly_payroll_rule_version"),
+        Index("ix_monthly_payroll_rule_effective", "organization_id", "valid_from", "valid_to"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    status = Column(String(16), nullable=False, server_default="published", default="published")
+    valid_from = Column(Date, nullable=False)
+    valid_to = Column(Date)
+    minimum_wage = Column(Numeric(20, 4), nullable=False)
+    shi_cap_multiplier = Column(Numeric(12, 6), nullable=False, server_default="10", default=10)
+    employee_rates = Column(JSONB, nullable=False)
+    employer_rates = Column(JSONB, nullable=False)
+    pit_brackets = Column(JSONB, nullable=False)
+    relief_tiers = Column(JSONB, nullable=False)
+    overtime_multipliers = Column(JSONB, nullable=False)
+    source_references = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MonthlyPayrollCalendarDay(Base):
+    """Explicit calendar overrides; unrecorded weekdays/weekends use defaults."""
+
+    __tablename__ = "monthly_payroll_calendar_days"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "calendar_date", name="uq_monthly_payroll_calendar_date"),
+        CheckConstraint("day_type IN ('working','weekly_rest','public_holiday')", name="ck_monthly_payroll_calendar_type"),
+        Index("ix_monthly_payroll_calendar_org_date", "organization_id", "calendar_date"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    calendar_date = Column(Date, nullable=False)
+    day_type = Column(String(24), nullable=False)
+    holiday_name = Column(Text)
+    is_override = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    updated_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class MonthlyPayrollMonth(Base):
+    """Container and immutable close snapshots for the run-based monthly flow."""
+
+    __tablename__ = "monthly_payroll_months"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "year", "month", name="uq_monthly_payroll_month"),
+        CheckConstraint("month BETWEEN 1 AND 12", name="ck_monthly_payroll_month_number"),
+        Index("ix_monthly_payroll_month_org_status", "organization_id", "status", "year", "month"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    year = Column(Integer, nullable=False)
+    month = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, server_default="open", default="open")
+    rule_set_id = Column(Integer, ForeignKey("monthly_payroll_rule_sets.id", ondelete="RESTRICT"), nullable=False)
+    rule_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    calendar_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    closed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    closed_at = Column(DateTime(timezone=True))
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MonthlyPayrollRun(Base):
+    """One advance or final table within a monthly payroll container."""
+
+    __tablename__ = "monthly_payroll_runs"
+    __table_args__ = (
+        Index("ix_monthly_payroll_run_month_date", "month_id", "pay_date", "run_type"),
+        CheckConstraint("run_type IN ('advance','final')", name="ck_monthly_payroll_run_type"),
+        CheckConstraint("status IN ('draft','approved','paid','closed')", name="ck_monthly_payroll_run_status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    month_id = Column(Integer, ForeignKey("monthly_payroll_months.id", ondelete="CASCADE"), nullable=False)
+    run_type = Column(String(16), nullable=False)
+    pay_date = Column(Date, nullable=False)
+    cutoff_date = Column(Date)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"))
+    status = Column(String(16), nullable=False, server_default="draft", default="draft")
+    note = Column(Text)
+    advance_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    approved_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    approved_at = Column(DateTime(timezone=True))
+    paid_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    paid_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MonthlyPayrollRunRow(Base):
+    """Worker inputs and calculated values; inputs stay editable until approval."""
+
+    __tablename__ = "monthly_payroll_run_rows"
+    __table_args__ = (
+        UniqueConstraint("run_id", "employee_id", name="uq_monthly_payroll_run_employee"),
+        Index("ix_monthly_payroll_run_row_org_worker", "organization_id", "employee_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    run_id = Column(Integer, ForeignKey("monthly_payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id", ondelete="RESTRICT"), nullable=False)
+    status = Column(String(16), nullable=False, server_default="draft", default="draft")
+    identity_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    profile_snapshot = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    inputs = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    result = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    payout_snapshot_ciphertext = Column(Text)
+    warnings = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    approved_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    approved_at = Column(DateTime(timezone=True))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class MonthlyPayrollRowAudit(Base):
+    __tablename__ = "monthly_payroll_row_audits"
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    run_id = Column(Integer, ForeignKey("monthly_payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    row_id = Column(Integer, ForeignKey("monthly_payroll_run_rows.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    field_name = Column(String(80), nullable=False)
+    old_value = Column(JSONB)
+    new_value = Column(JSONB)
+    reason = Column(Text)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MonthlyPayrollArchive(Base):
+    """Versioned close archive; each payload is a complete read-only snapshot."""
+
+    __tablename__ = "monthly_payroll_archives"
+    __table_args__ = (UniqueConstraint("month_id", "version", name="uq_monthly_payroll_archive_version"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    month_id = Column(Integer, ForeignKey("monthly_payroll_months.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)
+    snapshot = Column(JSONB, nullable=False)
+    closed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    closed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class ResourceAllocation(Base):
     __tablename__ = "resource_allocations"
     __table_args__ = (Index("ix_resource_allocations_employee_dates", "employee_id", "starts_on", "ends_on"),)

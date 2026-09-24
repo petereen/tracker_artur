@@ -58,9 +58,11 @@ from .frappe_service import (
     make_bank_entry, period_out, submit_additional_salary, submit_bank_entry,
     submit_salary_slips,
 )
+from .monthly_workflow import router as monthly_workflow_router
 
 
 router = APIRouter()
+router.include_router(monthly_workflow_router, prefix="/monthly", tags=["monthly-payroll"])
 
 
 async def payroll_capability(db: AsyncSession, actor: ActorContext, action: str) -> None:

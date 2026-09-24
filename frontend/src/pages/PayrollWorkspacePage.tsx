@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, Navigate, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, Check, CircleAlert, Download, Landmark, LockKeyhole, Plus, RefreshCw, Settings2, ShieldCheck, Users, WalletCards, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { downloadPayrollSalaryRegister, downloadProtectedPayslip, useActor, useApprovePayrollRun, useCalculatePayrollRun, useCreatePayrollRun, useHRDepartments, useERPAccountOptions, useMyPayrollPayslips, usePayrollAdditionalSalaries, usePayrollCapabilities, usePayrollComponentMasters, usePayrollComponentUsage, usePayrollPaymentBatches, usePayrollPostingProfile, usePayrollPreflight, usePayrollProfiles, usePayrollReconciliation, usePayrollRun, usePayrollRuns, usePayrollPeriods, usePayrollStructures, usePostPayrollRun, usePreparePayrollPayments, usePublishPayrollPayslips, useRejectPayrollRun, useReviewPayrollRun, useSettlePayrollPayment, useWorkerDirectory, usePayrollStructureAssignments, usePayrollTaxCategories, usePayrollFlexibleBenefitComponents, usePostingPreview, useReplacePayrollRun, usePayrollRunPreview, usePayrollSalaryRegister, useUpdatePayrollRunDraftInputs } from '../api/enterprise'
@@ -8,6 +8,7 @@ import { PayrollCycleInputs, PayrollSetupHub } from './PayrollSetupHub'
 import { PayrollPaymentWorkflow } from '../components/payroll/PayrollPaymentWorkflow'
 import { PayrollDocumentsPage } from '../components/payroll/PayrollDocumentsPage'
 import { PayrollReconciliationPanel } from '../components/payroll/PayrollReconciliationPanel'
+import { MonthlyPayrollDashboard, MonthlyPayrollWorkspace } from './MonthlyPayrollWorkspace'
 
 export const formatPayrollMoney = (value: string) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'MNT', maximumFractionDigits: 0 }).format(Number(value || 0))
 export const canManagePayroll = (roles: string[]) => roles.includes('admin') || roles.includes('hr') || roles.includes('payroll_manager')
@@ -16,7 +17,7 @@ export function payrollDocumentStatusLabel(status?: string | null) { const label
 export function payrollEntryNextAction(entry: { document_status?: string | null; salary_slips_created?: boolean; salary_slips_submitted?: boolean; bank_entry_id?: number | null }) { if (entry.document_status === 'cancelled') return 'amend'; if (!entry.salary_slips_created) return 'get-employees'; if (!entry.salary_slips_submitted) return 'submit-slips'; if (!entry.bank_entry_id) return 'make-bank-entry'; return 'view' }
 const errorCode = (error: any, fallback: string) => error?.response?.data?.detail?.code || error?.response?.data?.detail?.message || fallback
 const statusTone = (status: string) => status === 'rejected' || status === 'reversed' ? 'danger' : status === 'settled' || status === 'payslips_released' ? 'success' : status === 'approved' || status === 'posted' ? 'info' : 'warning'
-export function PayrollShell({ children, actions }: { children: ReactNode; actions?: ReactNode }) { return <main className="payroll-v2-shell"><div className="payroll-v2-content"><div className="payroll-compact-toolbar"><nav className="payroll-compact-nav" aria-label="Payroll navigation"><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll" end>Тойм</NavLink><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll/setup?tab=workers">Тохиргоо</NavLink><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll/inputs">Циклийн оролт</NavLink><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll/salary-slips">Цалингийн хуудас</NavLink><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll/reports">Тайлан</NavLink></nav>{actions ? <div className="payroll-compact-actions">{actions}</div> : null}</div>{children}</div></main> }
+export function PayrollShell({ children, actions }: { children: ReactNode; actions?: ReactNode }) { return <main className="payroll-v2-shell"><div className="payroll-v2-content"><div className="payroll-compact-toolbar"><nav className="payroll-compact-nav" aria-label="Payroll navigation"><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll/monthly">Сарын цалин</NavLink><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll" end>Тойм</NavLink><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll/setup?tab=workers">Тохиргоо</NavLink><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll/inputs">Циклийн оролт</NavLink><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll/salary-slips">Цалингийн хуудас</NavLink><NavLink className={({ isActive }) => isActive ? 'active' : undefined} to="/erp/payroll/reports">Тайлан</NavLink></nav>{actions ? <div className="payroll-compact-actions">{actions}</div> : null}</div>{children}</div></main> }
 function Shell({ children, actions }: { children: ReactNode; actions?: ReactNode }) { return <PayrollShell actions={actions}>{children}</PayrollShell> }
 function StatusChip({ status }: { status: string }) { return <span className={`payroll-v2-chip ${statusTone(status)}`}><span />{payrollDocumentStatusLabel(status)}</span> }
 function Empty({ title, copy, action }: { title: string; copy: string; action?: ReactNode }) { return <div className="payroll-v2-empty"><CircleAlert size={22} /><strong>{title}</strong><p>{copy}</p>{action}</div> }
@@ -88,22 +89,14 @@ export function PayrollWorkspacePage() {
   const actor = useActor()
   const permissions = usePayrollCapabilities()
   const manager = Boolean(permissions.data?.capabilities.view) || canManagePayroll(actor.data?.roles || [])
-  const params = useParams()
-  const legacyTabs: Record<string, string> = { '/salary-components': 'components', '/salary-structures': 'structures', '/payroll-periods': 'rules', '/assignments': 'assignments', '/accounting': 'accounting' }
-  const alias = Object.entries(legacyTabs).find(([suffix]) => location.pathname.endsWith(suffix))
   useEffect(() => { if (location.pathname.includes('/payroll-entries')) navigate('/erp/payroll', { replace: true }) }, [location.pathname, navigate])
-  if (!manager) return <EmployeeSelfService />
+  if (!manager) return <Navigate to="/hr" replace />
 
-  if (location.pathname.endsWith('/additional-salaries')) return <Navigate to="/erp/payroll/inputs" replace />
-  if (location.pathname.endsWith('/salary-slips')) return <PayrollDocumentsPage kind="slips" />
-  if (location.pathname.endsWith('/reports/salary-register')) return <Navigate to="/erp/payroll/reports?view=salary-register" replace />
-  if (location.pathname.endsWith('/reports/bank-remittance')) return <Navigate to="/erp/payroll/reports?view=bank-remittance" replace />
-  if (location.pathname.includes('/reports/')) return <PayrollDocumentsPage kind="reports" />
-  if (location.pathname.endsWith('/reports')) return <PayrollDocumentsPage kind="reports" />
-  if (alias) return <Navigate to={`/erp/payroll/setup?tab=${alias[1]}`} replace />
-  if (location.pathname.endsWith('/setup')) return <PayrollSetupHub />
-  if (location.pathname.endsWith('/inputs')) return <PayrollCycleInputs />
-  if (location.pathname.endsWith('/runs/new')) return <NewRun />
-  if (params.runId) return <RunDetail runId={Number(params.runId)} />
-  return <CompactDashboard />
+  const oldWorkflowRoute = ['/setup', '/inputs', '/runs', '/payroll-entries', '/salary-components', '/payroll-periods', '/salary-structures', '/accounting', '/additional-salaries', '/assignments', '/salary-slips', '/reports'].some((path) => location.pathname === `/erp/payroll${path}` || location.pathname.startsWith(`/erp/payroll${path}/`))
+  if (oldWorkflowRoute) return <Navigate to="/erp/payroll" replace />
+
+  if (location.pathname.endsWith('/monthly/reports')) return <MonthlyPayrollWorkspace reports />
+  if (location.pathname.endsWith('/monthly')) return <MonthlyPayrollWorkspace />
+  if (location.pathname.includes('/monthly/runs/')) return <MonthlyPayrollWorkspace detail />
+  return <MonthlyPayrollDashboard />
 }

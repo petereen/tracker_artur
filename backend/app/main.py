@@ -6,6 +6,8 @@ init_from_env(server_name="tracker-artur-api")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
@@ -98,6 +100,14 @@ async def seed_admin():
 
 
 app = FastAPI(title="OYUNS Agent — API", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def retire_legacy_payroll_api(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/v1/erp/payroll/") and not path.startswith("/v1/erp/payroll/monthly/") and path != "/v1/erp/payroll/capabilities":
+        return JSONResponse(status_code=410, content={"detail": {"code": "payroll_workflow_retired", "message": "Хуучин цалингийн урсгал хаагдсан. Сарын цалингийн самбарыг ашиглана уу.", "monthly_path": "/v1/erp/payroll/monthly"}})
+    return await call_next(request)
 
 cors_origins = {
     origin.strip()

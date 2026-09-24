@@ -67,10 +67,104 @@
 .hr-drawer-section dl { display: grid; gap: 9px; grid-template-columns: 1fr 1.3fr; margin: 0; }
 .hr-drawer-section dt { color: var(--color-muted); font-size: 11px; }
 .hr-drawer-section dd { font-size: 12px; margin: 0; }
+.monthly-payroll-backdrop { z-index: 90; }
+.monthly-payroll-drawer { display: flex; flex-direction: column; gap: 16px; max-width: 620px; padding-bottom: calc(24px + var(--safe-area-bottom)); width: min(100%, 620px); }
+.monthly-payroll-heading { align-items: flex-start; border-bottom: 1px solid var(--color-border-soft); flex: 0 0 auto; padding-bottom: 14px; }
+.monthly-payroll-heading h2 { font-size: 20px; }
+.monthly-payroll-form { display: grid; gap: 16px; min-height: 0; }
+.monthly-payroll-section, .monthly-payroll-preview, .monthly-payroll-history { background: var(--color-surface); border: 1px solid var(--color-border-soft); border-radius: 12px; display: grid; gap: 12px; padding: 14px; }
+.monthly-payroll-section-title { align-items: center; color: var(--color-accent); display: flex; gap: 10px; }
+.monthly-payroll-section-title > div { flex: 1; }
+.monthly-payroll-section-title h3, .monthly-payroll-preview h3 { color: var(--color-text); font-size: 13px; margin: 0; }
+.monthly-payroll-section-title p, .monthly-payroll-preview > p { color: var(--color-muted); font-size: 11px; margin: 3px 0 0; }
+.monthly-payroll-form label { color: var(--color-muted); display: grid; font-size: 11px; gap: 5px; }
+.monthly-payroll-form input:not([type="checkbox"]), .monthly-payroll-form select { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text); font: inherit; min-height: 38px; padding: 8px 10px; width: 100%; }
+.monthly-payroll-two-col { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.monthly-payroll-checkbox { align-items: center; display: flex !important; }
+.monthly-payroll-checkbox input { accent-color: var(--color-accent); }
+.monthly-payroll-paydays { display: grid; gap: 9px; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.monthly-payroll-advance { border-top: 1px solid var(--color-border-soft); display: grid; gap: 10px; padding-top: 12px; }
+.monthly-payroll-help { align-items: center; color: var(--color-muted); display: flex; font-size: 11px; gap: 7px; margin: 0; }
+.monthly-payroll-preview { background: color-mix(in srgb, var(--color-accent) 5%, var(--color-surface)); }
+.monthly-payroll-preview-head { align-items: center; color: var(--color-accent); display: flex; justify-content: space-between; }
+.monthly-payroll-preview-head span { color: var(--color-muted); font-size: 9px; letter-spacing: .08em; }
+.monthly-payroll-estimate-grid { display: grid; gap: 9px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.monthly-payroll-estimate-grid span { color: var(--color-muted); display: grid; font-size: 10px; gap: 4px; }
+.monthly-payroll-estimate-grid strong { color: var(--color-text); font-size: 13px; }
+.monthly-payroll-estimate-grid .take-home { border-top: 1px solid var(--color-border-soft); grid-column: 1 / -1; padding-top: 9px; }
+.monthly-run-create { align-items: end; margin: 12px 0 20px; }
+.monthly-run-create label, .monthly-inline-input label { color: var(--color-muted); display: grid; font-size: 11px; gap: 5px; }
+.monthly-run-create input, .monthly-run-create select, .monthly-inline-input input, .monthly-inline-input select { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text); font: inherit; min-height: 36px; padding: 7px 9px; }
+.monthly-run-list { margin: 12px 0 20px; }
+.monthly-inline-input { display: grid; gap: 7px; margin: 8px 0; min-width: 145px; }
+.monthly-warning { color: var(--color-danger, #b42318); display: block; }
+.monthly-run-footer { border-top: 1px solid var(--color-border-soft); margin-top: 18px; padding-top: 14px; }
+.monthly-calendar, .monthly-settings { margin-top: 16px; }
+.monthly-calendar summary, .monthly-settings summary { cursor: pointer; }
+.monthly-calendar-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); margin-top: 14px; }
+.monthly-calendar-grid > div, .monthly-settings-grid > label { display: grid; gap: 6px; }
+.monthly-calendar-grid > div { background: var(--color-bg); border: 1px solid var(--color-border-soft); border-radius: 8px; padding: 8px; }
+.monthly-calendar-grid strong { font-size: 11px; }
+.monthly-calendar-grid select, .monthly-settings-grid input, .monthly-settings-grid select, .monthly-settings-grid textarea { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text); font: inherit; min-height: 36px; padding: 7px 9px; }
+.monthly-settings-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin: 14px 0; }
+.monthly-settings-grid label { color: var(--color-muted); font-size: 11px; }
+.monthly-rules { display: grid; gap: 12px; }
+.monthly-rules > p, .monthly-rules > small, .monthly-rule-status { margin: 0; }
+.monthly-rule-toolbar, .monthly-rule-actions { align-items: end; display: flex; flex-wrap: wrap; gap: 9px; }
+.monthly-rule-toolbar label { color: var(--color-muted); display: grid; font-size: 11px; gap: 6px; min-width: min(100%, 290px); }
+.monthly-rule-toolbar select { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text); font: inherit; min-height: 36px; padding: 7px 9px; }
+.monthly-settings-grid textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; font-size: 11px !important; line-height: 1.5; resize: vertical; }
+.monthly-settings-grid input:disabled, .monthly-settings-grid textarea:disabled { cursor: not-allowed; opacity: .7; }
+.monthly-rule-status { color: var(--color-accent); font-size: 12px; font-weight: 700; }
+.monthly-rule-editor-fieldset { border: 1px solid var(--color-border-soft); border-radius: 10px; display: grid; gap: 9px; grid-column: 1 / -1; margin: 0; min-width: 0; padding: 12px; }
+.monthly-rule-editor-fieldset legend { color: var(--color-text); font-size: 12px; font-weight: 700; padding: 0 5px; }
+.monthly-rule-edit-row { align-items: end; display: grid; gap: 8px; }
+.monthly-rule-edit-row.rate { grid-template-columns: minmax(130px, .8fr) minmax(150px, 1fr) auto; }
+.monthly-rule-edit-row.tier { grid-template-columns: repeat(4, minmax(100px, 1fr)) auto; }
+.monthly-rule-edit-row label { color: var(--color-muted); display: grid; font-size: 10px; gap: 5px; }
+.monthly-rule-edit-row input { min-width: 0; }
+@media (max-width: 650px) { .monthly-rule-edit-row.rate, .monthly-rule-edit-row.tier { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.monthly-report-controls { align-items: end; display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.monthly-report-controls label { color: var(--color-muted); display: grid; font-size: 11px; gap: 5px; }
+.monthly-report-controls select, .monthly-report-controls input { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text); font: inherit; min-height: 36px; padding: 7px 9px; }
+.monthly-row-drawer { min-width: 230px; margin-top: 8px; text-align: left; }
+.monthly-row-drawer summary { color: var(--color-accent); cursor: pointer; font-size: 11px; padding: 5px 0; }
+.monthly-row-drawer-body { background: var(--color-bg); border: 1px solid var(--color-border-soft); border-radius: 8px; color: var(--color-muted); font-size: 11px; max-width: min(760px, 75vw); padding: 10px; white-space: normal; }
+.monthly-row-drawer-body p { margin: 5px 0; }
+.monthly-row-drawer-body .payroll-v2-table { font-size: 10px; }
+.monthly-row-drawer-body .payroll-v2-table th, .monthly-row-drawer-body .payroll-v2-table td { padding: 5px 7px; }
+.payroll-v2-chip.danger { background: color-mix(in srgb, var(--color-danger, #b42318) 12%, transparent); color: var(--color-danger, #b42318); }
+.monthly-one-off-toggle { align-items: center; color: var(--color-muted); display: flex; gap: 8px; }
+.monthly-one-off-toggle input { accent-color: var(--color-accent); }
+.monthly-import-control { align-items: flex-start; color: var(--color-muted); display: grid; font-size: 11px; gap: 5px; }
+.monthly-import-control input { max-width: 210px; font: inherit; }
+.monthly-computed-override { border-top: 1px solid var(--color-border-soft); display: grid; gap: 7px; margin-top: 10px; padding-top: 10px; }
+.monthly-computed-override strong { color: var(--color-text); }
+.monthly-computed-override input, .monthly-computed-override select { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-text); font: inherit; min-height: 34px; padding: 6px 8px; }
+.monthly-register-toolbar { align-items: end; display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 12px; }
+.monthly-register-toolbar label { color: var(--color-muted); display: grid; font-size: 11px; gap: 5px; }
+.monthly-register-toolbar input, .monthly-register-toolbar select { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text); font: inherit; min-height: 36px; min-width: 170px; padding: 7px 9px; }
+.monthly-register-toolbar > span { color: var(--color-muted); font-size: 11px; margin-left: auto; padding-bottom: 9px; }
+.monthly-department-group th { background: var(--color-bg-raised, var(--color-bg)); color: var(--color-accent); font-size: 11px; text-align: left; }
+.monthly-overtime-row > * { background: color-mix(in srgb, var(--color-warning, #b54708) 5%, transparent); }
+.payroll-v2-table tfoot { position: sticky; bottom: 0; z-index: 2; }
+.payroll-v2-table tfoot th, .payroll-v2-table tfoot td { background: var(--color-bg-raised, var(--color-bg)); border-top: 2px solid var(--color-border); font-weight: 700; }
+.payroll-v2-table thead th { position: sticky; top: 0; z-index: 1; }
+.monthly-payroll-estimate-grid .take-home strong { color: var(--color-accent); font-size: 18px; }
+.monthly-payroll-advance-estimates, .monthly-payroll-history { display: grid; gap: 7px; }
+.monthly-payroll-advance-estimates > span, .monthly-payroll-history > span, .monthly-payroll-bank-row { align-items: center; color: var(--color-muted); display: flex; font-size: 11px; justify-content: space-between; }
+.monthly-payroll-advance-estimates b, .monthly-payroll-history b { color: var(--color-text); }
+.monthly-payroll-bank-row { border-top: 1px solid var(--color-border-soft); gap: 8px; padding-top: 8px; }
+.monthly-payroll-bank-row strong { color: var(--color-text); }
+.monthly-payroll-bank-row small { color: var(--color-accent); }
+.monthly-payroll-bank-form { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.monthly-payroll-bank-form button { align-self: end; justify-content: center; min-height: 38px; }
+.monthly-payroll-footer { background: var(--color-surface); border-top: 1px solid var(--color-border-soft); bottom: calc(-24px - var(--safe-area-bottom)); display: flex; gap: 8px; justify-content: flex-end; margin: 0 -26px; padding: 12px 26px calc(12px + var(--safe-area-bottom)); position: sticky; }
+.monthly-payroll-loading { color: var(--color-muted); padding: 20px 0; }
 .hr-invite-result { display: grid; gap: 14px; }
 .hr-invite-result code { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 9px; display: block; font-size: 11px; overflow-wrap: anywhere; padding: 11px; }
 .hr-modal-actions { justify-content: flex-end; margin-top: 18px; }
-@media (max-width: 760px) { .hr-toolbar, .hr-panel-grid, .hr-form-grid, .hr-attendance-controls { grid-template-columns: 1fr; } .hr-week-nav { justify-content: space-between; } .hr-week-nav strong { min-width: 0; } .hr-balance-grid { grid-template-columns: repeat(3, minmax(90px, 1fr)); overflow-x: auto; } .hr-drawer { padding: 20px 16px calc(20px + var(--safe-area-bottom)); } }
+@media (max-width: 760px) { .hr-toolbar, .hr-panel-grid, .hr-form-grid, .hr-attendance-controls { grid-template-columns: 1fr; } .hr-week-nav { justify-content: space-between; } .hr-week-nav strong { min-width: 0; } .hr-balance-grid { grid-template-columns: repeat(3, minmax(90px, 1fr)); overflow-x: auto; } .hr-drawer { padding: 20px 16px calc(20px + var(--safe-area-bottom)); } .monthly-payroll-two-col, .monthly-payroll-bank-form { grid-template-columns: 1fr; } .monthly-payroll-footer { bottom: calc(-20px - var(--safe-area-bottom)); margin: 0 -16px; padding-left: 16px; padding-right: 16px; } }
 
 :root {
   color-scheme: light dark;

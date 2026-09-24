@@ -26,7 +26,7 @@ describe('enterprise login', () => {
 
   it('has explicit labels and a clear submit action', () => {
     renderLogin()
-    expect(screen.getByRole('heading', { name: 'Илүү хурдан. Илүү хялбар.' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Таны ажилнэг дор, цэгцтэй, хялбар.')
     expect(screen.getByLabelText('Нэвтрэх нэр')).toHaveAttribute('autocomplete', 'username')
     expect(screen.getByLabelText('Нууц үг')).toHaveAttribute('autocomplete', 'current-password')
     expect(screen.getByRole('button', { name: /Нэвтрэх/ })).toBeEnabled()

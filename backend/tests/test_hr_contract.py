@@ -1,16 +1,15 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[1]
 
 
 def test_hr_migration_is_single_reversible_head_and_preserves_time_off():
     migration = (ROOT / "alembic/versions/j0k1l2m3n4o5_hr_module.py").read_text()
-    assert 'down_revision = "i0j1k2l3m4n5"' in migration
+    assert 'down_revision: Union[str, Sequence[str], None] = "i0j1k2l3m4n5"' in migration
     assert 'op.rename_table("time_off", "leave_requests")' in migration
     assert 'op.rename_table("leave_requests", "time_off")' in migration
     assert "worker_invites" in migration and "token_hash" in migration
-    assert "uq_worker_invites_active_employee" in migration
+    assert '"uq_worker_invites_employee_open"' in migration
 
 
 def test_hr_router_exposes_identity_leave_attendance_and_payroll_contracts():
@@ -88,3 +87,20 @@ def test_hr_ui_can_set_annual_leave_days_for_new_and_existing_workers():
     assert "Баланс тохируулах" in page
     assert "entitled_days" in page
     assert "min?: string | number" in ui
+
+
+def test_monthly_payroll_profile_schedule_validation_and_shared_preview_contract():
+    schemas = (ROOT / "app/hr/schemas.py").read_text()
+    router = (ROOT / "app/hr/router.py").read_text()
+    frontend = (ROOT.parent / "frontend/src/components/MonthlyPayrollProfileDrawer.tsx").read_text()
+    assert '"MONTHLY": 1, "BIWEEKLY": 2, "WEEKLY": 4' in schemas
+    assert "self.pay_days != sorted(set(self.pay_days))" in schemas
+    assert "len(self.advance_values) != expected_values" in schemas
+    assert 'self.advance_basis == "PERCENT" and any(value > 100' in schemas
+    assert '@router.get("/employees/{employee_id}/payroll-profile")' in router
+    assert '@router.put("/employees/{employee_id}/payroll-profile")' in router
+    assert '@router.post("/employees/{employee_id}/payroll-profile/preview")' in router
+    assert "calculate_monthly_run(PayrollRunType.FINAL" in router
+    assert "calculate_monthly_run(PayrollRunType.ADVANCE" in router
+    assert "useMonthlyPayrollPreview" in frontend
+    assert "Цалингийн тохиргоо" in frontend

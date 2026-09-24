@@ -52,6 +52,38 @@ class EmployeePatch(BaseModel):
     timezone: str | None = None
 
 
+class MonthlyPayrollProfileInput(BaseModel):
+    base_salary: Decimal = Field(ge=0)
+    effective_from: date
+    salary_type: Literal["PRORATION", "FIXED"] = "PRORATION"
+    meal_allowance: Decimal = Field(default=Decimal("0"), ge=0)
+    commute_allowance: Decimal = Field(default=Decimal("0"), ge=0)
+    payment_frequency: Literal["MONTHLY", "BIWEEKLY", "WEEKLY"] = "MONTHLY"
+    pay_days: list[int]
+    advance_basis: Literal["FIXED", "PERCENT", "WORKED-TO-DATE"] = "FIXED"
+    advance_values: list[Decimal] = Field(default_factory=list)
+    daily_norm_hours: Decimal = Field(default=Decimal("8"), gt=0, le=24)
+    insured_type: str = Field(default="01001", min_length=1, max_length=32)
+    tax_relief_eligible: bool = True
+
+    @model_validator(mode="after")
+    def validate_schedule(self):
+        required = {"MONTHLY": 1, "BIWEEKLY": 2, "WEEKLY": 4}[self.payment_frequency]
+        if len(self.pay_days) != required or any(day < 1 or day > 31 for day in self.pay_days):
+            raise ValueError(f"{self.payment_frequency} requires {required} pay day(s), each between 1 and 31")
+        if self.pay_days != sorted(set(self.pay_days)):
+            raise ValueError("Pay days must be unique and in ascending order")
+        advance_count = max(0, required - 1)
+        expected_values = advance_count if self.advance_basis in {"FIXED", "PERCENT"} else 0
+        if len(self.advance_values) != expected_values:
+            raise ValueError(f"{self.advance_basis} requires {expected_values} advance value(s)")
+        if any(value < 0 for value in self.advance_values):
+            raise ValueError("Advance values cannot be negative")
+        if self.advance_basis == "PERCENT" and any(value > 100 for value in self.advance_values):
+            raise ValueError("Advance percentages cannot exceed 100")
+        return self
+
+
 class LeaveRequestInput(BaseModel):
     employee_id: int | None = None
     leave_type: LeaveType = "annual"
