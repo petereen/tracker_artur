@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { CircleAlert, Download, LockKeyhole, Plus, WalletCards, X } from 'lucide-react'
+import { CircleAlert, Download, LockKeyhole, Plus, Trash2, WalletCards, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   downloadMonthlyPayrollArchiveExport, downloadMonthlyPayrollReport, downloadMonthlyPayrollWorkerHistory,
-  useCloseMonthlyPayrollMonth, useCreateMonthlyPayrollMonth, useCreateMonthlyPayrollRun, useHRDepartments, useMarkMonthlyPayrollPaid,
+  useCloseMonthlyPayrollMonth, useCreateMonthlyPayrollMonth, useCreateMonthlyPayrollRun, useDeleteMonthlyPayrollRun, useHRDepartments, useMarkMonthlyPayrollPaid,
   useMarkMonthlyPayrollUnpaid, useMonthlyPayrollAdvanceDates, useMonthlyPayrollArchiveIndex, useMonthlyPayrollArchives,
   useMonthlyPayrollClosingStats, useMonthlyPayrollDashboard, useMonthlyPayrollMonths, useMonthlyPayrollReport,
   useMonthlyPayrollWorkerHistory, usePayrollCapabilities, useUnlockMonthlyPayrollMonth, useWorkerDirectory,
@@ -44,6 +44,7 @@ function MonthlyMonthBoard() {
   const unlockMonth = useUnlockMonthlyPayrollMonth()
   const pay = useMarkMonthlyPayrollPaid()
   const unpay = useMarkMonthlyPayrollUnpaid()
+  const deleteRun = useDeleteMonthlyPayrollRun()
   const caps = usePayrollCapabilities()
   const capabilities = caps.data?.capabilities || {}
   const [creating, setCreating] = useState(false)
@@ -56,6 +57,10 @@ function MonthlyMonthBoard() {
     if (!month) return
     const reason = await askReason('Хаасан сарыг дахин нээх', 'Шалтгаан (архивын дараагийн хувилбарт бичигдэнэ)', 'Нээх')
     if (reason) unlockMonth.mutate({ id: month.id, reason }, { onSuccess: () => toast.success('Сар нээгдлээ. Бодолтууд батлагдсан/төлсөн төлөвтэй үлдсэн.'), onError: (error) => toast.error(requestError(error)) })
+  }
+  const removeRun = async (run: { id: number; run_type: string; pay_date: string }) => {
+    const reason = await askReason(`«${runTitle(run)}» бодолтыг устгах`, 'Устгах шалтгаан (бүх мөр, засварын түүх устана)', 'Устгах')
+    if (reason) deleteRun.mutate({ id: run.id, reason }, { onSuccess: () => toast.success('Бодолт устгагдлаа. Шинээр үүсгэж болно.'), onError: (error) => toast.error(requestError(error)) })
   }
   const togglePaid = (runId: number, status: string) => (status === 'paid' ? unpay : pay).mutate(runId, { onSuccess: () => toast.success(status === 'paid' ? 'Төлөөгүй болголоо' : 'Төлсөн гэж тэмдэглэлээ'), onError: (error) => toast.error(requestError(error)) })
 
@@ -73,6 +78,7 @@ function MonthlyMonthBoard() {
           <div className="mp-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={run.workers} aria-valuenow={run.approved_rows}><i style={{ width: `${run.workers ? (run.approved_rows * 100) / run.workers : 0}%` }} /></div>
           <small>{run.approved_rows} / {run.workers} батлагдсан</small>
           {['approved', 'paid'].includes(run.status) && month.status === 'open' && capabilities.pay && <label className="mp-paid-toggle"><input type="checkbox" checked={run.status === 'paid'} disabled={pay.isPending || unpay.isPending} onChange={() => togglePaid(run.id, run.status)} />Төлсөн</label>}
+          {['draft', 'approved'].includes(run.status) && month.status === 'open' && capabilities.create && <button type="button" className="payroll-v2-button danger compact mp-card-delete" disabled={deleteRun.isPending} onClick={() => removeRun(run)}><Trash2 size={12} />Устгах</button>}
         </article>)}
           {!pipeline.length && <p className="mp-empty">Бодолт үүсгээгүй байна. «Шинэ бодолт»-оор урьдчилгаа эсвэл сүүл цалин эхлүүлнэ.</p>}
         </div>

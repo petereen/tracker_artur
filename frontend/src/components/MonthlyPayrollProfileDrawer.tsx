@@ -9,11 +9,14 @@ import {
   useSavePayrollBankAccount,
 } from '../api/enterprise'
 import type { MonthlyPayrollProfilePayload } from '../api/enterprise'
+import { plainNumber } from '../utils/numbers'
 
 const localToday = () => {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
+// A first salary normally applies to the whole month, not from today.
+const monthStart = () => `${localToday().slice(0, 8)}01`
 const daysFor = (frequency: MonthlyPayrollProfilePayload['payment_frequency']) => frequency === 'MONTHLY' ? [25] : frequency === 'BIWEEKLY' ? [10, 25] : [7, 14, 21, 28]
 const requestMessage = (error: any, fallback: string) => {
   const detail = error?.response?.data?.detail
@@ -21,7 +24,7 @@ const requestMessage = (error: any, fallback: string) => {
 }
 const money = (value?: string) => `${new Intl.NumberFormat('mn-MN', { maximumFractionDigits: 0 }).format(Number(value || 0))} ₮`
 const emptyForm = (): MonthlyPayrollProfilePayload => ({
-  base_salary: '', effective_from: localToday(), salary_type: 'PRORATION', meal_allowance: '0', commute_allowance: '0',
+  base_salary: '', effective_from: monthStart(), salary_type: 'PRORATION', meal_allowance: '0', commute_allowance: '0',
   payment_frequency: 'MONTHLY', pay_days: [25], advance_basis: 'FIXED', advance_values: [], daily_norm_hours: '8', insured_type: '01001', tax_relief_eligible: true,
 })
 
@@ -41,7 +44,8 @@ export function MonthlyPayrollProfileDrawer({ employee, onClose }: { employee: {
     if (!saved.data) return
     const payload: any = { ...saved.data }
     delete payload.salary_history
-    setForm({ ...emptyForm(), ...payload, advance_values: payload.advance_values || [] })
+    const numeric = Object.fromEntries(['base_salary', 'meal_allowance', 'commute_allowance', 'daily_norm_hours'].map((key) => [key, plainNumber(payload[key])]))
+    setForm({ ...emptyForm(), ...payload, ...numeric, advance_values: (payload.advance_values || []).map(plainNumber) })
     setReady(true)
   }, [saved.data])
 
@@ -104,6 +108,7 @@ export function MonthlyPayrollProfileDrawer({ employee, onClose }: { employee: {
 
         <section className="monthly-payroll-preview">
           <div className="monthly-payroll-preview-head"><div><span>БҮТЭН САРЫН ТООЦОО</span><h3>{preview.data?.month || form.effective_from.slice(0, 7)}</h3></div><ShieldCheck size={20} /></div>
+          {form.base_salary && !form.effective_from.endsWith('-01') && <p className="monthly-payroll-help">Бүтэн сарыг оруулсан цалингаар тооцов. Хүчинтэй огноо сарын дунд тул өмнөх цалинтай бол тухайн сард өдрөөр хуваагдан бодогдоно.</p>}
           {!form.base_salary ? <p>Үндсэн цалин оруулбал тооцооны урьдчилсан дүн гарна.</p> : preview.isFetching ? <p>Тооцоолж байна…</p> : preview.data ? <><div className="monthly-payroll-estimate-grid"><span>Нийт цалин<strong>{money(preview.data.gross)}</strong></span><span>Ажилтны НДШ<strong>{money(preview.data.employee_shi)}</strong></span><span>Татварын суурь<strong>{money(preview.data.taxable_income)}</strong></span><span>ХХОАТ хөнгөлөлт<strong>{money(preview.data.relief)}</strong></span><span>ХХОАТ<strong>{money(preview.data.pit)}</strong></span><span className="take-home">Гарт олгох<strong>{money(preview.data.net_pay)}</strong></span></div>{preview.data.advance_schedule.length > 0 && <div className="monthly-payroll-advance-estimates"><strong>Урьдчилгааны хуваарь</strong>{preview.data.advance_schedule.map((row) => <span key={row.pay_date}>{row.pay_date} <b>{money(row.estimated_amount)}</b></span>)}</div>}</> : <p>{preview.error ? requestMessage(preview.error, 'Тооцоолж чадсангүй. Татварын тохиргоог шалгана уу.') : 'Тооцооны дүн бэлдэж байна.'}</p>}
         </section>
 

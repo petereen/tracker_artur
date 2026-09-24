@@ -326,6 +326,11 @@ def _json_value(value: Any) -> Any:
     return value
 
 
+def _plain_value(value: Any) -> str:
+    """Form value without Numeric padding: 8.0000 -> "8", 0.0050 -> "0.005"."""
+    return format(value.normalize(), "f") if isinstance(value, Decimal) else str(value)
+
+
 def _rules(snapshot: dict[str, Any]) -> PayrollRules:
     return PayrollRules(
         minimum_wage=amount(snapshot["minimum_wage"]),
@@ -581,7 +586,7 @@ async def get_monthly_settings(db: AsyncSession = Depends(get_db), actor: ActorC
         return {"legal_company_name": None, "daily_norm_hours": "8", "employer_injury_rate": "0.005", "weekday_overtime_multiplier": "1.5", "rest_day_overtime_multiplier": "1.5", "public_holiday_overtime_multiplier": "2", "default_advance_basis": "FIXED", "default_advance_percent": "40", "deduction_types": ["Торгууль / сахилгын шийтгэл", "Хохирол / ажилтнаас авах авлага", "Бусад"], "salary_expense_account_id": None, "employer_shi_account_id": None, "advance_clearing_account_id": None}
     fields = ("legal_company_name", "daily_norm_hours", "employer_injury_rate", "weekday_overtime_multiplier", "rest_day_overtime_multiplier", "public_holiday_overtime_multiplier", "default_advance_basis", "default_advance_percent", "deduction_types", "salary_expense_account_id", "employer_shi_account_id", "advance_clearing_account_id")
     account_fields = {"salary_expense_account_id", "employer_shi_account_id", "advance_clearing_account_id"}
-    return {key: str(getattr(row, key)) if key not in {"deduction_types", "legal_company_name", *account_fields} and getattr(row, key) is not None else getattr(row, key) for key in fields}
+    return {key: _plain_value(getattr(row, key)) if key not in {"deduction_types", "legal_company_name", *account_fields} and getattr(row, key) is not None else getattr(row, key) for key in fields}
 
 
 @router.put("/settings")
@@ -751,8 +756,10 @@ async def _profiles_for_month(db: AsyncSession, actor: ActorContext, month: Mont
         employed_from = max(first, details.start_date) if details and details.start_date else first
         employed_to = min(last, details.end_date) if details and details.end_date else last
         segments = []
-        for item in active_history:
-            segment_start = max(employed_from, item.valid_from)
+        for position, item in enumerate(active_history):
+            # The earliest salary has no predecessor, so it covers the month
+            # from employment start even when HR dated it mid-month.
+            segment_start = employed_from if position == 0 else max(employed_from, item.valid_from)
             later = [entry.valid_from for entry in active_history if entry.valid_from > item.valid_from]
             segment_end = min(employed_to, (min(later) - date.resolution) if later else last)
             if segment_end < segment_start:
@@ -767,10 +774,11 @@ async def _attendance_inputs(db: AsyncSession, organization_id: int, employee_id
     first = date(month.year, month.month, 1)
     last = date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])
     end = min(last, cutoff) if cutoff else last
+    # Unconfirmed logs are included: worktime sync never confirms them, and a
+    # draft run is reviewed by the accountant anyway. Confirmed logs win below.
     logs = (await db.execute(select(AttendanceLog).where(
         AttendanceLog.organization_id == organization_id, AttendanceLog.employee_id == employee_id,
         AttendanceLog.attendance_date >= first, AttendanceLog.attendance_date <= end,
-        AttendanceLog.confirmed_at.is_not(None),
     ).order_by(AttendanceLog.attendance_date))).scalars().all()
     from zoneinfo import ZoneInfo
     local_zone = ZoneInfo("Asia/Ulaanbaatar")
@@ -788,9 +796,11 @@ async def _attendance_inputs(db: AsyncSession, organization_id: int, employee_id
         TimeOff.status == "approved", TimeOff.starts_on <= end, TimeOff.ends_on >= first,
     ))).scalars().all()
     approved_leave = [{"id": row.id, "start": row.starts_on, "end": row.ends_on, "type": row.time_off_type, "minutes": row.partial_day_minutes} for row in leave_rows]
+    # Worker time entries stay "pending" unless someone rejects them, so every
+    # finished, non-rejected work interval is payroll evidence.
     work_rows = (await db.execute(select(WorkTimeEntry).join(Employee, Employee.id == WorkTimeEntry.employee_id).where(
         Employee.organization_id == organization_id, WorkTimeEntry.employee_id == employee_id,
-        WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status == "approved",
+        WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status != "rejected",
         WorkTimeEntry.ended_at.is_not(None),
         WorkTimeEntry.started_at >= datetime.combine(first, datetime.min.time(), local_zone),
         WorkTimeEntry.started_at < datetime.combine(end + timedelta(days=1), datetime.min.time(), local_zone),
@@ -814,21 +824,40 @@ async def _attendance_inputs(db: AsyncSession, organization_id: int, employee_id
     leave_fraction = {date.fromisoformat(item["date"]): Decimal(item["fraction"]) for item in normalized["days"]}
     normal_hours = Decimal("0")
     overtime = {"weekday": Decimal("0"), "rest_day": Decimal("0"), "public_holiday": Decimal("0")}
-    lines = []
     day_minutes: dict[date, Decimal] = {}
     day_sources: dict[date, str] = {}
+    worked_statuses = {"present", "remote", "late"}
+    # Priority per day: an HR-confirmed log, then the worker's own time
+    # entries, then an unconfirmed (worktime-synced) log.
     for day, log in log_by_day.items():
-        if log.status not in {"present", "remote", "late"} or log.worked_minutes <= 0:
+        if not log.confirmed_at:
             continue
-        day_minutes[day] = Decimal(log.worked_minutes)
-        day_sources[day] = log.source
+        if log.status == "half_day":
+            # Minutes here are final; skip the 0.5 payable-day fraction.
+            day_minutes[day] = Decimal(log.worked_minutes) if log.worked_minutes > 0 else daily_norm_hours * 30
+            day_sources[day] = "attendance"
+            leave_fraction[day] = Decimal("1")
+            continue
+        if log.status not in worked_statuses:
+            day_minutes[day] = Decimal("0")
+            continue
+        if log.worked_minutes > 0:
+            day_minutes[day], day_sources[day] = Decimal(log.worked_minutes), log.source
+        elif day in approved_work:
+            day_minutes[day], day_sources[day] = approved_work[day], "worktime"
+        elif calendar_days[day] is CalendarDayType.WORKING:
+            # HR marked the day worked without clock times: one norm day.
+            day_minutes[day], day_sources[day] = daily_norm_hours * 60, "attendance"
     for day, minutes in approved_work.items():
         if day not in day_minutes:
-            day_minutes[day] = minutes
-            day_sources[day] = "approved_worktime"
+            day_minutes[day], day_sources[day] = minutes, "worktime"
+    for day, log in log_by_day.items():
+        if day not in day_minutes and log.status in worked_statuses and log.worked_minutes > 0:
+            day_minutes[day], day_sources[day] = Decimal(log.worked_minutes), log.source
+    day_minutes = {day: minutes for day, minutes in day_minutes.items() if minutes > 0}
     lines = []
     for work_day, minutes in sorted(day_minutes.items()):
-        total_hours = minutes / Decimal(60) * leave_fraction.get(work_day, Decimal("1"))
+        total_hours = (minutes / Decimal(60) * leave_fraction.get(work_day, Decimal("1"))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         normal, buckets = classify_work_hours(calendar_days[work_day], total_hours, daily_norm_hours)
         normal_hours += normal
         for key, value in buckets.items():
@@ -1966,6 +1995,30 @@ async def unapprove_run(run_id: int, db: AsyncSession = Depends(get_db), actor: 
         await _flag_final_advance_changes(db, run.month_id, actor.organization_id)
     await db.commit()
     return _run_out(run)
+
+
+@router.delete("/runs/{run_id}")
+async def delete_run(run_id: int, data: UnlockInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Delete a draft or approved (unpaid) run so it can be created again.
+
+    Rows and their audit lines cascade. Paid runs must be reopened first; a
+    final run that pulled a deleted advance is flagged «Урьдчилгаа өөрчлөгдсөн».
+    """
+    await require_capability(db, actor, "payroll", "create")
+    run = await _run(db, actor, run_id, lock=True)
+    if run.status not in {"draft", "approved"}:
+        raise HTTPException(status_code=409, detail="Төлсөн эсвэл хаасан бодолтыг устгах боломжгүй. Эхлээд «Дахин нээх»-ээр ноорог болгоно уу.")
+    if run.status == "approved":
+        await require_capability(db, actor, "payroll", "approve")
+    row_count = len((await db.execute(select(MonthlyPayrollRunRow.id).where(MonthlyPayrollRunRow.run_id == run.id))).scalars().all())
+    before = {**_run_out(run), "rows": row_count}
+    month_id, run_type = run.month_id, run.run_type
+    await db.delete(run)
+    await record_change(db, actor=actor, topic="payroll", aggregate_type="monthly_payroll_run", aggregate_id=run_id, operation="deleted", before=before, after={"reason": data.reason.strip()})
+    if run_type == "advance":
+        await _flag_final_advance_changes(db, month_id, actor.organization_id)
+    await db.commit()
+    return {"id": run_id, "deleted": True}
 
 
 @router.post("/runs/{run_id}/paid")

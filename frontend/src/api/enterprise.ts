@@ -575,6 +575,7 @@ export function useAddMonthlyPayrollRunWorkers(runId: number) { const qc = useQu
 export function useCalculateMonthlyPayrollRun() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/calculate`) }
 export function useApproveMonthlyPayrollRun() { return useMonthlyPayrollAction<MonthlyPayrollRun & { approval_summary?: MonthlyPayrollApprovalSummary }>((id) => `/v1/erp/payroll/monthly/runs/${id}/approve`) }
 export function useUnapproveMonthlyPayrollRun() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/unapprove`) }
+export function useDeleteMonthlyPayrollRun() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, reason }: { id: number; reason: string }) => api.delete(`/v1/erp/payroll/monthly/runs/${id}`, { data: { reason } }).then((r) => r.data as { id: number; deleted: boolean }), onSuccess: (_data, { id }) => { qc.removeQueries({ queryKey: [...monthlyPayrollKey, 'runs', id] }); qc.invalidateQueries({ queryKey: monthlyPayrollKey }) } }) }
 export function useMarkMonthlyPayrollUnpaid() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/unpaid`) }
 export function useMarkMonthlyPayrollPaid() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/paid`) }
 export function useRefreshMonthlyPayrollAdvances() { return useMonthlyPayrollAction((id) => `/v1/erp/payroll/monthly/runs/${id}/refresh-advances`) }

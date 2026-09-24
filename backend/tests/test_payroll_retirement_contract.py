@@ -54,3 +54,21 @@ def test_computed_override_calls_statutory_engine_recalculation():
     assert 'rules=rules' in source
     assert 'tax_relief_eligible=profile.tax_relief_eligible' in source
     assert 'taxable_income = max(ZERO, whole_tugrik(gross - employee_shi))' in engine
+
+
+def test_monthly_runs_are_deletable_until_paid_and_read_pending_worktime():
+    source = (ROOT / "app/payroll/monthly_workflow.py").read_text()
+    delete_route = source[source.index('@router.delete("/runs/{run_id}")'):]
+    delete_route = delete_route[:delete_route.index("@router.", 10)]
+    assert 'run.status not in {"draft", "approved"}' in delete_route
+    assert "_flag_final_advance_changes" in delete_route
+    assert 'operation="deleted"' in delete_route
+    # Worker time entries are never auto-approved, so payroll must not require it.
+    assert 'WorkTimeEntry.approval_status != "rejected"' in source
+    assert "AttendanceLog.confirmed_at.is_not(None)" not in source
+
+
+def test_hr_preview_is_a_full_month_at_the_entered_salary():
+    router = (ROOT / "app/hr/router.py").read_text()
+    preview = router[router.index('async def preview_monthly_payroll_profile'):]
+    assert "segments = [SalarySegment(data.base_salary, len(working_dates)" in preview

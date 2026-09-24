@@ -557,24 +557,29 @@ async def export_attendance(month: str | None = None, db: AsyncSession = Depends
     return Response(content=output.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="attendance-{data["month"]}.csv"'})
 
 
+def _plain_number(value) -> str:
+    """Numeric column as a form value: 4000000.0000 -> "4000000", 8.50 -> "8.5"."""
+    return format(Decimal(str(value if value is not None else 0)).normalize(), "f")
+
+
 def _monthly_payroll_profile_out(profile: MonthlyPayrollProfile | None, history: list[MonthlyPayrollSalaryHistory], employee_id: int) -> dict:
     today = date.today()
     current = next((row for row in history if row.valid_from <= today), history[0] if history else None)
     return {
         "employee_id": employee_id,
-        "base_salary": str(current.monthly_salary if current else 0),
+        "base_salary": _plain_number(current.monthly_salary if current else 0),
         "effective_from": current.valid_from.isoformat() if current else today.isoformat(),
         "salary_type": profile.salary_type if profile else "PRORATION",
-        "meal_allowance": str(profile.meal_allowance if profile else 0),
-        "commute_allowance": str(profile.commute_allowance if profile else 0),
+        "meal_allowance": _plain_number(profile.meal_allowance if profile else 0),
+        "commute_allowance": _plain_number(profile.commute_allowance if profile else 0),
         "payment_frequency": profile.payment_frequency if profile else "MONTHLY",
         "pay_days": profile.pay_days if profile else [25],
         "advance_basis": profile.advance_basis if profile else "FIXED",
-        "advance_values": [str(value) for value in (profile.advance_values if profile else [])],
-        "daily_norm_hours": str(profile.daily_norm_hours if profile else 8),
+        "advance_values": [_plain_number(value) for value in (profile.advance_values if profile else [])],
+        "daily_norm_hours": _plain_number(profile.daily_norm_hours if profile else 8),
         "insured_type": profile.insured_type if profile else "01001",
         "tax_relief_eligible": profile.tax_relief_eligible if profile else True,
-        "salary_history": [{"monthly_salary": str(row.monthly_salary), "valid_from": row.valid_from.isoformat()} for row in history],
+        "salary_history": [{"monthly_salary": _plain_number(row.monthly_salary), "valid_from": row.valid_from.isoformat()} for row in history],
     }
 
 
@@ -646,18 +651,9 @@ async def preview_monthly_payroll_profile(employee_id: int, data: MonthlyPayroll
     working_dates = [day for day, kind in calendar_days.items() if kind is CalendarDayType.WORKING]
     if not working_dates:
         raise HTTPException(status_code=422, detail={"code": "payroll_calendar_has_no_working_days"})
-    old_history = list((await db.execute(select(MonthlyPayrollSalaryHistory).join(MonthlyPayrollProfile, MonthlyPayrollProfile.id == MonthlyPayrollSalaryHistory.profile_id).where(MonthlyPayrollProfile.organization_id == actor.organization_id, MonthlyPayrollProfile.employee_id == employee_id, MonthlyPayrollSalaryHistory.valid_from <= period_end).order_by(MonthlyPayrollSalaryHistory.valid_from))).scalars())
-    salary_changes = {row.valid_from: Decimal(str(row.monthly_salary)) for row in old_history}
-    salary_changes[data.effective_from] = data.base_salary
-    ordered_changes = sorted(salary_changes.items())
-    segments: list[SalarySegment] = []
-    for index, (effective, salary_amount) in enumerate(ordered_changes):
-        next_effective = ordered_changes[index + 1][0] if index + 1 < len(ordered_changes) else period_end + timedelta(days=1)
-        days = sum(1 for day in working_dates if effective <= day < next_effective)
-        if days:
-            segments.append(SalarySegment(salary_amount, days, Decimal(days) * data.daily_norm_hours))
-    if not segments:
-        segments = [SalarySegment(data.base_salary, len(working_dates), Decimal(len(working_dates)) * data.daily_norm_hours)]
+    # «Бүтэн сарын тооцоо»: a full month at the salary being entered. A
+    # mid-month effective date is split only in the actual payroll run.
+    segments = [SalarySegment(data.base_salary, len(working_dates), Decimal(len(working_dates)) * data.daily_norm_hours)]
     profile = PayrollProfile(
         base_salary=data.base_salary, salary_type=data.salary_type,
         meal_allowance=data.meal_allowance, commute_allowance=data.commute_allowance,
