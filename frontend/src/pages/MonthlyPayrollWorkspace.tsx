@@ -61,7 +61,7 @@ function MonthlyMonthBoard() {
 
   return <MonthlyShell canAdminister={Boolean(capabilities.administer)}>
     {reasonDialog}
-    <header className="payroll-v2-page-title mp-page-head"><div><span className="payroll-v2-kicker">ЦАЛИН · САРЫН ЦАЛИН</span><h1>{monthTitle(selected)}</h1><p>{month ? `Дүрмийн хувилбар v${String(month.rule_snapshot.version || '')} · ${month.status === 'closed' ? 'Хаасан' : 'Нээлттэй'}` : 'Энэ сарын цалингийн бүртгэл нээгдээгүй.'}</p></div><MonthStepper value={selected} onChange={setSelected} /></header>
+    <header className="payroll-v2-page-title mp-page-head"><div><h1>{monthTitle(selected)}</h1><p>{month ? `Дүрмийн хувилбар v${String(month.rule_snapshot.version || '')} · ${month.status === 'closed' ? 'Хаасан' : 'Нээлттэй'}` : 'Энэ сарын цалингийн бүртгэл нээгдээгүй.'}</p></div><MonthStepper value={selected} onChange={setSelected} /></header>
     {!month && <section className="payroll-v2-stage-card mp-open-month"><WalletCards size={28} /><div><h2>Сарыг нээх</h2><p>Сар нээхэд тухайн өдрийн хуулийн дүрэм, ажлын календарь хадгалагдана. Календарийг урьдчилан <Link to="/erp/payroll/monthly/settings">Тохиргоо</Link> хэсэгт шалгана уу.</p></div><button className="payroll-v2-button primary" disabled={!capabilities.create || createMonth.isPending} onClick={open}><Plus size={15} />Сар нээх</button></section>}
     {month && <>
       <section className="payroll-v2-section">
@@ -193,7 +193,7 @@ function MonthlyArchive() {
   const caps = usePayrollCapabilities()
   const [openMonth, setOpenMonth] = useState<number | null>(null)
   return <MonthlyShell canAdminister={Boolean(caps.data?.capabilities.administer)}>
-    <header className="payroll-v2-page-title"><div><span className="payroll-v2-kicker">ЦАЛИН · АРХИВ</span><h1>Архив</h1><p>Хаасан сарын өөрчлөгдөхгүй хуулбар: бодолт, мөр, засварын түүх, хадгалсан Excel.</p></div></header>
+    <header className="payroll-v2-page-title"><div><h1>Архив</h1><p>Хаасан сарын өөрчлөгдөхгүй хуулбар: бодолт, мөр, засварын түүх, хадгалсан Excel.</p></div></header>
     <section className="payroll-v2-section"><div className="mp-table-wrap"><table className="mp-table compact"><thead><tr><th className="mp-text">Сар</th><th>Ажилтан</th><th>Олговол зохих</th><th>Нийт зардал</th><th>Хувилбар</th><th>Бодолт (төлсөн / нийт)</th><th /></tr></thead><tbody>
       {index.data?.map((item) => <tr key={item.archive_id}><th className="mp-text">{item.month}</th><td className="mp-num">{item.headcount}</td><td className="mp-num">{formatAmount(item.gross)}</td><td className="mp-num">{formatAmount(item.company_cost)}</td><td className="mp-num">v{item.version}</td><td className="mp-num">{item.runs_paid} / {item.runs}</td><td><button className="payroll-v2-button compact secondary" aria-expanded={openMonth === item.month_id} onClick={() => setOpenMonth(openMonth === item.month_id ? null : item.month_id)}>{openMonth === item.month_id ? 'Хураах' : 'Нээх'}</button> <Link to={`/erp/payroll?month=${item.month}`}>Самбар</Link></td></tr>)}
       {!index.isLoading && !index.data?.length && <tr><td colSpan={7} className="mp-empty">Хаасан сар алга.</td></tr>}
@@ -235,7 +235,7 @@ function MonthlyReports() {
   const columns = rows.length ? Array.from(new Set(rows.flatMap((row) => Object.keys(row)))) : []
   const display = (key: string, value: unknown) => key === 'run_type' ? (value === 'advance' ? 'Урьдчилгаа' : 'Сүүл цалин') : key === 'bucket' ? BUCKETS[String(value)] || String(value) : key === 'hours' ? formatHours(value) : TEXT_COLUMNS.has(key) ? String(value ?? '') : value === undefined || value === null || value === '' ? '' : formatAmount(value)
   return <MonthlyShell canAdminister={Boolean(caps.data?.capabilities.administer)}>
-    <header className="payroll-v2-page-title"><div><span className="payroll-v2-kicker">ЦАЛИН · ТАЙЛАН</span><h1>Цалингийн тайлан</h1><p>Хаасан сарууд архивын өгөгдлөөс, нээлттэй сарууд одоогийн бодолтоос уншина.</p></div></header>
+    <header className="payroll-v2-page-title"><div><h1>Цалингийн тайлан</h1><p>Хаасан сарууд архивын өгөгдлөөс, нээлттэй сарууд одоогийн бодолтоос уншина.</p></div></header>
     <section className="payroll-v2-section"><div className="mp-register-toolbar">
       <label>Тайлан<select value={kind} onChange={(event) => setKind(event.target.value as MonthlyPayrollReportKind)}>{Object.entries(REPORT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label>Эхлэх сар<input type="month" value={fromMonth} onChange={(event) => setFromMonth(event.target.value)} /></label>

@@ -91,7 +91,7 @@ export function MonthlyPayrollDashboard() {
     ['БНДШ', totals.employer_shi], ['Бусад суутгал', totals.other_deductions], ['Сүүл цалин', totals.net_pay], ['Нийт зардал', totals.company_cost, 'Олговол зохих + БНДШ'],
   ] : []
   return <MonthlyShell canAdminister={Boolean(caps.data?.capabilities.administer)} actions={<Link className="payroll-v2-button primary" to={`/erp/payroll/monthly?month=${month}`}><Plus size={15} />Шинэ бодолт</Link>}>
-    <header className="payroll-v2-page-title mp-page-head"><div><span className="payroll-v2-kicker">ЦАЛИН · ХЯНАХ САМБАР</span><h1>{monthTitle(month)}</h1><p>{data?.status === 'closed' ? 'Хаасан сар — архивын өгөгдөл.' : data?.month_id ? 'Нээлттэй сар.' : 'Энэ сард цалингийн бүртгэл нээгдээгүй.'}</p></div><MonthStepper value={month} onChange={setMonth} /></header>
+    <header className="payroll-v2-page-title mp-page-head"><div><h1>{monthTitle(month)}</h1><p>{data?.status === 'closed' ? 'Хаасан сар — архивын өгөгдөл.' : data?.month_id ? 'Нээлттэй сар.' : 'Энэ сард цалингийн бүртгэл нээгдээгүй.'}</p></div><MonthStepper value={month} onChange={setMonth} /></header>
     {dashboard.isLoading ? <p className="payroll-v2-loading">Самбар ачаалж байна…</p> : dashboard.error ? <p role="alert">{requestError(dashboard.error)}</p> : data && <>
       <section className="payroll-v2-metric-grid compact mp-kpis">
         <article><span>Урьдчилгаа (төлсөн / төлөвлөсөн)</span><strong>{formatMoney(data.advance.paid)}</strong><small>{formatMoney(data.advance.planned)} төлөвлөсөн</small></article>

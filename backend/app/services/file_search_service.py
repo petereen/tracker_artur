@@ -351,7 +351,12 @@ async def can_read_policy(db: AsyncSession, principal: FileSearchPrincipal, poli
 
 async def can_edit_policy(db: AsyncSession, principal: FileSearchPrincipal, policy: ResourcePolicy | None) -> bool:
     """Return whether this principal has an explicit edit grant on a resource."""
-    if policy is None:
+    # The standard policy seeded for every company file is internal. It cannot
+    # carry a meaningful edit grant, so avoid querying ResourceGrant for the
+    # common listing path. Besides reducing per-item queries, this keeps
+    # ordinary browsing safe while a deployment is catching up to the grant
+    # level migration.
+    if policy is None or policy.classification in {"internal", "public_link_safe"}:
         return False
     grants = list((await db.execute(select(ResourceGrant).where(
         ResourceGrant.policy_id == policy.id,

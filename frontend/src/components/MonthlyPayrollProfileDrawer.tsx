@@ -15,6 +15,10 @@ const localToday = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 const daysFor = (frequency: MonthlyPayrollProfilePayload['payment_frequency']) => frequency === 'MONTHLY' ? [25] : frequency === 'BIWEEKLY' ? [10, 25] : [7, 14, 21, 28]
+const requestMessage = (error: any, fallback: string) => {
+  const detail = error?.response?.data?.detail
+  return (typeof detail === 'string' ? detail : detail?.message) || fallback
+}
 const money = (value?: string) => `${new Intl.NumberFormat('mn-MN', { maximumFractionDigits: 0 }).format(Number(value || 0))} ₮`
 const emptyForm = (): MonthlyPayrollProfilePayload => ({
   base_salary: '', effective_from: localToday(), salary_type: 'PRORATION', meal_allowance: '0', commute_allowance: '0',
@@ -73,7 +77,7 @@ export function MonthlyPayrollProfileDrawer({ employee, onClose }: { employee: {
         <div><span className="eyebrow">ЦАЛИНГИЙН ТОХИРГОО</span><h2 id="monthly-payroll-title">{employee.name}</h2><p>Хүчинтэй огноотой цалингийн нөхцөл</p></div>
         <button type="button" onClick={onClose} aria-label="Хаах"><X size={18} /></button>
       </header>
-      {saved.isLoading ? <p className="hr-payroll-loading">Ажилтны цалингийн тохиргоог ачаалж байна…</p> : <form className="monthly-payroll-form" onSubmit={submit}>
+      {saved.isLoading ? <p className="hr-payroll-loading">Ажилтны цалингийн тохиргоог ачаалж байна…</p> : saved.isError ? <div className="hr-payroll-loading" role="alert"><p>{requestMessage(saved.error, 'Ажилтны цалингийн тохиргоог ачаалж чадсангүй.')}</p><button type="button" className="secondary-action" onClick={() => saved.refetch()}>Дахин ачаалах</button></div> : <form className="monthly-payroll-form" onSubmit={submit}>
         <section className="monthly-payroll-section">
           <div className="monthly-payroll-section-title"><Banknote size={18} /><div><h3>Үндсэн нөхцөл</h3><p>Өөрчлөлт бүр цалингийн түүхэд хадгалагдана.</p></div></div>
           <label>Үндсэн цалин (₮)<input required type="number" min="0" step="1" value={form.base_salary} onChange={(event) => setForm({ ...form, base_salary: event.target.value })} /></label>
@@ -100,7 +104,7 @@ export function MonthlyPayrollProfileDrawer({ employee, onClose }: { employee: {
 
         <section className="monthly-payroll-preview">
           <div className="monthly-payroll-preview-head"><div><span>БҮТЭН САРЫН ТООЦОО</span><h3>{preview.data?.month || form.effective_from.slice(0, 7)}</h3></div><ShieldCheck size={20} /></div>
-          {!form.base_salary ? <p>Үндсэн цалин оруулбал тооцооны урьдчилсан дүн гарна.</p> : preview.isFetching ? <p>Тооцоолж байна…</p> : preview.data ? <><div className="monthly-payroll-estimate-grid"><span>Нийт цалин<strong>{money(preview.data.gross)}</strong></span><span>Ажилтны НДШ<strong>{money(preview.data.employee_shi)}</strong></span><span>Татварын суурь<strong>{money(preview.data.taxable_income)}</strong></span><span>ХХОАТ хөнгөлөлт<strong>{money(preview.data.relief)}</strong></span><span>ХХОАТ<strong>{money(preview.data.pit)}</strong></span><span className="take-home">Гарт олгох<strong>{money(preview.data.net_pay)}</strong></span></div>{preview.data.advance_schedule.length > 0 && <div className="monthly-payroll-advance-estimates"><strong>Урьдчилгааны хуваарь</strong>{preview.data.advance_schedule.map((row) => <span key={row.pay_date}>{row.pay_date} <b>{money(row.estimated_amount)}</b></span>)}</div>}</> : <p>{preview.error ? 'Тооцооны дүрэм олдсонгүй. Татварын тохиргоог шалгана уу.' : 'Тооцооны дүн бэлдэж байна.'}</p>}
+          {!form.base_salary ? <p>Үндсэн цалин оруулбал тооцооны урьдчилсан дүн гарна.</p> : preview.isFetching ? <p>Тооцоолж байна…</p> : preview.data ? <><div className="monthly-payroll-estimate-grid"><span>Нийт цалин<strong>{money(preview.data.gross)}</strong></span><span>Ажилтны НДШ<strong>{money(preview.data.employee_shi)}</strong></span><span>Татварын суурь<strong>{money(preview.data.taxable_income)}</strong></span><span>ХХОАТ хөнгөлөлт<strong>{money(preview.data.relief)}</strong></span><span>ХХОАТ<strong>{money(preview.data.pit)}</strong></span><span className="take-home">Гарт олгох<strong>{money(preview.data.net_pay)}</strong></span></div>{preview.data.advance_schedule.length > 0 && <div className="monthly-payroll-advance-estimates"><strong>Урьдчилгааны хуваарь</strong>{preview.data.advance_schedule.map((row) => <span key={row.pay_date}>{row.pay_date} <b>{money(row.estimated_amount)}</b></span>)}</div>}</> : <p>{preview.error ? requestMessage(preview.error, 'Тооцоолж чадсангүй. Татварын тохиргоог шалгана уу.') : 'Тооцооны дүн бэлдэж байна.'}</p>}
         </section>
 
         <section className="monthly-payroll-section monthly-payroll-bank">

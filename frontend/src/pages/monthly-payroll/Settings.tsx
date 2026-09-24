@@ -15,7 +15,7 @@ export function MonthlyPayrollSettingsPage() {
   const { year, month } = parseMonthKey(calendarMonth)
   if (caps.data && !caps.data.capabilities.administer) return <MonthlyShell><p className="mp-empty">Цалингийн тохиргоог зөвхөн админ өөрчилнө.</p></MonthlyShell>
   return <MonthlyShell canAdminister>
-    <header className="payroll-v2-page-title"><div><span className="payroll-v2-kicker">ЦАЛИН · ТОХИРГОО</span><h1>Цалингийн тохиргоо</h1><p>Байгууллагын тохиргоо, хуулийн дүрмийн хувилбар, ажлын календарь. Нээсэн сарууд өөрийн хуулбарыг хадгална.</p></div></header>
+    <header className="payroll-v2-page-title"><div><h1>Цалингийн тохиргоо</h1><p>Байгууллагын тохиргоо, хуулийн дүрмийн хувилбар, ажлын календарь. Нээсэн сарууд өөрийн хуулбарыг хадгална.</p></div></header>
     <MonthlySettingsPanel />
     <MonthlyRuleSetEditor />
     <section className="payroll-v2-stage-card"><div className="payroll-v2-section-head"><h2>Ажлын календарь</h2><MonthStepper value={calendarMonth} onChange={setCalendarMonth} /></div><MonthlyCalendarEditor year={year} monthNumber={month} /></section>

@@ -2260,8 +2260,6 @@ class ERPParty(Base):
     contacts = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     addresses = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     custom = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
-    definition_version = Column(Integer, nullable=False, server_default="1", default=1)
-    workflow_state = Column(String(64), nullable=False, server_default="draft", default="draft")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -2603,6 +2601,8 @@ class ERPDocument(Base):
     cancelled_at = Column(DateTime(timezone=True))
     archived_at = Column(DateTime(timezone=True))
     archived_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    definition_version = Column(Integer, nullable=False, server_default="1", default=1)
+    workflow_state = Column(String(64), nullable=False, server_default="draft", default="draft")
     version = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

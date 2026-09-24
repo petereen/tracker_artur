@@ -26,6 +26,14 @@ def test_erp_schema_registers_tenant_scoped_configurable_records():
     assert Base.metadata.tables["erp_general_ledger_entries"].c.document_id.nullable is False
 
 
+def test_erp_workflow_columns_live_on_documents_like_the_migration():
+    # d5e6f7g8h9i0 adds these to erp_documents only; mapping them on erp_parties
+    # broke every party query and the ERP dashboard's pending-approval count.
+    documents, parties = Base.metadata.tables["erp_documents"].c, Base.metadata.tables["erp_parties"].c
+    assert {"definition_version", "workflow_state"} <= set(documents.keys())
+    assert not {"definition_version", "workflow_state"} & set(parties.keys())
+
+
 def test_erp_module_visibility_defaults_off_and_ignores_unknown_keys():
     assert module_settings({}) == {module: False for module in ERP_MODULES}
     settings = module_settings({"erp_modules": {"stock": True, "unknown": True}})
