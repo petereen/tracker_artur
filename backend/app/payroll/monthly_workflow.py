@@ -35,7 +35,7 @@ from .monthly_exports import build_run_workbook
 from .monthly_engine import (
     AdvanceBasis, AllowanceBasis, CalendarDayType, PayrollProfile, PayrollRunType, PayrollRules, apply_computed_overrides,
     SalarySegment, amount, calculate_monthly_run, classify_work_hours, default_2026_rules, month_calendar,
-    overtime_day_lines,
+    overtime_day_lines, whole_tugrik,
 )
 
 
@@ -43,7 +43,7 @@ router = APIRouter()
 # «Урьдчилгаа бодоогүй» (advance_not_calculated) is a warning by design: the
 # accountant may knowingly settle a worker whose advance run was never made.
 BLOCKING_ROW_WARNINGS = {"negative_final_pay", "profile_missing", "salary_history_missing_or_incomplete", "row_flagged", "advance_changed", "advance_not_due", "advance_not_positive"}
-TIME_INPUT_KEYS = ("worked_normal_hours", "worked_days", "worked_to_date_hours", "projected_remaining_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")
+TIME_INPUT_KEYS = ("worked_normal_hours", "worked_days", "worked_to_date_hours", "worked_days_to_date", "projected_remaining_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")
 
 
 class MonthInput(BaseModel):
@@ -879,7 +879,7 @@ async def _attendance_inputs(db: AsyncSession, organization_id: int, employee_id
         remaining_hours = daily_norm_hours * remaining_days
         worked_hours = normal_hours + remaining_hours
         worked_days += remaining_days
-    return {"worked_normal_hours": _plain_value(worked_hours) if cutoff else str(worked_hours), "worked_days": str(worked_days), "worked_to_date_hours": str(normal_hours), "projected_remaining_hours": _plain_value(remaining_hours), "elapsed_planned_days": planned_days_to_cutoff, "overtime_hours": {key: str(value) for key, value in overtime.items()}, "day_lines": lines, "missing_dates": normalized["missing_dates"], "approved_leave_days": normalized["days"], "time_source": "confirmed_hr_attendance_or_approved_worktime" if lines else "manual"}
+    return {"worked_normal_hours": _plain_value(worked_hours) if cutoff else str(worked_hours), "worked_days": str(worked_days), "worked_to_date_hours": str(normal_hours), "worked_days_to_date": str(len(lines)), "projected_remaining_hours": _plain_value(remaining_hours), "elapsed_planned_days": planned_days_to_cutoff, "overtime_hours": {key: str(value) for key, value in overtime.items()}, "day_lines": lines, "missing_dates": normalized["missing_dates"], "approved_leave_days": normalized["days"], "time_source": "confirmed_hr_attendance_or_approved_worktime" if lines else "manual"}
 
 
 async def _approved_advances(db: AsyncSession, run: MonthlyPayrollRun, employee_id: int, *, through_date: date | None = None) -> tuple[list[str], list[str]]:
@@ -1041,6 +1041,7 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         worked_to_date_hours=inputs.get("worked_to_date_hours") or 0,
         elapsed_planned_days=int(inputs.get("elapsed_planned_days") or 0), salary_segments=segment_objects or None,
         worked_days=inputs["worked_days"], allowance_planned_days=employed_days,
+        worked_days_to_date=inputs.get("worked_days_to_date"),
     )
     result_data = _json_value(asdict(result))
     result_data["advance_run_ids"] = advance_ids
@@ -1119,6 +1120,12 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         )
         projection_data = _json_value(asdict(projection))
         projection_data.pop("run_type", None)
+        # Advances are payments against net pay, not deductions: Суутгалын дүн
+        # here is НДШ + ХХОАТ + бусад, so Суутгалын дүн + Сүүл цалин = олговол
+        # зохих (company salary expense). Advances are shown on their own.
+        projection_data["total_deductions"] = str(whole_tugrik(projection.employee_shi + projection.pit + projection.other_deductions))
+        projection_data["net_pay"] = str(whole_tugrik(projection.gross - amount(projection_data["total_deductions"])))
+        projection_data["net_after_advances"] = str(projection.net_pay)
         projection_data["prior_advances"] = str(sum((amount(value) for value in prior_advances), Decimal("0")))
         projection_data["overtime_lines"] = overtime_day_lines(
             day_lines=inputs.get("day_lines") or [], aggregate_hours=inputs.get("overtime_hours") or {},

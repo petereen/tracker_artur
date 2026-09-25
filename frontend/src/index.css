@@ -12505,3 +12505,12 @@ html.capacitor-native .native-boot-error {
 .contract-expiry-reminders input { width: auto; accent-color: var(--color-accent); }
 .contract-approval-expiry { display: grid; gap: 6px; }
 .contract-approval-expiry input { width: 100%; border: 1px solid var(--color-border); border-radius: 9px; padding: 9px 10px; background: var(--color-surface2); color: var(--color-text); font: inherit; }
+.archive-expiry-settings { display: grid; gap: 10px; padding: 0 22px 18px; }
+.archive-expiry-settings h3 { margin: 0; font-size: 14px; }
+.archive-expiry-settings > label { display: grid; gap: 6px; color: var(--color-muted); font-size: 12px; }
+.archive-expiry-settings input[type="date"] { border: 1px solid var(--color-border); border-radius: 8px; padding: 9px; background: var(--color-surface2); color: var(--color-text); font: inherit; }
+.archive-expiry-settings fieldset { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 9px 11px; border: 1px solid var(--color-border); border-radius: 8px; }
+.archive-expiry-settings legend { padding: 0 4px; color: var(--color-muted); font-size: 11px; }
+.archive-expiry-settings fieldset label { display: flex; align-items: center; gap: 5px; color: var(--color-muted); font-size: 11px; }
+.archive-expiry-settings fieldset input { accent-color: var(--color-accent); }
+.archive-expiry-settings > button { justify-self: start; }

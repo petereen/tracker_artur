@@ -248,6 +248,8 @@ class ContractArchiveEntry(Base):
     scan_status = Column(String(16), nullable=False, server_default="pending", default="pending")
     review_status = Column(String(16), nullable=False, server_default="approved", default="approved")
     review_reason = Column(Text)
+    expiry_on = Column(Date)
+    expiry_reminder_days = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     author_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))

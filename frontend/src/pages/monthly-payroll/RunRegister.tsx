@@ -248,11 +248,11 @@ export function RunRegister({ runId }: { runId: number }) {
     { key: 'base_salary', label: 'Үндсэн цалин', kind: 'money', value: (row) => row.profile.base_salary },
   ]
   // Plan §7.2 Excel order. Advance rows show the same month columns from their
-  // full-month projection, so Суутгалын дүн = урьдчилгаа + НДШ + ХХОАТ there too.
+  // full-month projection, so Суутгалын дүн = НДШ + ХХОАТ there (advances are shown separately, not deducted).
   const workedTitle = (row: Row) => isFinal ? undefined : `${data?.cutoff_date || 'Таслах өдөр'} хүртэл ${formatHours(row.inputs.worked_to_date_hours)} цаг + үлдсэн ${formatHours(row.inputs.projected_remaining_hours)} цаг`
   const advanceTitle = (row: Row) => isFinal
     ? ((row.result.advance_lines || []).length ? `${row.result.advance_lines.length} батлагдсан урьдчилгааны бодолтоос` : undefined)
-    : (toNumber(monthFigures(row).prior_advances) > 0 ? `Өмнөх урьдчилгаа ${formatAmount(monthFigures(row).prior_advances)} ₮ суутгалын дүнд орсон` : undefined)
+    : (toNumber(monthFigures(row).prior_advances) > 0 ? `Өмнөх урьдчилгаа ${formatAmount(monthFigures(row).prior_advances)} ₮ сарын урьдчилгаанд орсон` : undefined)
   const monthColumns: Column[] = [
     { key: 'planned_days', label: 'Өдөр', group: 'Ажиллах', kind: 'days', value: (row) => row.result.planned_days ?? '—' },
     { key: 'planned_hours', label: 'Цаг', group: 'Ажиллах', kind: 'hours', value: (row) => row.result.planned_hours },

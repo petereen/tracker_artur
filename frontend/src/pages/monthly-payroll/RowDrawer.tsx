@@ -44,7 +44,7 @@ function explain(row: MonthlyPayrollRunRow, month: MonthlyPayrollMonth, isFinal:
   const basis = row.result.advance_basis
   const advanceLine: Explanation[] = isFinal ? [] : [{
     label: 'Энэ бодолтын урьдчилгаа', manual: (row.result.computed_overrides || []).includes('advance') || Boolean(inputs.fixed_advance || inputs.advance_percent),
-    formula: basis === 'PERCENT' ? 'Үндсэн цалин × хувь' : basis === 'FIXED' ? 'HR-ийн оруулсан дүн' : 'Таслах өдөр хүртэл олсон цалин − өмнө батлагдсан урьдчилгаа',
+    formula: basis === 'PERCENT' ? 'Үндсэн цалин × хувь' : basis === 'FIXED' ? 'HR-ийн оруулсан дүн' : 'Таслах өдөр хүртэл олсон цалин + (хоол + унаа) × өдөр − өмнө батлагдсан урьдчилгаа',
     inputs: basis === 'PERCENT' ? `${formatAmount(profile.base_salary)} × ${row.result.advance_value}%` : basis === 'FIXED' ? formatAmount(row.result.advance_value) : `${formatHours(inputs.worked_to_date_hours)} цаг × ${formatAmount(row.result.hourly_rate)}`,
     value: formatAmount(row.result.advance),
   }]
@@ -73,7 +73,7 @@ function explain(row: MonthlyPayrollRunRow, month: MonthlyPayrollMonth, isFinal:
       ? { label: 'Урьдчилгаа', manual: overrides.includes('advance'), formula: 'Батлагдсан урьдчилгааны бодолтуудын нийлбэр', inputs: (result.advance_lines || []).map((line: any) => `${line.pay_date || '#' + line.run_id}: ${formatAmount(line.amount)}`).join(' + ') || 'Батлагдсан урьдчилгаа алга', value: formatAmount(result.advance) }
       : { label: 'Сарын урьдчилгаа', manual: false, formula: 'Өмнө батлагдсан урьдчилгаа + энэ бодолтын урьдчилгаа', inputs: `${formatAmount(result.prior_advances)} + ${formatAmount(row.result.advance)}`, value: formatAmount(result.advance) },
     { label: 'Бусад суутгал', manual: overrides.includes('other_deductions'), formula: 'Суутгалын мөрүүдийн нийлбэр (татварын дараа)', inputs: (inputs.other_deductions || []).map((line: any) => `${line.type}: ${formatAmount(line.amount)}`).join(' + ') || '—', value: formatAmount(result.other_deductions) },
-    { label: 'Суутгалын дүн', manual: false, formula: 'Урьдчилгаа + ХХОАТ + НДШ + бусад суутгал', inputs: `${formatAmount(result.advance)} + ${formatAmount(result.pit)} + ${formatAmount(result.employee_shi)} + ${formatAmount(result.other_deductions)}`, value: formatAmount(result.total_deductions) },
+    { label: 'Суутгалын дүн', manual: false, formula: isFinal ? 'Урьдчилгаа + ХХОАТ + НДШ + бусад суутгал' : 'ХХОАТ + НДШ (урьдчилгаа тусдаа; цалингийн зардалд орно)', inputs: isFinal ? `${formatAmount(result.advance)} + ${formatAmount(result.pit)} + ${formatAmount(result.employee_shi)} + ${formatAmount(result.other_deductions)}` : `${formatAmount(result.pit)} + ${formatAmount(result.employee_shi)}`, value: formatAmount(result.total_deductions) },
     { label: isFinal ? 'Сүүл цалин' : 'Сүүл цалин (тооцоолсон)', manual: false, formula: 'Олговол зохих − суутгалын дүн', inputs: `${formatAmount(result.gross)} − ${formatAmount(result.total_deductions)}`, value: formatAmount(result.net_pay) },
     { label: 'БНДШ', manual: overrides.includes('employer_shi'), formula: 'НДШ суурь × байгууллагын хувь', inputs: `${formatAmount(result.shi_base)} × (${employerRates.map(([code, value]) => `${FUNDS[code] || code} ${formatHours(toNumber(value) * 100)}%`).join(' + ')})`, value: formatAmount(result.employer_shi) },
   ]

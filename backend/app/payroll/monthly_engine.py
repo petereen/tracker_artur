@@ -253,6 +253,7 @@ def calculate_monthly_run(
     salary_segments: Sequence[SalarySegment] | None = None,
     worked_days: Decimal | int | str = ZERO,
     allowance_planned_days: int | None = None,
+    worked_days_to_date: Decimal | int | str | None = None,
 ) -> PayrollRunResult:
     """Calculate an advance or final run from resolved worker and calendar inputs."""
     run_type = PayrollRunType(run_type)
@@ -278,6 +279,14 @@ def calculate_monthly_run(
             earned = whole_tugrik(amount(profile.base_salary) / planned_hours * amount(worked_to_date_hours))
         else:
             earned = whole_tugrik(amount(profile.base_salary) * Decimal(elapsed_planned_days) / Decimal(planned_days))
+        # Meal + commute are daily rates: (meal + commute) x days of the period so far.
+        if profile.allowance_basis is not AllowanceBasis.MONTHLY:
+            rate = amount(profile.meal_allowance) + amount(profile.commute_allowance)
+            if profile.allowance_basis is AllowanceBasis.WORKED_DAYS and worked_days_to_date is not None:
+                days = max(ZERO, amount(worked_days_to_date))
+            else:
+                days = Decimal(elapsed_planned_days)
+            earned += whole_tugrik(rate * days)
         previous = sum((whole_tugrik(value) for value in prior_approved_advances), ZERO)
         return PayrollRunResult(run_type=run_type, advance=max(ZERO, whole_tugrik(earned - previous)))
 

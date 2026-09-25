@@ -134,6 +134,15 @@ class ArchiveAccessInput(BaseModel):
 class ArchiveEntryPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=240)
     category: str | None = Field(default=None, max_length=240)
+    expiry_on: date | None = None
+    expiry_reminder_days: list[int] | None = Field(default=None, max_length=10)
+
+    @field_validator("expiry_reminder_days")
+    @classmethod
+    def validate_expiry_reminders(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and any(day < 1 or day > 365 for day in value):
+            raise ValueError("Expiry reminders must be between 1 and 365 days")
+        return sorted(set(value)) if value is not None else value
 
 
 class ArchiveReviewInput(BaseModel):
@@ -693,7 +702,7 @@ async def confirm_contract_final(public_id: UUID, db: AsyncSession = Depends(get
     contract.signed_at = item.confirmed_at
     contract.status = "SIGNED_AND_STAMPED"
     contract.version += 1
-    archive_entry = ContractArchiveEntry(organization_id=actor.organization_id, source="signed_contract", contract_id=contract.id, contract_file_id=item.id, name=item.filename, category=_archive_folder_category(contract.document_type), content_type=item.content_type, size=item.size, checksum=item.checksum, scan_status=item.scan_status, review_status="pending", created_by_account_id=actor.account_id, author_account_id=contract.author_account_id)
+    archive_entry = ContractArchiveEntry(organization_id=actor.organization_id, source="signed_contract", contract_id=contract.id, contract_file_id=item.id, name=item.filename, category=_archive_folder_category(contract.document_type), content_type=item.content_type, size=item.size, checksum=item.checksum, scan_status=item.scan_status, review_status="pending", expiry_on=contract.effective_end_on, expiry_reminder_days=contract.expiry_reminder_days or [], created_by_account_id=actor.account_id, author_account_id=contract.author_account_id)
     db.add(archive_entry)
     await db.flush()
     event = await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="signed_and_archived", version=contract.version, after={"status": contract.status, "file_id": item.id, "archive_entry_id": archive_entry.id, "archive_review_status": "pending"})
@@ -906,6 +915,8 @@ async def _archive_entry_out(
         "scan_status": entry.scan_status,
         "review_status": entry.review_status,
         "review_reason": entry.review_reason,
+        "expiry_on": entry.expiry_on,
+        "expiry_reminder_days": entry.expiry_reminder_days or [],
         "signing_status": "Гарын үсэг зурсан" if entry.source == "signed_contract" else "Гараар байршуулсан",
         "author": author,
         "uploader": uploader,
@@ -1207,15 +1218,19 @@ async def get_contract_archive_entry(entry_id: int, db: AsyncSession = Depends(g
 async def update_contract_archive_entry(entry_id: int, data: ArchiveEntryPatch | None = None, name: str | None = Query(default=None, max_length=240), category: str | None = Query(default=None, max_length=240), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
     data = data or ArchiveEntryPatch(name=name, category=category)
     entry = await _archive_entry(db, entry_id, actor, lock=True)
-    before = {"name": entry.name, "category": entry.category}
+    before = {"name": entry.name, "category": entry.category, "expiry_on": entry.expiry_on, "expiry_reminder_days": entry.expiry_reminder_days or []}
     if data.name is not None:
         entry.name = _archive_name(data.name)
         if entry.folder_id is not None:
             await _archive_ensure_entry_name(db, actor, entry.name, entry.folder_id, exclude_id=entry.id)
     if data.category is not None:
         entry.category = _archive_category(data.category)
+    if "expiry_on" in data.model_fields_set:
+        entry.expiry_on = data.expiry_on
+    if data.expiry_reminder_days is not None:
+        entry.expiry_reminder_days = data.expiry_reminder_days
     try:
-        await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation="updated", before=before, after={"name": entry.name, "category": entry.category})
+        await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation="updated", before=before, after={"name": entry.name, "category": entry.category, "expiry_on": entry.expiry_on, "expiry_reminder_days": entry.expiry_reminder_days or []})
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
