@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Badge,
   Btn,
@@ -35,8 +36,13 @@ const currentMonth = () => new Date().toISOString().slice(0, 7);
 const monthDate = (value: string) => `${value}-01`;
 
 export function PlansPage() {
-  const [tab, setTab] = useState<"ideas" | "company">("ideas");
-  const [month, setMonth] = useState(currentMonth);
+  // Deep links from shared chat cards: /plans?month=YYYY-MM&item=ID | &idea=ID
+  const [searchParams] = useSearchParams();
+  const linkedItemId = Number(searchParams.get("item")) || undefined;
+  const linkedIdeaId = Number(searchParams.get("idea")) || undefined;
+  const linkedMonth = /^\d{4}-\d{2}$/.test(searchParams.get("month") ?? "") ? searchParams.get("month")! : undefined;
+  const [tab, setTab] = useState<"ideas" | "company">(linkedItemId ? "company" : "ideas");
+  const [month, setMonth] = useState(() => linkedMonth ?? currentMonth());
   const [selected, setSelected] = useState<number[]>([]);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [draggedId, setDraggedId] = useState<number | null>(null);
@@ -51,6 +57,16 @@ export function PlansPage() {
   const deleteIdea = useDeletePlanIdea();
   const updateItem = useUpdateCompanyPlanItem();
   const deleteItem = useDeleteCompanyPlanItem();
+  useEffect(() => {
+    if (linkedItemId) setTab("company");
+    else if (linkedIdeaId) setTab("ideas");
+    if (linkedMonth) setMonth(linkedMonth);
+  }, [linkedItemId, linkedIdeaId, linkedMonth]);
+  const linkedId = linkedItemId ? `plan-item-${linkedItemId}` : linkedIdeaId ? `plan-idea-${linkedIdeaId}` : undefined;
+  const linkedLoaded = Boolean(linkedItemId ? companyPlan.data : ideas.data);
+  useEffect(() => {
+    if (linkedId && linkedLoaded) document.getElementById(linkedId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [linkedId, linkedLoaded, tab]);
   const columns = useMemo(
     () =>
       HORIZONS.reduce(
@@ -136,7 +152,7 @@ export function PlansPage() {
               </div>
             )}
             {(ideas.data || []).map((idea) => (
-              <article key={idea.id} className={`plan-idea ${idea.status}`}>
+              <article key={idea.id} id={`plan-idea-${idea.id}`} className={`plan-idea ${idea.status} ${linkedIdeaId === idea.id ? "linked" : ""}`}>
                 {canReview && idea.status === "pending" && (
                   <input
                     aria-label={`${idea.title} сонгох`}
@@ -234,6 +250,8 @@ export function PlansPage() {
               {columns[horizon.id].map((item, index) => (
                 <article
                   key={item.id}
+                  id={`plan-item-${item.id}`}
+                  className={linkedItemId === item.id ? "linked" : undefined}
                   draggable={canReview}
                   onDragStart={() => setDraggedId(item.id)}
                   onDragOver={(event) => event.preventDefault()}

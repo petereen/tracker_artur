@@ -1201,6 +1201,25 @@ export interface CompanyFileChatAttachment {
   download_url: string
 }
 
+export type ChatShareKind = 'task' | 'plan_item' | 'plan_idea' | 'plan_report' | 'contract' | 'report'
+export type ChatShareGroup = 'tasks' | 'plans' | 'contracts' | 'reports'
+
+/** Snapshot of a shared workspace item; `target_url` is present only when this reader may open it. */
+export interface ChatSharedCard {
+  kind: ChatShareKind
+  ref: string
+  group: ChatShareGroup
+  kind_label: string
+  title: string
+  status: string | null
+  status_label: string | null
+  fields: Array<{ label: string; value: string }>
+  excerpt: string | null
+  shared_at?: string
+  can_open?: boolean
+  target_url?: string
+}
+
 export interface ChatMessage {
   id: number
   conversation_id: number
@@ -1208,7 +1227,7 @@ export interface ChatMessage {
   sender_account_id: number | null
   client_nonce: string
   body: string | null
-  action: { type: 'task_action_preview'; payload: Record<string, any> } | null
+  action: { type: 'task_action_preview'; payload: Record<string, any> } | { type: 'shared_item'; payload: ChatSharedCard } | null
   kind: 'text' | 'call'
   call: { call_id: string; call_type: 'audio' | 'video'; outcome: 'completed' | 'missed' | 'declined' | 'canceled' | 'failed'; duration_seconds: number; direction: 'incoming' | 'outgoing'; caller_name: string | null; callee_name: string | null; started_at: string; ended_at: string | null } | null
   attachments: ChatAttachment[]

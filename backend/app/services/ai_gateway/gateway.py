@@ -610,6 +610,35 @@ class AIGateway:
             await asyncio.sleep(delay)
         raise GatewayError("Live model unavailable", kind="network", retryable=True, stage=stage)
 
+    async def generate_text(
+        self,
+        *,
+        instructions: str,
+        input_items: list[dict],
+        model_key: str = "terra",
+        max_output_tokens: int = 2_500,
+    ) -> str:
+        """Single grounded completion without tools, for server-built contexts.
+
+        Callers pass all data the model may use; nothing is fetched here.
+        """
+        config = registry()
+        key = model_key if model_key in config.models else next(iter(config.models))
+        model = config.models[key]
+        payload = {
+            "model": model.id,
+            "instructions": instructions,
+            "input": input_items,
+            "store": False,
+            "max_output_tokens": min(max_output_tokens, model.max_output_tokens),
+            "reasoning": {"effort": model.reasoning_effort},
+        }
+        data = await self._post(payload, model_key=key, stage="answer")
+        text = self._output_text(data)
+        if not text:
+            raise GatewayError("Empty model response", status_code=502, kind="invalid_response", retryable=False, stage="answer")
+        return text
+
     async def _classify_model(self, text: str) -> RoutingDecision:
         if "tasks_write" in self._infer_enterprise_intents(text):
             return RoutingDecision(model_key="luna", reasoning_effort="none", output_format="plain_text", verbosity="low", action_intents=["tasks_write"])

@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Archive, BellOff, Bookmark, Check, CheckCheck, ChevronLeft, Download, FileText, Forward, Info, Menu, MessageCircle, Mic, MoreHorizontal, Paperclip, Pause, Pencil, Pin, Play, Plus, Reply, RotateCcw, Search, Send, Square, Star, Trash2,
+  Archive, ArrowUpRight, BarChart3, BellOff, Bookmark, CalendarRange, Check, CheckCheck, ChevronLeft, Download, FileSignature, FileText, Forward, Info, ListChecks, Lock, Menu, MessageCircle, Mic, MoreHorizontal, Paperclip, Pause, Pencil, Pin, Play, Plus, Reply, RotateCcw, Search, Send, Slash, Square, Star, Trash2,
   UserMinus, X,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { ChatShareItem, ChatShareItemGroups, useChatShareItems, useShareChatItem } from '../api/chatShare'
 import {
-  cancelChatUpload, ChatAttachment, ChatConversation, ChatConversationFilter, ChatIdentity, ChatMessage, CompanyFileChatAttachment, downloadChatAttachment, downloadCompanyFileChatAttachment, uploadChatAttachment, useAcknowledgeChat, useAddChatMembers, useChatContacts,
+  cancelChatUpload, ChatAttachment, ChatConversation, ChatConversationFilter, ChatIdentity, ChatMessage, ChatShareGroup, ChatSharedCard, CompanyFileChatAttachment, downloadChatAttachment, downloadCompanyFileChatAttachment, uploadChatAttachment, useAcknowledgeChat, useAddChatMembers, useChatContacts,
   useChatConversation, useChatConversations, useChatMessageContext, useChatMessages, useChatReceiptDetails, useCreateChatGroup,
   useConfirmAssistantAction, useDeleteChatMessage, useEditChatMessage, useForwardChatMessage, useLeaveChatGroup, useOpenDirectConversation, usePinChatMessage, useReactChatMessage, useRemoveChatMember, useRenameChatGroup, useRejectAssistantAction, useSendChatMessage, useStarChatMessage, useChatSearch, useChatThread, useUpdateChatConversationPreferences,
 } from '../api/enterprise'
@@ -455,6 +456,68 @@ function ForwardDialog({ message, conversations, onClose, onForward }: { message
   return <div className="chat-modal-backdrop"><section ref={modalRef} className="chat-modal" role="dialog" aria-modal="true" aria-label="Мессеж дамжуулах"><header><div><span className="eyebrow">FORWARD</span><h2>Мессеж дамжуулах</h2></div><button className="chat-icon-button" onClick={onClose}><X /></button></header><div className="chat-contact-list">{conversations.map((conversation) => <button key={conversation.public_id} onClick={() => setSelected((items) => items.includes(conversation.public_id) ? items.filter((id) => id !== conversation.public_id) : items.length < 10 ? [...items, conversation.public_id] : items)}><Avatar conversation={conversation} /><span><strong>{conversation.title}</strong><small>{conversation.kind === 'group' ? `${conversation.member_count} гишүүн` : 'Шууд чат'}</small></span><i className={`chat-check ${selected.includes(conversation.public_id) ? 'selected' : ''}`}>{selected.includes(conversation.public_id) && <Check />}</i></button>)}</div><footer><span>{selected.length} сонгосон</span><button className="chat-primary-button" disabled={!selected.length} onClick={() => onForward(selected)}><Forward /> Дамжуулах</button></footer></section></div>
 }
 
+const SHARE_GROUP_ICONS: Record<ChatShareGroup, typeof ListChecks> = { tasks: ListChecks, plans: CalendarRange, contracts: FileSignature, reports: BarChart3 }
+
+/** Parses a composer draft of the form "/query" into the slash-menu search text. */
+export function slashQuery(draft: string): string | null {
+  const match = /^\/([^\n]*)$/.exec(draft)
+  return match ? match[1].trim() : null
+}
+
+function useDebouncedValue<T>(value: T, delay: number) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => { const timer = window.setTimeout(() => setDebounced(value), delay); return () => window.clearTimeout(timer) }, [value, delay])
+  return debounced
+}
+
+function SlashShareMenu({ groups, loading, activeIndex, onHover, onPick, onClose }: {
+  groups: ChatShareItemGroups['groups']
+  loading: boolean
+  activeIndex: number
+  onHover: (index: number) => void
+  onPick: (item: ChatShareItem) => void
+  onClose: () => void
+}) {
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' }) }, [activeIndex])
+  const visible = groups.filter((group) => group.items.length)
+  let index = -1
+  return <div className="chat-slash-menu" role="dialog" aria-label="Хуваалцах зүйл сонгох">
+    <header><span><Slash size={13} />Хуваалцах</span><small>↑↓ сонгох · Enter илгээх · Esc хаах</small><button type="button" className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
+    <div ref={listRef} id="chat-slash-listbox" role="listbox" aria-label="Хуваалцах боломжтой зүйлс">
+      {visible.map((group) => {
+        const Icon = SHARE_GROUP_ICONS[group.key]
+        return <section key={group.key} role="group" aria-label={group.label}>
+          <h4><Icon size={13} />{group.label}<span>{group.items.length}</span></h4>
+          {group.items.map((item) => {
+            index += 1
+            const itemIndex = index
+            return <button type="button" role="option" id={`chat-slash-option-${itemIndex}`} aria-selected={itemIndex === activeIndex} key={`${item.kind}-${item.ref}`} className={itemIndex === activeIndex ? 'active' : ''} onMouseEnter={() => onHover(itemIndex)} onMouseDown={(event) => event.preventDefault()} onClick={() => onPick(item)}>
+              <span><strong>{item.title}</strong><small>{item.kind_label}{item.subtitle ? ` · ${item.subtitle}` : ''}</small></span>
+              {item.status_label && <em className={`chat-share-status ${item.status ?? ''}`}>{item.status_label}</em>}
+            </button>
+          })}
+        </section>
+      })}
+      {!visible.length && <p className="chat-slash-empty">{loading ? 'Хайж байна…' : 'Илэрц олдсонгүй. Өөр үг бичээд үзээрэй.'}</p>}
+    </div>
+  </div>
+}
+
+export function SharedItemCard({ card }: { card: ChatSharedCard }) {
+  const Icon = SHARE_GROUP_ICONS[card.group] ?? FileText
+  const openable = Boolean(card.can_open && card.target_url)
+  const body = <>
+    <header><span className="chat-shared-card-icon"><Icon /></span><span><small>{card.kind_label}</small><strong>{card.title}</strong></span>{card.status_label && <em className={`chat-share-status ${card.status ?? ''}`}>{card.status_label}</em>}</header>
+    {card.fields.length > 0 && <dl>{card.fields.map((field) => <div key={field.label}><dt>{field.label}</dt><dd>{field.value}</dd></div>)}</dl>}
+    {card.excerpt && <p>{card.excerpt}</p>}
+    <footer>{openable ? <span>Байршлыг нээх <ArrowUpRight size={13} /></span> : <span className="locked"><Lock size={12} /> Танд нээх эрх байхгүй</span>}</footer>
+  </>
+  return openable
+    ? <Link to={card.target_url!} className={`chat-shared-card group-${card.group} openable`} aria-label={`${card.kind_label}: ${card.title} — нээх`}>{body}</Link>
+    : <div className={`chat-shared-card group-${card.group}`}>{body}</div>
+}
+
 function ChatTaskDraftActions({
   action,
   status,
@@ -463,7 +526,7 @@ function ChatTaskDraftActions({
   onReject,
   onEdit,
 }: {
-  action: NonNullable<ChatMessage['action']>
+  action: Extract<NonNullable<ChatMessage['action']>, { type: 'task_action_preview' }>
   status?: 'confirmed' | 'rejected'
   busy: boolean
   onConfirm: () => void
@@ -541,6 +604,15 @@ export function ChatWorkspacePage() {
   const preferences = useUpdateChatConversationPreferences(conversationId)
   const orderedMessages = useMemo(() => context.data?.items?.length ? context.data.items : [...(messages.data?.pages ?? [])].reverse().flatMap((page) => page.items), [context.data?.items, messages.data?.pages])
   const isAgentConversation = Boolean(conversation.data?.members.some((member) => member.is_agent))
+  const shareItem = useShareChatItem(conversationId)
+  const [slashDismissed, setSlashDismissed] = useState<string>()
+  const [slashIndex, setSlashIndex] = useState(0)
+  const rawSlashQuery = slashQuery(draft)
+  const slashOpen = rawSlashQuery !== null && !isAgentConversation && !recording && slashDismissed !== draft
+  const debouncedSlashQuery = useDebouncedValue(rawSlashQuery ?? '', 180)
+  const shareItems = useChatShareItems(debouncedSlashQuery, slashOpen)
+  const slashOptions = useMemo(() => (shareItems.data?.groups ?? []).flatMap((group) => group.items), [shareItems.data])
+  useEffect(() => { setSlashIndex(0) }, [debouncedSlashQuery])
 
   useEffect(() => { safeLocalStorage().set('oyuns-chat-sidebar-collapsed', collapsed ? '1' : '0') }, [collapsed])
   useEffect(() => { if (!conversationId && mobile) setDrawerOpen(true) }, [conversationId, mobile])
@@ -663,7 +735,28 @@ export function ChatWorkspacePage() {
     if (body === draft) setDraft('')
     send.mutate({ body: text, client_nonce: nonce, upload_ids: readyUploads.map((item) => item.attachment!.public_id), reply_to_message_id: replyingTo?.id }, { onSuccess: () => { setUploads([]); setReplyingTo(undefined) } })
   }
+  const pickShareItem = (item: ChatShareItem) => {
+    if (!conversationId || shareItem.isPending) return
+    setDraft('')
+    shareItem.mutate({ kind: item.kind, ref: item.ref, client_nonce: crypto.randomUUID() }, {
+      onError: (error) => { setDraft(`/${rawSlashQuery ?? ''}`); toast.error(error.response?.data?.detail || 'Хуваалцаж чадсангүй') },
+    })
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
   const onComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        if (slashOptions.length) setSlashIndex((index) => (index + (event.key === 'ArrowDown' ? 1 : -1) + slashOptions.length) % slashOptions.length)
+        return
+      }
+      if (event.key === 'Escape') { event.preventDefault(); setSlashDismissed(draft); return }
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+        const item = slashOptions[slashIndex]
+        if (item) { event.preventDefault(); pickShareItem(item); return }
+        if (event.key === 'Tab') return
+      }
+    }
     if (!mobile && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit() }
   }
   const sidebarVisible = mobile ? drawerOpen : !collapsed
@@ -674,7 +767,7 @@ export function ChatWorkspacePage() {
     if (body?.trim() && body.trim() !== message.body) edit.mutate({ messageId: message.id, body: body.trim() })
     setActionMessageId(undefined)
   }
-  const actionToken = (message: ChatMessage) => message.action?.payload.action_reference || message.action?.payload.token
+  const actionToken = (message: ChatMessage) => message.action?.type === 'task_action_preview' ? message.action.payload.action_reference || message.action.payload.token : undefined
   const confirmDraft = async (message: ChatMessage) => {
     const token = actionToken(message)
     if (!token) return
@@ -696,7 +789,7 @@ export function ChatWorkspacePage() {
     } catch (error: any) { toast.error(error?.message || 'Ноорог цуцлагдсангүй') }
   }
   const editDraft = (message: ChatMessage) => {
-    const title = message.action?.payload.title || ''
+    const title = message.action?.type === 'task_action_preview' ? message.action.payload.title || '' : ''
     setReplyingTo(message)
     setDraft(`Нооргийг засах${title ? `: “${title}”` : ''}. `)
     setActionMessageId(undefined)
@@ -711,7 +804,8 @@ export function ChatWorkspacePage() {
     {isAgentConversation && !draft && !recording && !uploads.length && <div className="chat-agent-prompts" aria-label="OYUNS Agent-ийн санал болгох асуултууд">
       {['Өнөөдрийн ажлыг нэгтгэ', 'Хугацаа хэтэрсэн даалгавар?', 'Компаний файлаас хайх'].map((prompt) => <button key={prompt} type="button" onClick={() => { setDraft(prompt); requestAnimationFrame(() => textareaRef.current?.focus()) }}>{prompt}</button>)}
     </div>}
-    {recording && <RecordingVisualizer stream={recordingStream} />}{replyingTo && <div className="chat-composer-reply"><Reply /><span><strong>{replyingTo.sender?.name}</strong>{replyingTo.body || 'Хавсралт'}</span><button onClick={() => setReplyingTo(undefined)} aria-label="Хариултыг болих"><X /></button></div>}{uploads.length > 0 && <div className="chat-upload-queue">{uploads.map((item) => <div key={item.localId} className={item.status}><Paperclip /><span><strong>{item.file.name}</strong><small>{item.status === 'failed' ? item.error : item.status === 'ready' ? 'Бэлэн' : `${item.progress}%`}</small>{item.status === 'uploading' && <i style={{ width: `${item.progress}%` }} />}</span>{item.status === 'failed' && <button onClick={() => retryUpload(item)} aria-label={`${item.file.name} дахин upload хийх`}><RotateCcw /></button>}<button onClick={() => discardUpload(item)} aria-label={`${item.file.name} хасах`}><X /></button></div>)}</div>}<div className="chat-composer"><input ref={fileInputRef} type="file" hidden multiple accept="image/*,video/mp4,video/webm,video/quicktime,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md" onChange={(event) => { queueFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = '' }} /><button className="chat-composer-tool" onClick={() => fileInputRef.current?.click()} disabled={uploads.length >= 10} aria-label="Файл хавсаргах"><Paperclip /></button><textarea ref={textareaRef} rows={1} maxLength={4000} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onComposerKeyDown} placeholder={isAgentConversation ? 'OYUNS Agent-д асуултаа бичих…' : 'Мессеж бичих…'} aria-label="Мессеж" /><button className={`chat-composer-tool ${recording ? 'recording' : ''}`} onClick={recording ? stopRecording : startRecording} aria-label={recording ? 'Бичлэг дуусгах' : 'Аудио бичих'}>{recording ? <Square /> : <Mic />}</button><button className="chat-send-button" onClick={() => submit()} disabled={(!draft.trim() && !uploads.some((item) => item.status === 'ready')) || uploads.some((item) => item.status !== 'ready') || send.isPending} aria-label="Илгээх"><Send /></button></div>
+    {slashOpen && <SlashShareMenu groups={shareItems.data?.groups ?? []} loading={shareItems.isFetching} activeIndex={slashIndex} onHover={setSlashIndex} onPick={pickShareItem} onClose={() => { setSlashDismissed(draft); textareaRef.current?.focus() }} />}
+    {recording && <RecordingVisualizer stream={recordingStream} />}{replyingTo && <div className="chat-composer-reply"><Reply /><span><strong>{replyingTo.sender?.name}</strong>{replyingTo.body || 'Хавсралт'}</span><button onClick={() => setReplyingTo(undefined)} aria-label="Хариултыг болих"><X /></button></div>}{uploads.length > 0 && <div className="chat-upload-queue">{uploads.map((item) => <div key={item.localId} className={item.status}><Paperclip /><span><strong>{item.file.name}</strong><small>{item.status === 'failed' ? item.error : item.status === 'ready' ? 'Бэлэн' : `${item.progress}%`}</small>{item.status === 'uploading' && <i style={{ width: `${item.progress}%` }} />}</span>{item.status === 'failed' && <button onClick={() => retryUpload(item)} aria-label={`${item.file.name} дахин upload хийх`}><RotateCcw /></button>}<button onClick={() => discardUpload(item)} aria-label={`${item.file.name} хасах`}><X /></button></div>)}</div>}<div className="chat-composer"><input ref={fileInputRef} type="file" hidden multiple accept="image/*,video/mp4,video/webm,video/quicktime,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md" onChange={(event) => { queueFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = '' }} /><button className="chat-composer-tool" onClick={() => fileInputRef.current?.click()} disabled={uploads.length >= 10} aria-label="Файл хавсаргах"><Paperclip /></button><textarea ref={textareaRef} rows={1} maxLength={4000} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onComposerKeyDown} placeholder={isAgentConversation ? 'OYUNS Agent-д асуултаа бичих…' : 'Мессеж бичих… “/” — даалгавар, төлөвлөгөө, гэрээ, тайлан хуваалцах'} aria-label="Мессеж" aria-expanded={slashOpen} aria-controls={slashOpen ? 'chat-slash-listbox' : undefined} aria-activedescendant={slashOpen && slashOptions.length ? `chat-slash-option-${slashIndex}` : undefined} aria-autocomplete="list" /><button className={`chat-composer-tool ${recording ? 'recording' : ''}`} onClick={recording ? stopRecording : startRecording} aria-label={recording ? 'Бичлэг дуусгах' : 'Аудио бичих'}>{recording ? <Square /> : <Mic />}</button><button className="chat-send-button" onClick={() => submit()} disabled={(!draft.trim() && !uploads.some((item) => item.status === 'ready')) || uploads.some((item) => item.status !== 'ready') || send.isPending} aria-label="Илгээх"><Send /></button></div>
   </div>
 
   return <div className={`chat-workspace ${collapsed && !mobile ? 'sidebar-collapsed' : ''}`}>
@@ -739,7 +833,7 @@ export function ChatWorkspacePage() {
           {!orderedMessages.length && !messages.isLoading && <div className="chat-thread-empty"><MessageCircle /><strong>Чат бичиж харилцан яриагаа эхлүүлээрэй</strong><span>Энд илгээсэн мессежүүд зөвхөн оролцогчдод харагдана.</span></div>}
           {orderedMessages.map((message, index) => message.kind === 'call' ? <CallHistoryMessage key={`${message.id}-${message.client_nonce}`} message={message} /> : <article id={message.id > 0 ? `chat-message-${message.id}` : undefined} key={`${message.id}-${message.client_nonce}`} className={`chat-message ${message.is_mine ? 'mine' : 'theirs'} ${message.status === 'failed' ? 'send-failed' : ''} ${highlightId === message.id ? 'highlighted' : ''}`} style={{ '--chat-message-delay': `${Math.min(index, 7) * 22}ms` } as React.CSSProperties} onContextMenu={(event) => { if (message.id > 0 && !message.is_deleted) { event.preventDefault(); setActionMessageId(message.id) } }}>
             {!message.is_mine && <Avatar identity={message.sender} />}
-            <div className="chat-message-content"><div className="chat-bubble">{!message.is_mine && conversation.data.kind === 'group' && <strong>{message.sender?.name}</strong>}{message.forwarded_sender_name && <small className="chat-forwarded"><Forward /> {message.forwarded_sender_name}-с дамжуулсан</small>}{message.reply_preview && <button className="chat-reply-preview" onClick={() => setThreadRootId(message.thread_root_message_id || message.reply_preview!.id)}><strong>{message.reply_preview.sender_name}</strong><span>{message.reply_preview.is_deleted ? 'Устгасан мессеж' : message.reply_preview.body || 'Хавсралт'}</span></button>}{message.is_deleted ? <p className="chat-deleted-message">Энэ мессеж устгагдсан</p> : <>{message.body && <p>{message.body}</p>}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((attachment) => <ChatAttachmentView key={attachment.public_id} conversationId={conversationId} attachment={attachment} />)}</div> : null}{message.company_file_attachments?.length ? <div className="chat-attachments">{message.company_file_attachments.map((attachment) => <CompanyFileAttachmentView key={attachment.item_id} attachment={attachment} />)}</div> : null}{message.action?.type === 'task_action_preview' && <ChatTaskDraftActions action={message.action} status={resolvedDraftActions[message.id]} busy={confirmAssistantAction.isPending || rejectAssistantAction.isPending} onConfirm={() => void confirmDraft(message)} onReject={() => void rejectDraft(message)} onEdit={() => editDraft(message)} />}</>} </div>
+            <div className="chat-message-content"><div className={`chat-bubble ${message.action?.type === 'shared_item' && !message.is_deleted ? 'has-shared-card' : ''}`}>{!message.is_mine && conversation.data.kind === 'group' && <strong>{message.sender?.name}</strong>}{message.forwarded_sender_name && <small className="chat-forwarded"><Forward /> {message.forwarded_sender_name}-с дамжуулсан</small>}{message.reply_preview && <button className="chat-reply-preview" onClick={() => setThreadRootId(message.thread_root_message_id || message.reply_preview!.id)}><strong>{message.reply_preview.sender_name}</strong><span>{message.reply_preview.is_deleted ? 'Устгасан мессеж' : message.reply_preview.body || 'Хавсралт'}</span></button>}{message.is_deleted ? <p className="chat-deleted-message">Энэ мессеж устгагдсан</p> : <>{message.action?.type === 'shared_item' ? <SharedItemCard card={message.action.payload} /> : message.body && <p>{message.body}</p>}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((attachment) => <ChatAttachmentView key={attachment.public_id} conversationId={conversationId} attachment={attachment} />)}</div> : null}{message.company_file_attachments?.length ? <div className="chat-attachments">{message.company_file_attachments.map((attachment) => <CompanyFileAttachmentView key={attachment.item_id} attachment={attachment} />)}</div> : null}{message.action?.type === 'task_action_preview' && <ChatTaskDraftActions action={message.action} status={resolvedDraftActions[message.id]} busy={confirmAssistantAction.isPending || rejectAssistantAction.isPending} onConfirm={() => void confirmDraft(message)} onReject={() => void rejectDraft(message)} onEdit={() => editDraft(message)} />}</>} </div>
               {!!message.reactions?.length && <div className="chat-reaction-row">{message.reactions.map((reaction) => <button key={reaction.emoji} className={reaction.reacted ? 'active' : ''} onClick={() => react.mutate({ messageId: message.id, emoji: reaction.emoji, remove: reaction.reacted })}>{reaction.emoji} <span>{reaction.count}</span></button>)}</div>}
               <footer><time>{formatTimestamp(message.created_at)}{message.edited_at ? ' · зассан' : ''}</time>{message.is_pinned && <Pin size={11} fill="currentColor" />}{message.is_starred && <Star size={11} fill="currentColor" />}{message.thread_reply_count > 0 && <button onClick={() => setThreadRootId(message.thread_root_message_id || message.id)}>{message.thread_reply_count} хариулт</button>}{message.is_mine && <button disabled={message.id < 1} onClick={() => message.id > 0 && setReceiptMessageId(message.id)}><ReceiptLabel message={message} /></button>}{message.status === 'failed' && message.body && <button className="chat-retry" onClick={() => submit(message.body, message.client_nonce)}>Дахин илгээх</button>}</footer>
               {message.id > 0 && !message.is_deleted && <div className="chat-message-actions"><button ref={(element) => { actionButtonRefs.current[message.id] = element }} onClick={() => setActionMessageId(actionMessageId === message.id ? undefined : message.id)} aria-label="Мессежийн үйлдэл"><MoreHorizontal /></button>{actionMessageId === message.id && <ChatActionMenu anchorRef={{ current: actionButtonRefs.current[message.id] }} boundsRef={threadPaneRef} onClose={() => setActionMessageId(undefined)}><div className="chat-quick-reactions">{['👍', '❤️', '😂', '🎉', '😮', '😢'].map((emoji) => <button key={emoji} onClick={() => react.mutate({ messageId: message.id, emoji, remove: message.reactions?.some((item) => item.emoji === emoji && item.reacted) })}>{emoji}</button>)}</div><button onClick={() => { setReplyingTo(message); setActionMessageId(undefined); textareaRef.current?.focus() }}><Reply />Хариулах</button>{message.thread_root_message_id == null && <button onClick={() => { setThreadRootId(message.id); setActionMessageId(undefined) }}><MessageCircle />Thread нээх</button>}{message.capabilities?.can_edit && <button onClick={() => editMessage(message)}><Pencil />Засах</button>}<button onClick={() => { setForwardMessage(message); setActionMessageId(undefined) }}><Forward />Дамжуулах</button><button onClick={() => pinMessage.mutate({ messageId: message.id, pinned: !message.is_pinned }, { onSuccess: () => setActionMessageId(undefined) })}><Pin />{message.is_pinned ? 'Салгах' : 'Тогтоох'}</button><button onClick={() => star.mutate({ messageId: message.id, starred: !message.is_starred }, { onSuccess: () => setActionMessageId(undefined) })}><Star />{message.is_starred ? 'Star болиулах' : 'Star'}</button><button onClick={() => { setReceiptMessageId(message.id); setActionMessageId(undefined) }}><Info />Мэдээлэл</button><button className="danger" onClick={() => remove.mutate({ messageId: message.id, scope: 'self' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Өөрөөс устгах</button>{message.capabilities?.can_delete_everyone && <button className="danger" onClick={() => window.confirm('Бүх хүнээс устгах уу?') && remove.mutate({ messageId: message.id, scope: 'everyone' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Бүгдээс устгах</button>}</ChatActionMenu>}</div>}

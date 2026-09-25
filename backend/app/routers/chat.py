@@ -41,7 +41,7 @@ from app.services.malware_scanner import MalwareDetected, scan_upload
 from app.services.ai_gateway import AIGateway, GatewayError
 from app.services import assistant_ai
 from app.services.assistant_text import detect_language
-from app.services import enterprise_tools
+from app.services import chat_share_service, enterprise_tools
 from app.services.file_search_service import FileSearchPrincipal, authorized_file
 
 
@@ -165,6 +165,12 @@ class ForwardDestination(BaseModel):
 
 class ForwardIn(BaseModel):
     destinations: list[ForwardDestination] = Field(min_length=1, max_length=10)
+
+
+class ShareItemIn(BaseModel):
+    kind: Literal["task", "plan_item", "plan_idea", "plan_report", "contract", "report"]
+    ref: str = Field(min_length=1, max_length=64)
+    client_nonce: UUID
 
 
 class ReceiptIn(BaseModel):
@@ -474,6 +480,17 @@ async def _message_out(db: AsyncSession, message: ChatMessage, actor: ActorConte
                 "ended_at": call.ended_at,
             }
     immutable = message.kind == "call"
+    action = None if message.deleted_at else message.action
+    shared_card = isinstance(action, dict) and action.get("type") == "shared_item"
+    if shared_card:
+        # The snapshot is visible to every participant; the link to its page
+        # is re-authorized for this reader on every read.
+        payload = dict(action.get("payload") or {})
+        can_open = await chat_share_service.reader_can_open(db, actor, str(payload.get("kind")), str(payload.get("ref")))
+        payload["can_open"] = can_open
+        if not can_open:
+            payload.pop("target_url", None)
+        action = {"type": "shared_item", "payload": payload}
     return {
         "id": message.id,
         "conversation_id": message.conversation_id,
@@ -483,7 +500,7 @@ async def _message_out(db: AsyncSession, message: ChatMessage, actor: ActorConte
         "body": None if message.deleted_at else message.body,
         "kind": message.kind,
         "call": call_out,
-        "action": None if message.deleted_at else message.action,
+        "action": action,
         "attachments": attachments,
         "company_file_attachments": company_file_attachments,
         "reply_to_message_id": message.reply_to_message_id,
@@ -503,7 +520,7 @@ async def _message_out(db: AsyncSession, message: ChatMessage, actor: ActorConte
         "status": status,
         "receipts": receipts,
         "capabilities": {
-            "can_edit": not immutable and can_change and bool(message.body),
+            "can_edit": not immutable and not shared_card and can_change and bool(message.body),
             "can_delete_everyone": not immutable and can_change,
             "can_delete_self": not immutable and message.deleted_at is None,
             "can_forward": not immutable and message.deleted_at is None,
@@ -1083,6 +1100,76 @@ async def messages(
     }
 
 
+async def _deliver_message(db: AsyncSession, actor: ActorContext, conversation: ChatConversation, message: ChatMessage, preview: str) -> None:
+    """Create receipts, queue pushes and emit the realtime event for a new message."""
+    participants = await _active_participants(db, conversation.id)
+    participant_ids = [item.account_id for item in participants]
+    db.add_all(ChatMessageReceipt(message_id=message.id, account_id=account_id) for account_id in participant_ids if account_id != actor.account_id)
+    now = _now()
+    conversation.updated_at = now
+    for participant in participants:
+        participant.archived_at = None
+        if participant.account_id != actor.account_id and not _is_muted(participant, now):
+            db.add(JobQueue(
+                job_type="chat_push",
+                payload={"message_id": message.id, "recipient_account_id": participant.account_id},
+                dedup_key=f"chat-push:{message.id}:{participant.account_id}",
+            ))
+    await db.flush()
+    sender = (await _identity_map(db, [actor.account_id])).get(actor.account_id)
+    await _emit(db, actor, conversation, "message_sent", aggregate_type="chat_message", aggregate_id=message.id, recipient_ids=participant_ids, extra={
+        "message_id": message.id,
+        "sender_account_id": actor.account_id,
+        "sender_name": sender["name"] if sender else actor.email,
+        "conversation_title": conversation.title if conversation.kind == "group" else None,
+        "preview": preview[:160],
+        "target_url": f"/chat/{conversation.public_id}?message={message.id}",
+    })
+
+
+@router.get("/share-items")
+async def share_items(
+    q: str = Query("", max_length=120),
+    limit_per_group: int = Query(6, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    """Slash-menu source: items the current account may share, grouped by type."""
+    return await chat_share_service.search_shareable(db, actor, q, limit_per_group=limit_per_group)
+
+
+@router.post("/conversations/{public_id}/share")
+async def share_item(
+    public_id: UUID,
+    data: ShareItemIn,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    conversation, _ = await _membership(db, actor, public_id)
+    existing = await db.scalar(select(ChatMessage).where(ChatMessage.conversation_id == conversation.id, ChatMessage.sender_account_id == actor.account_id, ChatMessage.client_nonce == data.client_nonce))
+    if existing:
+        return await _message_out(db, existing, actor)
+    try:
+        card = await chat_share_service.build_snapshot(db, actor, data.kind, data.ref)
+    except chat_share_service.ShareItemNotFound as exc:
+        raise HTTPException(status_code=404, detail="Item not found or not shareable by you") from exc
+    card["shared_at"] = _now().isoformat()
+    body = chat_share_service.fallback_body(card)
+    message = ChatMessage(
+        conversation_id=conversation.id,
+        sender_account_id=actor.account_id,
+        client_nonce=data.client_nonce,
+        body=body,
+        action={"type": "shared_item", "payload": card},
+    )
+    db.add(message)
+    await db.flush()
+    await _deliver_message(db, actor, conversation, message, body)
+    await db.commit()
+    await db.refresh(message)
+    return await _message_out(db, message, actor)
+
+
 @router.post("/conversations/{public_id}/messages")
 async def send_message(
     public_id: UUID,
@@ -1131,30 +1218,8 @@ async def send_message(
     for item in uploads:
         item.message_id = message.id
         item.expires_at = None
-    participants = await _active_participants(db, conversation.id)
-    participant_ids = [item.account_id for item in participants]
-    db.add_all(ChatMessageReceipt(message_id=message.id, account_id=account_id) for account_id in participant_ids if account_id != actor.account_id)
-    now = _now()
-    conversation.updated_at = now
-    for participant in participants:
-        participant.archived_at = None
-        if participant.account_id != actor.account_id and not _is_muted(participant, now):
-            db.add(JobQueue(
-                job_type="chat_push",
-                payload={"message_id": message.id, "recipient_account_id": participant.account_id},
-                dedup_key=f"chat-push:{message.id}:{participant.account_id}",
-            ))
-    await db.flush()
-    sender = (await _identity_map(db, [actor.account_id])).get(actor.account_id)
     preview = body or (f"{len(uploads)} attachment" if len(uploads) > 1 else "Attachment")
-    await _emit(db, actor, conversation, "message_sent", aggregate_type="chat_message", aggregate_id=message.id, recipient_ids=participant_ids, extra={
-        "message_id": message.id,
-        "sender_account_id": actor.account_id,
-        "sender_name": sender["name"] if sender else actor.email,
-        "conversation_title": conversation.title if conversation.kind == "group" else None,
-        "preview": preview[:160],
-        "target_url": f"/chat/{public_id}?message={message.id}",
-    })
+    await _deliver_message(db, actor, conversation, message, preview)
     await db.commit()
     await db.refresh(message)
     agent = await db.scalar(
@@ -1359,6 +1424,7 @@ async def forward_message(
                 sender_account_id=actor.account_id,
                 client_nonce=destination.client_nonce,
                 body=source.body,
+                action=source.action if isinstance(source.action, dict) and source.action.get("type") == "shared_item" else None,
                 forwarded_from_message_id=source.id,
                 forwarded_sender_name=source_sender["name"] if source_sender else None,
             )
