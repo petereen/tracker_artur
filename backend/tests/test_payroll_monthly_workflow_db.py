@@ -177,12 +177,12 @@ async def _scenario(client, ids, sessions, organization_id):
     # gross 1,620,000 − НДШ 186,300 − ХХОАТ (143,370 − 16,000 relief) = 1,306,330.
     assert _row(run10, ids["oyun"])["result"]["estimated_net"] == "1306330"
     # No time data yet → the projection assumes the planned month (168 h):
-    # Суутгалын дүн = 600,000 урьдчилгаа + 186,300 НДШ + 127,370 ХХОАТ.
+    # Суутгалын дүн = 600,000 урьдчилгаа + 186,300 НДШ + 127,370 ХХОАТ + 120,000 хоол унаа.
     projection = _row(run10, ids["oyun"])["result"]["projection"]
     assert _row(run10, ids["oyun"])["inputs"]["worked_normal_hours"] == "168"
     assert (projection["base_pay"], projection["meal_commute"], projection["gross"]) == ("1500000", "120000", "1620000")
     assert (projection["employee_shi"], projection["pit"], projection["advance"]) == ("186300", "127370", "600000")
-    assert (projection["total_deductions"], projection["net_pay"]) == ("913670", "706330")
+    assert (projection["total_deductions"], projection["net_pay"]) == ("1033670", "586330")
     await _ok(await client.post(f"/m/runs/{advance10['id']}/rows/{ids['oyun']}/approve"))
     approved = await _ok(await client.post(f"/m/runs/{advance10['id']}/approve"))
     assert approved["status"] == "approved" and approved["approval_summary"]["skipped"] == []

@@ -37,11 +37,11 @@ export const runStatusTone = (status: string) => (status === 'paid' || status ==
 export const runTitle = (run: { run_type: string; pay_date: string }) => (run.run_type === 'advance' ? `Урьдчилгаа — ${dayOf(run.pay_date)}-ны өдөр` : 'Сүүл цалин')
 
 /** Mirror of the backend BLOCKING_ROW_WARNINGS: these keep a row out of approval. */
-export const BLOCKING_WARNINGS = new Set(['negative_final_pay', 'profile_missing', 'salary_history_missing_or_incomplete', 'row_flagged', 'advance_changed', 'advance_not_due', 'advance_not_positive'])
+export const BLOCKING_WARNINGS = new Set(['negative_final_pay', 'profile_missing', 'salary_history_missing_or_incomplete', 'allowance_daily_rate_required', 'row_flagged', 'advance_changed', 'advance_not_due', 'advance_not_positive'])
 
 export const WARNING_LABELS: Record<string, string> = {
   negative_final_pay: 'Сүүл цалин сөрөг', profile_missing: 'HR цалингийн профайл алга', profile_incomplete: 'HR цалингийн профайл дутуу',
-  salary_history_missing_or_incomplete: 'Цалингийн түүх дутуу', advance_changed: 'Урьдчилгаа өөрчлөгдсөн', advance_not_calculated: 'Урьдчилгаа бодоогүй',
+  salary_history_missing_or_incomplete: 'Цалингийн түүх дутуу', allowance_daily_rate_required: 'HR дээр хоол, унааг өдрийн дүнгээр оруулна уу', advance_changed: 'Урьдчилгаа өөрчлөгдсөн', advance_not_calculated: 'Урьдчилгаа бодоогүй',
   advance_not_due: 'Энэ өдөр урьдчилгаа авахгүй ажилтан', advance_not_positive: 'Урьдчилгаа 0 байна', zero_worked_hours: 'Ажилласан цаг 0',
   advance_above_estimated_net: 'Урьдчилгаа сарын цэвэр цалингаас их', worked_to_date_without_time: 'Ирцийн цаг алга', deduction_details_missing: 'Суутгалын төрөл/тайлбар дутуу',
   worked_hours_above_planned: 'Ажилласан цаг төлөвлөгөөнөөс их', base_below_minimum_wage: 'Үндсэн цалин доод хэмжээнээс бага', overtime_work: 'Илүү цагтай',

@@ -45,7 +45,7 @@ const FILTERS: Array<{ key: string; label: string; test: (row: Row) => boolean }
   { key: 'error', label: 'Алдаатай', test: (row) => rowState(row) === 'error' },
   { key: 'overtime', label: 'Илүү цагтай', test: (row) => row.warnings.includes('overtime_work') },
 ]
-const PROFILE_WARNINGS = ['profile_missing', 'salary_history_missing_or_incomplete', 'profile_incomplete']
+const PROFILE_WARNINGS = ['profile_missing', 'salary_history_missing_or_incomplete', 'profile_incomplete', 'allowance_daily_rate_required']
 
 const sourceDiffers = (row: Row, key: string) => {
   const source = row.inputs._source_snapshot
@@ -248,7 +248,7 @@ export function RunRegister({ runId }: { runId: number }) {
     { key: 'base_salary', label: 'Үндсэн цалин', kind: 'money', value: (row) => row.profile.base_salary },
   ]
   // Plan §7.2 Excel order. Advance rows show the same month columns from their
-  // full-month projection, so Суутгалын дүн = НДШ + ХХОАТ there (advances are shown separately, not deducted).
+  // full-month projection, so Суутгалын дүн = урьдчилгаа + НДШ + ХХОАТ + хоол унаа + бусад there.
   const workedTitle = (row: Row) => isFinal ? undefined : `${data?.cutoff_date || 'Таслах өдөр'} хүртэл ${formatHours(row.inputs.worked_to_date_hours)} цаг + үлдсэн ${formatHours(row.inputs.projected_remaining_hours)} цаг`
   const advanceTitle = (row: Row) => isFinal
     ? ((row.result.advance_lines || []).length ? `${row.result.advance_lines.length} батлагдсан урьдчилгааны бодолтоос` : undefined)

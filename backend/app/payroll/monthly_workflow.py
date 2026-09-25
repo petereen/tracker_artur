@@ -42,7 +42,7 @@ from .monthly_engine import (
 router = APIRouter()
 # «Урьдчилгаа бодоогүй» (advance_not_calculated) is a warning by design: the
 # accountant may knowingly settle a worker whose advance run was never made.
-BLOCKING_ROW_WARNINGS = {"negative_final_pay", "profile_missing", "salary_history_missing_or_incomplete", "row_flagged", "advance_changed", "advance_not_due", "advance_not_positive"}
+BLOCKING_ROW_WARNINGS = {"negative_final_pay", "profile_missing", "salary_history_missing_or_incomplete", "allowance_daily_rate_required", "row_flagged", "advance_changed", "advance_not_due", "advance_not_positive"}
 TIME_INPUT_KEYS = ("worked_normal_hours", "worked_days", "worked_to_date_hours", "worked_days_to_date", "projected_remaining_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")
 
 
@@ -1120,10 +1120,12 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         )
         projection_data = _json_value(asdict(projection))
         projection_data.pop("run_type", None)
-        # Advances are payments against net pay, not deductions: Суутгалын дүн
-        # here is НДШ + ХХОАТ + бусад, so Суутгалын дүн + Сүүл цалин = олговол
-        # зохих (company salary expense). Advances are shown on their own.
-        projection_data["total_deductions"] = str(whole_tugrik(projection.employee_shi + projection.pit + projection.other_deductions))
+        # Суутгалын дүн = урьдчилгаа + НДШ + ХХОАТ (ХХОАТ ХӨН-өөр багасгасан) + бусад
+        # + хоол унаа (олговол зохих цалинд орсон (хоол + унаа) × өдөр), so
+        # Суутгалын дүн + Сүүл цалин = олговол зохих цалин.
+        projection_data["total_deductions"] = str(whole_tugrik(
+            projection.advance + projection.employee_shi + projection.pit + projection.other_deductions + projection.meal_commute
+        ))
         projection_data["net_pay"] = str(whole_tugrik(projection.gross - amount(projection_data["total_deductions"])))
         projection_data["net_after_advances"] = str(projection.net_pay)
         projection_data["prior_advances"] = str(sum((amount(value) for value in prior_advances), Decimal("0")))
@@ -1285,6 +1287,9 @@ def _profile_snapshot(profile: MonthlyPayrollProfile | None, history: MonthlyPay
     if profile is None:
         return {"complete": False, "validation_issues": ["profile_missing"], "base_salary": "0", "salary_segments": [], "salary_type": "PRORATION", "meal_allowance": "0", "commute_allowance": "0", "allowance_basis": "FIXED", "payment_frequency": "MONTHLY", "pay_days": [25], "advance_basis": "FIXED", "advance_amount": "0", "advance_percent": "40", "advance_values": [], "daily_norm_hours": "8", "insured_type": "01001", "tax_relief_eligible": True}
     issues = ["salary_history_missing_or_incomplete"] if history is None else []
+    # Meal + commute are daily rates × workdays; a legacy monthly-amount profile must be re-saved in HR.
+    if profile.allowance_basis == "MONTHLY":
+        issues.append("allowance_daily_rate_required")
     return _json_value({
         "complete": not issues, "validation_issues": issues, "base_salary": str(history.monthly_salary if history else 0),
         "salary_segments": segments, "salary_type": profile.salary_type,
@@ -2334,7 +2339,7 @@ async def payroll_dashboard(month: str | None = None, db: AsyncSession = Depends
                 warnings = set(row.warnings or [])
                 alerts["blocking_rows"] += bool(warnings & BLOCKING_ROW_WARNINGS)
                 alerts["warning_rows"] += bool(warnings - BLOCKING_ROW_WARNINGS)
-                alerts["incomplete_profiles"] += bool(warnings & {"profile_missing", "salary_history_missing_or_incomplete", "profile_incomplete"})
+                alerts["incomplete_profiles"] += bool(warnings & {"profile_missing", "salary_history_missing_or_incomplete", "profile_incomplete", "allowance_daily_rate_required"})
                 for key in ("hr_changed", "advance_changed", "advance_not_calculated"):
                     alerts[key] += key in warnings
                 alerts["flagged"] += row.status == "flagged"
