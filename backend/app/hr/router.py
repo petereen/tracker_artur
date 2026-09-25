@@ -7,7 +7,8 @@ from decimal import Decimal
 from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete as sa_delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -24,6 +25,7 @@ from app.models.models import (
     MonthlyPayrollCalendarDay,
     MonthlyPayrollProfile,
     MonthlyPayrollRuleSet,
+    MonthlyPayrollRun,
     MonthlyPayrollSalaryHistory,
     LeaveBalance,
     PayrollSalaryComponentMaster,
@@ -50,6 +52,7 @@ from .schemas import (
     LeaveRequestPatch,
     MonthlyPayrollProfileInput,
 )
+from .identity import EMPLOYMENT_STATUSES, WORKING_STATUSES, parse_registration_number
 from .service import (
     ATTENDANCE_STATUSES,
     HR_ROLES,
@@ -67,6 +70,7 @@ from .service import (
     leave_days,
     set_worker_active,
     suggested_attendance,
+    worker_history,
 )
 from app.payroll.monthly_engine import (
     AdvanceBasis,
@@ -99,10 +103,12 @@ def _employee_scope_clause(actor: ActorContext):
     return [Employee.id == actor.employee_id]
 
 
-async def _department(db: AsyncSession, actor: ActorContext, department_id: int) -> Department:
+async def _department(db: AsyncSession, actor: ActorContext, department_id: int, *, active_only: bool = False) -> Department:
     row = await db.scalar(select(Department).where(Department.id == department_id, Department.organization_id == actor.organization_id))
     if not row:
         raise HTTPException(status_code=404, detail="Department not found")
+    if active_only and not row.is_active:
+        raise HTTPException(status_code=409, detail={"code": "department_inactive", "message": "Идэвхгүй хэлтэст ажилтан оноох боломжгүй."})
     return row
 
 
@@ -116,98 +122,223 @@ async def _hr_account_ids(db: AsyncSession, organization_id: int) -> set[int]:
     )).scalars().all())
 
 
+# Personal data only HR and the worker themselves may read. It is also kept
+# out of domain-event payloads, which realtime fans out to the organisation.
+PRIVATE_FIELDS = ("registration_number", "birthday", "gender", "phone_number", "email", "address", "emergency_contact_name", "emergency_contact_phone", "termination_reason")
+EMPLOYEE_COLUMNS = ("name", "first_name", "last_name", "timezone", "phone_number", "email", "birthday")
+
+
+def _event_payload(employee_id: int, changes: dict) -> dict:
+    public = {key: value for key, value in changes.items() if key not in PRIVATE_FIELDS}
+    return {"employee_id": employee_id, **public, "changed_fields": sorted(changes)}
+
+
+def _employment_status(employee: Employee, details: EmployeeDetails | None) -> str:
+    status = details.employment_status if details else None
+    if status is None or (status in WORKING_STATUSES) != bool(employee.is_active):
+        return "active" if employee.is_active else "inactive"
+    return status
+
+
+def _iso(value) -> str | None:
+    return value.isoformat() if value else None
+
+
 async def _employee_out(db: AsyncSession, actor: ActorContext, employee: Employee, details: EmployeeDetails | None = None) -> dict:
     details = details or await db.scalar(select(EmployeeDetails).where(EmployeeDetails.employee_id == employee.id))
     department = await db.scalar(select(Department).where(Department.id == details.department_id, Department.organization_id == actor.organization_id)) if details and details.department_id else None
+    manager_id = details.manager_id if details else employee.manager_id
+    manager_name = await db.scalar(select(Employee.name).where(Employee.id == manager_id, Employee.organization_id == actor.organization_id)) if manager_id else None
     pending = await db.scalar(select(WorkerInvite.id).where(WorkerInvite.organization_id == actor.organization_id, WorkerInvite.employee_id == employee.id, WorkerInvite.used_at.is_(None), WorkerInvite.revoked_at.is_(None), WorkerInvite.expires_at > datetime.now(timezone.utc)))
     account = await db.scalar(select(UserAccount.id).where(UserAccount.organization_id == actor.organization_id, UserAccount.employee_id == employee.id, UserAccount.status == "active"))
+    can_see_private = can_manage_hr(actor) or actor.employee_id == employee.id
+    private = {
+        "registration_number": details.registration_number if details else None,
+        "birthday": _iso(employee.birthday),
+        "gender": details.gender if details else None,
+        "phone_number": employee.phone_number,
+        "email": employee.email,
+        "address": details.address if details else None,
+        "emergency_contact_name": details.emergency_contact_name if details else None,
+        "emergency_contact_phone": details.emergency_contact_phone if details else None,
+        "termination_reason": details.termination_reason if details else None,
+    }
     return {
         "id": employee.id, "name": employee.name, "first_name": employee.first_name, "last_name": employee.last_name,
         "telegram_id": employee.telegram_id, "telegram_username": employee.telegram_username, "photo_url": employee.photo_url or (employee.metadata_json or {}).get("avatar_url"),
         "timezone": employee.timezone or "Asia/Ulaanbaatar", "is_active": bool(employee.is_active),
         "department_id": details.department_id if details else None, "department_name": department.name if department else None,
-        "manager_id": details.manager_id if details else employee.manager_id, "job_title": details.job_title if details else employee.job_title,
-        "employment_role": details.employment_role if details else None, "start_date": details.start_date.isoformat() if details and details.start_date else None,
-        "end_date": details.end_date.isoformat() if details and details.end_date else None, "employment_status": "active" if employee.is_active else "inactive",
+        "manager_id": manager_id, "manager_name": manager_name, "job_title": details.job_title if details else employee.job_title,
+        "employment_role": details.employment_role if details else None, "employment_type": details.employment_type if details else "full_time",
+        "start_date": _iso(details.start_date if details else None), "probation_end_date": _iso(details.probation_end_date if details else None),
+        "end_date": _iso(details.end_date if details else None), "employment_status": _employment_status(employee, details),
         "is_archived": employee.deleted_at is not None,
         "telegram_status": "connected" if employee.telegram_id else "pending_invite" if pending else "not_invited", "account_id": account,
+        **(private if can_see_private else {key: None for key in private}),
     }
+
+
+def _department_out(row: Department, employee_count: int = 0) -> dict:
+    return {"id": row.id, "code": row.code, "name": row.name, "description": row.description, "manager_employee_id": row.manager_employee_id, "is_active": row.is_active, "employee_count": employee_count}
+
+
+async def _department_employee_count(db: AsyncSession, department_id: int) -> int:
+    return await db.scalar(select(func.count(EmployeeDetails.id)).join(Employee, Employee.id == EmployeeDetails.employee_id).where(EmployeeDetails.department_id == department_id, Employee.deleted_at.is_(None))) or 0
+
+
+async def _ensure_department_unique(db: AsyncSession, organization_id: int, *, code: str | None = None, name: str | None = None, exclude_id: int | None = None) -> None:
+    others = [Department.organization_id == organization_id] + ([Department.id != exclude_id] if exclude_id else [])
+    if code and await db.scalar(select(Department.id).where(*others, func.lower(Department.code) == code.lower())):
+        raise HTTPException(status_code=409, detail={"code": "department_code_exists", "message": "Ийм кодтой хэлтэс бүртгэлтэй байна."})
+    if name and await db.scalar(select(Department.id).where(*others, func.lower(Department.name) == name.lower())):
+        raise HTTPException(status_code=409, detail={"code": "department_name_exists", "message": "Ийм нэртэй хэлтэс бүртгэлтэй байна."})
+
+
+async def _next_department_code(db: AsyncSession, organization_id: int) -> str:
+    number = (await db.scalar(select(func.count(Department.id)).where(Department.organization_id == organization_id)) or 0) + 1
+    while await db.scalar(select(Department.id).where(Department.organization_id == organization_id, Department.code == f"DEPT-{number}")):
+        number += 1
+    return f"DEPT-{number}"
 
 
 @router.get("/departments")
 async def list_departments(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     rows = (await db.execute(select(Department).where(Department.organization_id == actor.organization_id).order_by(Department.name))).scalars().all()
-    return [{"id": row.id, "code": row.code, "name": row.name, "manager_employee_id": row.manager_employee_id, "is_active": row.is_active} for row in rows]
+    counts = dict((await db.execute(
+        select(EmployeeDetails.department_id, func.count(EmployeeDetails.id))
+        .join(Employee, Employee.id == EmployeeDetails.employee_id)
+        .where(EmployeeDetails.organization_id == actor.organization_id, EmployeeDetails.department_id.is_not(None), Employee.deleted_at.is_(None))
+        .group_by(EmployeeDetails.department_id)
+    )).all())
+    return [_department_out(row, counts.get(row.id, 0)) for row in rows]
 
 
 @router.post("/departments", status_code=status.HTTP_201_CREATED)
 async def create_department(data: DepartmentInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
     if data.manager_employee_id:
         await employee_in_scope(db, actor, data.manager_employee_id)
-    exists = await db.scalar(select(Department.id).where(Department.organization_id == actor.organization_id, Department.code == data.code))
-    if exists:
-        raise HTTPException(status_code=409, detail="Department code already exists")
-    row = Department(organization_id=actor.organization_id, **data.model_dump())
+    await _ensure_department_unique(db, actor.organization_id, code=data.code, name=data.name)
+    code = data.code or await _next_department_code(db, actor.organization_id)
+    row = Department(organization_id=actor.organization_id, code=code, name=data.name, description=data.description, manager_employee_id=data.manager_employee_id)
     db.add(row); await db.flush()
-    await record_change(db, actor=actor, topic="hr", aggregate_type="department", aggregate_id=row.id, operation="created", after=data.model_dump())
+    await record_change(db, actor=actor, topic="hr", aggregate_type="department", aggregate_id=row.id, operation="created", after={**data.model_dump(), "code": code})
     await db.commit()
-    return {"id": row.id, "code": row.code, "name": row.name, "manager_employee_id": row.manager_employee_id, "is_active": row.is_active}
+    return _department_out(row)
 
 
 @router.patch("/departments/{department_id}")
 async def update_department(department_id: int, data: DepartmentPatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
     row = await _department(db, actor, department_id)
+    patch = data.model_dump(exclude_unset=True)
+    if patch.get("name") is not None:
+        patch["name"] = patch["name"].strip()
+    for key in ("code", "name", "is_active"):
+        if key in patch and patch[key] is None:
+            raise HTTPException(status_code=422, detail=f"{key} cannot be empty")
     if data.manager_employee_id:
         await employee_in_scope(db, actor, data.manager_employee_id)
-    for key, value in data.model_dump(exclude_unset=True).items():
+    await _ensure_department_unique(db, actor.organization_id, code=patch.get("code"), name=patch.get("name"), exclude_id=row.id)
+    for key, value in patch.items():
         setattr(row, key, value)
-    await record_change(db, actor=actor, topic="hr", aggregate_type="department", aggregate_id=row.id, operation="updated", after=data.model_dump(exclude_unset=True))
+    operation = "archived" if patch.get("is_active") is False else "restored" if patch.get("is_active") is True else "updated"
+    await record_change(db, actor=actor, topic="hr", aggregate_type="department", aggregate_id=row.id, operation=operation, after=patch)
     await db.commit()
-    return {"id": row.id, "code": row.code, "name": row.name, "manager_employee_id": row.manager_employee_id, "is_active": row.is_active}
+    return _department_out(row, await _department_employee_count(db, row.id))
 
 
 @router.delete("/departments/{department_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def archive_department(department_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
+async def delete_department(department_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
+    """Permanently remove an empty department. Use PATCH is_active=false to archive one in use."""
     row = await _department(db, actor, department_id)
-    row.is_active = False
+    assigned = await _department_employee_count(db, row.id)
+    if assigned:
+        raise HTTPException(status_code=409, detail={"code": "department_has_workers", "count": assigned, "message": f"Хэлтэст {assigned} ажилтан бүртгэлтэй. Эхлээд ажилтнуудыг өөр хэлтэс рүү шилжүүлэх, эсвэл хэлтсийг идэвхгүй болгоно уу."})
+    if await db.scalar(select(MonthlyPayrollRun.id).where(MonthlyPayrollRun.department_id == row.id).limit(1)):
+        raise HTTPException(status_code=409, detail={"code": "department_has_payroll", "message": "Энэ хэлтсээр цалин бодогдсон тул устгах боломжгүй. Идэвхгүй болгоно уу."})
+    await record_change(db, actor=actor, topic="hr", aggregate_type="department", aggregate_id=row.id, operation="deleted", before=_department_out(row))
+    await db.delete(row)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def _status_clause(status_filter: str | None) -> list:
+    if status_filter == "active":
+        return [Employee.is_active.is_(True)]
+    if status_filter == "inactive":
+        return [Employee.is_active.is_(False)]
+    if status_filter in EMPLOYMENT_STATUSES:
+        return [EmployeeDetails.employment_status == status_filter]
+    return []
+
+
 @router.get("/employees")
 async def list_hr_employees(search: str | None = Query(default=None, max_length=160), department_id: int | None = None, status_filter: str | None = Query(default=None, alias="status"), telegram_status: str | None = None, include_archived: bool = False, page: int = Query(default=1, ge=1), page_size: int = Query(default=50, ge=1, le=200), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    query = select(Employee, EmployeeDetails).outerjoin(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).where(Employee.organization_id == actor.organization_id, *_employee_scope_clause(actor))
+    filters = [Employee.organization_id == actor.organization_id, *_employee_scope_clause(actor), *_status_clause(status_filter)]
     if search:
         term = f"%{search.strip()}%"
-        query = query.where(or_(Employee.name.ilike(term), Employee.telegram_username.ilike(term), Employee.first_name.ilike(term), Employee.last_name.ilike(term), EmployeeDetails.job_title.ilike(term)))
-    if department_id is not None: query = query.where(EmployeeDetails.department_id == department_id)
-    if not include_archived: query = query.where(Employee.deleted_at.is_(None))
-    if status_filter == "active": query = query.where(Employee.is_active.is_(True))
-    elif status_filter in {"inactive", "terminated"}: query = query.where(Employee.is_active.is_(False))
+        fields = [Employee.name, Employee.telegram_username, Employee.first_name, Employee.last_name, EmployeeDetails.job_title]
+        if can_manage_hr(actor):
+            fields += [EmployeeDetails.registration_number, Employee.phone_number, Employee.email]
+        filters.append(or_(*(field.ilike(term) for field in fields)))
+    if department_id is not None: filters.append(EmployeeDetails.department_id == department_id)
+    if not include_archived: filters.append(Employee.deleted_at.is_(None))
+    query = select(Employee, EmployeeDetails).outerjoin(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).where(*filters)
     rows = (await db.execute(query.order_by(Employee.name).offset((page - 1) * page_size).limit(page_size))).all()
     items = [await _employee_out(db, actor, employee, details) for employee, details in rows]
     if telegram_status: items = [item for item in items if item["telegram_status"] == telegram_status]
-    total_query = select(func.count(Employee.id)).select_from(Employee).outerjoin(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).where(Employee.organization_id == actor.organization_id, *_employee_scope_clause(actor))
-    if not include_archived: total_query = total_query.where(Employee.deleted_at.is_(None))
-    if status_filter == "active": total_query = total_query.where(Employee.is_active.is_(True))
-    elif status_filter in {"inactive", "terminated"}: total_query = total_query.where(Employee.is_active.is_(False))
-    total = await db.scalar(total_query) or 0
+    total = await db.scalar(select(func.count(Employee.id)).select_from(Employee).outerjoin(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).where(*filters)) or 0
     return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+
+async def _ensure_identity_unique(db: AsyncSession, actor: ActorContext, *, registration_number: str | None = None, email: str | None = None, telegram_id: str | None = None, employee_id: int | None = None) -> None:
+    if registration_number and await db.scalar(select(EmployeeDetails.employee_id).where(EmployeeDetails.organization_id == actor.organization_id, EmployeeDetails.registration_number == registration_number, EmployeeDetails.employee_id != (employee_id or -1))):
+        raise HTTPException(status_code=409, detail={"code": "registration_number_exists", "message": "Энэ регистрын дугаартай ажилтан бүртгэлтэй байна."})
+    if email and await db.scalar(select(Employee.id).where(func.lower(Employee.email) == email.lower(), Employee.id != (employee_id or -1))):
+        raise HTTPException(status_code=409, detail={"code": "email_exists", "message": "Энэ имэйл өөр ажилтанд бүртгэлтэй байна."})
+    if telegram_id and await db.scalar(select(Employee.id).where(Employee.telegram_id == telegram_id, Employee.id != (employee_id or -1))):
+        raise HTTPException(status_code=409, detail={"code": "telegram_id_exists", "message": "Энэ Telegram ID өөр ажилтанд холбогдсон байна."})
+
+
+def _registration_defaults(values: dict, *, birthday=None, gender=None) -> dict:
+    """Fill birthday/gender from the registration number when HR left them empty."""
+    if values.get("registration_number"):
+        decoded = parse_registration_number(values["registration_number"])
+        if values.get("birthday") is None and birthday is None:
+            values["birthday"] = decoded["birthday"]
+        if values.get("gender") is None and gender is None:
+            values["gender"] = decoded["gender"]
+    return values
+
+
+async def _commit_worker(db: AsyncSession) -> None:
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail={"code": "worker_conflict", "message": "Регистрын дугаар, имэйл эсвэл Telegram ID давхардаж байна."}) from exc
 
 
 @router.post("/employees", status_code=status.HTTP_201_CREATED)
 async def create_hr_employee(data: EmployeeCreate, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
-    if data.department_id: await _department(db, actor, data.department_id)
+    if data.department_id: await _department(db, actor, data.department_id, active_only=True)
     if data.manager_id: await employee_in_scope(db, actor, data.manager_id)
-    employee = Employee(organization_id=actor.organization_id, name=data.name, telegram_id=data.telegram_id, first_name=data.first_name, last_name=data.last_name, timezone=data.timezone, is_active=True)
+    await _ensure_identity_unique(db, actor, registration_number=data.registration_number, email=data.email, telegram_id=data.telegram_id)
+    values = _registration_defaults(data.model_dump())
+    employee = Employee(organization_id=actor.organization_id, name=data.name, telegram_id=data.telegram_id, first_name=data.first_name, last_name=data.last_name, timezone=data.timezone, phone_number=data.phone_number, email=data.email, birthday=values["birthday"], is_active=True)
     db.add(employee); await db.flush()
-    details = EmployeeDetails(organization_id=actor.organization_id, employee_id=employee.id, department_id=data.department_id, manager_id=data.manager_id, job_title=data.job_title, employment_role=data.employment_role, start_date=data.start_date, employment_status="active")
+    details = EmployeeDetails(
+        organization_id=actor.organization_id, employee_id=employee.id, department_id=data.department_id, manager_id=data.manager_id,
+        job_title=data.job_title, employment_role=data.employment_role, employment_type=data.employment_type or "full_time",
+        start_date=data.start_date, probation_end_date=data.probation_end_date, employment_status=data.employment_status,
+        registration_number=data.registration_number, gender=values["gender"], address=data.address,
+        emergency_contact_name=data.emergency_contact_name, emergency_contact_phone=data.emergency_contact_phone,
+    )
     db.add(details); await db.flush()
     if data.annual_leave_days is not None:
         db.add(LeaveBalance(organization_id=actor.organization_id, employee_id=employee.id, year=date.today().year, leave_type="annual", entitled_days=data.annual_leave_days))
     invite = await create_invite(db, actor, employee)
-    await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="created", after={"employee_id": employee.id, "department_id": data.department_id})
-    await db.commit()
+    await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="created", after=_event_payload(employee.id, data.model_dump(exclude_none=True, exclude={"name", "annual_leave_days"})))
+    await _commit_worker(db)
     return {"employee": await _employee_out(db, actor, employee, details), "invite": invite}
 
 
@@ -222,29 +353,66 @@ async def update_hr_employee(employee_id: int, data: EmployeePatch, db: AsyncSes
     employee = await employee_in_scope(db, actor, employee_id, write=True)
     details = await ensure_details(db, employee)
     patch = data.model_dump(exclude_unset=True)
-    if data.department_id is not None: await _department(db, actor, data.department_id)
+    changes = dict(patch)
+    for key in ("name", "timezone", "employment_type", "restore"):
+        if key in patch and patch[key] is None:
+            raise HTTPException(status_code=422, detail=f"{key} cannot be empty")
+    if patch.get("department_id") is not None and patch["department_id"] != details.department_id:
+        await _department(db, actor, patch["department_id"], active_only=True)
     if data.manager_id is not None:
         if data.manager_id == employee_id: raise HTTPException(status_code=422, detail="A worker cannot manage themselves")
         await employee_in_scope(db, actor, data.manager_id)
-    for key in ("name", "first_name", "last_name", "timezone"):
+    await _ensure_identity_unique(db, actor, registration_number=patch.get("registration_number"), email=patch.get("email"), employee_id=employee.id)
+    patch = _registration_defaults(patch, birthday=employee.birthday, gender=details.gender)
+    for key in EMPLOYEE_COLUMNS:
         if key in patch: setattr(employee, key, patch.pop(key))
     requested_active = patch.pop("is_active", None)
     employment_status = patch.pop("employment_status", None)
     restore = patch.pop("restore", False)
+    previous_status = _employment_status(employee, details)
+    if employment_status is not None:
+        requested_active = employment_status in WORKING_STATUSES
+    if requested_active is False and employee.id == actor.employee_id:
+        raise HTTPException(status_code=400, detail={"code": "cannot_deactivate_self", "message": "Өөрийгөө идэвхгүй болгох боломжгүй."})
     for key, value in patch.items(): setattr(details, key, value)
-    if employment_status is not None: requested_active = employment_status == "active"
+    if employment_status == "terminated" and details.end_date is None:
+        details.end_date = date.today()
+    elif requested_active and previous_status == "terminated":
+        # Rehire: the previous leaving date must not cut the new payroll window.
+        if "end_date" not in data.model_fields_set: details.end_date = None
+        if "termination_reason" not in data.model_fields_set: details.termination_reason = None
     if requested_active is not None:
-        await set_worker_active(db, employee, requested_active, restore=restore or (requested_active and employee.deleted_at is not None))
-    await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="updated", after=data.model_dump(exclude_unset=True))
-    await db.commit()
+        await set_worker_active(db, employee, requested_active, restore=restore or (requested_active and employee.deleted_at is not None), status=employment_status)
+    await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="updated", after=_event_payload(employee.id, changes))
+    await _commit_worker(db)
     return await _employee_out(db, actor, employee, details)
 
 
 @router.delete("/employees/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def deactivate_hr_employee(employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
+async def deactivate_hr_employee(employee_id: int, permanent: bool = False, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
+    """Archive a worker; with ``permanent=true`` hard-delete an archived worker created by mistake."""
     employee = await employee_in_scope(db, actor, employee_id, write=True)
-    await archive_worker(db, employee, account_id=actor.account_id)
-    await db.commit()
+    if employee.id == actor.employee_id:
+        raise HTTPException(status_code=400, detail={"code": "cannot_remove_self", "message": "Өөрийгөө архивлах эсвэл устгах боломжгүй."})
+    if not permanent:
+        await archive_worker(db, employee, account_id=actor.account_id)
+        await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="archived", after={"employee_id": employee.id})
+        await db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if employee.deleted_at is None:
+        raise HTTPException(status_code=409, detail={"code": "worker_not_archived", "message": "Бүр мөсөн устгахаас өмнө ажилтныг архивлана уу."})
+    history = await worker_history(db, employee)
+    has_history = HTTPException(status_code=409, detail={"code": "worker_has_history", "history": history, "message": "Энэ ажилтан ажлын түүх эсвэл нэвтрэх эрхтэй тул бүр мөсөн устгах боломжгүй. Архивт үлдээнэ үү."})
+    if history:
+        raise has_history
+    await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="deleted", before={"employee_id": employee.id, "name": employee.name})
+    # Core delete: database FKs cascade/restrict; the ORM would try to null children instead.
+    await db.execute(sa_delete(Employee).where(Employee.id == employee.id, Employee.organization_id == actor.organization_id))
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise has_history from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

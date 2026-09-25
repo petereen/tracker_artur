@@ -1154,6 +1154,7 @@ class Department(Base):
     code = Column(String(80), nullable=False)
     name = Column(Text, nullable=False)
     manager_employee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    description = Column(Text)
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
@@ -1164,6 +1165,18 @@ class EmployeeDetails(Base):
     __table_args__ = (
         UniqueConstraint("organization_id", "employee_id", name="uq_employee_details_org_employee"),
         Index("ix_employee_details_org_department", "organization_id", "department_id"),
+        Index(
+            "uq_employee_details_org_registration_number", "organization_id", "registration_number",
+            unique=True, postgresql_where=sa_text("registration_number IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "employment_status IN ('active','probation','on_leave','suspended','inactive','terminated')",
+            name="ck_employee_details_employment_status",
+        ),
+        CheckConstraint(
+            "employment_type IN ('full_time','part_time','contract','intern')",
+            name="ck_employee_details_employment_type",
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -1176,6 +1189,15 @@ class EmployeeDetails(Base):
     start_date = Column(Date)
     end_date = Column(Date)
     employment_status = Column(String(20), nullable=False, server_default="active", default="active")
+    # Mongolian civil registration number (Регистрын дугаар): 2 Cyrillic letters + 8 digits.
+    registration_number = Column(String(10))
+    gender = Column(String(8))
+    address = Column(Text)
+    emergency_contact_name = Column(Text)
+    emergency_contact_phone = Column(Text)
+    employment_type = Column(String(20), nullable=False, server_default="full_time", default="full_time")
+    probation_end_date = Column(Date)
+    termination_reason = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

@@ -6,7 +6,7 @@ WORKED-TO-DATE advance keep their existing behaviour (allowance earned to date
 was part of that advance); everything else defaults to FINAL.
 
 Revision ID: a7b8c9d0e1f3
-Revises: z4a5b6c7d8e9
+Revises: p1q2r3s4t5u6
 Create Date: 2026-09-25 12:00:00.000000
 
 """
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 
 revision: str = "a7b8c9d0e1f3"
-down_revision: Union[str, Sequence[str], None] = "z4a5b6c7d8e9"
+down_revision: Union[str, Sequence[str], None] = "p1q2r3s4t5u6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

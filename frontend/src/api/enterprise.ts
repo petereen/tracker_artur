@@ -510,13 +510,19 @@ export function useEnterpriseLogout() {
 }
 
 // ─── HR workspace ───────────────────────────────────────────────────────────
-export interface HRDepartment { id: number; code: string; name: string; manager_employee_id: number | null; is_active: boolean }
+export type HREmploymentStatus = 'active' | 'probation' | 'on_leave' | 'suspended' | 'inactive' | 'terminated'
+export type HREmploymentType = 'full_time' | 'part_time' | 'contract' | 'intern'
+export interface HRDepartment { id: number; code: string; name: string; description: string | null; manager_employee_id: number | null; is_active: boolean; employee_count: number }
 export interface HREmployee {
   id: number; name: string; first_name: string | null; last_name: string | null; telegram_id: string | null;
   telegram_username: string | null; photo_url: string | null; timezone: string; is_active: boolean;
-  department_id: number | null; department_name: string | null; manager_id: number | null; job_title: string | null;
-  employment_role: string | null; start_date: string | null; end_date: string | null; employment_status: string; is_archived?: boolean;
+  department_id: number | null; department_name: string | null; manager_id: number | null; manager_name: string | null; job_title: string | null;
+  employment_role: string | null; employment_type: HREmploymentType; start_date: string | null; probation_end_date: string | null; end_date: string | null;
+  employment_status: HREmploymentStatus; is_archived?: boolean;
   telegram_status: 'connected' | 'pending_invite' | 'not_invited'; account_id: number | null
+  // Private fields: null unless the viewer is HR or the worker themselves.
+  registration_number: string | null; birthday: string | null; gender: 'male' | 'female' | null; phone_number: string | null; email: string | null;
+  address: string | null; emergency_contact_name: string | null; emergency_contact_phone: string | null; termination_reason: string | null
 }
 export interface HRLeaveRequest { id: number; employee_id: number; employee_name: string; leave_type: 'annual' | 'sick' | 'unpaid'; starts_on: string; ends_on: string; working_days: string; reason: string | null; status: string; reviewer_feedback: string | null; version: number }
 export interface HRLeaveBalance { id: number; employee_id: number; year: number; leave_type: string; entitled_days: string; carried_days: string; adjustment_days: string; used_days: string; pending_days: string; available_days: string }
@@ -620,10 +626,14 @@ export async function downloadMonthlyPayrollInputTemplate(id: number) { const re
 export async function downloadMonthlyPayrollArchiveExport(archiveId: number, runId: number) { const response = await api.get(`/v1/erp/payroll/monthly/archives/${archiveId}/runs/${runId}/export`, { responseType: 'blob' }); const url = window.URL.createObjectURL(response.data); const link = document.createElement('a'); link.href = url; link.download = `monthly-payroll-archive-${archiveId}-run-${runId}.xlsx`; document.body.appendChild(link); link.click(); link.remove(); window.URL.revokeObjectURL(url) }
 
 export function useHRDepartments() { return useQuery<HRDepartment[]>({ queryKey: ['v1', 'hr', 'departments'], queryFn: () => api.get('/v1/hr/departments').then((r) => r.data) }) }
-export function useHREmployees(params: { search?: string; department_id?: number; status?: string; page?: number; include_archived?: boolean } = {}) { return useQuery<{ items: HREmployee[]; page: number; page_size: number; total: number }>({ queryKey: ['v1', 'hr', 'employees', params], queryFn: () => api.get('/v1/hr/employees', { params }).then((r) => r.data) }) }
+export function useCreateHRDepartment() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { name: string; code?: string | null; description?: string | null; manager_employee_id?: number | null }) => api.post('/v1/hr/departments', input).then((r) => r.data as HRDepartment), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr'] }) }) }
+export function useUpdateHRDepartment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...input }: { id: number; name?: string; code?: string; description?: string | null; manager_employee_id?: number | null; is_active?: boolean }) => api.patch(`/v1/hr/departments/${id}`, input).then((r) => r.data as HRDepartment), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr'] }) }) }
+export function useDeleteHRDepartment() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/v1/hr/departments/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr'] }) }) }
+export function useHREmployees(params: { search?: string; department_id?: number; status?: string; page?: number; page_size?: number; include_archived?: boolean } = {}) { return useQuery<{ items: HREmployee[]; page: number; page_size: number; total: number }>({ queryKey: ['v1', 'hr', 'employees', params], queryFn: () => api.get('/v1/hr/employees', { params }).then((r) => r.data) }) }
 export function useCreateHREmployee() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/hr/employees', input).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'hr'] }); qc.invalidateQueries({ queryKey: ['employees'] }) } }) }
 export function useUpdateHREmployee() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...input }: { id: number } & Record<string, unknown>) => api.patch(`/v1/hr/employees/${id}`, input).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'hr'] }); qc.invalidateQueries({ queryKey: ['employees'] }); qc.invalidateQueries({ queryKey: ['v1', 'workers'] }); qc.invalidateQueries({ queryKey: ['v1', 'payroll'] }) } }) }
 export function useArchiveHREmployee() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/v1/hr/employees/${id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'hr'] }); qc.invalidateQueries({ queryKey: ['employees'] }); qc.invalidateQueries({ queryKey: ['v1', 'workers'] }); qc.invalidateQueries({ queryKey: ['v1', 'payroll'] }) } }) }
+export function useDeleteHREmployeePermanently() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/v1/hr/employees/${id}`, { params: { permanent: true } }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'hr'] }); qc.invalidateQueries({ queryKey: ['employees'] }); qc.invalidateQueries({ queryKey: ['v1', 'workers'] }) } }) }
 export function useRegenerateHRInvite() { return useMutation({ mutationFn: (id: number) => api.post(`/v1/hr/employees/${id}/invite`).then((r) => r.data) }) }
 export function useRevokeHRInvite() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.post(`/v1/hr/employees/${id}/invite/revoke`).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'hr'] }) }) }
 export function useHRLeaveRequests(params: { status?: string; employee_id?: number; year?: number } = {}) { return useQuery<HRLeaveRequest[]>({ queryKey: ['v1', 'hr', 'leave-requests', params], queryFn: () => api.get('/v1/hr/leave-requests', { params }).then((r) => r.data) }) }

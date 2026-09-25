@@ -15,18 +15,24 @@ from app.core.config import settings
 from app.core.enterprise_deps import ActorContext
 from app.core.security import hash_account_password
 from app.core.telegram_auth import verify_init_data
+from app.hr.identity import WORKING_STATUSES
 from app.models.models import (
+    AttendanceLog,
     Department,
     Employee,
     EmployeeCompensationItem,
     EmployeeDetails,
     HolidayRecord,
     LeaveBalance,
+    MonthlyPayrollRunRow,
     RoleAssignment,
     Schedule,
+    SurveySession,
+    TaskAssignee,
     TimeOff,
     UserAccount,
     WorkerInvite,
+    WorkReport,
     WorkTimeEntry,
 )
 
@@ -35,8 +41,6 @@ HR_ROLES = ("admin", "hr")
 MANAGER_ROLES = ("admin", "hr", "manager", "team_lead")
 LEAVE_TYPES = {"annual", "sick", "unpaid"}
 ATTENDANCE_STATUSES = {"present", "remote", "absent", "late"}
-
-
 def can_manage_hr(actor: ActorContext) -> bool:
     return actor.has_any_role(*HR_ROLES)
 
@@ -81,14 +85,23 @@ async def ensure_details(db: AsyncSession, employee: Employee, *, start_date: da
     return details
 
 
-async def set_worker_active(db: AsyncSession, employee: Employee, active: bool, *, restore: bool = False) -> None:
-    """Keep HR's legacy status and account access aligned with the person row."""
+async def set_worker_active(db: AsyncSession, employee: Employee, active: bool, *, restore: bool = False, status: str | None = None) -> None:
+    """Keep HR's employment status and account access aligned with the person row.
+
+    ``status`` picks the precise employment status; without it the worker
+    keeps a compatible current status (e.g. probation stays probation).
+    """
+    if status is not None and (status in WORKING_STATUSES) != active:
+        raise ValueError(f"Status {status!r} does not match active={active}")
     employee.is_active = active
     if restore:
         employee.deleted_at = None
         employee.deleted_by_account_id = None
     details = await ensure_details(db, employee)
-    details.employment_status = "active" if active else "inactive"
+    if status is not None:
+        details.employment_status = status
+    elif (details.employment_status in WORKING_STATUSES) != active:
+        details.employment_status = "active" if active else "inactive"
     accounts = (await db.execute(select(UserAccount).where(UserAccount.organization_id == employee.organization_id, UserAccount.employee_id == employee.id))).scalars().all()
     if not active:
         for account in accounts:
@@ -100,6 +113,29 @@ async def archive_worker(db: AsyncSession, employee: Employee, *, account_id: in
     employee.deleted_at = datetime.now(timezone.utc)
     employee.deleted_by_account_id = account_id
     await set_worker_active(db, employee, False)
+
+
+# Records that make a worker part of the company's history. A worker with any
+# of these (or a login account) can only be archived, never hard-deleted.
+_HISTORY_MODELS = (
+    ("work_time", WorkTimeEntry),
+    ("attendance", AttendanceLog),
+    ("leave", TimeOff),
+    ("work_reports", WorkReport),
+    ("tasks", TaskAssignee),
+    ("surveys", SurveySession),
+    ("payroll", MonthlyPayrollRunRow),
+)
+
+
+async def worker_history(db: AsyncSession, employee: Employee) -> list[str]:
+    found = [
+        label for label, model in _HISTORY_MODELS
+        if await db.scalar(select(model.employee_id).where(model.employee_id == employee.id).limit(1)) is not None
+    ]
+    if await db.scalar(select(UserAccount.id).where(UserAccount.employee_id == employee.id).limit(1)) is not None:
+        found.append("account")
+    return found
 
 
 def _token_hash(raw: str) -> str:
@@ -173,7 +209,8 @@ async def bind_invite_user(db: AsyncSession, raw_token: str, user: dict[str, Any
     employee.is_active = True
     employee.onboarded_at = employee.onboarded_at or now
     details = await ensure_details(db, employee, start_date=now.date())
-    details.employment_status = "active"
+    if details.employment_status not in WORKING_STATUSES:
+        details.employment_status = "active"
     invite.used_at = now
     invite.bound_telegram_id = telegram_id
     account = await db.scalar(select(UserAccount).where(UserAccount.employee_id == employee.id).with_for_update())

@@ -57,7 +57,7 @@ def bind_employee_invite(raw_token: str, user) -> tuple[Employee | None, str | N
         employee.is_active = True
         employee.onboarded_at = employee.onboarded_at or now
         details = s.execute(select(EmployeeDetails).where(EmployeeDetails.employee_id == employee.id)).scalar_one_or_none()
-        if details:
+        if details and details.employment_status not in ("active", "probation"):
             details.employment_status = "active"
         invite.used_at = now
         invite.bound_telegram_id = telegram_id

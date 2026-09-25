@@ -25,6 +25,17 @@
 .hr-empty, .hr-muted { color: var(--color-muted); font-size: 12px; padding: 24px; text-align: center; }
 .hr-panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .hr-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 14px 0; }
+.hr-directory-toolbar { align-items: center; grid-template-columns: minmax(0, 1fr) 190px 190px auto; }
+.hr-worker-modal.hr-worker-modal { max-height: calc(100vh - 32px); max-width: 760px; overflow-y: auto; }
+.hr-form-section { border-top: 1px solid var(--color-border-soft); color: var(--color-muted); font: 700 10px var(--font-brand); letter-spacing: .06em; margin: 16px 0 0; padding-top: 14px; text-transform: uppercase; }
+.hr-form-section:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.hr-form-wide { grid-column: 1 / -1; }
+.hr-field-error { color: var(--color-red, #D93025); font-size: 11px; margin: 4px 0 0; }
+.hr-form-note { background: color-mix(in srgb, var(--color-amber, #B7791F) 12%, var(--color-surface)); border-radius: 9px; color: var(--color-text); font-size: 12px; margin: 0 0 8px; padding: 9px 11px; }
+.hr-drawer-badges { margin-top: 8px; }
+.hr-drawer-header-actions { display: flex; gap: 4px; }
+.hr-department-name { display: grid; gap: 2px; min-width: 0; }
+.hr-department-name small { color: var(--color-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hr-balance-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 16px 0; }
 .hr-balance-grid > div { background: var(--color-surface-2); border: 1px solid var(--color-border-soft); border-radius: 11px; display: grid; gap: 2px; padding: 11px; }
 .hr-balance-grid small, .hr-balance-grid span, .hr-request-list span, .hr-attendance-list span, .hr-component-list span { color: var(--color-muted); font-size: 10px; }
@@ -164,7 +175,7 @@
 .hr-invite-result { display: grid; gap: 14px; }
 .hr-invite-result code { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 9px; display: block; font-size: 11px; overflow-wrap: anywhere; padding: 11px; }
 .hr-modal-actions { justify-content: flex-end; margin-top: 18px; }
-@media (max-width: 760px) { .hr-toolbar, .hr-panel-grid, .hr-form-grid, .hr-attendance-controls { grid-template-columns: 1fr; } .hr-week-nav { justify-content: space-between; } .hr-week-nav strong { min-width: 0; } .hr-balance-grid { grid-template-columns: repeat(3, minmax(90px, 1fr)); overflow-x: auto; } .hr-drawer { padding: 20px 16px calc(20px + var(--safe-area-bottom)); } .monthly-payroll-two-col, .monthly-payroll-bank-form { grid-template-columns: 1fr; } .monthly-payroll-footer { bottom: calc(-20px - var(--safe-area-bottom)); margin: 0 -16px; padding-left: 16px; padding-right: 16px; } }
+@media (max-width: 760px) { .hr-toolbar, .hr-directory-toolbar, .hr-panel-grid, .hr-form-grid, .hr-attendance-controls { grid-template-columns: 1fr; } .hr-week-nav { justify-content: space-between; } .hr-week-nav strong { min-width: 0; } .hr-balance-grid { grid-template-columns: repeat(3, minmax(90px, 1fr)); overflow-x: auto; } .hr-drawer { padding: 20px 16px calc(20px + var(--safe-area-bottom)); } .monthly-payroll-two-col, .monthly-payroll-bank-form { grid-template-columns: 1fr; } .monthly-payroll-footer { bottom: calc(-20px - var(--safe-area-bottom)); margin: 0 -16px; padding-left: 16px; padding-right: 16px; } }
 
 :root {
   color-scheme: light dark;

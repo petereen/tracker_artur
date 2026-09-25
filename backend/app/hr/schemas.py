@@ -1,52 +1,159 @@
+import re
 from datetime import date
 from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .identity import normalize_registration_number, parse_registration_number
+
 
 LeaveType = Literal["annual", "sick", "unpaid"]
 AttendanceStatus = Literal["present", "remote", "absent", "late"]
 
 
+EmploymentStatus = Literal["active", "probation", "on_leave", "suspended", "inactive", "terminated"]
+EmploymentType = Literal["full_time", "part_time", "contract", "intern"]
+Gender = Literal["male", "female"]
+
+_PHONE_RE = re.compile(r"^\+?[0-9][0-9 ()-]{5,19}$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_DEPARTMENT_CODE = r"^[A-Za-z0-9_-]+$"
+
+
+def _blank_to_none(value):
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return value
+
+
 class DepartmentInput(BaseModel):
-    code: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    # Code is optional in the UI; the router derives one when it is blank.
+    code: str | None = Field(default=None, max_length=80)
     name: str = Field(min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
     manager_employee_id: int | None = None
+
+    @field_validator("code", "description", mode="before")
+    @classmethod
+    def blank(cls, value):
+        return _blank_to_none(value)
+
+    @field_validator("code")
+    @classmethod
+    def code_format(cls, value: str | None) -> str | None:
+        if value is not None and not re.match(_DEPARTMENT_CODE, value):
+            raise ValueError("Код зөвхөн латин үсэг, тоо, '-' болон '_' агуулна")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def name_stripped(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Хэлтсийн нэр хоосон байна")
+        return value
 
 
 class DepartmentPatch(BaseModel):
-    code: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    code: str | None = Field(default=None, min_length=1, max_length=80, pattern=_DEPARTMENT_CODE)
     name: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2000)
     manager_employee_id: int | None = None
     is_active: bool | None = None
 
 
-class EmployeeCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    telegram_id: str | None = Field(default=None, max_length=80)
+class _WorkerFields(BaseModel):
+    """Profile fields shared by create and patch; all optional."""
+
     first_name: str | None = Field(default=None, max_length=120)
     last_name: str | None = Field(default=None, max_length=120)
+    registration_number: str | None = Field(default=None, max_length=16)
+    birthday: date | None = None
+    gender: Gender | None = None
+    phone_number: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=254)
+    address: str | None = Field(default=None, max_length=1000)
+    emergency_contact_name: str | None = Field(default=None, max_length=200)
+    emergency_contact_phone: str | None = Field(default=None, max_length=32)
     department_id: int | None = None
     manager_id: int | None = None
     job_title: str | None = Field(default=None, max_length=160)
     employment_role: str | None = Field(default=None, max_length=160)
+    employment_type: EmploymentType | None = None
     start_date: date | None = None
+    probation_end_date: date | None = None
+    end_date: date | None = None
+    termination_reason: str | None = Field(default=None, max_length=2000)
+
+    @field_validator(
+        "first_name", "last_name", "registration_number", "phone_number", "email", "address",
+        "emergency_contact_name", "emergency_contact_phone", "job_title", "employment_role", "termination_reason",
+        mode="before",
+    )
+    @classmethod
+    def blank(cls, value):
+        return _blank_to_none(value)
+
+    @field_validator("registration_number")
+    @classmethod
+    def registration_number_valid(cls, value: str | None) -> str | None:
+        value = normalize_registration_number(value)
+        if value is not None:
+            parse_registration_number(value)
+        return value
+
+    @field_validator("phone_number", "emergency_contact_phone")
+    @classmethod
+    def phone_valid(cls, value: str | None) -> str | None:
+        if value is not None and not _PHONE_RE.match(value):
+            raise ValueError("Утасны дугаар буруу байна")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def email_valid(cls, value: str | None) -> str | None:
+        if value is not None:
+            value = value.lower()
+            if not _EMAIL_RE.match(value):
+                raise ValueError("Имэйл хаяг буруу байна")
+        return value
+
+    @model_validator(mode="after")
+    def date_order(self):
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValueError("Ажлаас гарсан огноо ажилд орсон огнооноос өмнө байж болохгүй")
+        if self.start_date and self.probation_end_date and self.probation_end_date < self.start_date:
+            raise ValueError("Туршилтын хугацаа ажилд орсон огнооноос өмнө дуусах боломжгүй")
+        return self
+
+
+class EmployeeCreate(_WorkerFields):
+    # Display name; derived from first/last name when omitted.
+    name: str | None = Field(default=None, max_length=200)
+    telegram_id: str | None = Field(default=None, max_length=80)
+    employment_status: Literal["active", "probation"] = "active"
     timezone: str = "Asia/Ulaanbaatar"
     annual_leave_days: Decimal | None = Field(default=None, ge=0, le=366)
 
+    @field_validator("name", "telegram_id", mode="before")
+    @classmethod
+    def blank_identity(cls, value):
+        return _blank_to_none(value)
 
-class EmployeePatch(BaseModel):
+    @model_validator(mode="after")
+    def display_name(self):
+        if not self.name:
+            self.name = " ".join(part for part in (self.first_name, self.last_name) if part) or None
+        if not self.name:
+            raise ValueError("Нэр оруулна уу")
+        return self
+
+
+class EmployeePatch(_WorkerFields):
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    first_name: str | None = Field(default=None, max_length=120)
-    last_name: str | None = Field(default=None, max_length=120)
-    department_id: int | None = None
-    manager_id: int | None = None
-    job_title: str | None = Field(default=None, max_length=160)
-    employment_role: str | None = Field(default=None, max_length=160)
-    start_date: date | None = None
-    end_date: date | None = None
-    employment_status: Literal["active", "inactive", "terminated"] | None = None
+    employment_status: EmploymentStatus | None = None
     is_active: bool | None = None
     restore: bool = False
     timezone: str | None = None
