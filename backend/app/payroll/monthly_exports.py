@@ -229,7 +229,7 @@ def advance_columns(with_cutoff_hours: bool) -> list[tuple[str, str | None]]:
         ("Өдөр", "Ажиллах"), ("Цаг", "Ажиллах"), ("Ажилласан цаг", None), ("Ажилласан өдөр", None), ("Тооцсон цалин", None),
         ("Илүү цаг", None), ("Илүү цагийн хөлс", None), ("Ээлжийн амралтын мөнгө", None), ("Хоол унаа", None), ("Урамшуулал", None),
         ("Олговол зохих цалин", None), ("НДШ", "Суутгалууд"), ("ХХОАТ ХӨН", "Суутгалууд"), ("ХХОАТ", "Суутгалууд"), ("Урьдчилгаа", "Суутгалууд"),
-        ("Суутгалын дүн", None), ("Сүүл цалин (тооцоолсон)", None), ("БНДШ", None), ("Төлбөрийн өдөр", None),
+        ("Үүнээс хоол унаа", "Суутгалууд"), ("Суутгалын дүн", None), ("Сүүл цалин (тооцоолсон)", None), ("БНДШ", None), ("Төлбөрийн өдөр", None),
     ]
 
 
@@ -262,7 +262,7 @@ def advance_register_values(index: int, row: Mapping[str, Any], pay_date: date, 
         _num(month.get("base_pay")), _num(overtime_hours), _num(month.get("overtime_pay")), _num(inputs.get("leave_pay")),
         _num(month.get("meal_commute")), _num(inputs.get("bonus")), _num(month.get("gross")),
         _num(month.get("employee_shi")), _num(month.get("relief")), _num(month.get("pit")), _num(result.get("advance")),
-        _num(month.get("total_deductions")), _num(month.get("net_pay")), _num(month.get("employer_shi")),
+        _num(result.get("advance_allowance")), _num(month.get("total_deductions")), _num(month.get("net_pay")), _num(month.get("employer_shi")),
         identity.get("pay_date") or pay_date.isoformat(),
     ]
 
@@ -291,7 +291,7 @@ def _advance_register(workbook: Workbook, rows: Sequence[Mapping[str, Any]], com
     formats[labels.index("Өдөр") + 1] = "0"
     formats[labels.index("Хувь / дүн") + 1] = MONEY
     next_row = _write_grouped_table(sheet, header_row + 2, labels, groups, sum_columns=[column for column in range(6, width + 1) if column not in text_columns], formats=formats, label_span=5)
-    sheet.cell(next_row + 1, 1, "Суутгалын дүн = НДШ + ХХОАТ + сарын нийт урьдчилгаа + хоол унаа; Сүүл цалин (тооцоолсон) = Олговол зохих цалин − Суутгалын дүн.").font = Font(italic=True)
+    sheet.cell(next_row + 1, 1, "Урьдчилгаа нь HR-ийн тохиргоогоор сарын хоол унааг агуулж болно (Үүнээс хоол унаа). Суутгалын дүн = НДШ + ХХОАТ + сарын нийт урьдчилгаа + бусад; Сүүл цалин (тооцоолсон) = Олговол зохих цалин − Суутгалын дүн.").font = Font(italic=True)
     sheet.cell(next_row + 2, 1, "НДШ – ажилтны цалингаас суутгах шимтгэл; БНДШ – Байгууллагын төлөх нийгмийн даатгалын шимтгэл (цалингаас суутгахгүй).").font = Font(italic=True)
     _widths(sheet, {1: 5, 2: 14, 3: 14, 4: 12, 5: 18, **{column: 13 for column in range(6, width + 1)}, labels.index("Өдөр") + 1: 7, labels.index("Цаг") + 1: 8})
     _page_setup(sheet, f"D{header_row + 2}")

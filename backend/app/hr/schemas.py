@@ -59,6 +59,7 @@ class MonthlyPayrollProfileInput(BaseModel):
     meal_allowance: Decimal = Field(default=Decimal("0"), ge=0)
     commute_allowance: Decimal = Field(default=Decimal("0"), ge=0)
     allowance_basis: Literal["FIXED", "WORKED_DAYS"] = "FIXED"
+    allowance_payout: Literal["ADVANCE", "FINAL"] = "FINAL"
     payment_frequency: Literal["MONTHLY", "BIWEEKLY", "WEEKLY"] = "MONTHLY"
     pay_days: list[int]
     advance_basis: Literal["FIXED", "PERCENT", "WORKED-TO-DATE"] = "FIXED"

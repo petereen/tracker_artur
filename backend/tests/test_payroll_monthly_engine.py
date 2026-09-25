@@ -326,3 +326,31 @@ def test_legacy_monthly_allowance_is_unchanged():
         planned_hours=220, worked_normal_hours=D("213.15"), worked_days=D("22"),
     )
     assert result.meal_commute == D("24222")
+
+
+def _allowance_profile(payout, **extra):
+    return PayrollProfile(
+        base_salary=D("4000000"), meal_allowance=D("15000"), commute_allowance=D("10000"), allowance_basis="FIXED",
+        allowance_payout=payout, advance_basis="FIXED", advance_amount=D("2000000"), payment_frequency="BIWEEKLY", pay_days=(5, 25), **extra,
+    )
+
+
+def test_advance_payout_adds_month_meal_commute_to_first_advance_only():
+    rules = default_2026_rules()
+    kwargs = dict(rules=rules, planned_days=22, planned_hours=176)
+    with_meal = calculate_monthly_run(PayrollRunType.ADVANCE, _allowance_profile("ADVANCE"), **kwargs)
+    assert (with_meal.advance, with_meal.advance_allowance) == (D("2550000"), D("550000"))
+    later = calculate_monthly_run(PayrollRunType.ADVANCE, _allowance_profile("ADVANCE"), prior_approved_advances=[D("2550000")], **kwargs)
+    assert (later.advance, later.advance_allowance) == (D("2000000"), D("0"))
+    remaining = calculate_monthly_run(PayrollRunType.ADVANCE, _allowance_profile("FINAL"), **kwargs)
+    assert (remaining.advance, remaining.advance_allowance) == (D("2000000"), D("0"))
+
+
+def test_final_run_nets_the_advance_that_carried_the_allowance():
+    rules = default_2026_rules()
+    kwargs = dict(rules=rules, planned_days=22, planned_hours=176, worked_normal_hours=176, worked_days=22)
+    early = calculate_monthly_run(PayrollRunType.FINAL, _allowance_profile("ADVANCE"), approved_advances=[D("2550000")], **kwargs)
+    late = calculate_monthly_run(PayrollRunType.FINAL, _allowance_profile("FINAL"), approved_advances=[D("2000000")], **kwargs)
+    # Same gross, НДШ and ХХОАТ either way; only who was paid the 550k when differs.
+    assert early.gross == late.gross and early.employee_shi == late.employee_shi and early.pit == late.pit
+    assert late.net_pay - early.net_pay == D("550000")

@@ -530,6 +530,8 @@ export interface MonthlyPayrollProfilePayload {
   commute_allowance: string
   /** FIXED/WORKED_DAYS take daily rates; MONTHLY is a legacy profile that must be re-saved. */
   allowance_basis: 'FIXED' | 'WORKED_DAYS' | 'MONTHLY'
+  /** ADVANCE: meal + commute is paid inside the advance; FINAL: with the remaining pay. */
+  allowance_payout: 'ADVANCE' | 'FINAL'
   payment_frequency: 'MONTHLY' | 'BIWEEKLY' | 'WEEKLY'
   pay_days: number[]
   advance_basis: 'FIXED' | 'PERCENT' | 'WORKED-TO-DATE'

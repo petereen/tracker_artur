@@ -104,6 +104,13 @@ class AllowanceBasis(StrEnum):
     WORKED_DAYS = "WORKED_DAYS"  # daily rate × days actually worked
 
 
+class AllowancePayout(StrEnum):
+    """Which payment carries meal + commute: the advance or the remaining (final) pay."""
+
+    ADVANCE = "ADVANCE"
+    FINAL = "FINAL"
+
+
 class CalendarDayType(StrEnum):
     WORKING = "working"
     WEEKLY_REST = "weekly_rest"
@@ -125,6 +132,7 @@ class PayrollProfile:
     meal_allowance: Decimal = ZERO
     commute_allowance: Decimal = ZERO
     allowance_basis: AllowanceBasis = AllowanceBasis.MONTHLY
+    allowance_payout: AllowancePayout = AllowancePayout.FINAL
     payment_frequency: str = "MONTHLY"
     pay_days: tuple[int, ...] = (25,)
     advance_basis: AdvanceBasis = AdvanceBasis.FIXED
@@ -139,6 +147,8 @@ class PayrollProfile:
             object.__setattr__(self, "advance_basis", AdvanceBasis(self.advance_basis))
         if not isinstance(self.allowance_basis, AllowanceBasis):
             object.__setattr__(self, "allowance_basis", AllowanceBasis(self.allowance_basis))
+        if not isinstance(self.allowance_payout, AllowancePayout):
+            object.__setattr__(self, "allowance_payout", AllowancePayout(self.allowance_payout))
         if self.salary_type not in {"PRORATION", "FIXED"}:
             raise ValueError("salary_type must be PRORATION or FIXED")
         if self.payment_frequency not in {"MONTHLY", "BIWEEKLY", "WEEKLY"}:
@@ -207,6 +217,7 @@ class PayrollRunResult:
     relief: Decimal = ZERO
     pit: Decimal = ZERO
     advance: Decimal = ZERO
+    advance_allowance: Decimal = ZERO  # part of `advance` that is meal + commute
     other_deductions: Decimal = ZERO
     total_deductions: Decimal = ZERO
     net_pay: Decimal = ZERO
@@ -271,24 +282,39 @@ def calculate_monthly_run(
                 raise ValueError("Worker is not due for an advance on this pay day")
         # FIXED and PERCENT are per-pay-day instalments typed by HR; only
         # WORKED-TO-DATE is cumulative and nets off earlier approved advances.
-        if profile.advance_basis is AdvanceBasis.FIXED:
-            return PayrollRunResult(run_type=run_type, advance=max(ZERO, whole_tugrik(profile.advance_amount)))
-        if profile.advance_basis is AdvanceBasis.PERCENT:
-            return PayrollRunResult(run_type=run_type, advance=max(ZERO, whole_tugrik(amount(profile.base_salary) * amount(profile.advance_percent) / Decimal("100"))))
+        pays_allowance = profile.allowance_payout is AllowancePayout.ADVANCE
+        if profile.advance_basis in {AdvanceBasis.FIXED, AdvanceBasis.PERCENT}:
+            if profile.advance_basis is AdvanceBasis.FIXED:
+                installment = max(ZERO, whole_tugrik(profile.advance_amount))
+            else:
+                installment = max(ZERO, whole_tugrik(amount(profile.base_salary) * amount(profile.advance_percent) / Decimal("100")))
+            # The whole month's meal + commute rides on the first advance only.
+            allowance = ZERO
+            if pays_allowance and profile.allowance_basis is not AllowanceBasis.MONTHLY and not prior_approved_advances:
+                daily = amount(profile.meal_allowance) + amount(profile.commute_allowance)
+                if profile.allowance_basis is AllowanceBasis.FIXED:
+                    days = Decimal(planned_days if allowance_planned_days is None else allowance_planned_days)
+                else:
+                    days = max(ZERO, amount(worked_days))
+                allowance = whole_tugrik(daily * days)
+            return PayrollRunResult(run_type=run_type, advance=installment + allowance, advance_allowance=allowance)
         if profile.salary_type == "PRORATION":
             earned = whole_tugrik(amount(profile.base_salary) / planned_hours * amount(worked_to_date_hours))
         else:
             earned = whole_tugrik(amount(profile.base_salary) * Decimal(elapsed_planned_days) / Decimal(planned_days))
         # Meal + commute are daily rates: (meal + commute) x days of the period so far.
-        if profile.allowance_basis is not AllowanceBasis.MONTHLY:
+        allowance_earned = ZERO
+        if pays_allowance and profile.allowance_basis is not AllowanceBasis.MONTHLY:
             rate = amount(profile.meal_allowance) + amount(profile.commute_allowance)
             if profile.allowance_basis is AllowanceBasis.WORKED_DAYS and worked_days_to_date is not None:
                 days = max(ZERO, amount(worked_days_to_date))
             else:
                 days = Decimal(elapsed_planned_days)
-            earned += whole_tugrik(rate * days)
+            allowance_earned = whole_tugrik(rate * days)
+            earned += allowance_earned
         previous = sum((whole_tugrik(value) for value in prior_approved_advances), ZERO)
-        return PayrollRunResult(run_type=run_type, advance=max(ZERO, whole_tugrik(earned - previous)))
+        advance = max(ZERO, whole_tugrik(earned - previous))
+        return PayrollRunResult(run_type=run_type, advance=advance, advance_allowance=min(advance, allowance_earned))
 
     base_cells: list[Decimal] = []
     overtime_by_bucket: dict[str, Decimal] = {key: ZERO for key in rules.overtime_multipliers}

@@ -182,7 +182,7 @@ async def _scenario(client, ids, sessions, organization_id):
     assert _row(run10, ids["oyun"])["inputs"]["worked_normal_hours"] == "168"
     assert (projection["base_pay"], projection["meal_commute"], projection["gross"]) == ("1500000", "120000", "1620000")
     assert (projection["employee_shi"], projection["pit"], projection["advance"]) == ("186300", "127370", "600000")
-    assert (projection["total_deductions"], projection["net_pay"]) == ("1033670", "586330")
+    assert (projection["total_deductions"], projection["net_pay"]) == ("913670", "706330")  # meal + commute is paid with the remaining pay
     await _ok(await client.post(f"/m/runs/{advance10['id']}/rows/{ids['oyun']}/approve"))
     approved = await _ok(await client.post(f"/m/runs/{advance10['id']}/approve"))
     assert approved["status"] == "approved" and approved["approval_summary"]["skipped"] == []

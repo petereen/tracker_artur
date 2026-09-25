@@ -573,6 +573,7 @@ def _monthly_payroll_profile_out(profile: MonthlyPayrollProfile | None, history:
         "meal_allowance": _plain_number(profile.meal_allowance if profile else 0),
         "commute_allowance": _plain_number(profile.commute_allowance if profile else 0),
         "allowance_basis": profile.allowance_basis if profile else "FIXED",
+        "allowance_payout": profile.allowance_payout if profile else "FINAL",
         "payment_frequency": profile.payment_frequency if profile else "MONTHLY",
         "pay_days": profile.pay_days if profile else [25],
         "advance_basis": profile.advance_basis if profile else "FIXED",
@@ -657,7 +658,7 @@ async def preview_monthly_payroll_profile(employee_id: int, data: MonthlyPayroll
     segments = [SalarySegment(data.base_salary, len(working_dates), Decimal(len(working_dates)) * data.daily_norm_hours)]
     profile = PayrollProfile(
         base_salary=data.base_salary, salary_type=data.salary_type,
-        meal_allowance=data.meal_allowance, commute_allowance=data.commute_allowance, allowance_basis=data.allowance_basis,
+        meal_allowance=data.meal_allowance, commute_allowance=data.commute_allowance, allowance_basis=data.allowance_basis, allowance_payout=data.allowance_payout,
         payment_frequency=data.payment_frequency, pay_days=tuple(data.pay_days),
         advance_basis=AdvanceBasis(data.advance_basis), daily_norm_hours=data.daily_norm_hours,
         insured_type=data.insured_type, tax_relief_eligible=data.tax_relief_eligible,
@@ -671,7 +672,7 @@ async def preview_monthly_payroll_profile(employee_id: int, data: MonthlyPayroll
         value = data.advance_values[index] if index < len(data.advance_values) else Decimal("0")
         advance_profile = replace(profile, advance_amount=value if data.advance_basis == "FIXED" else Decimal("0"), advance_percent=value if data.advance_basis == "PERCENT" else Decimal("40"))
         elapsed_days = sum(1 for day in working_dates if day < pay_date)
-        advance_result = calculate_monthly_run(PayrollRunType.ADVANCE, advance_profile, rules=rules, planned_days=len(working_dates), planned_hours=planned_hours, worked_to_date_hours=Decimal(elapsed_days) * data.daily_norm_hours, elapsed_planned_days=elapsed_days, advance_pay_day=profile.pay_days[index])
+        advance_result = calculate_monthly_run(PayrollRunType.ADVANCE, advance_profile, rules=rules, planned_days=len(working_dates), planned_hours=planned_hours, worked_to_date_hours=Decimal(elapsed_days) * data.daily_norm_hours, elapsed_planned_days=elapsed_days, advance_pay_day=profile.pay_days[index], worked_days=len(working_dates))
         advance_schedule.append({"pay_date": pay_date.isoformat(), "basis": data.advance_basis, "value": str(value) if data.advance_basis != "WORKED-TO-DATE" else None, "estimated_amount": str(advance_result.advance)})
     return {"month": period_start.strftime("%Y-%m"), "gross": str(final.gross), "employee_shi": str(final.employee_shi), "taxable_income": str(final.taxable_income), "pit_before_relief": str(final.pit_before_relief), "relief": str(final.relief), "pit": str(final.pit), "net_pay": str(final.net_pay), "advance_schedule": advance_schedule}
 

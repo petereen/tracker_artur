@@ -926,6 +926,8 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         meal_allowance=amount(profile_data.get("meal_allowance", 0)), commute_allowance=amount(profile_data.get("commute_allowance", 0)),
         # Snapshots taken before daily allowances keep their monthly amounts.
         allowance_basis=AllowanceBasis(profile_data.get("allowance_basis") or "MONTHLY"),
+        # Snapshots taken before this setting paid meal + commute with the remaining pay.
+        allowance_payout=profile_data.get("allowance_payout") or "FINAL",
         payment_frequency=profile_data["payment_frequency"], pay_days=tuple(profile_data["pay_days"]),
         advance_basis=AdvanceBasis(profile_data["advance_basis"]), advance_amount=amount(profile_data.get("advance_amount", 0)),
         advance_percent=amount(profile_data.get("advance_percent", 40)), daily_norm_hours=amount(profile_data.get("daily_norm_hours", 8)),
@@ -1120,14 +1122,11 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         )
         projection_data = _json_value(asdict(projection))
         projection_data.pop("run_type", None)
-        # Суутгалын дүн = урьдчилгаа + НДШ + ХХОАТ (ХХОАТ ХӨН-өөр багасгасан) + бусад
-        # + хоол унаа (олговол зохих цалинд орсон (хоол + унаа) × өдөр), so
-        # Суутгалын дүн + Сүүл цалин = олговол зохих цалин.
-        projection_data["total_deductions"] = str(whole_tugrik(
-            projection.advance + projection.employee_shi + projection.pit + projection.other_deductions + projection.meal_commute
-        ))
-        projection_data["net_pay"] = str(whole_tugrik(projection.gross - amount(projection_data["total_deductions"])))
+        # Суутгалын дүн = урьдчилгаа + НДШ + ХХОАТ (ХХОАТ ХӨН-өөр багасгасан) + бусад.
+        # Хоол унаа олговол зохих цалинд орсон тул НДШ, ХХОАТ нь түүнийг агуулна; урьдчилгаатай
+        # хамт төлөх бол урьдчилгаанд орсон (allowance_payout = ADVANCE), үгүй бол сүүл цалинд.
         projection_data["net_after_advances"] = str(projection.net_pay)
+        projection_data["advance_allowance"] = result_data.get("advance_allowance", "0")
         projection_data["prior_advances"] = str(sum((amount(value) for value in prior_advances), Decimal("0")))
         projection_data["overtime_lines"] = overtime_day_lines(
             day_lines=inputs.get("day_lines") or [], aggregate_hours=inputs.get("overtime_hours") or {},
@@ -1285,7 +1284,7 @@ def _identity_snapshot(employee: Employee, details: EmployeeDetails | None, depa
 
 def _profile_snapshot(profile: MonthlyPayrollProfile | None, history: MonthlyPayrollSalaryHistory | None, segments: list[dict[str, Any]]) -> dict[str, Any]:
     if profile is None:
-        return {"complete": False, "validation_issues": ["profile_missing"], "base_salary": "0", "salary_segments": [], "salary_type": "PRORATION", "meal_allowance": "0", "commute_allowance": "0", "allowance_basis": "FIXED", "payment_frequency": "MONTHLY", "pay_days": [25], "advance_basis": "FIXED", "advance_amount": "0", "advance_percent": "40", "advance_values": [], "daily_norm_hours": "8", "insured_type": "01001", "tax_relief_eligible": True}
+        return {"complete": False, "validation_issues": ["profile_missing"], "base_salary": "0", "salary_segments": [], "salary_type": "PRORATION", "meal_allowance": "0", "commute_allowance": "0", "allowance_basis": "FIXED", "allowance_payout": "FINAL", "payment_frequency": "MONTHLY", "pay_days": [25], "advance_basis": "FIXED", "advance_amount": "0", "advance_percent": "40", "advance_values": [], "daily_norm_hours": "8", "insured_type": "01001", "tax_relief_eligible": True}
     issues = ["salary_history_missing_or_incomplete"] if history is None else []
     # Meal + commute are daily rates × workdays; a legacy monthly-amount profile must be re-saved in HR.
     if profile.allowance_basis == "MONTHLY":
@@ -1294,7 +1293,7 @@ def _profile_snapshot(profile: MonthlyPayrollProfile | None, history: MonthlyPay
         "complete": not issues, "validation_issues": issues, "base_salary": str(history.monthly_salary if history else 0),
         "salary_segments": segments, "salary_type": profile.salary_type,
         "meal_allowance": str(profile.meal_allowance), "commute_allowance": str(profile.commute_allowance),
-        "allowance_basis": profile.allowance_basis,
+        "allowance_basis": profile.allowance_basis, "allowance_payout": profile.allowance_payout,
         "payment_frequency": profile.payment_frequency, "pay_days": list(profile.pay_days or []),
         "advance_basis": profile.advance_basis, "advance_amount": str(profile.advance_amount),
         "advance_percent": str(profile.advance_percent), "advance_values": [str(value) for value in (profile.advance_values or [])],

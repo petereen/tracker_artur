@@ -252,7 +252,10 @@ export function RunRegister({ runId }: { runId: number }) {
   const workedTitle = (row: Row) => isFinal ? undefined : `${data?.cutoff_date || 'Таслах өдөр'} хүртэл ${formatHours(row.inputs.worked_to_date_hours)} цаг + үлдсэн ${formatHours(row.inputs.projected_remaining_hours)} цаг`
   const advanceTitle = (row: Row) => isFinal
     ? ((row.result.advance_lines || []).length ? `${row.result.advance_lines.length} батлагдсан урьдчилгааны бодолтоос` : undefined)
-    : (toNumber(monthFigures(row).prior_advances) > 0 ? `Өмнөх урьдчилгаа ${formatAmount(monthFigures(row).prior_advances)} ₮ сарын урьдчилгаанд орсон` : undefined)
+    : [
+      toNumber(row.result.advance_allowance) > 0 ? `${formatAmount(toNumber(row.result.advance) - toNumber(row.result.advance_allowance))} + хоол унаа ${formatAmount(row.result.advance_allowance)}` : '',
+      toNumber(monthFigures(row).prior_advances) > 0 ? `Өмнөх урьдчилгаа ${formatAmount(monthFigures(row).prior_advances)} ₮ сарын урьдчилгаанд орсон` : '',
+    ].filter(Boolean).join(' · ') || undefined
   const monthColumns: Column[] = [
     { key: 'planned_days', label: 'Өдөр', group: 'Ажиллах', kind: 'days', value: (row) => row.result.planned_days ?? '—' },
     { key: 'planned_hours', label: 'Цаг', group: 'Ажиллах', kind: 'hours', value: (row) => row.result.planned_hours },
@@ -286,6 +289,7 @@ export function RunRegister({ runId }: { runId: number }) {
     { key: 'advance_value', label: 'Хувь / дүн', group: 'Урьдчилгааны тооцоо', kind: 'text', manual: (row) => Boolean(row.inputs.fixed_advance || row.inputs.advance_percent), value: (row) => row.result.advance_value, render: (row, isEditing) => isEditing ? (draft.advance_basis === 'WORKED-TO-DATE' ? '—' : numberInput('Хувь эсвэл дүн', draft.advance_value, (value) => setDraftValue('advance_value', value))) : row.result.advance_basis === 'PERCENT' ? `${formatHours(row.result.advance_value)}%` : row.result.advance_basis === 'FIXED' ? formatAmount(row.result.advance_value) : '—' },
     ...(hasWorkedToDate ? [{ key: 'worked_to_date_hours', label: 'Таслах өдөр хүртэл цаг', group: 'Урьдчилгааны тооцоо', kind: 'hours' as Kind, value: (row: Row) => (row.result.advance_basis === 'WORKED-TO-DATE' ? row.inputs.worked_to_date_hours : 0), manual: (row: Row) => sourceDiffers(row, 'worked_to_date_hours'), render: (row: Row, isEditing: boolean) => isEditing && draft.advance_basis === 'WORKED-TO-DATE' ? numberInput('Таслах өдөр хүртэл ажилласан цаг', draft.worked_to_date_hours, (value) => setDraftValue('worked_to_date_hours', value)) : row.result.advance_basis === 'WORKED-TO-DATE' ? formatHours(row.inputs.worked_to_date_hours) : '—' }] : []),
     ...monthColumns,
+    { key: 'advance_allowance', label: 'Үүнээс хоол унаа', group: 'Суутгалууд', kind: 'money', value: (row) => row.result.advance_allowance },
     { key: 'total_deductions', label: 'Суутгалын дүн', kind: 'money', short: true, value: (row) => monthFigures(row).total_deductions },
     { key: 'net_pay', label: 'Сүүл цалин (тооцоолсон)', kind: 'money', short: true, value: (row) => monthFigures(row).net_pay },
     { key: 'employer_shi', label: 'БНДШ', kind: 'money', value: (row) => monthFigures(row).employer_shi },
