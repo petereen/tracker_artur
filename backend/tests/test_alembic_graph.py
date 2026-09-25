@@ -13,6 +13,8 @@ def test_alembic_has_one_deployable_head():
 
     heads = script.get_heads()
     assert len(heads) == 1
-    assert heads == ["w2x3y4z5a6b7"]
-    assert script.get_revision(heads[0]).down_revision == "u2v3w4x5y6z7"
-    assert script.get_revision("u2v3w4x5y6z7").down_revision == "s0t1u2v3w4x5"
+    assert heads == ["p1q2r3s4t5u6"]
+    assert set(script.get_revision(heads[0]).down_revision) == {
+        "b2c3d4e5f6g7",
+        "m6n7o8p9q0r1",
+    }

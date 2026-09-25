@@ -20,7 +20,7 @@
   - [x] P2: Excel-order register with grouped headers, subtotals, sticky/frozen columns and presets; advance register; status chips; overtime colours + info box; tabbed row drawer; dashboard with trend; settings/archive pages; legacy page cleanup (`frontend/src/pages/monthly-payroll/`)
   - [x] P3: §12 workbooks (`backend/app/payroll/monthly_exports.py`), extended closing stats and accounting summary, Mongolian report headers
   - [x] P4: engine/export unit tests, PostgreSQL end-to-end test, frontend helper/chart tests; browser walkthrough at desktop and phone width
-  - [ ] Merge Alembic heads once the concurrent company-files migration (`f2a3b4c5d6e7`) lands (`tests/test_alembic_graph.py`)
+  - [x] Merge current Alembic heads so `alembic upgrade head` has one target (`backend/alembic/versions/p1q2r3s4t5u6_merge_contract_and_global_search_heads.py`, `backend/tests/test_alembic_graph.py`)
 - [ ] Complete monthly payroll cutover and retire the previous workflow
   - [x] Fix mid-month salary segment proration and overtime denominators (`backend/app/payroll/monthly_engine.py`)
   - [x] Add the missing mid-month PRORATION and segment-rate overtime regression fixture (`backend/tests/test_payroll_monthly_engine.py`)
