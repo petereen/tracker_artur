@@ -572,6 +572,7 @@ def _monthly_payroll_profile_out(profile: MonthlyPayrollProfile | None, history:
         "salary_type": profile.salary_type if profile else "PRORATION",
         "meal_allowance": _plain_number(profile.meal_allowance if profile else 0),
         "commute_allowance": _plain_number(profile.commute_allowance if profile else 0),
+        "allowance_basis": profile.allowance_basis if profile else "FIXED",
         "payment_frequency": profile.payment_frequency if profile else "MONTHLY",
         "pay_days": profile.pay_days if profile else [25],
         "advance_basis": profile.advance_basis if profile else "FIXED",
@@ -656,13 +657,13 @@ async def preview_monthly_payroll_profile(employee_id: int, data: MonthlyPayroll
     segments = [SalarySegment(data.base_salary, len(working_dates), Decimal(len(working_dates)) * data.daily_norm_hours)]
     profile = PayrollProfile(
         base_salary=data.base_salary, salary_type=data.salary_type,
-        meal_allowance=data.meal_allowance, commute_allowance=data.commute_allowance,
+        meal_allowance=data.meal_allowance, commute_allowance=data.commute_allowance, allowance_basis=data.allowance_basis,
         payment_frequency=data.payment_frequency, pay_days=tuple(data.pay_days),
         advance_basis=AdvanceBasis(data.advance_basis), daily_norm_hours=data.daily_norm_hours,
         insured_type=data.insured_type, tax_relief_eligible=data.tax_relief_eligible,
     )
     planned_hours = Decimal(len(working_dates)) * data.daily_norm_hours
-    final = calculate_monthly_run(PayrollRunType.FINAL, profile, rules=rules, planned_days=len(working_dates), planned_hours=planned_hours, worked_normal_hours=planned_hours, salary_segments=segments)
+    final = calculate_monthly_run(PayrollRunType.FINAL, profile, rules=rules, planned_days=len(working_dates), planned_hours=planned_hours, worked_normal_hours=planned_hours, worked_days=len(working_dates), salary_segments=segments)
     pay_dates = pay_dates_for_month(profile, year, month_number)
     advance_schedule = []
     advance_dates = pay_dates[:-1]

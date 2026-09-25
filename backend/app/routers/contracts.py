@@ -50,6 +50,14 @@ class ContractCreate(BaseModel):
     task_id: int | None = None
     effective_start_on: date | None = None
     effective_end_on: date | None = None
+    expiry_reminder_days: list[int] = Field(default_factory=list, max_length=10)
+
+    @field_validator("expiry_reminder_days")
+    @classmethod
+    def validate_expiry_reminders(cls, value: list[int]) -> list[int]:
+        if any(day < 1 or day > 365 for day in value):
+            raise ValueError("Expiry reminders must be between 1 and 365 days")
+        return sorted(set(value))
 
     @field_validator("title")
     @classmethod
@@ -69,10 +77,27 @@ class ContractPatch(BaseModel):
     task_id: int | None = None
     effective_start_on: date | None = None
     effective_end_on: date | None = None
+    expiry_reminder_days: list[int] | None = Field(default=None, max_length=10)
+
+    @field_validator("expiry_reminder_days")
+    @classmethod
+    def validate_expiry_reminders(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and any(day < 1 or day > 365 for day in value):
+            raise ValueError("Expiry reminders must be between 1 and 365 days")
+        return sorted(set(value)) if value is not None else value
 
 
 class ReviewInput(BaseModel):
     remark: str | None = Field(default=None, max_length=5000)
+    effective_end_on: date | None = None
+    expiry_reminder_days: list[int] | None = Field(default=None, max_length=10)
+
+    @field_validator("expiry_reminder_days")
+    @classmethod
+    def validate_expiry_reminders(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and any(day < 1 or day > 365 for day in value):
+            raise ValueError("Expiry reminders must be between 1 and 365 days")
+        return sorted(set(value)) if value is not None else value
 
 
 class CommentInput(BaseModel):
@@ -258,6 +283,7 @@ def _contract_summary(contract: ContractDocument, revision: ContractRevision | N
         "task_id": contract.task_id,
         "effective_start_on": contract.effective_start_on,
         "effective_end_on": contract.effective_end_on,
+        "expiry_reminder_days": contract.expiry_reminder_days or [],
         "submission_round": contract.submission_round,
         "version": contract.version,
         "current_revision_id": contract.current_revision_id,
@@ -310,12 +336,14 @@ async def list_contracts(view: Literal["all", "drafts", "pending_my_approval", "
 async def create_contract(data: ContractCreate, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if actor.employee_id is None:
         raise HTTPException(status_code=403, detail="An employee-linked account is required to draft contracts")
+    if data.effective_end_on is None:
+        raise HTTPException(status_code=422, detail="An expiry date is required when creating a contract")
     await _assert_links(db, actor, data.project_id, data.task_id)
     reviewers = await _candidate_accounts(db, actor.organization_id, data.reviewer_account_ids)
     if actor.account_id in {account.id for account, _ in reviewers}:
         raise HTTPException(status_code=422, detail="The author cannot be their own reviewer")
     _validate_dates(data.effective_start_on, data.effective_end_on)
-    contract = ContractDocument(organization_id=actor.organization_id, author_account_id=actor.account_id, author_employee_id=actor.employee_id, title=data.title.strip(), document_type=data.document_type, project_id=data.project_id, task_id=data.task_id, effective_start_on=data.effective_start_on, effective_end_on=data.effective_end_on, reviewer_account_ids=[account.id for account, _ in reviewers])
+    contract = ContractDocument(organization_id=actor.organization_id, author_account_id=actor.account_id, author_employee_id=actor.employee_id, title=data.title.strip(), document_type=data.document_type, project_id=data.project_id, task_id=data.task_id, effective_start_on=data.effective_start_on, effective_end_on=data.effective_end_on, expiry_reminder_days=data.expiry_reminder_days, reviewer_account_ids=[account.id for account, _ in reviewers])
     db.add(contract)
     await db.flush()
     revision = await _new_revision(db, contract, title=data.title, document_type=data.document_type, body_json=data.body_json, project_id=data.project_id, task_id=data.task_id, effective_start_on=data.effective_start_on, effective_end_on=data.effective_end_on, actor=actor)
@@ -360,6 +388,8 @@ async def update_contract(public_id: UUID, data: ContractPatch, if_match: str | 
     start = values.get("effective_start_on", current.effective_start_on)
     end = values.get("effective_end_on", current.effective_end_on)
     contract.reviewer_account_ids = [account.id for account, _ in reviewers]
+    if "expiry_reminder_days" in values:
+        contract.expiry_reminder_days = values["expiry_reminder_days"] or []
     revision = await _new_revision(db, contract, title=title, document_type=document_type, body_json=body, project_id=project_id, task_id=task_id, effective_start_on=start, effective_end_on=end, actor=actor)
     await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="draft_saved", version=contract.version, after={"revision_id": revision.id, "status": contract.status})
     await db.commit()
@@ -387,7 +417,7 @@ async def duplicate_contract(public_id: UUID, db: AsyncSession = Depends(get_db)
     source_revision = await db.get(ContractRevision, source.current_revision_id)
     if not source_revision:
         raise HTTPException(status_code=409, detail="Rejected contract has no revision")
-    duplicate = ContractDocument(organization_id=actor.organization_id, author_account_id=actor.account_id, author_employee_id=actor.employee_id, title=f"{source.title} (Хуулбар)", document_type=source.document_type, project_id=source.project_id, task_id=source.task_id, effective_start_on=source.effective_start_on, effective_end_on=source.effective_end_on, reviewer_account_ids=source.reviewer_account_ids or [])
+    duplicate = ContractDocument(organization_id=actor.organization_id, author_account_id=actor.account_id, author_employee_id=actor.employee_id, title=f"{source.title} (Хуулбар)", document_type=source.document_type, project_id=source.project_id, task_id=source.task_id, effective_start_on=source.effective_start_on, effective_end_on=source.effective_end_on, expiry_reminder_days=source.expiry_reminder_days or [], reviewer_account_ids=source.reviewer_account_ids or [])
     db.add(duplicate)
     await db.flush()
     revision = await _new_revision(db, duplicate, title=duplicate.title, document_type=duplicate.document_type, body_json=source_revision.body_json, project_id=duplicate.project_id, task_id=duplicate.task_id, effective_start_on=duplicate.effective_start_on, effective_end_on=duplicate.effective_end_on, actor=actor)
@@ -407,6 +437,8 @@ async def _submit(public_id: UUID, db: AsyncSession, actor: ActorContext, *, res
         raise HTTPException(status_code=422, detail="Select at least one reviewer before submitting")
     if contract.current_revision_id is None:
         raise HTTPException(status_code=409, detail="Contract has no current revision")
+    if contract.effective_end_on is None:
+        raise HTTPException(status_code=422, detail="Enter an expiry date before submitting the contract")
     contract.submission_round += 1
     contract.status = "PENDING_REVIEW"
     contract.version += 1
@@ -475,6 +507,13 @@ async def _review(public_id: UUID, data: ReviewInput, action: Literal["approve",
     else:
         remaining = await db.scalar(select(ContractReview.id).where(ContractReview.contract_id == contract.id, ContractReview.round_number == contract.submission_round, ContractReview.decision != "approved").limit(1))
         if not remaining:
+            end_on = data.effective_end_on if data.effective_end_on is not None else contract.effective_end_on
+            reminder_days = data.expiry_reminder_days if data.expiry_reminder_days is not None else (contract.expiry_reminder_days or [])
+            if end_on is None:
+                raise HTTPException(status_code=422, detail="An expiry date is required for final approval")
+            _validate_dates(contract.effective_start_on, end_on)
+            contract.effective_end_on = end_on
+            contract.expiry_reminder_days = sorted(set(reminder_days))
             contract.status = "APPROVED"
             contract.approved_revision_id = contract.current_revision_id
             contract.approved_at = _now()

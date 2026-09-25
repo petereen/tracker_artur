@@ -98,11 +98,11 @@ async def _payroll_api(monkeypatch):
 
         ids = {
             # §18 row: BIWEEKLY 10/25, 40% advance, meal + commute 120,000.
-            "oyun": await worker("Бат Оюун-Эрдэнэ", finance, bank=True, salary=D("1500000"), profile={"salary_type": "PRORATION", "meal_allowance": D("70000"), "commute_allowance": D("50000"), "payment_frequency": "BIWEEKLY", "pay_days": [10, 25], "advance_basis": "PERCENT", "advance_values": ["40"], "tax_relief_eligible": True}),
+            "oyun": await worker("Бат Оюун-Эрдэнэ", finance, bank=True, salary=D("1500000"), profile={"salary_type": "PRORATION", "meal_allowance": D("70000"), "commute_allowance": D("50000"), "allowance_basis": "MONTHLY", "payment_frequency": "BIWEEKLY", "pay_days": [10, 25], "advance_basis": "PERCENT", "advance_values": ["40"], "tax_relief_eligible": True}),
             # WEEKLY FIXED instalments must not net each other off.
             "weekly": await worker("Дорж Сараа", sales, salary=D("1500000"), profile={"salary_type": "FIXED", "payment_frequency": "WEEKLY", "pay_days": [7, 14, 21, 28], "advance_basis": "FIXED", "advance_values": ["200000", "200000", "200000"], "tax_relief_eligible": True}),
             # Hired mid-month: salary history starts on the hire date.
-            "hire": await worker("Ганаа Тэмүүлэн", sales, start=date(2026, 8, 17), salary=D("1500000"), salary_from=date(2026, 8, 17), profile={"salary_type": "FIXED", "payment_frequency": "MONTHLY", "pay_days": [25], "tax_relief_eligible": True}),
+            "hire": await worker("Ганаа Тэмүүлэн", sales, start=date(2026, 8, 17), salary=D("1500000"), salary_from=date(2026, 8, 17), profile={"salary_type": "FIXED", "meal_allowance": D("10000"), "commute_allowance": D("5000"), "allowance_basis": "FIXED", "payment_frequency": "MONTHLY", "pay_days": [25], "tax_relief_eligible": True}),
             # No payroll profile yet: must surface as a blocking row, not vanish.
             "missing": await worker("Профайлгүй Ажилтан", finance),
         }
@@ -165,6 +165,8 @@ async def _scenario(client, ids, sessions, organization_id):
     assert _row(final_run, ids["missing"])["warnings"] == ["profile_missing"]
     hire = _row(final_run, ids["hire"])
     assert hire["profile"]["complete"] is True and hire["result"]["base_pay"] == "785714"
+    # FIXED daily allowance: 15,000 × 11 planned workdays from the 17th.
+    assert (hire["result"]["allowance_days"], hire["result"]["meal_commute"]) == ("11", "165000")
 
     # Advance run on the 10th: 40% of 1,500,000. Approve one row, then «Бүгдийг батлах».
     advance10 = await _ok(await client.post(f"/m/months/{month['id']}/runs", json={"run_type": "advance", "pay_date": "2026-08-10"}), 201)

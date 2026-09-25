@@ -96,6 +96,14 @@ class AdvanceBasis(StrEnum):
     WORKED_TO_DATE = "WORKED-TO-DATE"
 
 
+class AllowanceBasis(StrEnum):
+    """How meal + commute is paid. FIXED and WORKED_DAYS take daily rates."""
+
+    MONTHLY = "MONTHLY"  # legacy snapshots: monthly amounts, hourly workers prorated by hours
+    FIXED = "FIXED"  # daily rate × planned workdays of employment in the month
+    WORKED_DAYS = "WORKED_DAYS"  # daily rate × days actually worked
+
+
 class CalendarDayType(StrEnum):
     WORKING = "working"
     WEEKLY_REST = "weekly_rest"
@@ -116,6 +124,7 @@ class PayrollProfile:
     salary_type: str = "PRORATION"
     meal_allowance: Decimal = ZERO
     commute_allowance: Decimal = ZERO
+    allowance_basis: AllowanceBasis = AllowanceBasis.MONTHLY
     payment_frequency: str = "MONTHLY"
     pay_days: tuple[int, ...] = (25,)
     advance_basis: AdvanceBasis = AdvanceBasis.FIXED
@@ -128,6 +137,8 @@ class PayrollProfile:
     def __post_init__(self) -> None:
         if not isinstance(self.advance_basis, AdvanceBasis):
             object.__setattr__(self, "advance_basis", AdvanceBasis(self.advance_basis))
+        if not isinstance(self.allowance_basis, AllowanceBasis):
+            object.__setattr__(self, "allowance_basis", AllowanceBasis(self.allowance_basis))
         if self.salary_type not in {"PRORATION", "FIXED"}:
             raise ValueError("salary_type must be PRORATION or FIXED")
         if self.payment_frequency not in {"MONTHLY", "BIWEEKLY", "WEEKLY"}:
@@ -185,6 +196,7 @@ class PayrollRunResult:
     base_pay: Decimal = ZERO
     overtime_by_bucket: Mapping[str, Decimal] = field(default_factory=dict)
     overtime_pay: Decimal = ZERO
+    allowance_days: Decimal = ZERO
     meal_commute: Decimal = ZERO
     gross: Decimal = ZERO
     shi_base: Decimal = ZERO
@@ -239,6 +251,8 @@ def calculate_monthly_run(
     worked_to_date_hours: Decimal | int | str = ZERO,
     elapsed_planned_days: int = 0,
     salary_segments: Sequence[SalarySegment] | None = None,
+    worked_days: Decimal | int | str = ZERO,
+    allowance_planned_days: int | None = None,
 ) -> PayrollRunResult:
     """Calculate an advance or final run from resolved worker and calendar inputs."""
     run_type = PayrollRunType(run_type)
@@ -293,11 +307,20 @@ def calculate_monthly_run(
 
     base_pay = sum(base_cells, ZERO)
     overtime_pay = whole_tugrik(sum(overtime_by_bucket.values(), ZERO))
-    if profile.salary_type == "PRORATION":
+    allowance = amount(profile.meal_allowance) + amount(profile.commute_allowance)
+    allowance_days = ZERO
+    if profile.allowance_basis is AllowanceBasis.FIXED:
+        # Planned workdays inside the employment window, not attendance.
+        allowance_days = Decimal(planned_days if allowance_planned_days is None else allowance_planned_days)
+        meal_commute = whole_tugrik(allowance * allowance_days)
+    elif profile.allowance_basis is AllowanceBasis.WORKED_DAYS:
+        allowance_days = max(ZERO, amount(worked_days))
+        meal_commute = whole_tugrik(allowance * allowance_days)
+    elif profile.salary_type == "PRORATION":
         fraction = min(Decimal("1"), max(ZERO, worked_normal_hours / planned_hours))
-        meal_commute = whole_tugrik((amount(profile.meal_allowance) + amount(profile.commute_allowance)) * fraction)
+        meal_commute = whole_tugrik(allowance * fraction)
     else:
-        meal_commute = whole_tugrik(amount(profile.meal_allowance) + amount(profile.commute_allowance))
+        meal_commute = whole_tugrik(allowance)
     gross = whole_tugrik(base_pay + overtime_pay + whole_tugrik(leave_pay) + meal_commute + whole_tugrik(bonus))
     cap = whole_tugrik(rules.minimum_wage * rules.shi_cap_multiplier)
     shi_base = min(gross, cap)
@@ -313,7 +336,7 @@ def calculate_monthly_run(
     net = whole_tugrik(gross - total_deductions)
     return PayrollRunResult(
         run_type=run_type, base_pay=base_pay, overtime_by_bucket=overtime_by_bucket,
-        overtime_pay=overtime_pay, meal_commute=meal_commute, gross=gross, shi_base=shi_base,
+        overtime_pay=overtime_pay, allowance_days=allowance_days, meal_commute=meal_commute, gross=gross, shi_base=shi_base,
         employee_shi=employee_shi, employer_shi=employer_shi, taxable_income=taxable_income,
         pit_before_relief=pit_before, relief=relief, pit=pit, advance=advance,
         other_deductions=other, total_deductions=total_deductions, net_pay=net,

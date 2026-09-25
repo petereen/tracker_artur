@@ -1269,6 +1269,7 @@ class MonthlyPayrollProfile(Base):
         CheckConstraint("salary_type IN ('PRORATION','FIXED')", name="ck_monthly_payroll_salary_type"),
         CheckConstraint("payment_frequency IN ('MONTHLY','BIWEEKLY','WEEKLY')", name="ck_monthly_payroll_frequency"),
         CheckConstraint("advance_basis IN ('FIXED','PERCENT','WORKED-TO-DATE')", name="ck_monthly_payroll_advance_basis"),
+        CheckConstraint("allowance_basis IN ('MONTHLY','FIXED','WORKED_DAYS')", name="ck_monthly_payroll_allowance_basis"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -1277,6 +1278,9 @@ class MonthlyPayrollProfile(Base):
     salary_type = Column(String(16), nullable=False, server_default="PRORATION", default="PRORATION")
     meal_allowance = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
     commute_allowance = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
+    # FIXED / WORKED_DAYS: meal and commute are daily rates. MONTHLY is the
+    # legacy monthly-amount behaviour kept for profiles saved before 2026-09.
+    allowance_basis = Column(String(16), nullable=False, server_default="FIXED", default="FIXED")
     payment_frequency = Column(String(16), nullable=False, server_default="MONTHLY", default="MONTHLY")
     pay_days = Column(JSONB, nullable=False, server_default=sa_text("'[25]'::jsonb"), default=lambda: [25])
     advance_basis = Column(String(24), nullable=False, server_default="FIXED", default="FIXED")

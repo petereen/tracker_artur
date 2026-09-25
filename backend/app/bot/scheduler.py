@@ -201,6 +201,10 @@ def _rebuild_jobs_unlocked():
     scheduler.add_job(try_send_monthly_report_digest, "interval", minutes=15,
         id="monthly_report_digest", replace_existing=True)
 
+    from app.services.contract_expiry_reminders import reconcile_contract_expiry_reminders
+    scheduler.add_job(reconcile_contract_expiry_reminders, "interval", minutes=30,
+        id="contract_expiry_reminders", replace_existing=True)
+
     _last_schedule_fingerprint = _schedule_fingerprint()
     scheduler.add_job(reconcile_schedule_jobs, "interval", minutes=1,
         id="reconcile_schedules", replace_existing=True)

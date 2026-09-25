@@ -5,6 +5,7 @@ import pytest
 
 from app.payroll.monthly_engine import (
     AdvanceBasis,
+    AllowanceBasis,
     CalendarDayType,
     PayrollProfile,
     PayrollRunType,
@@ -282,3 +283,46 @@ def test_fixed_salary_with_unemployed_zero_segment_prorates_partial_month():
         salary_segments=(SalarySegment(D("1500000"), 11, D("88")), SalarySegment(D("0"), 10, D("0"))),
     )
     assert result.base_pay == D("785714")
+
+
+def test_fixed_allowance_pays_daily_rate_for_every_planned_workday():
+    # 25,000/day meal + commute, 22 planned days: absence does not reduce it.
+    result = calculate_monthly_run(
+        PayrollRunType.FINAL,
+        PayrollProfile(base_salary=D("4000000"), meal_allowance=D("15000"), commute_allowance=D("10000"), allowance_basis=AllowanceBasis.FIXED),
+        rules=default_2026_rules(), planned_days=22, planned_hours=176,
+        worked_normal_hours=D("150"), worked_days=D("19"),
+    )
+    assert result.allowance_days == D("22")
+    assert result.meal_commute == D("550000")
+
+
+def test_fixed_allowance_uses_employed_planned_days_for_a_midmonth_hire():
+    result = calculate_monthly_run(
+        PayrollRunType.FINAL,
+        PayrollProfile(base_salary=D("4000000"), meal_allowance=D("25000"), allowance_basis="FIXED"),
+        rules=default_2026_rules(), planned_days=22, planned_hours=176,
+        worked_normal_hours=D("80"), allowance_planned_days=10,
+    )
+    assert result.meal_commute == D("250000")
+
+
+def test_worked_days_allowance_pays_daily_rate_for_days_actually_worked():
+    result = calculate_monthly_run(
+        PayrollRunType.FINAL,
+        PayrollProfile(base_salary=D("4000000"), meal_allowance=D("15000"), commute_allowance=D("10000"), allowance_basis=AllowanceBasis.WORKED_DAYS),
+        rules=default_2026_rules(), planned_days=22, planned_hours=176,
+        worked_normal_hours=D("150"), worked_days=D("19.5"),
+    )
+    assert result.allowance_days == D("19.5")
+    assert result.meal_commute == D("487500")
+
+
+def test_legacy_monthly_allowance_is_unchanged():
+    profile = PayrollProfile(base_salary=D("4000000"), salary_type="PRORATION", meal_allowance=D("25000"))
+    assert profile.allowance_basis is AllowanceBasis.MONTHLY
+    result = calculate_monthly_run(
+        PayrollRunType.FINAL, profile, rules=default_2026_rules(), planned_days=22,
+        planned_hours=220, worked_normal_hours=D("213.15"), worked_days=D("22"),
+    )
+    assert result.meal_commute == D("24222")

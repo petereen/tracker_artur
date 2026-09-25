@@ -33,7 +33,7 @@ from app.services.secret_box import decrypt_secret, encrypt_secret
 from .inputs import payment_days
 from .monthly_exports import build_run_workbook
 from .monthly_engine import (
-    AdvanceBasis, CalendarDayType, PayrollProfile, PayrollRunType, PayrollRules, apply_computed_overrides,
+    AdvanceBasis, AllowanceBasis, CalendarDayType, PayrollProfile, PayrollRunType, PayrollRules, apply_computed_overrides,
     SalarySegment, amount, calculate_monthly_run, classify_work_hours, default_2026_rules, month_calendar,
     overtime_day_lines,
 )
@@ -43,7 +43,7 @@ router = APIRouter()
 # «Урьдчилгаа бодоогүй» (advance_not_calculated) is a warning by design: the
 # accountant may knowingly settle a worker whose advance run was never made.
 BLOCKING_ROW_WARNINGS = {"negative_final_pay", "profile_missing", "salary_history_missing_or_incomplete", "row_flagged", "advance_changed", "advance_not_due", "advance_not_positive"}
-TIME_INPUT_KEYS = ("worked_normal_hours", "worked_to_date_hours", "projected_remaining_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")
+TIME_INPUT_KEYS = ("worked_normal_hours", "worked_days", "worked_to_date_hours", "projected_remaining_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")
 
 
 class MonthInput(BaseModel):
@@ -62,6 +62,7 @@ class RunInput(BaseModel):
 
 class RowInput(BaseModel):
     worked_normal_hours: Decimal | None = Field(default=None, ge=0)
+    worked_days: Decimal | None = Field(default=None, ge=0, le=31)
     worked_to_date_hours: Decimal = Field(default=Decimal("0"), ge=0)
     elapsed_planned_days: int = Field(default=0, ge=0)
     overtime_hours: dict[str, Decimal] = Field(default_factory=dict)
@@ -865,6 +866,8 @@ async def _attendance_inputs(db: AsyncSession, organization_id: int, employee_id
         lines.append({"date": work_day.isoformat(), "day_type": calendar_days[work_day].value, "hours": str(total_hours), "normal_hours": str(normal), "overtime_hours": {key: str(value) for key, value in buckets.items() if value > 0}, "source": day_sources[work_day]})
     planned_days_to_cutoff = sum(day <= end and day_type is CalendarDayType.WORKING for day, day_type in calendar_days.items())
     worked_hours, remaining_hours = normal_hours, Decimal("0")
+    # A day counts once it has any recorded work, rest days and holidays too.
+    worked_days = len(lines)
     if cutoff:
         # Advance runs project the whole month: hours worked through the
         # cut-off plus the planned hours still ahead. Without any time data
@@ -872,9 +875,11 @@ async def _attendance_inputs(db: AsyncSession, organization_id: int, employee_id
         employed_from = max(first, details.start_date) if details and details.start_date else first
         employed_to = min(last, details.end_date) if details and details.end_date else last
         remaining_from = max(employed_from, end + timedelta(days=1)) if lines else employed_from
-        remaining_hours = sum((daily_norm_hours for day, day_type in calendar_days.items() if remaining_from <= day <= employed_to and day_type is CalendarDayType.WORKING), Decimal("0"))
+        remaining_days = sum(remaining_from <= day <= employed_to and day_type is CalendarDayType.WORKING for day, day_type in calendar_days.items())
+        remaining_hours = daily_norm_hours * remaining_days
         worked_hours = normal_hours + remaining_hours
-    return {"worked_normal_hours": _plain_value(worked_hours) if cutoff else str(worked_hours), "worked_to_date_hours": str(normal_hours), "projected_remaining_hours": _plain_value(remaining_hours), "elapsed_planned_days": planned_days_to_cutoff, "overtime_hours": {key: str(value) for key, value in overtime.items()}, "day_lines": lines, "missing_dates": normalized["missing_dates"], "approved_leave_days": normalized["days"], "time_source": "confirmed_hr_attendance_or_approved_worktime" if lines else "manual"}
+        worked_days += remaining_days
+    return {"worked_normal_hours": _plain_value(worked_hours) if cutoff else str(worked_hours), "worked_days": str(worked_days), "worked_to_date_hours": str(normal_hours), "projected_remaining_hours": _plain_value(remaining_hours), "elapsed_planned_days": planned_days_to_cutoff, "overtime_hours": {key: str(value) for key, value in overtime.items()}, "day_lines": lines, "missing_dates": normalized["missing_dates"], "approved_leave_days": normalized["days"], "time_source": "confirmed_hr_attendance_or_approved_worktime" if lines else "manual"}
 
 
 async def _approved_advances(db: AsyncSession, run: MonthlyPayrollRun, employee_id: int, *, through_date: date | None = None) -> tuple[list[str], list[str]]:
@@ -919,6 +924,8 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
     profile = PayrollProfile(
         base_salary=amount(profile_data["base_salary"]), salary_type=profile_data["salary_type"],
         meal_allowance=amount(profile_data.get("meal_allowance", 0)), commute_allowance=amount(profile_data.get("commute_allowance", 0)),
+        # Snapshots taken before daily allowances keep their monthly amounts.
+        allowance_basis=AllowanceBasis(profile_data.get("allowance_basis") or "MONTHLY"),
         payment_frequency=profile_data["payment_frequency"], pay_days=tuple(profile_data["pay_days"]),
         advance_basis=AdvanceBasis(profile_data["advance_basis"]), advance_amount=amount(profile_data.get("advance_amount", 0)),
         advance_percent=amount(profile_data.get("advance_percent", 40)), daily_norm_hours=amount(profile_data.get("daily_norm_hours", 8)),
@@ -960,6 +967,7 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
     planned_hours = sum((amount(profile.daily_norm_hours) for value in days.values() if value is CalendarDayType.WORKING), Decimal("0"))
     segments_raw = profile_data.get("salary_segments") or []
     segment_objects = []
+    employed_days = planned_days
     if segments_raw:
         raw_segments = []
         total_segment_days = 0
@@ -1006,8 +1014,12 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
             ))
         # Working days outside employment earn nothing but still count in the
         # month, so FIXED pay is prorated by days employed.
+        employed_days = min(planned_days, total_segment_days)
         if total_segment_days < planned_days:
             segment_objects.append(SalarySegment(Decimal("0"), planned_days - total_segment_days, Decimal("0"), {}))
+    if inputs.get("worked_days") in (None, ""):
+        # Rows captured before worked days were tracked: whole norm days.
+        inputs["worked_days"] = _plain_value((amount(inputs["worked_normal_hours"]) / profile.daily_norm_hours).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
     advance_snapshot = (run.advance_snapshot or {}).get(str(row.employee_id), {}) if run.run_type == "final" else {}
     approved_advances = advance_snapshot.get("amounts", [])
     advance_ids = advance_snapshot.get("run_ids", [])
@@ -1028,6 +1040,7 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         other_deductions=[item["amount"] for item in deductions],
         worked_to_date_hours=inputs.get("worked_to_date_hours") or 0,
         elapsed_planned_days=int(inputs.get("elapsed_planned_days") or 0), salary_segments=segment_objects or None,
+        worked_days=inputs["worked_days"], allowance_planned_days=employed_days,
     )
     result_data = _json_value(asdict(result))
     result_data["advance_run_ids"] = advance_ids
@@ -1089,6 +1102,7 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
         estimated = calculate_monthly_run(
             PayrollRunType.FINAL, profile, rules=rules, planned_days=planned_days, planned_hours=planned_hours,
             worked_normal_hours=planned_hours, salary_segments=full_month_segments or None,
+            worked_days=employed_days, allowance_planned_days=employed_days,
         )
         result_data["estimated_net"] = str(estimated.net_pay)
         # The advance table shows the month as the final run will see it:
@@ -1101,6 +1115,7 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
             overtime_hours=inputs.get("overtime_hours") or {}, leave_pay=inputs.get("leave_pay") or 0,
             bonus=inputs.get("bonus") or 0, approved_advances=[*prior_advances, result_data["advance"]],
             salary_segments=segment_objects or None,
+            worked_days=inputs["worked_days"], allowance_planned_days=employed_days,
         )
         projection_data = _json_value(asdict(projection))
         projection_data.pop("run_type", None)
@@ -1261,12 +1276,13 @@ def _identity_snapshot(employee: Employee, details: EmployeeDetails | None, depa
 
 def _profile_snapshot(profile: MonthlyPayrollProfile | None, history: MonthlyPayrollSalaryHistory | None, segments: list[dict[str, Any]]) -> dict[str, Any]:
     if profile is None:
-        return {"complete": False, "validation_issues": ["profile_missing"], "base_salary": "0", "salary_segments": [], "salary_type": "PRORATION", "meal_allowance": "0", "commute_allowance": "0", "payment_frequency": "MONTHLY", "pay_days": [25], "advance_basis": "FIXED", "advance_amount": "0", "advance_percent": "40", "advance_values": [], "daily_norm_hours": "8", "insured_type": "01001", "tax_relief_eligible": True}
+        return {"complete": False, "validation_issues": ["profile_missing"], "base_salary": "0", "salary_segments": [], "salary_type": "PRORATION", "meal_allowance": "0", "commute_allowance": "0", "allowance_basis": "FIXED", "payment_frequency": "MONTHLY", "pay_days": [25], "advance_basis": "FIXED", "advance_amount": "0", "advance_percent": "40", "advance_values": [], "daily_norm_hours": "8", "insured_type": "01001", "tax_relief_eligible": True}
     issues = ["salary_history_missing_or_incomplete"] if history is None else []
     return _json_value({
         "complete": not issues, "validation_issues": issues, "base_salary": str(history.monthly_salary if history else 0),
         "salary_segments": segments, "salary_type": profile.salary_type,
         "meal_allowance": str(profile.meal_allowance), "commute_allowance": str(profile.commute_allowance),
+        "allowance_basis": profile.allowance_basis,
         "payment_frequency": profile.payment_frequency, "pay_days": list(profile.pay_days or []),
         "advance_basis": profile.advance_basis, "advance_amount": str(profile.advance_amount),
         "advance_percent": str(profile.advance_percent), "advance_values": [str(value) for value in (profile.advance_values or [])],

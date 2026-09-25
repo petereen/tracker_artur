@@ -1,6 +1,7 @@
 # Project Task Tracker
 
 ## Current Milestone
+- [x] Add contract expiry reminder offsets, approval confirmation, and legal-counsel expiry notifications (`backend/app/models/contracts.py`, `backend/app/routers/contracts.py`, scheduler, `frontend/src/pages/ContractsWorkspacePage.tsx`, `backend/alembic/versions/a1c2e3f4g5h6_contract_expiry_reminders.py`)
 - [x] Prevent ordinary company-file listing from querying edit-grant columns for default internal policies, avoiding a migration-window 500 for members (`backend/app/services/file_search_service.py`)
 - [x] Restrict company file uploads/folder creation to admin, manager, and supervisor roles; add inherited folder sharing with read/edit access (`backend/app/routers/company_files.py`, `backend/app/services/file_search_service.py`, `frontend/src/pages/CompanyFilesPage.tsx`, `backend/alembic/versions/f2a3b4c5d6e7_company_file_edit_grants.py`, `backend/tests/test_company_files.py`)
 - [ ] Close payroll design-plan gaps (review 2026-09-24): P0 bugs → P1 workflow → P2 screens → P3 export/closing → P4 tests

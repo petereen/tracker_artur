@@ -24,7 +24,7 @@ const requestMessage = (error: any, fallback: string) => {
 }
 const money = (value?: string) => `${new Intl.NumberFormat('mn-MN', { maximumFractionDigits: 0 }).format(Number(value || 0))} ₮`
 const emptyForm = (): MonthlyPayrollProfilePayload => ({
-  base_salary: '', effective_from: monthStart(), salary_type: 'PRORATION', meal_allowance: '0', commute_allowance: '0',
+  base_salary: '', effective_from: monthStart(), salary_type: 'PRORATION', meal_allowance: '0', commute_allowance: '0', allowance_basis: 'FIXED',
   payment_frequency: 'MONTHLY', pay_days: [25], advance_basis: 'FIXED', advance_values: [], daily_norm_hours: '8', insured_type: '01001', tax_relief_eligible: true,
 })
 
@@ -55,7 +55,8 @@ export function MonthlyPayrollProfileDrawer({ employee, onClose }: { employee: {
   }, [form])
 
   const advanceCount = Math.max(0, form.pay_days.length - 1)
-  const preview = useMonthlyPayrollPreview(employee.id, previewForm, previewForm.effective_from.slice(0, 7), ready && Boolean(previewForm.base_salary))
+  const legacyAllowance = form.allowance_basis === 'MONTHLY'
+  const preview = useMonthlyPayrollPreview(employee.id, previewForm, previewForm.effective_from.slice(0, 7), ready && Boolean(previewForm.base_salary) && previewForm.allowance_basis !== 'MONTHLY')
   const advanceLabels = useMemo(() => form.payment_frequency === 'WEEKLY' ? ['1-р урьдчилгаа', '2-р урьдчилгаа', '3-р урьдчилгаа'] : ['Урьдчилгаа'], [form.payment_frequency])
 
   const setFrequency = (frequency: MonthlyPayrollProfilePayload['payment_frequency']) => {
@@ -89,10 +90,16 @@ export function MonthlyPayrollProfileDrawer({ employee, onClose }: { employee: {
           <div className="monthly-payroll-two-col">
             <label>Цалингийн төрөл<select value={form.salary_type} onChange={(event) => setForm({ ...form, salary_type: event.target.value as MonthlyPayrollProfilePayload['salary_type'] })}><option value="PRORATION">Ажилласан цагаар</option><option value="FIXED">Бүтэн дүнгээр</option></select></label>
             <label>Өдрийн норм (цаг)<input required type="number" min="0.25" max="24" step="0.25" value={form.daily_norm_hours} onChange={(event) => setForm({ ...form, daily_norm_hours: event.target.value })} /></label>
-            <label>Хоол (₮)<input type="number" min="0" step="1" value={form.meal_allowance} onChange={(event) => setForm({ ...form, meal_allowance: event.target.value })} /></label>
-            <label>Унаа (₮)<input type="number" min="0" step="1" value={form.commute_allowance} onChange={(event) => setForm({ ...form, commute_allowance: event.target.value })} /></label>
+            <label>Хоол, унааны тооцоо<select required value={form.allowance_basis} onChange={(event) => setForm({ ...form, allowance_basis: event.target.value as MonthlyPayrollProfilePayload['allowance_basis'] })}>{legacyAllowance && <option value="MONTHLY" disabled>Сонгоно уу</option>}<option value="FIXED">Тогтмол (ажлын өдрөөр)</option><option value="WORKED_DAYS">Цагаар (ажилласан өдрөөр)</option></select></label>
+            <label>Хоол (₮/өдөр)<input type="number" min="0" step="1" value={form.meal_allowance} onChange={(event) => setForm({ ...form, meal_allowance: event.target.value })} /></label>
+            <label>Унаа (₮/өдөр)<input type="number" min="0" step="1" value={form.commute_allowance} onChange={(event) => setForm({ ...form, commute_allowance: event.target.value })} /></label>
             <label>Даатгалын төрөл<input required value={form.insured_type} onChange={(event) => setForm({ ...form, insured_type: event.target.value })} /></label>
           </div>
+          <p className="monthly-payroll-help">{legacyAllowance
+            ? 'Хоол, унааг одоо өдрийн дүнгээр оруулна. Хадгалсан дүн нь сарын дүн байсан тул өдрийн дүнг шинэчилж, тооцох аргыг сонгоно уу.'
+            : form.allowance_basis === 'FIXED'
+              ? '(Хоол + унаа) × тухайн сарын ажлын өдөр — ирцээс үл хамаарна.'
+              : '(Хоол + унаа) × бодит ажилласан өдөр — ирц, цагийн бүртгэлээс.'}</p>
           <label className="monthly-payroll-checkbox"><input type="checkbox" checked={form.tax_relief_eligible} onChange={(event) => setForm({ ...form, tax_relief_eligible: event.target.checked })} /><span>ХХОАТ-ын хөнгөлөлт тооцох</span></label>
         </section>
 
@@ -120,7 +127,7 @@ export function MonthlyPayrollProfileDrawer({ employee, onClose }: { employee: {
         </section>
 
         {saved.data?.salary_history?.length ? <section className="monthly-payroll-history"><strong>Цалингийн өөрчлөлтийн түүх</strong>{saved.data.salary_history.map((row) => <span key={row.valid_from}>{row.valid_from}<b>{money(row.monthly_salary)}</b></span>)}</section> : null}
-        <footer className="monthly-payroll-footer"><button type="button" className="secondary-action" onClick={onClose}>Хаах</button><button className="primary-action" disabled={!ready || !form.base_salary || save.isPending}><Check size={14} />{save.isPending ? 'Хадгалж байна…' : 'Тохиргоо хадгалах'}</button></footer>
+        <footer className="monthly-payroll-footer"><button type="button" className="secondary-action" onClick={onClose}>Хаах</button><button className="primary-action" disabled={!ready || !form.base_salary || legacyAllowance || save.isPending}><Check size={14} />{save.isPending ? 'Хадгалж байна…' : 'Тохиргоо хадгалах'}</button></footer>
       </form>}
     </aside>
   </div>

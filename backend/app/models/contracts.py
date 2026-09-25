@@ -67,6 +67,7 @@ class ContractDocument(Base):
     task_id = Column(Integer, ForeignKey("tasks.id", ondelete="SET NULL"))
     effective_start_on = Column(Date)
     effective_end_on = Column(Date)
+    expiry_reminder_days = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     reviewer_account_ids = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     current_revision_id = Column(Integer, ForeignKey("contract_revisions.id", ondelete="SET NULL"))
     approved_revision_id = Column(Integer, ForeignKey("contract_revisions.id", ondelete="SET NULL"))

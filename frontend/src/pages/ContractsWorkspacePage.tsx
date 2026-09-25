@@ -128,6 +128,7 @@ function ContractComposer({
   );
   const [start, setStart] = useState(initial?.effective_start_on ?? "");
   const [end, setEnd] = useState(initial?.effective_end_on ?? "");
+  const [expiryReminderDays, setExpiryReminderDays] = useState<number[]>(initial?.expiry_reminder_days ?? []);
   const [supportingFiles, setSupportingFiles] = useState<File[]>([]);
   const editable =
     !initial ||
@@ -139,6 +140,7 @@ function ContractComposer({
   const reviewerOptions = Array.isArray(candidates.data) ? candidates.data : [];
   const save = async () => {
     if (!title.trim()) return toast.error("Гарчиг оруулна уу");
+    if (!end) return toast.error("Гэрээний дуусах огноо оруулна уу");
     try {
       const result = initial
         ? await update.mutateAsync({
@@ -152,6 +154,7 @@ function ContractComposer({
             task_id: taskId ? Number(taskId) : null,
             effective_start_on: start || null,
             effective_end_on: end || null,
+            expiry_reminder_days: expiryReminderDays,
           })
         : await create.mutateAsync({
             title,
@@ -162,6 +165,7 @@ function ContractComposer({
             task_id: taskId ? Number(taskId) : null,
             effective_start_on: start || null,
             effective_end_on: end || null,
+            expiry_reminder_days: expiryReminderDays,
           });
       if (!initial && supportingFiles.length) {
         let failedUploads = 0;
@@ -297,14 +301,24 @@ function ContractComposer({
           />
         </label>
         <label>
-          Хүчин төгөлдөр дуусах огноо
+          Дуусах / хугацаа дуусах огноо *
           <input
             type="date"
             value={end}
             onChange={(event) => setEnd(event.target.value)}
             disabled={!editable}
+            required
           />
         </label>
+        <fieldset className="contract-expiry-reminders" disabled={!editable}>
+          <legend>Хугацаа дуусахаас өмнө хуульчид сануулах</legend>
+          {[1, 3, 7, 14, 30, 60, 90].map((days) => (
+            <label key={days}>
+              <input type="checkbox" checked={expiryReminderDays.includes(days)} onChange={(event) => setExpiryReminderDays((current) => event.target.checked ? [...current, days].sort((a, b) => a - b) : current.filter((value) => value !== days))} />
+              {days} хоногийн өмнө
+            </label>
+          ))}
+        </fieldset>
       </div>
       <label className="contract-editor-label">Агуулга / нөхцөл</label>
       <RichContractEditor value={body} editable={editable} onChange={setBody} />
@@ -430,6 +444,8 @@ function ContractDetailView({
   const resolveComment = useResolveContractComment();
   const [editing, setEditing] = useState(false);
   const [remark, setRemark] = useState("");
+  const [approvalExpiry, setApprovalExpiry] = useState(detail.effective_end_on ?? "");
+  const [approvalReminderDays, setApprovalReminderDays] = useState<number[]>(detail.expiry_reminder_days ?? []);
   const [comment, setComment] = useState("");
   const [anchor, setAnchor] = useState<{
     from: number;
@@ -672,7 +688,7 @@ function ContractDetailView({
               </>
             )}
           </div>
-          {canReview && (
+            {canReview && (
             <div className="contract-rail-card review-action-card">
               <div className="section-label">Таны хяналт</div>
               <textarea
@@ -680,10 +696,23 @@ function ContractDetailView({
                 onChange={(event) => setRemark(event.target.value)}
                 placeholder="Тайлбар / санал (засвар, буцаалтад заавал)"
               />
+              <label className="contract-approval-expiry">
+                Дуусах огноог баталгаажуулах *
+                <input type="date" value={approvalExpiry} onChange={(event) => setApprovalExpiry(event.target.value)} />
+              </label>
+              <fieldset className="contract-expiry-reminders" >
+                <legend>Хуульчид сануулах өдрүүд</legend>
+                {[1, 3, 7, 14, 30, 60, 90].map((days) => (
+                  <label key={days}>
+                    <input type="checkbox" checked={approvalReminderDays.includes(days)} onChange={(event) => setApprovalReminderDays((current) => event.target.checked ? [...current, days].sort((a, b) => a - b) : current.filter((value) => value !== days))} />
+                    {days} хоногийн өмнө
+                  </label>
+                ))}
+              </fieldset>
               <div className="review-actions">
                 <button
                   className="button button-primary"
-                  onClick={() => run(approve, "Зөвшөөрөл бүртгэгдлээ")}
+                  onClick={() => approvalExpiry ? approve.mutate({ publicId: detail.public_id, remark: remark.trim() || undefined, effective_end_on: approvalExpiry, expiry_reminder_days: approvalReminderDays }, { onSuccess: () => toast.success("Зөвшөөрөл бүртгэгдлээ"), onError: (error: any) => toast.error(error.response?.data?.detail || "Зөвшөөрөл бүртгэж чадсангүй") }) : toast.error("Дуусах огноо оруулна уу")}
                 >
                   Зөвшөөрөх
                 </button>

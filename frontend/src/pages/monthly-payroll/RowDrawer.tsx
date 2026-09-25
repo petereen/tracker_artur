@@ -21,6 +21,21 @@ const AUDIT_LABELS: Record<string, string> = { inputs: 'Оролт засав', 
 const auditLabel = (field: string) => field.startsWith('computed:') ? `Тооцсон дүн: ${OVERRIDABLE.find(([key]) => key === field.split(':')[1])?.[1] || field}${field.endsWith(':revert') ? ' (буцаав)' : ''}` : AUDIT_LABELS[field] || field
 const brief = (value: unknown) => value === null || value === undefined ? '—' : typeof value === 'object' ? '' : String(value)
 
+function allowanceLine(row: MonthlyPayrollRunRow, result: Record<string, any>): Explanation {
+  const { profile } = row
+  const rates = `${formatAmount(profile.meal_allowance)} + ${formatAmount(profile.commute_allowance)}`
+  const daily = profile.allowance_basis === 'FIXED' || profile.allowance_basis === 'WORKED_DAYS'
+  if (!daily) {
+    // Snapshots taken before daily rates hold monthly amounts.
+    return { label: 'Хоол унаа', manual: false, formula: profile.salary_type === 'FIXED' ? 'Хоол + унаа' : '(Хоол + унаа) × ажилласан ÷ ажиллах цаг', inputs: rates, value: formatAmount(result.meal_commute) }
+  }
+  return {
+    label: 'Хоол унаа', manual: profile.allowance_basis === 'WORKED_DAYS' && JSON.stringify(row.inputs.worked_days ?? null) !== JSON.stringify(row.inputs._source_snapshot?.worked_days ?? null),
+    formula: profile.allowance_basis === 'FIXED' ? '(Хоол + унаа) × ажиллах өдөр' : '(Хоол + унаа) × ажилласан өдөр',
+    inputs: `(${rates}) × ${formatHours(result.allowance_days)} өдөр`, value: formatAmount(result.meal_commute),
+  }
+}
+
 function explain(row: MonthlyPayrollRunRow, month: MonthlyPayrollMonth, isFinal: boolean): Explanation[] {
   const { inputs, profile } = row
   const result = monthFigures(row)
@@ -47,7 +62,7 @@ function explain(row: MonthlyPayrollRunRow, month: MonthlyPayrollMonth, isFinal:
     ...workedLine,
     { label: 'Тооцсон цалин', manual: false, formula: profile.salary_type === 'FIXED' ? 'Үндсэн цалин × ажилласан ажлын өдөр ÷ сарын ажлын өдөр' : 'Цагийн үнэлгээ × ажилласан цаг', inputs: profile.salary_type === 'FIXED' ? (segments.length ? segments.map((segment) => `${segment.valid_from} – ${segment.valid_to}: ${formatAmount(segment.monthly_salary)}`).join('; ') + ` (сард ${result.planned_days} ажлын өдөр)` : formatAmount(profile.base_salary)) : segments.length > 1 ? segments.map((segment) => `${segment.valid_from} – ${segment.valid_to}: ${formatAmount(segment.monthly_salary)} ÷ ${formatHours(result.planned_hours)} цаг`).join('; ') + ` × ${formatHours(inputs.worked_normal_hours)} цаг` : `${rate} × ${formatHours(inputs.worked_normal_hours)} цаг`, value: formatAmount(result.base_pay) },
     { label: 'Илүү цагийн хөлс', manual: false, formula: 'Цагийн үнэлгээ × (ажлын өдрийн илүү цаг × 1.5 + амралтын өдөр × 1.5 + баяр × 2.0)', inputs: Object.entries(inputs.overtime_hours || {}).filter(([, hours]) => toNumber(hours) > 0).map(([bucket, hours]) => `${BUCKET_NAMES[bucket] || bucket} ${formatHours(hours)} цаг`).join(', ') || 'Илүү цаггүй', value: formatAmount(result.overtime_pay) },
-    { label: 'Хоол унаа', manual: false, formula: profile.salary_type === 'FIXED' ? 'Хоол + унаа' : '(Хоол + унаа) × ажилласан ÷ ажиллах цаг', inputs: `${formatAmount(profile.meal_allowance)} + ${formatAmount(profile.commute_allowance)}`, value: formatAmount(result.meal_commute) },
+    allowanceLine(row, result),
     { label: 'Олговол зохих цалин', manual: overrides.includes('gross'), formula: 'Тооцсон + илүү цаг + ээлжийн амралт + хоол унаа + урамшуулал', inputs: `${formatAmount(result.base_pay)} + ${formatAmount(result.overtime_pay)} + ${formatAmount(inputs.leave_pay)} + ${formatAmount(result.meal_commute)} + ${formatAmount(inputs.bonus)}`, value: formatAmount(result.gross) },
     { label: 'Ажилтны НДШ', manual: overrides.includes('employee_shi'), formula: 'НДШ суурь (дээд хязгаартай) × ажилтны хувь', inputs: `${formatAmount(result.shi_base)} × (${employeeRates.map(([code, value]) => `${FUNDS[code] || code} ${formatHours(toNumber(value) * 100)}%`).join(' + ')})`, value: formatAmount(result.employee_shi) },
     { label: 'Татвар ногдох орлого', manual: false, formula: 'Олговол зохих − ажилтны НДШ', inputs: `${formatAmount(result.gross)} − ${formatAmount(result.employee_shi)}`, value: formatAmount(result.taxable_income) },
@@ -137,7 +152,7 @@ export function RowDrawer({ row, run, month, editable, onClose, askReason }: {
           <small>Бусад суутгал татвар, НДШ-ийн дараа хасагдана; НДШ, ХХОАТ-ын суурийг өөрчлөхгүй.</small>
         </div>}
         {tab === 'history' && <>
-          {pending && <div className="mp-strip info"><span><strong>HR мэдээлэл өөрчлөгдсөн.</strong> {['name', 'job_title', 'department'].filter((key) => pending.identity?.[key] !== (row.identity as any)[key]).map((key) => `${key}: ${(row.identity as any)[key] || '—'} → ${pending.identity?.[key] || '—'}`).join('; ')}{['base_salary', 'salary_type', 'payment_frequency', 'advance_basis', 'meal_allowance', 'commute_allowance'].filter((key) => JSON.stringify(pending.profile?.[key]) !== JSON.stringify((row.profile as any)[key])).map((key) => ` ${key}: ${brief((row.profile as any)[key])} → ${brief(pending.profile?.[key])}`).join(';')}</span>{editable && <button type="button" className="payroll-v2-button primary compact" disabled={acceptHR.isPending} onClick={() => acceptHR.mutate(row.employee_id, { onSuccess: () => toast.success('HR өөрчлөлтийг хүлээн авлаа'), onError: (error) => toast.error(requestError(error)) })}>Хүлээн авах</button>}</div>}
+          {pending && <div className="mp-strip info"><span><strong>HR мэдээлэл өөрчлөгдсөн.</strong> {['name', 'job_title', 'department'].filter((key) => pending.identity?.[key] !== (row.identity as any)[key]).map((key) => `${key}: ${(row.identity as any)[key] || '—'} → ${pending.identity?.[key] || '—'}`).join('; ')}{['base_salary', 'salary_type', 'payment_frequency', 'advance_basis', 'meal_allowance', 'commute_allowance', 'allowance_basis'].filter((key) => JSON.stringify(pending.profile?.[key]) !== JSON.stringify((row.profile as any)[key])).map((key) => ` ${key}: ${brief((row.profile as any)[key])} → ${brief(pending.profile?.[key])}`).join(';')}</span>{editable && <button type="button" className="payroll-v2-button primary compact" disabled={acceptHR.isPending} onClick={() => acceptHR.mutate(row.employee_id, { onSuccess: () => toast.success('HR өөрчлөлтийг хүлээн авлаа'), onError: (error) => toast.error(requestError(error)) })}>Хүлээн авах</button>}</div>}
           {(row.audit || []).length ? <ol className="mp-audit">{[...(row.audit || [])].reverse().map((item, index) => <li key={index}><strong>{auditLabel(item.field)}</strong>{brief(item.old) || brief(item.new) ? <span>{brief(item.old)} → {brief(item.new)}</span> : null}<small>{item.reason || 'шалтгаангүй'} · {new Date(item.at).toLocaleString('mn-MN')}</small></li>)}</ol> : <p className="mp-empty">Засварын түүх алга — бүх дүн автомат.</p>}
           {editable && (row.audit || []).some((item) => ['inputs', 'excel_import'].includes(item.field)) && <button type="button" className="payroll-v2-button secondary compact" onClick={revertAllInputs}>Бүх гар оролтыг буцаах</button>}
         </>}

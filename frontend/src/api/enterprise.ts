@@ -296,7 +296,7 @@ export type ContractDocumentType = 'contract' | 'agreement' | 'official_letter' 
 export interface ContractSummary {
   id: number; public_id: string; title: string; document_type: ContractDocumentType; status: ContractStatus
   author_account_id: number; author_name?: string | null; project_id: number | null; task_id: number | null
-  effective_start_on?: string | null; effective_end_on?: string | null; submission_round: number; version: number
+  effective_start_on?: string | null; effective_end_on?: string | null; expiry_reminder_days: number[]; submission_round: number; version: number
   current_revision_id: number | null; approved_revision_id: number | null; approved_at?: string | null; signed_at?: string | null
   excerpt?: string; created_at: string; updated_at: string
 }
@@ -312,9 +312,9 @@ const contractKeys = ['v1', 'contracts'] as const
 export function useContractList(view: string) { return useQuery<ContractListResponse>({ queryKey: [...contractKeys, view], queryFn: () => api.get('/v1/contracts', { params: { view } }).then((r) => r.data) }) }
 export function useContractDetail(publicId?: string) { return useQuery<ContractDetail>({ queryKey: [...contractKeys, 'detail', publicId], queryFn: () => api.get(`/v1/contracts/${publicId}`).then((r) => r.data), enabled: Boolean(publicId) }) }
 export function useContractReviewerCandidates() { return useQuery<ContractReviewerCandidate[]>({ queryKey: [...contractKeys, 'reviewer-candidates'], queryFn: () => api.get('/v1/contracts/reviewer-candidates').then((r) => r.data) }) }
-export function useCreateContract() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { title: string; document_type: ContractDocumentType; body_json: Record<string, unknown>; reviewer_account_ids: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null }) => api.post('/v1/contracts', input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: contractKeys }) }) }
-export function useUpdateContract() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, version, ...input }: { publicId: string; version: number; title?: string; document_type?: ContractDocumentType; body_json?: Record<string, unknown>; reviewer_account_ids?: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null }) => api.patch(`/v1/contracts/${publicId}`, input, { headers: { 'If-Match': String(version) } }).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }) }
-function contractAction(path: string) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, remark }: { publicId: string; remark?: string }) => api.post(`/v1/contracts/${publicId}/${path}`, remark === undefined ? {} : { remark }).then((r) => r.data), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Үйлдэл амжилтгүй боллоо') }) }
+export function useCreateContract() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { title: string; document_type: ContractDocumentType; body_json: Record<string, unknown>; reviewer_account_ids: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null; expiry_reminder_days: number[] }) => api.post('/v1/contracts', input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: contractKeys }) }) }
+export function useUpdateContract() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, version, ...input }: { publicId: string; version: number; title?: string; document_type?: ContractDocumentType; body_json?: Record<string, unknown>; reviewer_account_ids?: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null; expiry_reminder_days?: number[] }) => api.patch(`/v1/contracts/${publicId}`, input, { headers: { 'If-Match': String(version) } }).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }
+function contractAction(path: string) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, ...input }: { publicId: string; remark?: string; effective_end_on?: string; expiry_reminder_days?: number[] }) => api.post(`/v1/contracts/${publicId}/${path}`, input).then((r) => r.data), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Үйлдэл амжилтгүй боллоо') }) }
 export function useSubmitContract() { return contractAction('submit') }
 export function useResubmitContract() { return contractAction('resubmit') }
 export function useRecallContract() { return contractAction('recall') }
@@ -522,6 +522,8 @@ export interface MonthlyPayrollProfilePayload {
   salary_type: 'PRORATION' | 'FIXED'
   meal_allowance: string
   commute_allowance: string
+  /** FIXED/WORKED_DAYS take daily rates; MONTHLY is a legacy profile that must be re-saved. */
+  allowance_basis: 'FIXED' | 'WORKED_DAYS' | 'MONTHLY'
   payment_frequency: 'MONTHLY' | 'BIWEEKLY' | 'WEEKLY'
   pay_days: number[]
   advance_basis: 'FIXED' | 'PERCENT' | 'WORKED-TO-DATE'

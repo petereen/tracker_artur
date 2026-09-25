@@ -217,7 +217,7 @@ export function RunRegister({ runId }: { runId: number }) {
   const startEdit = (row: Row) => {
     setEditing(row.employee_id)
     setDraft({
-      worked_normal_hours: plainNumber(row.inputs.worked_normal_hours), leave_pay: plainNumber(row.inputs.leave_pay), bonus: plainNumber(row.inputs.bonus),
+      worked_normal_hours: plainNumber(row.inputs.worked_normal_hours), worked_days: plainNumber(row.inputs.worked_days), leave_pay: plainNumber(row.inputs.leave_pay), bonus: plainNumber(row.inputs.bonus),
       overtime_hours: Object.fromEntries(Object.entries(row.inputs.overtime_hours || {}).map(([key, value]) => [key, plainNumber(value)])), worked_to_date_hours: plainNumber(row.inputs.worked_to_date_hours),
       advance_basis: row.inputs.advance_basis || row.result.advance_basis || row.profile.advance_basis,
       advance_value: plainNumber(row.inputs.fixed_advance ?? row.inputs.advance_percent ?? row.result.advance_value),
@@ -225,6 +225,8 @@ export function RunRegister({ runId }: { runId: number }) {
   }
   const saveEdit = async (row: Row) => {
     const payload: Record<string, unknown> = { employeeId: row.employee_id, reason: 'Нягтлангийн засвар' }
+    // Blank worked days keeps the server's estimate from hours.
+    if (draft.worked_days !== '' && draft.worked_days !== undefined) payload.worked_days = draft.worked_days
     Object.assign(payload, { worked_normal_hours: draft.worked_normal_hours || '0', leave_pay: draft.leave_pay || '0', bonus: draft.bonus || '0', overtime_hours: Object.fromEntries(Object.entries(draft.overtime_hours || {}).map(([key, value]) => [key, value || '0'])) })
     if (!isFinal) {
       payload.advance_basis = draft.advance_basis
@@ -255,6 +257,7 @@ export function RunRegister({ runId }: { runId: number }) {
     { key: 'planned_days', label: 'Өдөр', group: 'Ажиллах', kind: 'days', value: (row) => row.result.planned_days ?? '—' },
     { key: 'planned_hours', label: 'Цаг', group: 'Ажиллах', kind: 'hours', value: (row) => row.result.planned_hours },
     { key: 'worked_normal_hours', label: 'Ажилласан цаг', kind: 'hours', short: true, value: (row) => row.inputs.worked_normal_hours, manual: (row) => sourceDiffers(row, 'worked_normal_hours'), render: (row, isEditing) => isEditing ? numberInput('Ажилласан цаг', draft.worked_normal_hours, (value) => setDraftValue('worked_normal_hours', value)) : <span title={workedTitle(row)}>{formatHours(row.inputs.worked_normal_hours)}</span> },
+    { key: 'worked_days', label: 'Ажилласан өдөр', kind: 'days', value: (row) => row.inputs.worked_days ?? monthFigures(row).allowance_days, manual: (row) => sourceDiffers(row, 'worked_days'), render: (row, isEditing) => isEditing ? numberInput('Ажилласан өдөр', draft.worked_days, (value) => setDraftValue('worked_days', value)) : (row.inputs.worked_days == null ? '—' : formatHours(row.inputs.worked_days)) },
     { key: 'base_pay', label: 'Тооцсон цалин', kind: 'money', value: (row) => monthFigures(row).base_pay },
     { key: 'overtime_hours', label: 'Илүү цаг', kind: 'hours', value: overtimeTotal, manual: (row) => sourceDiffers(row, 'overtime_hours'), render: (row, isEditing) => isEditing ? <span className="mp-ot-edit">{BUCKETS.map((bucket) => <label key={bucket.key} title={bucket.label}><b className={`mp-ot-mark ${bucket.key}`}>{bucket.mark}</b><input className="mp-inline-input" aria-label={bucket.label} type="text" inputMode="decimal" value={String(draft.overtime_hours?.[bucket.key] ?? '')} onChange={(event) => setDraftValue('overtime_hours', { ...draft.overtime_hours, [bucket.key]: event.target.value.replace(/[^\d.]/g, '') })} /></label>)}</span> : formatHours(overtimeTotal(row)) },
     { key: 'overtime_pay', label: 'Илүү цагийн хөлс', kind: 'money', value: (row) => monthFigures(row).overtime_pay },

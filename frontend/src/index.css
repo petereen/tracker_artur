@@ -12499,3 +12499,9 @@ html.capacitor-native .native-boot-error {
 .payroll-v2-register-subtotal { background: var(--muted, #f5f6f8); font-weight: 700; }
 .payroll-v2-table .payroll-v2-sticky-worker { position: sticky; left: 0; z-index: 1; background: var(--card, #fff); text-align: left; min-width: 170px; }
 .payroll-v2-table-wrap:has(.payroll-v2-sticky-worker) { overflow: auto; }
+.contract-expiry-reminders { display: flex; flex-wrap: wrap; gap: 8px 12px; min-width: 0; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 9px; }
+.contract-expiry-reminders legend { padding: 0 4px; color: var(--color-muted); font-size: 11px; font-weight: 600; }
+.contract-expiry-reminders label, .contract-approval-expiry { display: flex; align-items: center; gap: 6px; color: var(--color-muted); font-size: 11px; }
+.contract-expiry-reminders input { width: auto; accent-color: var(--color-accent); }
+.contract-approval-expiry { display: grid; gap: 6px; }
+.contract-approval-expiry input { width: 100%; border: 1px solid var(--color-border); border-radius: 9px; padding: 9px 10px; background: var(--color-surface2); color: var(--color-text); font: inherit; }
