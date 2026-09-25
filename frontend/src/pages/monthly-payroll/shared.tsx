@@ -12,6 +12,8 @@ export const formatMoney = (value: unknown) => `${wholeNumber.format(Math.round(
 export const formatAmount = (value: unknown) => wholeNumber.format(Math.round(Number(value || 0)))
 export const formatHours = (value: unknown) => hourNumber.format(Number(value || 0))
 export const toNumber = (value: unknown) => Number(value || 0)
+/** Month figures: the final result, or an advance row's full-month projection over its own fields. */
+export const monthFigures = (row: MonthlyPayrollRunRow): Record<string, any> => row.result.projection ? { ...row.result, ...row.result.projection } : row.result
 
 export const monthKey = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`
 export const parseMonthKey = (value: string | null | undefined) => {

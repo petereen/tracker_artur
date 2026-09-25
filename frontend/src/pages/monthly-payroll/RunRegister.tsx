@@ -12,7 +12,7 @@ import {
 } from '../../api/enterprise'
 import type { MonthlyPayrollApprovalSummary, MonthlyPayrollRunRow } from '../../api/enterprise'
 import {
-  BLOCKING_WARNINGS, MonthlyShell, RowStateChip, RunStatusChip, formatAmount, formatHours, monthKey, requestError,
+  BLOCKING_WARNINGS, MonthlyShell, RowStateChip, RunStatusChip, formatAmount, formatHours, monthFigures, monthKey, requestError,
   rowState, runTitle, shiftMonth, toNumber, useReasonDialog, warningLabel, type RowState,
 } from './shared'
 import { plainNumber } from '../../utils/numbers'
@@ -72,7 +72,8 @@ function OvertimeInfo({ row, children }: { row: Row; children: ReactNode }) {
   }
   const buckets = activeBuckets(row)
   if (!buckets.length) return <>{children}</>
-  const lines: any[] = row.result.overtime_lines || []
+  const month = monthFigures(row)
+  const lines: any[] = month.overtime_lines || []
   const manualHours = sourceDiffers(row, 'overtime_hours')
   return <span className="mp-ot-anchor" onMouseEnter={show} onMouseLeave={() => setOpen(false)}>
     <button ref={triggerRef} type="button" className="mp-ot-trigger" aria-expanded={open} onClick={() => (open ? setOpen(false) : show())} onBlur={() => setOpen(false)}>
@@ -86,10 +87,10 @@ function OvertimeInfo({ row, children }: { row: Row; children: ReactNode }) {
           if (!bucketLines.length) return null
           return <Fragment key={bucket.key}>
             {bucketLines.map((line, index) => <tr key={`${bucket.key}-${index}`}><td>{line.date || 'Гараар'}</td><td>{line.weekday !== null && line.weekday !== undefined ? WEEKDAYS[line.weekday] : '—'}</td><td><b className={`mp-ot-mark ${bucket.key}`}>{bucket.mark}</b> {line.day_type ? DAY_TYPES[line.day_type] || line.day_type : bucket.label}</td><td>{formatHours(line.hours)}</td><td>{line.multiplier}</td><td>{formatAmount(line.rate)}</td><td>{formatAmount(line.amount)}</td></tr>)}
-            <tr className="mp-ot-subtotal"><td colSpan={3}>{bucket.label} · ХТХ {bucket.law}</td><td>{formatHours(row.inputs.overtime_hours?.[bucket.key])}</td><td /><td /><td>{formatAmount(row.result.overtime_by_bucket?.[bucket.key])}</td></tr>
+            <tr className="mp-ot-subtotal"><td colSpan={3}>{bucket.label} · ХТХ {bucket.law}</td><td>{formatHours(row.inputs.overtime_hours?.[bucket.key])}</td><td /><td /><td>{formatAmount(month.overtime_by_bucket?.[bucket.key])}</td></tr>
           </Fragment>
         })}
-      </tbody><tfoot><tr><td colSpan={6}>Нийт илүү цагийн хөлс</td><td>{formatAmount(row.result.overtime_pay)}</td></tr></tfoot></table>
+      </tbody><tfoot><tr><td colSpan={6}>Нийт илүү цагийн хөлс</td><td>{formatAmount(month.overtime_pay)}</td></tr></tfoot></table>
       <small>Цагийн үнэлгээ = үндсэн цалин ÷ {formatHours(row.result.planned_hours)} цаг = {formatAmount(row.result.hourly_rate)} ₮ (Хөдөлмөрийн тухай хууль 109.1, 109.2, 109.4).</small>
       {manualHours && <small className="mp-manual-note">Тооцоолсон: {formatHours(Object.values(row.inputs._source_snapshot?.overtime_hours || {}).reduce((sum: number, value) => sum + toNumber(value), 0))} цаг · Гараар: {formatHours(overtimeTotal(row))} цаг</small>}
     </div>}
@@ -108,7 +109,7 @@ function Cell({ column, row, index, editing }: { column: Column; row: Row; index
   const classes = [
     column.kind === 'text' ? 'mp-text' : 'mp-num', column.sticky ? `mp-sticky-${column.sticky}` : '',
     buckets.length === 1 ? `mp-ot-${buckets[0].key}` : buckets.length > 1 ? 'mp-ot-multi' : '',
-    column.key === 'net_pay' && toNumber(row.result.net_pay) < 0 ? 'mp-negative' : '',
+    column.key === 'net_pay' && toNumber(column.value(row, index)) < 0 ? 'mp-negative' : '',
     column.key === 'net_pay' || column.key === 'advance' ? 'mp-key' : '',
   ].filter(Boolean).join(' ')
   const manual = column.manual?.(row)
@@ -224,9 +225,8 @@ export function RunRegister({ runId }: { runId: number }) {
   }
   const saveEdit = async (row: Row) => {
     const payload: Record<string, unknown> = { employeeId: row.employee_id, reason: 'Нягтлангийн засвар' }
-    if (isFinal) {
-      Object.assign(payload, { worked_normal_hours: draft.worked_normal_hours || '0', leave_pay: draft.leave_pay || '0', bonus: draft.bonus || '0', overtime_hours: Object.fromEntries(Object.entries(draft.overtime_hours || {}).map(([key, value]) => [key, value || '0'])) })
-    } else {
+    Object.assign(payload, { worked_normal_hours: draft.worked_normal_hours || '0', leave_pay: draft.leave_pay || '0', bonus: draft.bonus || '0', overtime_hours: Object.fromEntries(Object.entries(draft.overtime_hours || {}).map(([key, value]) => [key, value || '0'])) })
+    if (!isFinal) {
       payload.advance_basis = draft.advance_basis
       if (draft.advance_basis === 'WORKED-TO-DATE') payload.worked_to_date_hours = draft.worked_to_date_hours || '0'
       else if (draft.advance_value !== '' && toNumber(draft.advance_value) > 0) payload[draft.advance_basis === 'PERCENT' ? 'advance_percent' : 'fixed_advance'] = draft.advance_value
@@ -245,42 +245,51 @@ export function RunRegister({ runId }: { runId: number }) {
     { key: 'job_title', label: 'Албан тушаал', kind: 'text', value: (row) => row.identity.job_title || '—' },
     { key: 'base_salary', label: 'Үндсэн цалин', kind: 'money', value: (row) => row.profile.base_salary },
   ]
-  const finalColumns: Column[] = [
-    ...identityColumns,
+  // Plan §7.2 Excel order. Advance rows show the same month columns from their
+  // full-month projection, so Суутгалын дүн = урьдчилгаа + НДШ + ХХОАТ there too.
+  const workedTitle = (row: Row) => isFinal ? undefined : `${data?.cutoff_date || 'Таслах өдөр'} хүртэл ${formatHours(row.inputs.worked_to_date_hours)} цаг + үлдсэн ${formatHours(row.inputs.projected_remaining_hours)} цаг`
+  const advanceTitle = (row: Row) => isFinal
+    ? ((row.result.advance_lines || []).length ? `${row.result.advance_lines.length} батлагдсан урьдчилгааны бодолтоос` : undefined)
+    : (toNumber(monthFigures(row).prior_advances) > 0 ? `Өмнөх урьдчилгаа ${formatAmount(monthFigures(row).prior_advances)} ₮ суутгалын дүнд орсон` : undefined)
+  const monthColumns: Column[] = [
     { key: 'planned_days', label: 'Өдөр', group: 'Ажиллах', kind: 'days', value: (row) => row.result.planned_days ?? '—' },
     { key: 'planned_hours', label: 'Цаг', group: 'Ажиллах', kind: 'hours', value: (row) => row.result.planned_hours },
-    { key: 'worked_normal_hours', label: 'Ажилласан цаг', kind: 'hours', short: true, value: (row) => row.inputs.worked_normal_hours, manual: (row) => sourceDiffers(row, 'worked_normal_hours'), render: (row, isEditing) => isEditing ? numberInput('Ажилласан цаг', draft.worked_normal_hours, (value) => setDraftValue('worked_normal_hours', value)) : formatHours(row.inputs.worked_normal_hours) },
-    { key: 'base_pay', label: 'Тооцсон цалин', kind: 'money', value: (row) => row.result.base_pay },
+    { key: 'worked_normal_hours', label: 'Ажилласан цаг', kind: 'hours', short: true, value: (row) => row.inputs.worked_normal_hours, manual: (row) => sourceDiffers(row, 'worked_normal_hours'), render: (row, isEditing) => isEditing ? numberInput('Ажилласан цаг', draft.worked_normal_hours, (value) => setDraftValue('worked_normal_hours', value)) : <span title={workedTitle(row)}>{formatHours(row.inputs.worked_normal_hours)}</span> },
+    { key: 'base_pay', label: 'Тооцсон цалин', kind: 'money', value: (row) => monthFigures(row).base_pay },
     { key: 'overtime_hours', label: 'Илүү цаг', kind: 'hours', value: overtimeTotal, manual: (row) => sourceDiffers(row, 'overtime_hours'), render: (row, isEditing) => isEditing ? <span className="mp-ot-edit">{BUCKETS.map((bucket) => <label key={bucket.key} title={bucket.label}><b className={`mp-ot-mark ${bucket.key}`}>{bucket.mark}</b><input className="mp-inline-input" aria-label={bucket.label} type="text" inputMode="decimal" value={String(draft.overtime_hours?.[bucket.key] ?? '')} onChange={(event) => setDraftValue('overtime_hours', { ...draft.overtime_hours, [bucket.key]: event.target.value.replace(/[^\d.]/g, '') })} /></label>)}</span> : formatHours(overtimeTotal(row)) },
-    { key: 'overtime_pay', label: 'Илүү цагийн хөлс', kind: 'money', value: (row) => row.result.overtime_pay },
+    { key: 'overtime_pay', label: 'Илүү цагийн хөлс', kind: 'money', value: (row) => monthFigures(row).overtime_pay },
     { key: 'leave_pay', label: 'Ээлжийн амралтын мөнгө', kind: 'money', value: (row) => row.inputs.leave_pay, manual: (row) => toNumber(row.inputs.leave_pay) > 0, render: (row, isEditing) => isEditing ? numberInput('Ээлжийн амралтын мөнгө', draft.leave_pay, (value) => setDraftValue('leave_pay', value)) : formatAmount(row.inputs.leave_pay) },
-    { key: 'meal_commute', label: 'Хоол унаа', kind: 'money', value: (row) => row.result.meal_commute },
+    { key: 'meal_commute', label: 'Хоол унаа', kind: 'money', value: (row) => monthFigures(row).meal_commute },
     { key: 'bonus', label: 'Урамшуулал', kind: 'money', value: (row) => row.inputs.bonus, manual: (row) => toNumber(row.inputs.bonus) > 0, render: (row, isEditing) => isEditing ? numberInput('Урамшуулал', draft.bonus, (value) => setDraftValue('bonus', value)) : formatAmount(row.inputs.bonus) },
-    { key: 'gross', label: 'Олговол зохих цалин', kind: 'money', short: true, value: (row) => row.result.gross, manual: (row) => overridden(row, 'gross') },
-    { key: 'employee_shi', label: 'НДШ', group: 'Суутгалууд', kind: 'money', value: (row) => row.result.employee_shi, manual: (row) => overridden(row, 'employee_shi') },
-    { key: 'relief', label: 'ХХОАТ ХӨН', group: 'Суутгалууд', kind: 'money', value: (row) => row.result.relief },
-    { key: 'pit', label: 'ХХОАТ', group: 'Суутгалууд', kind: 'money', value: (row) => row.result.pit, manual: (row) => overridden(row, 'pit') },
-    { key: 'advance', label: 'Урьдчилгаа', group: 'Суутгалууд', kind: 'money', short: true, value: (row) => row.result.advance, manual: (row) => overridden(row, 'advance'), render: (row) => <span title={(row.result.advance_lines || []).length ? `${row.result.advance_lines.length} батлагдсан урьдчилгааны бодолтоос` : undefined}>{formatAmount(row.result.advance)}</span> },
+    { key: 'gross', label: 'Олговол зохих цалин', kind: 'money', short: true, value: (row) => monthFigures(row).gross, manual: (row) => isFinal && overridden(row, 'gross') },
+    { key: 'employee_shi', label: 'НДШ', group: 'Суутгалууд', kind: 'money', value: (row) => monthFigures(row).employee_shi, manual: (row) => isFinal && overridden(row, 'employee_shi') },
+    { key: 'relief', label: 'ХХОАТ ХӨН', group: 'Суутгалууд', kind: 'money', value: (row) => monthFigures(row).relief },
+    { key: 'pit', label: 'ХХОАТ', group: 'Суутгалууд', kind: 'money', value: (row) => monthFigures(row).pit, manual: (row) => isFinal && overridden(row, 'pit') },
+    { key: 'advance', label: 'Урьдчилгаа', group: 'Суутгалууд', kind: 'money', short: true, value: (row) => row.result.advance, manual: (row) => overridden(row, 'advance') || (!isFinal && Boolean(row.inputs.fixed_advance || row.inputs.advance_percent)), render: (row) => <span title={advanceTitle(row)}>{formatAmount(row.result.advance)}</span> },
+  ]
+  const finalColumns: Column[] = [
+    ...identityColumns,
+    ...monthColumns,
     { key: 'other_deductions', label: 'Бусад суутгал', group: 'Суутгалууд', kind: 'money', value: (row) => row.result.other_deductions, manual: (row) => (row.inputs.other_deductions || []).length > 0 || overridden(row, 'other_deductions') },
     { key: 'total_deductions', label: 'Суутгалын дүн', kind: 'money', short: true, value: (row) => row.result.total_deductions },
     { key: 'net_pay', label: 'Сүүл цалин (Гарт олгох)', kind: 'money', short: true, value: (row) => row.result.net_pay },
     { key: 'employer_shi', label: 'БНДШ', kind: 'money', value: (row) => row.result.employer_shi, manual: (row) => overridden(row, 'employer_shi') },
   ]
-  // Plan §7.1: Ажилласан цаг appears only when a worker's advance is WORKED-TO-DATE.
+  // Plan §7.1 basis columns first; the cut-off hours column appears only for WORKED-TO-DATE workers.
   const advanceColumns: Column[] = [
     ...identityColumns,
     { key: 'salary_type', label: 'Төрөл', kind: 'text', value: (row) => SALARY_TYPES[String(row.profile.salary_type)] || row.profile.salary_type },
-    { key: 'advance_basis', label: 'Урьдчилгааны суурь', kind: 'text', value: (row) => BASIS_LABELS[row.result.advance_basis] || row.result.advance_basis || '—', render: (row, isEditing) => isEditing ? <select className="mp-inline-input" aria-label="Урьдчилгааны суурь" value={draft.advance_basis} onChange={(event) => setDraftValue('advance_basis', event.target.value)}>{Object.entries(BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : (BASIS_LABELS[row.result.advance_basis] || row.result.advance_basis || '—') },
-    { key: 'advance_value', label: 'Хувь / дүн', kind: 'text', manual: (row) => Boolean(row.inputs.fixed_advance || row.inputs.advance_percent), value: (row) => row.result.advance_value, render: (row, isEditing) => isEditing ? (draft.advance_basis === 'WORKED-TO-DATE' ? '—' : numberInput('Хувь эсвэл дүн', draft.advance_value, (value) => setDraftValue('advance_value', value))) : row.result.advance_basis === 'PERCENT' ? `${formatHours(row.result.advance_value)}%` : row.result.advance_basis === 'FIXED' ? formatAmount(row.result.advance_value) : '—' },
-    ...(hasWorkedToDate ? [{ key: 'worked_to_date_hours', label: 'Ажилласан цаг', kind: 'hours' as Kind, value: (row: Row) => (row.result.advance_basis === 'WORKED-TO-DATE' ? row.inputs.worked_to_date_hours : 0), manual: (row: Row) => sourceDiffers(row, 'worked_to_date_hours'), render: (row: Row, isEditing: boolean) => isEditing && draft.advance_basis === 'WORKED-TO-DATE' ? numberInput('Ажилласан цаг', draft.worked_to_date_hours, (value) => setDraftValue('worked_to_date_hours', value)) : row.result.advance_basis === 'WORKED-TO-DATE' ? formatHours(row.inputs.worked_to_date_hours) : '—' }] : []),
-    { key: 'advance', label: 'Урьдчилгаа', kind: 'money', short: true, value: (row) => row.result.advance, manual: (row) => overridden(row, 'advance') },
-    { key: 'estimated_net', label: 'Сарын цэвэр (тооцоолсон)', kind: 'money', value: (row) => row.result.estimated_net },
-    { key: 'advance_pct', label: 'Урьдчилгаа %', kind: 'text', short: true, value: (row) => row.result.advance_pct_of_estimated_net ? `${row.result.advance_pct_of_estimated_net}%` : '—' },
+    { key: 'advance_basis', label: 'Суурь', group: 'Урьдчилгааны тооцоо', kind: 'text', value: (row) => BASIS_LABELS[row.result.advance_basis] || row.result.advance_basis || '—', render: (row, isEditing) => isEditing ? <select className="mp-inline-input" aria-label="Урьдчилгааны суурь" value={draft.advance_basis} onChange={(event) => setDraftValue('advance_basis', event.target.value)}>{Object.entries(BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : (BASIS_LABELS[row.result.advance_basis] || row.result.advance_basis || '—') },
+    { key: 'advance_value', label: 'Хувь / дүн', group: 'Урьдчилгааны тооцоо', kind: 'text', manual: (row) => Boolean(row.inputs.fixed_advance || row.inputs.advance_percent), value: (row) => row.result.advance_value, render: (row, isEditing) => isEditing ? (draft.advance_basis === 'WORKED-TO-DATE' ? '—' : numberInput('Хувь эсвэл дүн', draft.advance_value, (value) => setDraftValue('advance_value', value))) : row.result.advance_basis === 'PERCENT' ? `${formatHours(row.result.advance_value)}%` : row.result.advance_basis === 'FIXED' ? formatAmount(row.result.advance_value) : '—' },
+    ...(hasWorkedToDate ? [{ key: 'worked_to_date_hours', label: 'Таслах өдөр хүртэл цаг', group: 'Урьдчилгааны тооцоо', kind: 'hours' as Kind, value: (row: Row) => (row.result.advance_basis === 'WORKED-TO-DATE' ? row.inputs.worked_to_date_hours : 0), manual: (row: Row) => sourceDiffers(row, 'worked_to_date_hours'), render: (row: Row, isEditing: boolean) => isEditing && draft.advance_basis === 'WORKED-TO-DATE' ? numberInput('Таслах өдөр хүртэл ажилласан цаг', draft.worked_to_date_hours, (value) => setDraftValue('worked_to_date_hours', value)) : row.result.advance_basis === 'WORKED-TO-DATE' ? formatHours(row.inputs.worked_to_date_hours) : '—' }] : []),
+    ...monthColumns,
+    { key: 'total_deductions', label: 'Суутгалын дүн', kind: 'money', short: true, value: (row) => monthFigures(row).total_deductions },
+    { key: 'net_pay', label: 'Сүүл цалин (тооцоолсон)', kind: 'money', short: true, value: (row) => monthFigures(row).net_pay },
     { key: 'pay_date', label: 'Төлбөрийн өдөр', kind: 'text', value: (row) => row.identity.pay_date || data?.pay_date },
   ]
   const columns = (isFinal ? finalColumns : advanceColumns).filter((column) => preset === 'full' || column.short)
   const grouped = preset === 'full' && columns.some((column) => column.group)
-  const sumColumns = new Set(columns.filter((column) => column.kind === 'money' || column.kind === 'hours').map((column) => column.key).filter((key) => !['base_salary', 'estimated_net', 'planned_hours'].includes(key)))
+  const sumColumns = new Set(columns.filter((column) => column.kind === 'money' || column.kind === 'hours').map((column) => column.key).filter((key) => !['base_salary', 'planned_hours'].includes(key)))
   const sumOf = (list: Row[], column: Column) => list.reduce((total, row, index) => total + toNumber(column.value(row, index)), 0)
   const totalCell = (list: Row[], column: Column) => sumColumns.has(column.key) ? (column.kind === 'hours' ? formatHours(sumOf(list, column)) : formatAmount(sumOf(list, column))) : ''
 
@@ -451,7 +460,7 @@ export function RunRegister({ runId }: { runId: number }) {
           <tfoot><tr>{columns.map((column, columnIndex) => columnIndex === 0 ? null : columnIndex === 1 ? <th key={column.key} colSpan={2} className="mp-sticky-label">{visibleRows.length === rows.length ? `Нийт · ${rows.length} ажилтан` : `Нийт · ${visibleRows.length}/${rows.length}`}</th> : <td key={column.key} className="mp-num">{totalCell(visibleRows, column)}</td>)}<td colSpan={2} /></tr></tfoot>
         </table>
       </div>
-      <p className="mp-legend">{isFinal && <><span><b className="mp-ot-mark weekday">И</b>ажлын өдрийн илүү цаг</span><span><b className="mp-ot-mark rest_day">А</b>амралтын өдөр</span><span><b className="mp-ot-mark public_holiday">Б</b>баярын өдөр</span></>}<span><span className="mp-manual-dot" />гараар зассан</span></p>
+      <p className="mp-legend"><span><b className="mp-ot-mark weekday">И</b>ажлын өдрийн илүү цаг</span><span><b className="mp-ot-mark rest_day">А</b>амралтын өдөр</span><span><b className="mp-ot-mark public_holiday">Б</b>баярын өдөр</span><span><span className="mp-manual-dot" />гараар зассан</span>{!isFinal && <span>Сарын дүн (НДШ, ХХОАТ, сүүл цалин) тооцоолсон төлөв — эцсийн дүн сүүл цалингийн бодолтод гарна.</span>}</p>
     </section>
     {drawer && month.data && <RowDrawer row={drawer} run={data} month={month.data} editable={editable} onClose={() => setDrawerRow(null)} askReason={askReason} />}
   </MonthlyShell>

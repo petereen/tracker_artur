@@ -7,7 +7,7 @@ import {
   useRevertMonthlyPayrollComputedCell, useRevertMonthlyPayrollRowOverrides, useSaveMonthlyPayrollRow,
 } from '../../api/enterprise'
 import type { MonthlyPayrollMonth, MonthlyPayrollRun, MonthlyPayrollRunRow } from '../../api/enterprise'
-import { formatAmount, formatHours, requestError, toNumber, warningLabel } from './shared'
+import { formatAmount, formatHours, monthFigures, requestError, toNumber, warningLabel } from './shared'
 import { plainNumber } from '../../utils/numbers'
 
 type Tab = 'calculation' | 'days' | 'advances' | 'deductions' | 'history'
@@ -22,23 +22,29 @@ const auditLabel = (field: string) => field.startsWith('computed:') ? `Тооц�
 const brief = (value: unknown) => value === null || value === undefined ? '—' : typeof value === 'object' ? '' : String(value)
 
 function explain(row: MonthlyPayrollRunRow, month: MonthlyPayrollMonth, isFinal: boolean): Explanation[] {
-  const { inputs, result, profile } = row
-  const overrides: string[] = result.computed_overrides || []
+  const { inputs, profile } = row
+  const result = monthFigures(row)
+  const overrides: string[] = isFinal ? row.result.computed_overrides || [] : []
   const rate = `${formatAmount(profile.base_salary)} ÷ ${formatHours(result.planned_hours)} цаг = ${formatAmount(result.hourly_rate)}`
-  if (!isFinal) {
-    const basis = result.advance_basis
-    return [{
-      label: 'Урьдчилгаа', manual: overrides.includes('advance') || Boolean(inputs.fixed_advance || inputs.advance_percent),
-      formula: basis === 'PERCENT' ? 'Үндсэн цалин × хувь' : basis === 'FIXED' ? 'HR-ийн оруулсан дүн' : 'Таслах өдөр хүртэл олсон цалин − өмнө батлагдсан урьдчилгаа',
-      inputs: basis === 'PERCENT' ? `${formatAmount(profile.base_salary)} × ${result.advance_value}%` : basis === 'FIXED' ? formatAmount(result.advance_value) : `${formatHours(inputs.worked_to_date_hours)} цаг × ${formatAmount(result.hourly_rate)}`,
-      value: formatAmount(result.advance),
-    }, { label: 'Сарын цэвэр (тооцоолсон)', manual: false, formula: 'Бүтэн сарын үндсэн + хоол унаа − НДШ − ХХОАТ', inputs: 'HR профайл', value: formatAmount(result.estimated_net) }]
-  }
+  const basis = row.result.advance_basis
+  const advanceLine: Explanation[] = isFinal ? [] : [{
+    label: 'Энэ бодолтын урьдчилгаа', manual: (row.result.computed_overrides || []).includes('advance') || Boolean(inputs.fixed_advance || inputs.advance_percent),
+    formula: basis === 'PERCENT' ? 'Үндсэн цалин × хувь' : basis === 'FIXED' ? 'HR-ийн оруулсан дүн' : 'Таслах өдөр хүртэл олсон цалин − өмнө батлагдсан урьдчилгаа',
+    inputs: basis === 'PERCENT' ? `${formatAmount(profile.base_salary)} × ${row.result.advance_value}%` : basis === 'FIXED' ? formatAmount(row.result.advance_value) : `${formatHours(inputs.worked_to_date_hours)} цаг × ${formatAmount(row.result.hourly_rate)}`,
+    value: formatAmount(row.result.advance),
+  }]
+  const workedLine: Explanation[] = isFinal ? [] : [{
+    label: 'Ажилласан цаг', manual: JSON.stringify(inputs.worked_normal_hours ?? null) !== JSON.stringify(inputs._source_snapshot?.worked_normal_hours ?? null),
+    formula: 'Таслах өдөр хүртэл ажилласан цаг + үлдсэн ажлын өдрийн төлөвлөсөн цаг (цагийн бүртгэлгүй бол бүтэн сар)',
+    inputs: `${formatHours(inputs.worked_to_date_hours)} + ${formatHours(inputs.projected_remaining_hours)} цаг`, value: formatHours(inputs.worked_normal_hours),
+  }]
   const segments: any[] = profile.salary_segments as any[] || []
   const employeeRates = Object.entries((month.rule_snapshot.employee_rates || {}) as Record<string, string>)
   const employerRates = Object.entries((month.rule_snapshot.employer_rates || {}) as Record<string, string>)
-  return [
+  const lines: Explanation[] = [
+    ...advanceLine,
     { label: 'Ажиллах цаг', manual: false, formula: 'Хуанлийн ажлын өдөр × өдрийн норм', inputs: `${result.planned_days} өдөр × ${formatHours(profile.daily_norm_hours)} цаг`, value: formatHours(result.planned_hours) },
+    ...workedLine,
     { label: 'Тооцсон цалин', manual: false, formula: profile.salary_type === 'FIXED' ? 'Үндсэн цалин × ажилласан ажлын өдөр ÷ сарын ажлын өдөр' : 'Цагийн үнэлгээ × ажилласан цаг', inputs: profile.salary_type === 'FIXED' ? (segments.length ? segments.map((segment) => `${segment.valid_from} – ${segment.valid_to}: ${formatAmount(segment.monthly_salary)}`).join('; ') + ` (сард ${result.planned_days} ажлын өдөр)` : formatAmount(profile.base_salary)) : segments.length > 1 ? segments.map((segment) => `${segment.valid_from} – ${segment.valid_to}: ${formatAmount(segment.monthly_salary)} ÷ ${formatHours(result.planned_hours)} цаг`).join('; ') + ` × ${formatHours(inputs.worked_normal_hours)} цаг` : `${rate} × ${formatHours(inputs.worked_normal_hours)} цаг`, value: formatAmount(result.base_pay) },
     { label: 'Илүү цагийн хөлс', manual: false, formula: 'Цагийн үнэлгээ × (ажлын өдрийн илүү цаг × 1.5 + амралтын өдөр × 1.5 + баяр × 2.0)', inputs: Object.entries(inputs.overtime_hours || {}).filter(([, hours]) => toNumber(hours) > 0).map(([bucket, hours]) => `${BUCKET_NAMES[bucket] || bucket} ${formatHours(hours)} цаг`).join(', ') || 'Илүү цаггүй', value: formatAmount(result.overtime_pay) },
     { label: 'Хоол унаа', manual: false, formula: profile.salary_type === 'FIXED' ? 'Хоол + унаа' : '(Хоол + унаа) × ажилласан ÷ ажиллах цаг', inputs: `${formatAmount(profile.meal_allowance)} + ${formatAmount(profile.commute_allowance)}`, value: formatAmount(result.meal_commute) },
@@ -48,12 +54,16 @@ function explain(row: MonthlyPayrollRunRow, month: MonthlyPayrollMonth, isFinal:
     { label: 'ХХОАТ (хөнгөлөлтийн өмнө)', manual: false, formula: 'Шатлалт хувь (10% / 15% / 20%)', inputs: formatAmount(result.taxable_income), value: formatAmount(result.pit_before_relief) },
     { label: 'ХХОАТ ХӨН', manual: false, formula: 'Орлогын шатлалаас хамаарах хөнгөлөлт, татвараас хэтрэхгүй', inputs: profile.tax_relief_eligible === false ? 'Хөнгөлөлт тооцохгүй' : formatAmount(result.taxable_income), value: formatAmount(result.relief) },
     { label: 'ХХОАТ', manual: overrides.includes('pit'), formula: 'Хөнгөлөлтийн өмнөх татвар − ХХОАТ ХӨН', inputs: `${formatAmount(result.pit_before_relief)} − ${formatAmount(result.relief)}`, value: formatAmount(result.pit) },
-    { label: 'Урьдчилгаа', manual: overrides.includes('advance'), formula: 'Батлагдсан урьдчилгааны бодолтуудын нийлбэр', inputs: (result.advance_lines || []).map((line: any) => `${line.pay_date || '#' + line.run_id}: ${formatAmount(line.amount)}`).join(' + ') || 'Батлагдсан урьдчилгаа алга', value: formatAmount(result.advance) },
+    isFinal
+      ? { label: 'Урьдчилгаа', manual: overrides.includes('advance'), formula: 'Батлагдсан урьдчилгааны бодолтуудын нийлбэр', inputs: (result.advance_lines || []).map((line: any) => `${line.pay_date || '#' + line.run_id}: ${formatAmount(line.amount)}`).join(' + ') || 'Батлагдсан урьдчилгаа алга', value: formatAmount(result.advance) }
+      : { label: 'Сарын урьдчилгаа', manual: false, formula: 'Өмнө батлагдсан урьдчилгаа + энэ бодолтын урьдчилгаа', inputs: `${formatAmount(result.prior_advances)} + ${formatAmount(row.result.advance)}`, value: formatAmount(result.advance) },
     { label: 'Бусад суутгал', manual: overrides.includes('other_deductions'), formula: 'Суутгалын мөрүүдийн нийлбэр (татварын дараа)', inputs: (inputs.other_deductions || []).map((line: any) => `${line.type}: ${formatAmount(line.amount)}`).join(' + ') || '—', value: formatAmount(result.other_deductions) },
     { label: 'Суутгалын дүн', manual: false, formula: 'Урьдчилгаа + ХХОАТ + НДШ + бусад суутгал', inputs: `${formatAmount(result.advance)} + ${formatAmount(result.pit)} + ${formatAmount(result.employee_shi)} + ${formatAmount(result.other_deductions)}`, value: formatAmount(result.total_deductions) },
-    { label: 'Сүүл цалин', manual: false, formula: 'Олговол зохих − суутгалын дүн', inputs: `${formatAmount(result.gross)} − ${formatAmount(result.total_deductions)}`, value: formatAmount(result.net_pay) },
+    { label: isFinal ? 'Сүүл цалин' : 'Сүүл цалин (тооцоолсон)', manual: false, formula: 'Олговол зохих − суутгалын дүн', inputs: `${formatAmount(result.gross)} − ${formatAmount(result.total_deductions)}`, value: formatAmount(result.net_pay) },
     { label: 'БНДШ', manual: overrides.includes('employer_shi'), formula: 'НДШ суурь × байгууллагын хувь', inputs: `${formatAmount(result.shi_base)} × (${employerRates.map(([code, value]) => `${FUNDS[code] || code} ${formatHours(toNumber(value) * 100)}%`).join(' + ')})`, value: formatAmount(result.employer_shi) },
   ]
+  // Other deductions are entered in the final run only.
+  return isFinal ? lines : lines.filter((line) => line.label !== 'Бусад суутгал')
 }
 
 export function RowDrawer({ row, run, month, editable, onClose, askReason }: {
@@ -105,7 +115,8 @@ export function RowDrawer({ row, run, month, editable, onClose, askReason }: {
           <table className="mp-explain"><thead><tr><th>Багана</th><th>Томьёо</th><th>Оролт</th><th>Дүн</th></tr></thead><tbody>
             {explain(row, month, isFinal).map((item) => <tr key={item.label}><th>{item.label}<small className={item.manual ? 'manual' : 'auto'}>{item.manual ? 'гараар' : 'автомат'}</small></th><td>{item.formula}</td><td>{item.inputs}</td><td className="mp-num">{item.value}</td></tr>)}
           </tbody></table>
-          {isFinal && <p className="mp-check">Шалгалт: суутгалын дүн + сүүл цалин = {formatAmount(toNumber(row.result.total_deductions) + toNumber(row.result.net_pay))} {toNumber(row.result.total_deductions) + toNumber(row.result.net_pay) === toNumber(row.result.gross) ? '= олговол зохих ✓' : '≠ олговол зохих ✗'}</p>}
+          {(() => { const figures = monthFigures(row); const sum = toNumber(figures.total_deductions) + toNumber(figures.net_pay); return <p className="mp-check">Шалгалт: суутгалын дүн + сүүл цалин = {formatAmount(sum)} {sum === toNumber(figures.gross) ? '= олговол зохих ✓' : '≠ олговол зохих ✗'}</p> })()}
+          {!isFinal && <p className="mp-manual-note">Урьдчилгаанд НДШ, ХХОАТ суутгахгүй. Сарын дүн нь тооцоолсон төлөв бөгөөд эцсийн тооцоо сүүл цалингийн бодолтод хийгдэнэ.</p>}
           {(row.result.computed_overrides || []).length > 0 && <div className="mp-overrides"><strong>Гараар зассан дүн</strong>{(row.result.computed_overrides as string[]).map((field) => <span key={field}>{OVERRIDABLE.find(([key]) => key === field)?.[1] || field}{editable && <button type="button" className="payroll-v2-button secondary compact" onClick={() => revertOverride(field)}>Автомат болгох</button>}</span>)}</div>}
           {editable && row.profile.complete !== false && <div className="mp-override-form"><strong>Тооцсон дүнг засах</strong><select aria-label="Засах багана" value={overrideField} onChange={(event) => setOverrideField(event.target.value)}>{OVERRIDABLE.filter(([key]) => isFinal || key === 'advance').map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><input aria-label="Шинэ дүн" type="number" min="0" value={overrideValue} placeholder={formatAmount(row.result[overrideField])} onChange={(event) => setOverrideValue(event.target.value)} /><button type="button" className="payroll-v2-button secondary compact" disabled={!overrideValue || override.isPending} onClick={applyOverride}>Засах</button><small>Доош урсах дүнгүүд (НДШ, татвар, сүүл цалин) дахин бодогдоно; гараар зассан дүн хэвээр үлдэнэ.</small></div>}
         </>}

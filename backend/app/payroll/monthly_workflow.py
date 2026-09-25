@@ -43,7 +43,7 @@ router = APIRouter()
 # «Урьдчилгаа бодоогүй» (advance_not_calculated) is a warning by design: the
 # accountant may knowingly settle a worker whose advance run was never made.
 BLOCKING_ROW_WARNINGS = {"negative_final_pay", "profile_missing", "salary_history_missing_or_incomplete", "row_flagged", "advance_changed", "advance_not_due", "advance_not_positive"}
-TIME_INPUT_KEYS = ("worked_normal_hours", "worked_to_date_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")
+TIME_INPUT_KEYS = ("worked_normal_hours", "worked_to_date_hours", "projected_remaining_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")
 
 
 class MonthInput(BaseModel):
@@ -864,7 +864,17 @@ async def _attendance_inputs(db: AsyncSession, organization_id: int, employee_id
             overtime[key] += value
         lines.append({"date": work_day.isoformat(), "day_type": calendar_days[work_day].value, "hours": str(total_hours), "normal_hours": str(normal), "overtime_hours": {key: str(value) for key, value in buckets.items() if value > 0}, "source": day_sources[work_day]})
     planned_days_to_cutoff = sum(day <= end and day_type is CalendarDayType.WORKING for day, day_type in calendar_days.items())
-    return {"worked_normal_hours": str(normal_hours), "worked_to_date_hours": str(normal_hours), "elapsed_planned_days": planned_days_to_cutoff, "overtime_hours": {key: str(value) for key, value in overtime.items()}, "day_lines": lines, "missing_dates": normalized["missing_dates"], "approved_leave_days": normalized["days"], "time_source": "confirmed_hr_attendance_or_approved_worktime" if lines else "manual"}
+    worked_hours, remaining_hours = normal_hours, Decimal("0")
+    if cutoff:
+        # Advance runs project the whole month: hours worked through the
+        # cut-off plus the planned hours still ahead. Without any time data
+        # the worker is assumed to work the planned month.
+        employed_from = max(first, details.start_date) if details and details.start_date else first
+        employed_to = min(last, details.end_date) if details and details.end_date else last
+        remaining_from = max(employed_from, end + timedelta(days=1)) if lines else employed_from
+        remaining_hours = sum((daily_norm_hours for day, day_type in calendar_days.items() if remaining_from <= day <= employed_to and day_type is CalendarDayType.WORKING), Decimal("0"))
+        worked_hours = normal_hours + remaining_hours
+    return {"worked_normal_hours": _plain_value(worked_hours) if cutoff else str(worked_hours), "worked_to_date_hours": str(normal_hours), "projected_remaining_hours": _plain_value(remaining_hours), "elapsed_planned_days": planned_days_to_cutoff, "overtime_hours": {key: str(value) for key, value in overtime.items()}, "day_lines": lines, "missing_dates": normalized["missing_dates"], "approved_leave_days": normalized["days"], "time_source": "confirmed_hr_attendance_or_approved_worktime" if lines else "manual"}
 
 
 async def _approved_advances(db: AsyncSession, run: MonthlyPayrollRun, employee_id: int, *, through_date: date | None = None) -> tuple[list[str], list[str]]:
@@ -1081,7 +1091,26 @@ async def _calculate_row(db: AsyncSession, month: MonthlyPayrollMonth, run: Mont
             worked_normal_hours=planned_hours, salary_segments=full_month_segments or None,
         )
         result_data["estimated_net"] = str(estimated.net_pay)
-        result_data["advance_pct_of_estimated_net"] = str((amount(result_data["advance"]) * 100 / estimated.net_pay).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)) if estimated.net_pay > 0 else None
+        # The advance table shows the month as the final run will see it:
+        # projected hours, overtime so far, leave pay, meal/commute and bonus,
+        # with НДШ and ХХОАТ, so Суутгалын дүн = this month's advances + НДШ +
+        # ХХОАТ. Kept under "projection" so totals never count it as payroll.
+        projection = calculate_monthly_run(
+            PayrollRunType.FINAL, profile, rules=rules, planned_days=planned_days, planned_hours=planned_hours,
+            worked_normal_hours=inputs.get("worked_normal_hours") or 0,
+            overtime_hours=inputs.get("overtime_hours") or {}, leave_pay=inputs.get("leave_pay") or 0,
+            bonus=inputs.get("bonus") or 0, approved_advances=[*prior_advances, result_data["advance"]],
+            salary_segments=segment_objects or None,
+        )
+        projection_data = _json_value(asdict(projection))
+        projection_data.pop("run_type", None)
+        projection_data["prior_advances"] = str(sum((amount(value) for value in prior_advances), Decimal("0")))
+        projection_data["overtime_lines"] = overtime_day_lines(
+            day_lines=inputs.get("day_lines") or [], aggregate_hours=inputs.get("overtime_hours") or {},
+            bucket_totals=projection.overtime_by_bucket, salary_segments=profile_data.get("salary_segments") or [],
+            base_salary=profile.base_salary, planned_hours=planned_hours, multipliers=rules.overtime_multipliers,
+        )
+        result_data["projection"] = projection_data
         if amount(result_data["advance"]) > estimated.net_pay:
             warnings.append("advance_above_estimated_net")
         if amount(result_data["advance"]) <= 0:
@@ -1264,6 +1293,35 @@ async def _fresh_snapshots(db: AsyncSession, actor: ActorContext, month: Monthly
     return identity, _profile_snapshot(profile, history, segments)
 
 
+async def _advance_carry_over(db: AsyncSession, organization_id: int, month_id: int, employee_id: int, attendance: dict[str, Any]) -> dict[str, Any]:
+    """Accountant inputs typed in the month's latest advance row, reused by the final row.
+
+    Leave pay and bonus carry as typed. Overtime carries only for buckets the
+    accountant entered by hand and the full-month time data left empty, so
+    recorded attendance always wins.
+    """
+    source = (await db.execute(select(MonthlyPayrollRun.id, MonthlyPayrollRunRow.inputs).join(
+        MonthlyPayrollRunRow, MonthlyPayrollRunRow.run_id == MonthlyPayrollRun.id,
+    ).where(
+        MonthlyPayrollRun.month_id == month_id, MonthlyPayrollRun.organization_id == organization_id,
+        MonthlyPayrollRunRow.organization_id == organization_id, MonthlyPayrollRun.run_type == "advance",
+        MonthlyPayrollRunRow.employee_id == employee_id,
+    ).order_by(MonthlyPayrollRun.pay_date.desc(), MonthlyPayrollRun.id.desc()).limit(1))).first()
+    if source is None:
+        return {}
+    inputs = source.inputs or {}
+    carried: dict[str, Any] = {key: str(inputs[key]) for key in ("leave_pay", "bonus") if amount(inputs.get(key) or 0) > 0}
+    typed = inputs.get("overtime_hours") or {}
+    recorded = (inputs.get("_source_snapshot") or {}).get("overtime_hours") or {}
+    fresh = attendance.get("overtime_hours") or {}
+    manual = {bucket: str(hours) for bucket, hours in typed.items() if amount(hours or 0) > 0 and amount(hours) != amount(recorded.get(bucket) or 0) and amount(fresh.get(bucket) or 0) == 0}
+    if manual:
+        carried["overtime_hours"] = {**fresh, **manual}
+    if carried:
+        carried["carried_from_advance_run"] = source.id
+    return carried
+
+
 async def _build_row(db: AsyncSession, actor: ActorContext, month: MonthlyPayrollMonth, run: MonthlyPayrollRun, employee: Employee, details: EmployeeDetails | None, profile: MonthlyPayrollProfile | None, history: MonthlyPayrollSalaryHistory | None, segments: list[dict[str, Any]], *, one_off: bool = False) -> MonthlyPayrollRunRow:
     """Snapshot one worker into a run: identity, HR profile, time and payout."""
     identity, profile_data = await _fresh_snapshots(db, actor, month, run, employee, details, profile, history, segments)
@@ -1285,11 +1343,12 @@ async def _build_row(db: AsyncSession, actor: ActorContext, month: MonthlyPayrol
         "account_number": decrypt_secret(payout.account_number_ciphertext),
         "account_holder": decrypt_secret(payout.account_holder_ciphertext) if payout.account_holder_ciphertext else employee.name,
     }, ensure_ascii=False)) if payout else None
+    carried = await _advance_carry_over(db, actor.organization_id, month.id, employee.id, attendance) if run.run_type == "final" else {}
     row = MonthlyPayrollRunRow(
         organization_id=actor.organization_id, run_id=run.id, employee_id=employee.id,
         identity_snapshot=identity, profile_snapshot=profile_data,
         payout_snapshot_ciphertext=payout_snapshot,
-        inputs={**attendance, "leave_pay": "0", "bonus": "0", "other_deductions": [], **({"one_off_advance": True} if one_off else {})},
+        inputs={**attendance, "leave_pay": "0", "bonus": "0", "other_deductions": [], **carried, **({"one_off_advance": True} if one_off else {})},
     )
     db.add(row)
     return row
@@ -1585,7 +1644,7 @@ async def refresh_run_time(run_id: int, db: AsyncSession = Depends(get_db), acto
     ).with_for_update())).scalars().all()
     changed = 0
     calendar_overrides = {date.fromisoformat(key): value for key, value in month.calendar_snapshot.items()}
-    canonical_keys = ("worked_normal_hours", "worked_to_date_hours", "elapsed_planned_days", "overtime_hours", "day_lines", "missing_dates", "approved_leave_days", "time_source")
+    canonical_keys = TIME_INPUT_KEYS
     for row in rows:
         if row.status != "draft" or not row.profile_snapshot.get("complete", True):
             continue
@@ -1783,12 +1842,12 @@ async def import_payroll_inputs(run_id: int, file: UploadFile = File(...), db: A
         before = dict(row.inputs or {})
         # A blank cell keeps the row's current value; only filled cells change.
         provided: dict[str, Any] = {"reason": text_value("reason") or ""}
-        hour_keys = ("worked_normal_hours", "leave_pay", "bonus") if run.run_type == "final" else ("worked_to_date_hours",)
+        hour_keys = ("worked_normal_hours", "leave_pay", "bonus") if run.run_type == "final" else ("worked_to_date_hours", "worked_normal_hours", "leave_pay", "bonus")
         for key in hour_keys:
             if text_value(key) is not None:
                 provided[key] = text_value(key)
         overtime = {key: text_value(f"overtime_{key}") for key in ("weekday", "rest_day", "public_holiday")}
-        if run.run_type == "final" and any(value is not None for value in overtime.values()):
+        if any(value is not None for value in overtime.values()):
             provided["overtime_hours"] = {**(before.get("overtime_hours") or {}), **{key: value for key, value in overtime.items() if value is not None}}
         try:
             if run.run_type == "final" and text_value("deduction_amount") is not None:

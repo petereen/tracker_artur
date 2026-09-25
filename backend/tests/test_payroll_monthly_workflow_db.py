@@ -174,6 +174,13 @@ async def _scenario(client, ids, sessions, organization_id):
     # Reference column: a full month on the profile, not hours worked so far:
     # gross 1,620,000 − НДШ 186,300 − ХХОАТ (143,370 − 16,000 relief) = 1,306,330.
     assert _row(run10, ids["oyun"])["result"]["estimated_net"] == "1306330"
+    # No time data yet → the projection assumes the planned month (168 h):
+    # Суутгалын дүн = 600,000 урьдчилгаа + 186,300 НДШ + 127,370 ХХОАТ.
+    projection = _row(run10, ids["oyun"])["result"]["projection"]
+    assert _row(run10, ids["oyun"])["inputs"]["worked_normal_hours"] == "168"
+    assert (projection["base_pay"], projection["meal_commute"], projection["gross"]) == ("1500000", "120000", "1620000")
+    assert (projection["employee_shi"], projection["pit"], projection["advance"]) == ("186300", "127370", "600000")
+    assert (projection["total_deductions"], projection["net_pay"]) == ("913670", "706330")
     await _ok(await client.post(f"/m/runs/{advance10['id']}/rows/{ids['oyun']}/approve"))
     approved = await _ok(await client.post(f"/m/runs/{advance10['id']}/approve"))
     assert approved["status"] == "approved" and approved["approval_summary"]["skipped"] == []
@@ -294,3 +301,30 @@ async def _scenario(client, ids, sessions, organization_id):
 
     dashboard = await _ok(await client.get("/m/dashboard", params={"month": "2026-08"}))
     assert dashboard["has_final"] is True and dashboard["trend"][-1]["month"] == "2026-08"
+
+
+def test_advance_projection_carries_into_final(monkeypatch):
+    asyncio.run(_advance_projection_scenario(monkeypatch))
+
+
+async def _advance_projection_scenario(monkeypatch):
+    async with _payroll_api(monkeypatch) as (client, ids, _sessions, _organization_id):
+        month = await _ok(await client.post("/m/months", json={"year": 2026, "month": 8}), 201)
+        advance = await _ok(await client.post(f"/m/months/{month['id']}/runs", json={"run_type": "advance", "pay_date": "2026-08-10"}), 201)
+        # Extra pay typed in the advance table: 4 h weekday overtime, leave pay, bonus.
+        row = await _ok(await client.put(f"/m/runs/{advance['id']}/rows/{ids['oyun']}", json={"overtime_hours": {"weekday": "4"}, "leave_pay": "100000", "bonus": "50000", "reason": "Сарын төлөв"}))
+        projection = row["result"]["projection"]
+        assert row["result"]["advance"] == "600000"
+        # 1,500,000 + 53,571 илүү цаг + 100,000 + 120,000 хоол унаа + 50,000 = 1,823,571.
+        assert (projection["overtime_pay"], projection["gross"]) == ("53571", "1823571")
+        assert (projection["employee_shi"], projection["relief"], projection["pit"]) == ("209711", "14000", "147386")
+        assert (projection["total_deductions"], projection["net_pay"]) == ("957097", "866474")
+        await _ok(await client.post(f"/m/runs/{advance['id']}/approve"))
+
+        # The final run starts from what the accountant already typed.
+        final = await _ok(await client.post(f"/m/months/{month['id']}/runs", json={"run_type": "final", "pay_date": "2026-08-31"}), 201)
+        oyun = _row(await _ok(await client.get(f"/m/runs/{final['id']}")), ids["oyun"])
+        assert (oyun["inputs"]["leave_pay"], oyun["inputs"]["bonus"]) == ("100000", "50000")
+        assert oyun["inputs"]["overtime_hours"]["weekday"] == "4"
+        assert oyun["inputs"]["carried_from_advance_run"] == advance["id"]
+        assert oyun["result"]["overtime_pay"] == "53571" and oyun["result"]["advance"] == "600000"
