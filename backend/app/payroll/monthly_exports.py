@@ -12,6 +12,7 @@ import io
 from collections import OrderedDict
 from datetime import date
 from decimal import Decimal
+from itertools import groupby
 from typing import Any, Iterable, Mapping, Sequence
 
 from openpyxl import Workbook
@@ -176,18 +177,17 @@ def final_register_values(index: int, row: Mapping[str, Any]) -> list[Any]:
     ]
 
 
-def _final_register(workbook: Workbook, rows: Sequence[Mapping[str, Any]], company: str | None, year: int, month: int) -> None:
-    sheet = workbook.create_sheet("Цалингийн хүснэгт")
-    width = len(FINAL_COLUMNS)
-    header_row = _title(sheet, company_title(company, f"{year} оны {month:02d} сарын цалингийн хүснэгт"), width)
-    grouped = {column for span in FINAL_GROUPS for column in range(span[0], span[1] + 1)}
-    for column, label in enumerate(FINAL_COLUMNS, start=1):
+def _grouped_header(sheet: Worksheet, header_row: int, labels: Sequence[str], groups: Mapping[tuple[int, int], str]) -> None:
+    """Two header rows: grouped columns sit under their group label, the rest span both rows."""
+    width = len(labels)
+    grouped = {column for span in groups for column in range(span[0], span[1] + 1)}
+    for column, label in enumerate(labels, start=1):
         if column in grouped:
             sheet.cell(header_row + 1, column, label)
         else:
             sheet.cell(header_row, column, label)
             sheet.merge_cells(start_row=header_row, start_column=column, end_row=header_row + 1, end_column=column)
-    for (start, end), label in FINAL_GROUPS.items():
+    for (start, end), label in groups.items():
         sheet.cell(header_row, start, label)
         sheet.merge_cells(start_row=header_row, start_column=start, end_row=header_row, end_column=end)
     for row_index in (header_row, header_row + 1):
@@ -195,6 +195,13 @@ def _final_register(workbook: Workbook, rows: Sequence[Mapping[str, Any]], compa
         for column in range(1, width + 1):
             sheet.cell(row_index, column).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     sheet.row_dimensions[header_row + 1].height = 42
+
+
+def _final_register(workbook: Workbook, rows: Sequence[Mapping[str, Any]], company: str | None, year: int, month: int) -> None:
+    sheet = workbook.create_sheet("Цалингийн хүснэгт")
+    width = len(FINAL_COLUMNS)
+    header_row = _title(sheet, company_title(company, f"{year} оны {month:02d} сарын цалингийн хүснэгт"), width)
+    _grouped_header(sheet, header_row, FINAL_COLUMNS, FINAL_GROUPS)
     counter = 0
     groups: OrderedDict[str, list[list[Any]]] = OrderedDict()
     for department, department_rows in _by_department(rows).items():
@@ -210,34 +217,84 @@ def _final_register(workbook: Workbook, rows: Sequence[Mapping[str, Any]], compa
     _page_setup(sheet, f"D{header_row + 2}")
 
 
+ADVANCE_BASIS_GROUP = "Урьдчилгааны тооцоо"
+
+
+def advance_columns(with_cutoff_hours: bool) -> list[tuple[str, str | None]]:
+    """(label, group) in the system's advance table order; the cut-off column only when a row uses WORKED-TO-DATE."""
+    return [
+        ("№", None), ("Овог", None), ("Нэр", None), ("РД", None), ("Албан тушаал", None), ("Үндсэн цалин", None), ("Цалингийн төрөл", None),
+        ("Суурь", ADVANCE_BASIS_GROUP), ("Хувь / дүн", ADVANCE_BASIS_GROUP),
+        *([("Таслах өдөр хүртэл цаг", ADVANCE_BASIS_GROUP)] if with_cutoff_hours else []),
+        ("Өдөр", "Ажиллах"), ("Цаг", "Ажиллах"), ("Ажилласан цаг", None), ("Ажилласан өдөр", None), ("Тооцсон цалин", None),
+        ("Илүү цаг", None), ("Илүү цагийн хөлс", None), ("Ээлжийн амралтын мөнгө", None), ("Хоол унаа", None), ("Урамшуулал", None),
+        ("Олговол зохих цалин", None), ("НДШ", "Суутгалууд"), ("ХХОАТ ХӨН", "Суутгалууд"), ("ХХОАТ", "Суутгалууд"), ("Урьдчилгаа", "Суутгалууд"),
+        ("Суутгалын дүн", None), ("Сүүл цалин (тооцоолсон)", None), ("БНДШ", None), ("Төлбөрийн өдөр", None),
+    ]
+
+
+def _group_spans(columns: Sequence[tuple[str, str | None]]) -> dict[tuple[int, int], str]:
+    spans: dict[tuple[int, int], str] = {}
+    column = 1
+    for group, members in groupby(columns, key=lambda item: item[1]):
+        count = len(list(members))
+        if group:
+            spans[(column, column + count - 1)] = group
+        column += count
+    return spans
+
+
+def advance_register_values(index: int, row: Mapping[str, Any], pay_date: date, with_cutoff_hours: bool) -> list[Any]:
+    """One advance row; month cells come from the full-month projection, like the system table."""
+    identity, profile, inputs, result = row["identity"], row["profile"], row["inputs"], row["result"]
+    month = {**result, **(result.get("projection") or {})}
+    last, first = split_name(identity)
+    basis = result.get("advance_basis") or profile.get("advance_basis")
+    value = result.get("advance_value")
+    overtime_hours = sum((_d(hours) for hours in (inputs.get("overtime_hours") or {}).values()), Decimal("0"))
+    worked_days = inputs.get("worked_days") if inputs.get("worked_days") is not None else month.get("allowance_days")
+    return [
+        index, last, first, identity.get("rd") or "", identity.get("job_title") or "",
+        _num(profile.get("base_salary")), SALARY_TYPE_LABELS.get(profile.get("salary_type"), profile.get("salary_type") or ""),
+        BASIS_LABELS.get(basis, basis or ""), (f"{_num(value)}%" if basis == "PERCENT" else _num(value)) if value not in (None, "") else "",
+        *([_num(inputs.get("worked_to_date_hours")) if basis == "WORKED-TO-DATE" else ""] if with_cutoff_hours else []),
+        _num(result.get("planned_days")), _num(result.get("planned_hours")), _num(inputs.get("worked_normal_hours")), _num(worked_days),
+        _num(month.get("base_pay")), _num(overtime_hours), _num(month.get("overtime_pay")), _num(inputs.get("leave_pay")),
+        _num(month.get("meal_commute")), _num(inputs.get("bonus")), _num(month.get("gross")),
+        _num(month.get("employee_shi")), _num(month.get("relief")), _num(month.get("pit")), _num(result.get("advance")),
+        _num(month.get("total_deductions")), _num(month.get("net_pay")), _num(month.get("employer_shi")),
+        identity.get("pay_date") or pay_date.isoformat(),
+    ]
+
+
 def _advance_register(workbook: Workbook, rows: Sequence[Mapping[str, Any]], company: str | None, pay_date: date) -> None:
-    headers = ("№", "Овог", "Нэр", "РД", "Албан тушаал", "Үндсэн цалин", "Цалингийн төрөл", "Урьдчилгааны суурь", "Хувь / дүн", "Ажилласан цаг", "Урьдчилгаа", "Төлбөрийн өдөр")
+    with_cutoff_hours = any((row["result"].get("advance_basis") or row["profile"].get("advance_basis")) == "WORKED-TO-DATE" for row in rows)
+    columns = advance_columns(with_cutoff_hours)
+    labels = [label for label, _group in columns]
+    width = len(labels)
     sheet = workbook.create_sheet("Урьдчилгаа")
-    header_row = _title(sheet, company_title(company, f"{pay_date.month:02d} сарын урьдчилгаа цалин ({pay_date.day:02d} өдөр)"), len(headers))
-    for column, label in enumerate(headers, start=1):
-        cell = sheet.cell(header_row, column, label)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    _style_range(sheet, header_row, 1, len(headers), bold=True, fill=HEADER_FILL)
+    header_row = _title(
+        sheet, company_title(company, f"{pay_date.month:02d} сарын урьдчилгаа цалин ({pay_date.day:02d} өдөр)"), width,
+        "Ажилласан цагаас хойшх баганууд нь сарын урьдчилсан тооцоо; сүүл цалингийн бодолтоор өөрчлөгдөж болно.",
+    )
+    _grouped_header(sheet, header_row, labels, _group_spans(columns))
     counter = 0
     groups: OrderedDict[str, list[list[Any]]] = OrderedDict()
     for department, department_rows in _by_department(rows).items():
         groups[department] = []
         for row in department_rows:
             counter += 1
-            identity, profile, inputs, result = row["identity"], row["profile"], row["inputs"], row["result"]
-            last, first = split_name(identity)
-            basis = result.get("advance_basis") or profile.get("advance_basis")
-            value = result.get("advance_value")
-            groups[department].append([
-                counter, last, first, identity.get("rd") or "", identity.get("job_title") or "",
-                _num(profile.get("base_salary")), SALARY_TYPE_LABELS.get(profile.get("salary_type"), profile.get("salary_type") or ""),
-                BASIS_LABELS.get(basis, basis or ""), (f"{_num(value)}%" if basis == "PERCENT" else _num(value)) if value not in (None, "") else "",
-                _num(inputs.get("worked_to_date_hours")) if basis == "WORKED-TO-DATE" else "",
-                _num(result.get("advance")), identity.get("pay_date") or pay_date.isoformat(),
-            ])
-    _write_grouped_table(sheet, header_row + 1, headers, groups, sum_columns=(6, 11), formats={6: MONEY, 9: MONEY, 10: HOURS, 11: MONEY}, label_span=5)
-    _widths(sheet, {1: 5, 2: 14, 3: 14, 4: 12, 5: 18, 6: 14, 7: 12, 8: 18, 9: 11, 10: 12, 11: 14, 12: 13})
-    _page_setup(sheet, f"D{header_row + 1}")
+            groups[department].append(advance_register_values(counter, row, pay_date, with_cutoff_hours))
+    text_columns = {labels.index(label) + 1 for label in ("Цалингийн төрөл", "Суурь", "Хувь / дүн", "Төлбөрийн өдөр")}
+    formats = {column: MONEY for column in range(6, width + 1) if column not in text_columns}
+    formats.update({labels.index(label) + 1: HOURS for label in ("Цаг", "Ажилласан цаг", "Ажилласан өдөр", "Илүү цаг", *(("Таслах өдөр хүртэл цаг",) if with_cutoff_hours else ()))})
+    formats[labels.index("Өдөр") + 1] = "0"
+    formats[labels.index("Хувь / дүн") + 1] = MONEY
+    next_row = _write_grouped_table(sheet, header_row + 2, labels, groups, sum_columns=[column for column in range(6, width + 1) if column not in text_columns], formats=formats, label_span=5)
+    sheet.cell(next_row + 1, 1, "Суутгалын дүн = НДШ + ХХОАТ + сарын нийт урьдчилгаа + хоол унаа; Сүүл цалин (тооцоолсон) = Олговол зохих цалин − Суутгалын дүн.").font = Font(italic=True)
+    sheet.cell(next_row + 2, 1, "НДШ – ажилтны цалингаас суутгах шимтгэл; БНДШ – Байгууллагын төлөх нийгмийн даатгалын шимтгэл (цалингаас суутгахгүй).").font = Font(italic=True)
+    _widths(sheet, {1: 5, 2: 14, 3: 14, 4: 12, 5: 18, **{column: 13 for column in range(6, width + 1)}, labels.index("Өдөр") + 1: 7, labels.index("Цаг") + 1: 8})
+    _page_setup(sheet, f"D{header_row + 2}")
 
 
 def _payment_list(workbook: Workbook, rows: Sequence[Mapping[str, Any]], amount_key: str, title: str) -> None:

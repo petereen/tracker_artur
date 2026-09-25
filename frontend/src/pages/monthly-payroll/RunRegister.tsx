@@ -288,6 +288,7 @@ export function RunRegister({ runId }: { runId: number }) {
     ...monthColumns,
     { key: 'total_deductions', label: 'Суутгалын дүн', kind: 'money', short: true, value: (row) => monthFigures(row).total_deductions },
     { key: 'net_pay', label: 'Сүүл цалин (тооцоолсон)', kind: 'money', short: true, value: (row) => monthFigures(row).net_pay },
+    { key: 'employer_shi', label: 'БНДШ', kind: 'money', value: (row) => monthFigures(row).employer_shi },
     { key: 'pay_date', label: 'Төлбөрийн өдөр', kind: 'text', value: (row) => row.identity.pay_date || data?.pay_date },
   ]
   const columns = (isFinal ? finalColumns : advanceColumns).filter((column) => preset === 'full' || column.short)

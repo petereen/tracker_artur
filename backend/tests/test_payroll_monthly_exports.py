@@ -116,6 +116,32 @@ def test_advance_workbook_title_register_and_missing_bank_flag():
     assert "Банкны мэдээлэл дутуу" in payments
 
 
+def test_advance_register_shows_projected_month_breakdown_and_employer_shi():
+    projection = {
+        "base_pay": "3875455", "overtime_pay": "0", "meal_commute": "550000", "gross": "4425455", "employee_shi": "508927",
+        "relief": "0", "pit": "391653", "advance": "2000000", "total_deductions": "3450580", "net_pay": "974875", "employer_shi": "553182",
+    }
+    row = {
+        "identity": {"name": "Ochirbat Temuulen", "department": "Систем хөгжүүлэлт", "pay_date": "2026-09-05"},
+        "profile": {"base_salary": "4000000", "salary_type": "PRORATION", "advance_basis": "FIXED"},
+        "inputs": {"worked_normal_hours": "213.15", "worked_days": 22, "overtime_hours": {}, "leave_pay": "0", "bonus": "0"},
+        "result": {"advance": "2000000", "advance_basis": "FIXED", "advance_value": "2000000", "planned_days": 22, "planned_hours": "220", "projection": projection},
+        "payout": None,
+    }
+    workbook = load_workbook(BytesIO(build_run_workbook(run_type="advance", pay_date=date(2026, 9, 5), year=2026, month=9, rows=[row], company="OYUNS", rule_snapshot={})))
+    sheet = workbook["Урьдчилгаа"]
+    header = {sheet.cell(4, column).value or sheet.cell(3, column).value: column for column in range(1, sheet.max_column + 1)}
+    assert "Таслах өдөр хүртэл цаг" not in header
+    assert [sheet.cell(3, header[label]).value for label in ("Суурь", "Өдөр", "НДШ")] == ["Урьдчилгааны тооцоо", "Ажиллах", "Суутгалууд"]
+    data_row = next(row_cells for row_cells in sheet.iter_rows(min_row=5) if row_cells[2].value == "Temuulen")
+    cell = {label: data_row[column - 1].value for label, column in header.items()}
+    assert cell["Олговол зохих цалин"] == 4425455 and cell["НДШ"] == 508927 and cell["ХХОАТ"] == 391653 and cell["Урьдчилгаа"] == 2000000
+    assert cell["Суутгалын дүн"] == 3450580 and cell["Сүүл цалин (тооцоолсон)"] == 974875 and cell["БНДШ"] == 553182
+    assert cell["Ажилласан цаг"] == 213.15 and cell["Хоол унаа"] == 550000 and cell["Төлбөрийн өдөр"] == "2026-09-05"
+    values = [cell.value for row_cells in sheet.iter_rows() for cell in row_cells]
+    assert any(isinstance(value, str) and "БНДШ – Байгууллагын" in value for value in values)
+
+
 def test_name_split_and_company_title_helpers():
     assert split_name({"name": "Бат Оюун-Эрдэнэ"}) == ("Бат", "Оюун-Эрдэнэ")
     assert split_name({"name": "Сараа", "last_name": "Дорж", "first_name": "Сараа"}) == ("Дорж", "Сараа")
