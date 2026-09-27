@@ -1,6 +1,11 @@
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
 
-@tailwind base;
+/* Preflight lives in Astryx's `reset` layer (declared first by
+   @astryxdesign/core/reset.css). Unlayered, its `* { border-width: 0 }` and
+   button/heading resets beat every Astryx component style in `astryx-base`. */
+@layer reset {
+  @tailwind base;
+}
 @tailwind components;
 @tailwind utilities;
 
@@ -846,10 +851,26 @@
   }
 }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    color: inherit;
+    font: inherit;
+  }
+  button {
+    cursor: pointer;
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
 }
 html,
 body,
@@ -868,20 +889,6 @@ body {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
-button,
-input,
-select,
-textarea {
-  color: inherit;
-  font: inherit;
-}
-button {
-  cursor: pointer;
-}
-a {
-  color: inherit;
-  text-decoration: none;
-}
 ::selection {
   background: var(--color-accent-soft);
   color: var(--color-accent);
@@ -899,9 +906,11 @@ a {
   background-clip: padding-box;
   border-radius: 999px;
 }
-:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--color-accent) 48%, transparent);
-  outline-offset: 2px;
+@layer reset {
+  :focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-accent) 48%, transparent);
+    outline-offset: 2px;
+  }
 }
 
 .eyebrow {

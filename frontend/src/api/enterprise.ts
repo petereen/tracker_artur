@@ -1782,6 +1782,14 @@ export interface UserProfile {
   birthday: string | null
   work_direction: string | null
   work_branch: string | null
+  department_id: number | null
+  department_name: string | null
+  department_locked: boolean
+  job_title: string | null
+  manager_name: string | null
+  manager_avatar_url: string | null
+  start_date: string | null
+  employment_type: string | null
   telegram_connected: boolean
   requires_password_setup: boolean
 }
@@ -1845,7 +1853,7 @@ export function useUpdateChatNotificationPreferences() { const qc = useQueryClie
 export function useUpdateProfile() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { username?: string; avatar_url?: string | null; locale?: string; phone_number?: string | null; birthday?: string | null; work_direction?: string | null; work_branch?: string | null; current_password?: string }) => api.patch('/v1/auth/profile', input).then((response) => response.data),
+    mutationFn: (input: { username?: string; avatar_url?: string | null; locale?: string; phone_number?: string | null; birthday?: string | null; work_direction?: string | null; work_branch?: string | null; department_id?: number | null; current_password?: string }) => api.patch('/v1/auth/profile', input).then((response) => response.data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success('Профайл хадгалагдлаа') },
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Профайл хадгалагдсангүй'),
   })

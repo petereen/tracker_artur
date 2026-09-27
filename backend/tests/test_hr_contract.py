@@ -104,3 +104,17 @@ def test_monthly_payroll_profile_schedule_validation_and_shared_preview_contract
     assert "calculate_monthly_run(PayrollRunType.ADVANCE" in router
     assert "useMonthlyPayrollPreview" in frontend
     assert "Цалингийн тохиргоо" in frontend
+
+
+def test_profile_department_comes_from_hr_departments_and_locks_after_assignment():
+    auth = (ROOT / "app/routers/enterprise_auth.py").read_text()
+    assert "department_id: int | None = None" in auth
+    assert '"department_locked": bool(department) and not can_manage_hr(actor)' in auth
+    # Only an active department of the actor's organisation may be picked.
+    assert "Department.id == data.department_id, Department.organization_id == actor.organization_id" in auth
+    assert "if not department or not department.is_active:" in auth
+    # Once HR (or the worker) set it, only HR may change or clear it.
+    assert "if details.department_id and not can_manage_hr(actor):" in auth
+    assert "employee.work_branch = department.name" in auth
+    # PATCH and GET share one serializer so the page never loses HR fields after saving.
+    assert auth.count("return await _profile_out(") == 2

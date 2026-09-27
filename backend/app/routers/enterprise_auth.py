@@ -24,13 +24,15 @@ from app.core.security import (
     verify_account_password,
 )
 from app.core.telegram_auth import verify_init_data
-from app.models.models import Employee, JobQueue, Organization, PasswordResetToken, RefreshSession, RoleAssignment, TelegramOAuthState, UserAccount
+from app.models.models import Department, Employee, EmployeeDetails, JobQueue, Organization, PasswordResetToken, RefreshSession, RoleAssignment, TelegramOAuthState, UserAccount
 from app.core.roles import SYSTEM_ROLES
 from app.services.email_service import email_is_configured
 from app.services.secret_box import encrypt_secret
 from app.services.avatar_storage import InvalidAvatar, read_avatar, save_avatar
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable
 from app.services import telegram_oidc
+from app.services.enterprise_events import record_change
+from app.hr.service import can_manage_hr, ensure_details
 
 
 router = APIRouter()
@@ -142,6 +144,8 @@ class ProfilePatch(BaseModel):
     birthday: date | None = None
     work_direction: str | None = Field(default=None, max_length=240)
     work_branch: str | None = Field(default=None, max_length=240)
+    # HR department; a worker may pick it once, after that only HR changes it.
+    department_id: int | None = None
     current_password: str | None = None
 
     @field_validator("username")
@@ -762,26 +766,42 @@ async def me(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(g
     return AccountOut(id=actor.account_id, email=actor.email, employee_id=actor.employee_id, locale=actor.locale, roles=sorted(actor.roles), status="active", name=employee.name if employee else actor.email, avatar_url=(employee.metadata_json or {}).get("avatar_url") if employee else None)
 
 
-@router.get("/profile")
-async def profile(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    account = await db.get(UserAccount, actor.account_id)
-    employee = await db.get(Employee, actor.employee_id) if actor.employee_id else None
-    password_setup_required = bool(account and account.must_change_password) or bool(await db.scalar(select(RefreshSession.id).where(RefreshSession.account_id == actor.account_id, RefreshSession.auth_method == "telegram", RefreshSession.revoked_at.is_(None)).limit(1)))
+async def _profile_out(db: AsyncSession, actor: ActorContext, account: UserAccount, employee: Employee | None, password_setup_required: bool) -> dict:
+    details = await db.scalar(select(EmployeeDetails).where(EmployeeDetails.employee_id == employee.id)) if employee else None
+    department = await db.scalar(select(Department).where(Department.id == details.department_id, Department.organization_id == actor.organization_id)) if details and details.department_id else None
+    manager_id = (details.manager_id if details else None) or (employee.manager_id if employee else None)
+    manager = await db.get(Employee, manager_id) if manager_id else None
     return {
-        "username": actor.email,
-        "locale": actor.locale,
+        "username": account.email,
+        "locale": account.locale,
         "employee_id": actor.employee_id,
-        "name": employee.name if employee else actor.email,
+        "name": employee.name if employee else account.email,
         "telegram_username": employee.telegram_username if employee else None,
         "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None,
         "phone_number": employee.phone_number if employee else None,
         "birthday": employee.birthday if employee else None,
         "work_direction": employee.work_direction if employee else None,
         "work_branch": employee.work_branch if employee else None,
+        "department_id": department.id if department else None,
+        "department_name": department.name if department else None,
+        "department_locked": bool(department) and not can_manage_hr(actor),
+        "job_title": (details.job_title if details and details.job_title else None) or (employee.job_title if employee else None),
+        "manager_name": manager.name if manager else None,
+        "manager_avatar_url": (manager.metadata_json or {}).get("avatar_url") if manager else None,
+        "start_date": details.start_date if details else None,
+        "employment_type": details.employment_type if details else None,
         "telegram_connected": bool(employee and employee.telegram_id),
         "requires_password_setup": password_setup_required,
         "roles": sorted(actor.roles),
     }
+
+
+@router.get("/profile")
+async def profile(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    account = await db.get(UserAccount, actor.account_id)
+    employee = await db.get(Employee, actor.employee_id) if actor.employee_id else None
+    password_setup_required = bool(account and account.must_change_password) or bool(await db.scalar(select(RefreshSession.id).where(RefreshSession.account_id == actor.account_id, RefreshSession.auth_method == "telegram", RefreshSession.revoked_at.is_(None)).limit(1)))
+    return await _profile_out(db, actor, account, employee, password_setup_required)
 
 
 @router.get("/preferences/world-clock", response_model=WorldClockPreferences)
@@ -920,8 +940,25 @@ async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db),
         for field in ("phone_number", "birthday", "work_direction", "work_branch"):
             if field in data.model_fields_set:
                 setattr(employee, field, getattr(data, field))
+    if employee and "department_id" in data.model_fields_set:
+        details = await ensure_details(db, employee)
+        if data.department_id != details.department_id:
+            if details.department_id and not can_manage_hr(actor):
+                raise HTTPException(status_code=403, detail="Алба HR-аас оноогдсон тул зөвхөн HR өөрчилнө")
+            if data.department_id is None:
+                if not can_manage_hr(actor):
+                    raise HTTPException(status_code=403, detail="Алба сонгох шаардлагатай")
+                details.department_id = None
+            else:
+                department = await db.scalar(select(Department).where(Department.id == data.department_id, Department.organization_id == actor.organization_id))
+                if not department or not department.is_active:
+                    raise HTTPException(status_code=422, detail="Идэвхтэй алба сонгоно уу")
+                details.department_id = department.id
+                # Legacy consumers (worker cards, payroll filters) still read the free-text branch.
+                employee.work_branch = department.name
+            await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="updated", after={"employee_id": employee.id, "department_id": details.department_id, "changed_fields": ["department_id"]})
     await db.commit()
-    return {"username": account.email, "locale": account.locale, "employee_id": actor.employee_id, "name": employee.name if employee else account.email, "telegram_username": employee.telegram_username if employee else None, "avatar_url": (employee.metadata_json or {}).get("avatar_url") if employee else None, "phone_number": employee.phone_number if employee else None, "birthday": employee.birthday if employee else None, "work_direction": employee.work_direction if employee else None, "work_branch": employee.work_branch if employee else None, "telegram_connected": bool(employee and employee.telegram_id), "requires_password_setup": account.must_change_password, "roles": sorted(actor.roles)}
+    return await _profile_out(db, actor, account, employee, account.must_change_password)
 
 
 class ProfilePasswordChange(BaseModel):
