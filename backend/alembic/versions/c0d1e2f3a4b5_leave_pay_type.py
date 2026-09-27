@@ -17,8 +17,15 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("leave_requests", sa.Column("requested_pay_type", sa.Text(), nullable=False, server_default="paid"))
-    op.add_column("leave_requests", sa.Column("approved_pay_type", sa.Text(), nullable=True))
+    # The enterprise foundation migration builds leave_requests from the
+    # current model metadata, which already includes these columns on fresh
+    # databases. Keep this revision safe for both schema histories.
+    inspector = sa.inspect(op.get_bind())
+    columns = {column["name"] for column in inspector.get_columns("leave_requests")}
+    if "requested_pay_type" not in columns:
+        op.add_column("leave_requests", sa.Column("requested_pay_type", sa.Text(), nullable=False, server_default="paid"))
+    if "approved_pay_type" not in columns:
+        op.add_column("leave_requests", sa.Column("approved_pay_type", sa.Text(), nullable=True))
     # Existing approved requests keep their meaning: unpaid leave type stays unpaid, everything else paid.
     op.execute("UPDATE leave_requests SET requested_pay_type = 'unpaid' WHERE time_off_type = 'unpaid'")
     op.execute("UPDATE leave_requests SET approved_pay_type = requested_pay_type WHERE status = 'approved'")

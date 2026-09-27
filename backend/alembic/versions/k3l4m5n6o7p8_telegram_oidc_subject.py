@@ -17,8 +17,15 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("user_accounts", sa.Column("telegram_oidc_subject", sa.Text(), nullable=True))
-    op.create_unique_constraint("uq_user_accounts_telegram_oidc_subject", "user_accounts", ["telegram_oidc_subject"])
+    # The enterprise foundation migration builds user_accounts from the
+    # current model metadata, which already includes this column (and its
+    # unique constraint) on fresh databases. Keep this revision safe for
+    # both schema histories.
+    inspector = sa.inspect(op.get_bind())
+    columns = {column["name"] for column in inspector.get_columns("user_accounts")}
+    if "telegram_oidc_subject" not in columns:
+        op.add_column("user_accounts", sa.Column("telegram_oidc_subject", sa.Text(), nullable=True))
+        op.create_unique_constraint("uq_user_accounts_telegram_oidc_subject", "user_accounts", ["telegram_oidc_subject"])
 
 
 def downgrade() -> None:
