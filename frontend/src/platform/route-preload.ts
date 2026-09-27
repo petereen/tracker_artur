@@ -10,6 +10,7 @@ const routeLoaders: Record<string, () => Promise<unknown>> = {
   '/analytics': () => import('../pages/StatsWorkspacePage'),
   '/contracts': () => import('../pages/ContractsWorkspacePage'),
   '/erp/payroll': () => import('../pages/PayrollWorkspacePage'),
+  '/erp/crm': () => import('../pages/CRMWorkspacePage'),
 }
 
 const warmed = new Set<string>()

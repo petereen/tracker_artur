@@ -111,7 +111,8 @@ def build_employee_morning(emp_id: int, tz: str | None) -> str | None:
     tasks = task_service.list_assigned_to(emp_id, only_active=True)
     overdue = [t for t in tasks if _is_overdue(t, now)]
     today = [t for t in tasks if _is_due_today(t, tz, now)]
-    if not overdue and not today:
+    crm_lines = _crm_morning_lines(emp_id, tz, now)
+    if not overdue and not today and not crm_lines:
         return None
     lines = ["🌅 <b>Өглөөний мэнд! Өнөөдрийн даалгавар</b>"]
     if overdue:
@@ -120,7 +121,23 @@ def build_employee_morning(emp_id: int, tz: str | None) -> str | None:
     if today:
         lines.append(f"\n📌 Өнөөдөр дуусах хугацаатай ({len(today)}):")
         lines += [f"  {_line(t)}" for t in today]
+    lines += crm_lines
     return "\n".join(lines)
+
+
+def _crm_morning_lines(emp_id: int, tz: str | None, now: datetime) -> list[str]:
+    """CRM follow-ups are optional; a CRM failure must never block the task digest."""
+    from datetime import timedelta
+
+    from app.services.crm_reminders import crm_digest_lines
+
+    zone = pytz.timezone(tz or "Asia/Ulaanbaatar")
+    day_end = zone.localize(datetime.combine(_local_today(tz) + timedelta(days=1), datetime.min.time()))
+    try:
+        return crm_digest_lines(emp_id, now, day_end.astimezone(timezone.utc))
+    except Exception:
+        log.warning("digest.crm_section_failed", exc_info=True)
+        return []
 
 
 # ─── Сотрудник: вечер ─────────────────────────────────────────────────────────

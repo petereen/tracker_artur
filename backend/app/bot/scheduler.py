@@ -205,6 +205,10 @@ def _rebuild_jobs_unlocked():
     scheduler.add_job(reconcile_contract_expiry_reminders, "interval", minutes=30,
         id="contract_expiry_reminders", replace_existing=True)
 
+    from app.services.crm_reminders import reconcile_crm_activity_reminders
+    scheduler.add_job(reconcile_crm_activity_reminders, "interval", minutes=15,
+        id="crm_activity_reminders", replace_existing=True)
+
     _last_schedule_fingerprint = _schedule_fingerprint()
     scheduler.add_job(reconcile_schedule_jobs, "interval", minutes=1,
         id="reconcile_schedules", replace_existing=True)

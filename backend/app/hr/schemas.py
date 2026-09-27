@@ -9,6 +9,7 @@ from .identity import normalize_registration_number, parse_registration_number
 
 
 LeaveType = Literal["annual", "sick", "unpaid"]
+LeavePayType = Literal["paid", "unpaid"]
 AttendanceStatus = Literal["present", "remote", "absent", "late"]
 
 
@@ -196,6 +197,7 @@ class MonthlyPayrollProfileInput(BaseModel):
 class LeaveRequestInput(BaseModel):
     employee_id: int | None = None
     leave_type: LeaveType = "annual"
+    pay_type: LeavePayType = "paid"
     starts_on: date
     ends_on: date
     reason: str = Field(min_length=1, max_length=2000)
@@ -209,6 +211,7 @@ class LeaveRequestInput(BaseModel):
 
 class LeaveRequestPatch(BaseModel):
     leave_type: LeaveType | None = None
+    pay_type: LeavePayType | None = None
     starts_on: date | None = None
     ends_on: date | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=2000)
@@ -224,6 +227,7 @@ class LeaveRequestPatch(BaseModel):
 
 class LeaveDecisionInput(BaseModel):
     approve: bool
+    pay_type: LeavePayType | None = None
     feedback: str | None = Field(default=None, max_length=2000)
     version: int | None = Field(default=None, ge=1)
 
@@ -284,3 +288,7 @@ class PayrollGenerateInput(BaseModel):
 class InviteBindInput(BaseModel):
     token: str = Field(min_length=20, max_length=512)
     init_data: str = Field(min_length=1, max_length=4096)
+
+
+class EmployeeRolesInput(BaseModel):
+    roles: list[str] = Field(min_length=1, max_length=8)

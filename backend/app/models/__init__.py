@@ -92,3 +92,12 @@ from app.models.contracts import (  # noqa: F401
     ContractArchiveEntry,
     ContractArchiveAccess,
 )
+from app.models.crm import (  # noqa: F401
+    CRMActivity,
+    CRMActivityType,
+    ERPPartyBankAccount,
+    ERPPartyContact,
+    ERPPartyGroup,
+    ERPPaymentTerm,
+    ERPStatus,
+)

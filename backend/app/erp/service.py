@@ -109,7 +109,7 @@ ACCOUNT_METADATA = {
 ROLE_TEMPLATES = {
     "erp_administrator": ("ERP administrator", [("*", "*")]),
     "erp_accountant": ("Accountant", [("accounts", "*"), ("chart_account", "*"), ("cost_center", "*"), ("tax_template", "*"), ("journal_entry", "*"), ("payment_entry", "*"), ("budget", "*"), ("sales_invoice", "view"), ("purchase_invoice", "view")]),
-    "erp_sales": ("Sales", [("parties", "*"), ("customer", "*"), ("customer_discount_tier", "*"), ("items", "view"), ("sales_catalog_item", "*"), ("quotation", "*"), ("sales_order", "*"), ("delivery", "*"), ("sales_invoice", "create"), ("sales_invoice", "view"), ("lead", "*"), ("opportunity", "*")]),
+    "erp_sales": ("Sales", [("parties", "*"), ("customer", "*"), ("customer_discount_tier", "*"), ("items", "view"), ("sales_catalog_item", "*"), ("quotation", "*"), ("sales_order", "*"), ("delivery", "*"), ("sales_invoice", "create"), ("sales_invoice", "view"), ("lead", "*"), ("opportunity", "*"), ("crm_activity", "*"), ("crm_settings", "view")]),
     "erp_purchasing": ("Purchasing", [("parties", "*"), ("supplier", "*"), ("supplier_price_list", "*"), ("purchase_item", "*"), ("items", "view"), ("supplier_quotation", "*"), ("purchase_order", "*"), ("purchase_receipt", "*"), ("purchase_invoice", "create"), ("purchase_invoice", "view")]),
     "erp_stock": ("Stock controller", [("items", "*"), ("item_sku", "*"), ("warehouses", "*"), ("warehouse", "*"), ("uom", "*"), ("reorder_rule", "*"), ("stock", "view"), ("stock_entry", "*"), ("stock_reconciliation", "*")]),
     "erp_hr_payroll": ("Payroll administrator", [("salary_structure", "*"), ("payroll_run", "*"), ("salary_slip", "*"), ("payroll", "*")]),

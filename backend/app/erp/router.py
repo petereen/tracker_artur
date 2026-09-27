@@ -26,6 +26,8 @@ from app.erp.service import (
     approval_required, bootstrap_organization, cancel_document, capability_scopes, default_workflow, document_out, ensure_definition, module_settings, next_number, operation_catalog, post_document, published_definition, record_workflow_transition, require_capability, require_phase5_gate, phase5_gate_status, scope_allows, validate_custom_fields, validate_definition_fields, validate_form_values, validate_workflow,
 )
 from app.payroll.router import router as payroll_router
+from app.crm.router import router as crm_router
+from app.crm.service import ensure_crm_defaults, party_flags_for_type
 
 
 router = APIRouter()
@@ -760,6 +762,8 @@ async def update_modules(data: ModulesInput, db: AsyncSession = Depends(get_db),
     settings = {**(organization.settings or {}), MODULE_SETTINGS_KEY: {name: bool(data.modules.get(name, False)) for name in ERP_MODULES}}
     organization.settings = settings
     await bootstrap_organization(db, organization.id)
+    if data.modules.get("crm"):
+        await ensure_crm_defaults(db, organization.id)
     await record_change(db, actor=actor, topic="erp", aggregate_type="erp_module_settings", aggregate_id=organization.id, operation="updated", after={MODULE_SETTINGS_KEY: settings[MODULE_SETTINGS_KEY]})
     await db.commit()
     return {"modules": module_settings(settings), "notice": "Visibility changes do not disable APIs, integrations, or existing automations."}
@@ -1015,7 +1019,7 @@ async def commit_import_batch(batch_id: int, db: AsyncSession = Depends(get_db),
                 raise HTTPException(status_code=409, detail={"code": "erp_import_duplicate_party", "code": row["code"]})
             kind = str(row.get("party_type") or "customer").casefold()
             if kind not in {"customer", "supplier", "prospect", "contact"}: kind = "customer"
-            db.add(ERPParty(organization_id=actor.organization_id, party_type=kind, code=str(row["code"]), name=str(row["name"]), email=row.get("email"), phone=row.get("phone")))
+            db.add(ERPParty(organization_id=actor.organization_id, party_type=kind, code=str(row["code"]), name=str(row["name"]), email=row.get("email"), phone=row.get("phone"), **party_flags_for_type(kind)))
         elif batch.entity == "items":
             if await db.scalar(select(ERPItem.id).where(ERPItem.organization_id == actor.organization_id, ERPItem.code == str(row["code"]))):
                 raise HTTPException(status_code=409, detail={"code": "erp_import_duplicate_item", "code": row["code"]})
@@ -1067,7 +1071,7 @@ async def create_party(data: PartyInput, db: AsyncSession = Depends(get_db), act
     await require_capability(db, actor, "parties", "create")
     payload = data.model_dump()
     payload["custom"] = await validate_custom_fields(db, actor.organization_id, "party", data.custom)
-    party = ERPParty(organization_id=actor.organization_id, **payload)
+    party = ERPParty(organization_id=actor.organization_id, **payload, **party_flags_for_type(data.party_type))
     db.add(party)
     await record_change(db, actor=actor, topic="erp", aggregate_type="erp_party", aggregate_id=0, operation="created", after={"code": data.code, "party_type": data.party_type})
     await db.commit()
@@ -1895,3 +1899,4 @@ async def outstanding_invoices(kind: Literal["receivable", "payable"], db: Async
 # The generic document workbench remains available for legacy payroll rows but
 # cannot create new payroll documents.
 router.include_router(payroll_router, prefix="/payroll")
+router.include_router(crm_router, prefix="/crm")

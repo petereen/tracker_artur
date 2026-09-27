@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
+from app.core.roles import SYSTEM_ROLES
 from app.models.models import (
     AttendanceLog,
     Department,
@@ -48,6 +49,7 @@ from .schemas import (
     InviteBindInput,
     LeaveBalancePatch,
     LeaveDecisionInput,
+    EmployeeRolesInput,
     LeaveRequestInput,
     LeaveRequestPatch,
     MonthlyPayrollProfileInput,
@@ -388,6 +390,45 @@ async def update_hr_employee(employee_id: int, data: EmployeePatch, db: AsyncSes
     return await _employee_out(db, actor, employee, details)
 
 
+# HR may grant every platform role except "admin"; admin rights stay in Administration settings.
+HR_ASSIGNABLE_ROLES = sorted(SYSTEM_ROLES - {"admin"})
+
+
+async def _employee_account(db: AsyncSession, actor: ActorContext, employee_id: int) -> UserAccount:
+    await employee_in_scope(db, actor, employee_id)
+    account = await db.scalar(select(UserAccount).where(UserAccount.organization_id == actor.organization_id, UserAccount.employee_id == employee_id).with_for_update())
+    if not account:
+        raise HTTPException(status_code=409, detail={"code": "worker_has_no_account"})
+    return account
+
+
+@router.get("/employees/{employee_id}/roles")
+async def get_employee_roles(employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
+    await employee_in_scope(db, actor, employee_id)
+    account = await db.scalar(select(UserAccount).where(UserAccount.organization_id == actor.organization_id, UserAccount.employee_id == employee_id))
+    roles = sorted(set((await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all())) if account else []
+    return {"account_id": account.id if account else None, "roles": roles, "assignable_roles": HR_ASSIGNABLE_ROLES, "locked": "admin" in roles}
+
+
+@router.put("/employees/{employee_id}/roles")
+async def set_employee_roles(employee_id: int, data: EmployeeRolesInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
+    account = await _employee_account(db, actor, employee_id)
+    if account.id == actor.account_id:
+        raise HTTPException(status_code=403, detail="You cannot change your own roles")
+    roles = sorted(set(data.roles))
+    if not roles or not set(roles).issubset(HR_ASSIGNABLE_ROLES):
+        raise HTTPException(status_code=400, detail="Invalid roles")
+    before = sorted(set((await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all()))
+    if "admin" in before:
+        raise HTTPException(status_code=403, detail="Only an administrator can change roles of an administrator")
+    await db.execute(sa_delete(RoleAssignment).where(RoleAssignment.account_id == account.id))
+    for role in roles:
+        db.add(RoleAssignment(account_id=account.id, role=role))
+    await record_change(db, actor=actor, topic="hr", aggregate_type="employee_roles", aggregate_id=employee_id, operation="updated", before={"roles": before}, after={"roles": roles})
+    await db.commit()
+    return {"account_id": account.id, "roles": roles, "assignable_roles": HR_ASSIGNABLE_ROLES, "locked": False}
+
+
 @router.delete("/employees/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_hr_employee(employee_id: int, permanent: bool = False, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
     """Archive a worker; with ``permanent=true`` hard-delete an archived worker created by mistake."""
@@ -455,7 +496,7 @@ async def list_leave_requests(year: int | None = None, status_filter: str | None
     if year: query = query.where(TimeOff.starts_on <= date(year, 12, 31), TimeOff.ends_on >= date(year, 1, 1))
     if status_filter: query = query.where(TimeOff.status == status_filter)
     rows = (await db.execute(query.order_by(TimeOff.starts_on.desc(), TimeOff.id.desc()))).all()
-    return [{"id": row.id, "employee_id": row.employee_id, "employee_name": employee.name, "leave_type": row.time_off_type, "starts_on": row.starts_on.isoformat(), "ends_on": row.ends_on.isoformat(), "working_days": str(row.working_days or 0), "reason": row.reason, "status": row.status, "reviewer_feedback": row.reviewer_feedback, "version": row.version} for row, employee in rows]
+    return [{"id": row.id, "employee_id": row.employee_id, "employee_name": employee.name, "leave_type": row.time_off_type, "requested_pay_type": row.requested_pay_type, "approved_pay_type": row.approved_pay_type, "starts_on": row.starts_on.isoformat(), "ends_on": row.ends_on.isoformat(), "working_days": str(row.working_days or 0), "reason": row.reason, "status": row.status, "reviewer_feedback": row.reviewer_feedback, "version": row.version} for row, employee in rows]
 
 
 @router.post("/leave-requests", status_code=status.HTTP_201_CREATED)
@@ -470,9 +511,9 @@ async def submit_leave_request(data: LeaveRequestInput, db: AsyncSession = Depen
         balance = await leave_balance(db, actor.organization_id, employee.id, data.starts_on.year, "annual")
         if Decimal(balance["available_days"]) < Decimal(days): raise HTTPException(status_code=409, detail={"code": "leave_balance_insufficient", "available_days": balance["available_days"]})
     approved = can_manage_hr(actor)
-    row = TimeOff(organization_id=actor.organization_id, employee_id=employee.id, time_off_type=data.leave_type, starts_on=data.starts_on, ends_on=data.ends_on, working_days=days, reason=data.reason, status="approved" if approved else "pending", approved_by_account_id=actor.account_id if approved else None, reviewed_by_account_id=actor.account_id if approved else None, reviewed_at=datetime.now(timezone.utc) if approved else None)
+    row = TimeOff(organization_id=actor.organization_id, employee_id=employee.id, time_off_type=data.leave_type, requested_pay_type=data.pay_type, approved_pay_type=data.pay_type if approved else None, starts_on=data.starts_on, ends_on=data.ends_on, working_days=days, reason=data.reason, status="approved" if approved else "pending", approved_by_account_id=actor.account_id if approved else None, reviewed_by_account_id=actor.account_id if approved else None, reviewed_at=datetime.now(timezone.utc) if approved else None)
     db.add(row); await db.flush()
-    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=row.status, after={"employee_id": employee.id, "leave_type": row.time_off_type, "working_days": days, "status": row.status})
+    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=row.status, after={"employee_id": employee.id, "leave_type": row.time_off_type, "pay_type": row.requested_pay_type, "working_days": days, "status": row.status})
     await create_notifications(
         db,
         organization_id=actor.organization_id,
@@ -541,12 +582,17 @@ async def update_leave_request(request_id: int, data: LeaveRequestPatch, db: Asy
 
     before = {"leave_type": row.time_off_type, "starts_on": row.starts_on.isoformat(), "ends_on": row.ends_on.isoformat(), "working_days": str(row.working_days or 0), "reason": row.reason, "status": row.status}
     row.time_off_type = leave_type
+    if data.pay_type is not None:
+        row.requested_pay_type = data.pay_type
+        if row.status == "approved" and new_status == "approved":
+            row.approved_pay_type = data.pay_type
     row.starts_on = starts_on
     row.ends_on = ends_on
     row.working_days = days
     row.reason = reason
     row.status = new_status
     if new_status == "rejected":
+        row.approved_pay_type = None
         row.approved_by_account_id = None
         row.reviewed_by_account_id = actor.account_id
         row.reviewed_at = datetime.now(timezone.utc)
@@ -569,7 +615,7 @@ async def update_leave_request(request_id: int, data: LeaveRequestPatch, db: Asy
         immediate=True,
     )
     await db.commit()
-    return {"id": row.id, "status": row.status, "leave_type": row.time_off_type, "starts_on": starts_on.isoformat(), "ends_on": ends_on.isoformat(), "working_days": str(days), "reason": row.reason, "version": row.version}
+    return {"id": row.id, "status": row.status, "leave_type": row.time_off_type, "requested_pay_type": row.requested_pay_type, "approved_pay_type": row.approved_pay_type, "starts_on": starts_on.isoformat(), "ends_on": ends_on.isoformat(), "working_days": str(days), "reason": row.reason, "version": row.version}
 
 
 @router.post("/leave-requests/{request_id}/decision")
@@ -581,10 +627,15 @@ async def decide_leave_request(request_id: int, data: LeaveDecisionInput, db: As
         await employee_in_scope(db, actor, row.employee_id)
         if row.employee_id == actor.employee_id: raise HTTPException(status_code=403, detail="Managers cannot approve their own leave")
     if data.version is not None and row.version != data.version: raise HTTPException(status_code=409, detail="Leave request changed")
+    if data.pay_type is not None and data.pay_type != row.requested_pay_type and not can_manage_hr(actor):
+        raise HTTPException(status_code=403, detail="Only HR can change salary type of a leave request")
+    row.approved_pay_type = (data.pay_type or row.requested_pay_type) if data.approve else None
     row.status = "approved" if data.approve else "rejected"; row.reviewer_feedback = data.feedback; row.reviewed_by_account_id = actor.account_id; row.reviewed_at = datetime.now(timezone.utc); row.approved_by_account_id = actor.account_id if data.approve else None; row.version += 1
-    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=row.status, version=row.version, after={"status": row.status, "feedback": data.feedback})
+    source_event = await record_change(db, actor=actor, topic="hr", aggregate_type="leave_request", aggregate_id=row.id, operation=row.status, version=row.version, after={"status": row.status, "pay_type": row.approved_pay_type, "feedback": data.feedback})
     employee = await db.get(Employee, row.employee_id)
-    status_label = "батлагдлаа" if row.status == "approved" else "татгалзлаа"
+    status_label = "татгалзлаа"
+    if row.status == "approved":
+        status_label = "цалинтай чөлөөгөөр батлагдлаа" if row.approved_pay_type == "paid" else "цалингүй чөлөөгөөр батлагдлаа"
     feedback = f" Шалтгаан: {data.feedback}" if data.feedback else ""
     await create_notifications(
         db,
@@ -601,7 +652,7 @@ async def decide_leave_request(request_id: int, data: LeaveDecisionInput, db: As
         immediate=True,
     )
     await db.commit()
-    return {"id": row.id, "status": row.status, "version": row.version, "reviewer_feedback": row.reviewer_feedback}
+    return {"id": row.id, "status": row.status, "approved_pay_type": row.approved_pay_type, "version": row.version, "reviewer_feedback": row.reviewer_feedback}
 
 
 @router.post("/leave-requests/{request_id}/cancel")

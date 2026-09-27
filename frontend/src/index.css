@@ -8313,7 +8313,7 @@ html.capacitor-native .native-boot-error {
   box-shadow: var(--shadow-lg);
   display: grid;
   gap: 2px;
-  min-width: 150px;
+  min-width: 160px;
   padding: 5px;
   position: absolute;
   right: 0;
@@ -8322,11 +8322,36 @@ html.capacitor-native .native-boot-error {
 }
 .company-file-action-menu button {
   align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--color-text);
+  cursor: pointer;
   display: flex;
-  gap: 7px;
+  gap: 10px;
   justify-content: flex-start;
-  padding: 0 8px;
+  padding: 8px 10px;
   width: 100%;
+  font-size: 0.875rem;
+  transition: background-color 0.15s ease;
+}
+.company-file-action-menu button:hover {
+  background: var(--color-surface-2);
+}
+.company-file-action-menu button.danger {
+  color: var(--color-red);
+}
+.company-file-action-menu button.danger:hover {
+  background: var(--color-red-soft);
+  color: var(--color-red);
+}
+.company-file-action-menu button span {
+  flex: 1;
+  min-width: 0;
+}
+.company-file-action-menu button svg {
+  flex-shrink: 0;
+  color: currentColor;
 }
 .company-file-grid {
   display: grid;

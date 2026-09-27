@@ -4,7 +4,23 @@
 
 > 📄 **Продуктовое ТЗ (описательное, без тех. стека)** — как работает сервис и как взаимодействуют бот, Telegram Mini App и веб-кабинет: [`docs/portal-spec.md`](docs/portal-spec.md). Ключевой принцип: три канала поверх единого ядра, веб-кабинет сотрудника = основа Mini App.
 
-## ✅ Статус проекта: АКТИВЕН на Azure ACA (реактивирован 2026-05-31)
+## ✅ Статус проекта: АКТИВЕН на Dokploy (VPS) — `https://erp.oyuns.mn`
+
+> **Прод = Dokploy на VPS** (`docker-compose.dokploy.yml`), API под `/api` (`/api/health`). **Деплой = push в `origin/master`** (github.com/petereen/tracker_artur): новые роуты появляются на проде через секунды после push. Проверка: незащищённый роут → `403` (есть) / `404` (нет), плюс смена хэша `assets/index-*.js`. CLI `az` локально не установлен.
+> **Блок про Azure ACA ниже устарел** (исторический, актуальность не проверялась) — не использовать для деплоя. Раздел «Деплой изменений» с `docker compose` — тоже для локальной/старой схемы.
+> **Рабочее дерево общее:** в нём параллельно правят другие люди/агенты. Коммить только свои hunk-и (`git apply --cached` с отфильтрованным патчем), проверять коммит в чистом `git worktree` (tsc + vitest + build + pytest) и только потом пушить в `master` (пуш = деплой, подтверждать у пользователя).
+
+### Чат-шаринг и отчёты руководителя (2026-09-25, `29b8452`, в `master` и на проде)
+- **Слэш-меню в чате** (`ChatWorkspacePage.tsx`): `/` открывает меню активных задач, планов, черновиков договоров и отчётов, группы + живой поиск (`GET /v1/chat/share-items`, `services/chat_share_service.py`). Список ограничен ролью **отправителя** (менеджмент — всё; остальные — свои: назначенные/созданные задачи, свои идеи планов, договоры где автор/ревьюер, свои отчёты; план компании виден всем). Выбор → `POST /v1/chat/conversations/{id}/share` → сообщение с `action.type='shared_item'` (снимок-карточка на момент отправки; `body` — текстовый fallback).
+- **Доступ к ссылке проверяется на каждое чтение у получателя** (`reader_can_open` в `_message_out`): нет прав → `can_open=false` и без `target_url` («Танд нээх эрх байхгүй»). Карточка сама доступа не даёт. Правила зеркалят страницы (`_task_for_actor`, `_get_contract`: договор открывает только admin/автор/ревьюер).
+- **Deep-link'и:** `/tasks?task=`, `/contracts/{public_id}`, `/reports?report=ID`, `/plans?month=YYYY-MM&item=ID|idea=ID`.
+- **Отчёты admin/manager** (`routers/report_insights.py`, `services/report_insights_service.py`, префикс `/v1/report-insights`, `report_insights` регистрируется в `main.py`; team_lead **не** включён): `GET /scope`, `GET /export/preview`, `GET /export` (1 отчёт → `.md`, иначе ZIP с папками по работнику или отделу + `manifest.csv`), `POST /summary` (KPI + тексты отчётов → OYUNS; чат с `history`, промпты про прибыль/расходы/ROI/KPI). UI: кнопка «Татах ба AI хураангуй» на `/reports` (`components/ReportInsightsPanel.tsx`). Экспорт и сводки пишутся в аудит (`record_change`).
+- **Ограничение:** прибыль/расходы/ROI берутся только из текста отчётов работников, данных ERP в сводке нет; модель обязана писать «в данных нет», а не выдумывать. Без AI — детерминированный fallback (`degraded=true`).
+- **`AIGateway.generate_text`** — новый метод без tools для серверно собранного контекста.
+- **Тесты:** `backend/tests/test_chat_share_and_report_insights_db.py` идёт только при `SHARE_TEST_DATABASE_URL` (одноразовая Postgres, напр. `postgresql+asyncpg://tracker@127.0.0.1:55432/share_test`); фронт — `ChatWorkspacePage.test.tsx`, `ReportInsightsPanel.test.tsx`. Локальный прогон backend: py3.11 venv через `uv`, env-заглушки `DATABASE_URL/SYNC_DATABASE_URL/SECRET_KEY/BOT_TOKEN`. Известные падения до этих изменений: 39 backend-тестов и `ContractsWorkspacePage.test.tsx › queues and uploads attachments…`.
+- **UI-предпочтение:** новые экраны по требованию пользователя строить на Astryx (`@astryxdesign/core`, см. `frontend/AGENTS.md`); слэш-меню/карточки/панель отчётов сделаны на существующем CSS — переделать на Astryx, когда настройка Astryx будет влита в `master`.
+
+## Проект: история (Azure ACA, реактивирован 2026-05-31)
 
 Проект пересоздан с нуля на Azure Container Apps после потери старого хоста `172.201.9.182` (был удалён 2026-05-27, БД утеряны). БД стартовала пустой; admin-пользователь засеивается автоматически из `ADMIN_EMAIL`/`ADMIN_PASSWORD` при старте backend.
 
@@ -23,9 +39,10 @@
 - **Руководитель:** `manager_settings.telegram_id=201374791` + env бота `MANAGER_TG_ID=201374791`; также заведён как `Employee` id=1 (без расписания — для self-assign).
 - **Sentry:** подключён (коммит `c01fe7a`, `app/observability/sentry.py` — api+bot+frontend).
 - **Hardening валидации ответов (PR [#3](https://github.com/bronxtc52/tracker_artur/pull/3), миграция `a7b8c9d0e1f2`, база `feature/tasks-and-miniapp`):** класс багов как Sentry #28 — обязательное поле в `*Out`-схеме ↔ nullable-колонка с только client-side `default=` без `server_default`/`NOT NULL` → `NULL` на seed/singleton/raw-insert валит сериализацию FastAPI `ResponseValidationError` (500). Захардено 10 колонок (`manager_settings.{weekly_summary_day,alerts_enabled,gamification_enabled,soft_mode_weeks}`, `employees.is_active`, `schedules.variant`, `questions.{options,is_required,sort_order}`, `tasks.priority`): миграция `backfill→server_default→NOT NULL` + зеркало в `models.py` + app-level `field_validator`/`or`-фолбэки. Образ с фиксом задеплоен в проде (ревизия `harden-nullcols-0014`, alembic head `a7b8c9d0e1f2`). PR #3 влит в `feature/tasks-and-miniapp`, оттуда в `master` через [PR #4](https://github.com/bronxtc52/tracker_artur/pull/4) (merge-commit `5d598cb`, 2026-05-31). `master` и прод согласованы. **⚠️ Gotcha:** в `models.py` нельзя писать `server_default=text(...)` — у `Question.text` есть колонка-атрибут `text`, затеняющая `sqlalchemy.text()` внутри тела класса (`'Column' object is not callable` на импорте). Используется алиас `from sqlalchemy.sql import text as sa_text`.
+- **CRM (Харилцагч + Харилцаа холбоо, по Dayansoft d026/d027):** расширенный `erp_parties` + `crm_activities`, API `app/crm/` → `/v1/erp/crm`, UI `/erp/crm`, миграция `d1e2f3a4b5c6`, напоминания `services/crm_reminders.py` (джоб в боте). Доступ — ERP capabilities (`parties`, `crm_activity`, `crm_settings`; роль Sales), не системные роли. Подробности: [`docs/crm-module.md`](docs/crm-module.md).
 - **Тесты:** `backend/tests/` (parser, telegram_auth, notification_policy, task_ai) — облачный прогон через `backend/Dockerfile.test` (`az acr build` → `python -m pytest`; локально pip на VM нет).
 
-- **Resource group:** `rg-tracker-artur-prod-neu` (North Europe)
+- _(Устарело, Azure ACA)_ **Resource group:** `rg-tracker-artur-prod-neu` (North Europe)
 - **ACA environment:** `cae-tracker-artur-prod-neu` (default domain `wittyhill-ad6320ed.northeurope.azurecontainerapps.io`)
 - **Apps:**
   - `ca-tracker-artur-web` — React/Vite + nginx, **external** ingress :80. `/api/`→backend по HTTPS:443 (см. `frontend/nginx.conf`).

@@ -1138,6 +1138,9 @@ class TimeOff(Base):
     reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     reviewer_feedback = Column(Text)
     reviewed_at = Column(DateTime(timezone=True))
+    # "paid" (Цалинтай чөлөө) / "unpaid" (Цалингүй чөлөө): requested by the employee, confirmed by HR on approval.
+    requested_pay_type = Column(Text, nullable=False, server_default="paid", default="paid")
+    approved_pay_type = Column(Text)
     version = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -2286,9 +2289,44 @@ class ERPParty(Base):
     credit_limit = Column(Numeric(18, 4))
     currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
     status = Column(String(24), nullable=False, server_default="active", default="active")
+    # Legacy JSON contacts; CRM keeps contacts in ``erp_party_contacts``.
     contacts = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     addresses = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     custom = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    # CRM customer master (Dayansoft d026). ``tax_id`` above is the ТТД.
+    name_en = Column(Text)
+    business_name = Column(Text)
+    registry_no = Column(String(20))
+    is_customer = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    is_supplier = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    is_individual = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    is_foreign = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    vat_payer = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    city_tax_payer = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    tax_status_checked_at = Column(DateTime(timezone=True))
+    website = Column(Text)
+    legal_address = Column(Text)
+    location = Column(Text)
+    informal_address = Column(Text)
+    tags = Column(ARRAY(Text), nullable=False, server_default=sa_text("'{}'::text[]"), default=list)
+    customer_since = Column(Date)
+    inactive_since = Column(Date)
+    responsible_employee_id = Column(Integer, ForeignKey("employees.id", ondelete="SET NULL"))
+    parent_party_id = Column(Integer, ForeignKey("erp_parties.id", ondelete="SET NULL"))
+    settle_via_parent = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    group_id = Column(Integer, ForeignKey("erp_party_groups.id", ondelete="SET NULL"))
+    payment_term_id = Column(Integer, ForeignKey("erp_payment_terms.id", ondelete="SET NULL"))
+    price_list_id = Column(Integer, ForeignKey("erp_price_lists.id", ondelete="SET NULL"))
+    settlement_account_id = Column(Integer, ForeignKey("erp_accounts.id", ondelete="SET NULL"))
+    sales_discount_pct = Column(Numeric(9, 4))
+    sales_note = Column(Text)
+    sales_lead_days = Column(Integer)
+    purchase_discount_pct = Column(Numeric(9, 4))
+    purchase_note = Column(Text)
+    purchase_lead_days = Column(Integer)
+    delivery_terms = Column(Text)
+    links = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    version = Column(Integer, nullable=False, server_default="1", default=1)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -3762,3 +3800,9 @@ class PayrollStatementLine(Base):
     matched_allocation_id = Column(Integer, ForeignKey("payroll_payment_allocations.id", ondelete="SET NULL"))
     fee_amount = Column(Numeric(20, 4), nullable=False, server_default="0", default=0)
     matched_at = Column(DateTime(timezone=True))
+
+
+# ERPParty and CRM activities reference tables defined in sibling modules; import
+# them here so every metadata consumer (Alembic, create_all, tests) sees them.
+import app.models.contracts  # noqa: E402,F401
+import app.models.crm  # noqa: E402,F401

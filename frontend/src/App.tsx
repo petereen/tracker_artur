@@ -22,6 +22,7 @@ const EnterpriseTasksPage = lazy(() => import('./pages/EnterpriseTasksPage').the
 const CalendarWorkspacePage = lazy(() => import('./pages/CalendarWorkspacePage').then((module) => ({ default: module.CalendarWorkspacePage })))
 const StatsWorkspacePage = lazy(() => import('./pages/StatsWorkspacePage').then((module) => ({ default: module.StatsWorkspacePage })))
 const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
+const CRMWorkspacePage = lazy(() => import('./pages/CRMWorkspacePage').then((module) => ({ default: module.CRMWorkspacePage })))
 const ERPWorkspacePage = lazy(() => import('./pages/ERPWorkspacePage').then((module) => ({ default: module.ERPWorkspacePage })))
 const PayrollWorkspacePage = lazy(() => import('./pages/PayrollWorkspacePage').then((module) => ({ default: module.PayrollWorkspacePage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
@@ -127,6 +128,11 @@ function AuthenticatedApp() {
         <Route element={<RequireRoles allowedRoles={ERP_ROLES} />}>
           <Route path="erp" element={<ERPWorkspacePage />} />
         </Route>
+        {/* CRM is authorized by ERP capabilities (e.g. the Sales role), not system roles. */}
+        <Route path="erp/crm" element={<CRMWorkspacePage />} />
+        <Route path="erp/crm/customers" element={<CRMWorkspacePage />} />
+        <Route path="erp/crm/customers/:partyId" element={<CRMWorkspacePage />} />
+        <Route path="erp/crm/settings" element={<CRMWorkspacePage />} />
         <Route element={<RequireRoles allowedRoles={PAYROLL_ROLES} />}>
           <Route path="erp/payroll" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/setup" element={<PayrollWorkspacePage />} />
