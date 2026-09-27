@@ -440,6 +440,8 @@ export function EnterpriseDashboardPage() {
   const serverClockRef = useRef<{ serverTimeMs: number; clientTimeMs: number } | null>(null);
   const clockRefetchRef = useRef(clock.refetch);
   clockRefetchRef.current = clock.refetch;
+  const clockEnabledRef = useRef(employeeId != null);
+  clockEnabledRef.current = employeeId != null;
   const serverTime = clock.data?.server_time;
   useEffect(() => {
     if (!serverTime) return;
@@ -472,7 +474,9 @@ export function EnterpriseDashboardPage() {
     const handleVisibilityChange = () => {
       syncNow();
       if (document.visibilityState === "visible") {
-        void clockRefetchRef.current();
+        if (clockEnabledRef.current) {
+          void clockRefetchRef.current();
+        }
         startTimer();
       } else {
         clearTimer();
