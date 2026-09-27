@@ -16,6 +16,7 @@ import { WorkspaceModeProvider } from './WorkspaceModeProvider'
 import { WorkspaceModeToggle } from './WorkspaceModeToggle'
 import { WorkspaceRouteSkeleton } from './Loading'
 import { getRealtimeUrl, resolvePublicAssetUrl, safeLocalStorage, safeSessionStorage } from '../platform/runtime'
+import { useColorThemeStore } from '../store/colorTheme'
 import { showDesktopChatAlert } from '../platform/chat-notifications'
 import { setTelemetryTag } from '../platform/telemetry'
 import { preloadRoute } from '../platform/route-preload'
@@ -149,7 +150,8 @@ export function EnterpriseShell() {
   const suppressWorkersClickRef = useRef(false)
   const [workerSearch, setWorkerSearch] = useState('')
   const [selectedWorker, setSelectedWorker] = useState<number>()
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => (safeLocalStorage().get('oyuns-theme') as 'light' | 'dark') || 'light')
+  const theme = useColorThemeStore((state) => state.theme)
+  const setTheme = useColorThemeStore((state) => state.setTheme)
   const workers = useWorkerDirectory(workersOpen)
   const branding = useBrandingSettings()
   const actorResolved = Boolean(actorQuery.data)
@@ -198,7 +200,6 @@ export function EnterpriseShell() {
     window.addEventListener('resize', clampToggle)
     return () => window.removeEventListener('resize', clampToggle)
   }, [])
-  useEffect(() => { document.documentElement.dataset.theme = theme; safeLocalStorage().set('oyuns-theme', theme) }, [theme])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
