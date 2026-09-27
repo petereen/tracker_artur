@@ -6,11 +6,16 @@ import { useAuthStore } from '../store/auth'
 
 const apiBaseUrl = getApiBaseUrl()
 
-export const api = axios.create({ baseURL: apiBaseUrl, withCredentials: true })
+// A hung request (dropped connection, backend stall during a deploy) must
+// eventually reject rather than leave bootstrapSession()'s finally — and
+// thus the initial-load skeleton — waiting forever.
+const REQUEST_TIMEOUT_MS = 20_000
+
+export const api = axios.create({ baseURL: apiBaseUrl, withCredentials: true, timeout: REQUEST_TIMEOUT_MS })
 // Public kiosk endpoints must not trigger the employee session refresh flow.
 // A TV at /worktimeqr has no employee bearer token before pairing.
-export const publicApi = axios.create({ baseURL: apiBaseUrl, withCredentials: true })
-const refreshClient = axios.create({ baseURL: apiBaseUrl, withCredentials: true })
+export const publicApi = axios.create({ baseURL: apiBaseUrl, withCredentials: true, timeout: REQUEST_TIMEOUT_MS })
+const refreshClient = axios.create({ baseURL: apiBaseUrl, withCredentials: true, timeout: REQUEST_TIMEOUT_MS })
 let refreshPromise: Promise<string> | null = null
 let proactiveTimer: number | undefined
 
