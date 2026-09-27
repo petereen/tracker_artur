@@ -16,6 +16,7 @@ from app.models.models import (
     ERPAccountingSettings,
     ERPAccountRole,
     ERPCapability,
+    ERPCostCenter,
     ERPCustomField,
     ERPDocument,
     ERPDocumentLine,
