@@ -64,26 +64,24 @@ describe('GoogleCalendarSyncControl', () => {
     expect(screen.getByRole('menu')).toBeInTheDocument()
   })
 
-  it('renders a compact mobile month and selected-day agenda for multi-day items', () => {
+  it('renders a mobile month that opens a day view with multi-day and timed items', () => {
     const now = new Date()
     const day = (value: number) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(value).padStart(2, '0')}`
     state.events.tasks = [{ id: 44, title: 'Олон өдрийн ажил', start_at: day(17), deadline_at: day(19), primary_owner_name: 'Test' }]
-    state.events.entries = [{ id: 45, kind: 'event', title: 'Уулзалт', starts_at: day(18), ends_at: day(18) }]
+    state.events.entries = [{ id: 45, kind: 'event', title: 'Уулзалт', starts_at: new Date(now.getFullYear(), now.getMonth(), 18, 10).toISOString(), ends_at: new Date(now.getFullYear(), now.getMonth(), 18, 11, 30).toISOString() }]
     const { container } = render(<CalendarWorkspacePage />)
     expect(container.querySelector('.mobile-calendar')).toBeInTheDocument()
-    expect(container.querySelectorAll('.mobile-calendar-grid button')).toHaveLength(42)
-    const eventDay = container.querySelector<HTMLButtonElement>('.mobile-calendar-grid button[aria-label*="18"]')
-    expect(eventDay).not.toBeNull()
-    fireEvent.click(eventDay as HTMLButtonElement)
-    expect(container.querySelectorAll('.mobile-calendar-agenda-item').length).toBeGreaterThanOrEqual(2)
-    expect(container.querySelector('.mobile-calendar-agenda-item')?.textContent).toContain('Олон өдрийн ажил')
-    const selected = container.querySelector<HTMLButtonElement>('.mobile-calendar-grid button[aria-pressed="true"]')
-    expect(selected).not.toBeNull()
-    const targetDay = container.querySelector<HTMLButtonElement>('.mobile-calendar-grid button[aria-label*="17"]')
-    expect(targetDay).not.toBeNull()
-    fireEvent.click(targetDay as HTMLButtonElement)
-    expect(targetDay).toHaveAttribute('aria-pressed', 'true')
-    expect(container.querySelector('.mobile-calendar-agenda')?.textContent).toContain('Олон өдрийн ажил')
+    expect(container.querySelectorAll('.mcal-month-cell')).toHaveLength(42)
+    const cell = [...container.querySelectorAll<HTMLButtonElement>('.mcal-month-cell:not(.outside)')].find((button) => button.querySelector('strong')?.textContent === '18')
+    expect(cell?.textContent).toContain('Олон өдрийн ажил')
+    fireEvent.click(cell as HTMLButtonElement)
+    expect(container.querySelector('.mcal-day')).toBeInTheDocument()
+    expect(container.querySelector('.mcal-all-day')?.textContent).toContain('Олон өдрийн ажил')
+    const timed = container.querySelector<HTMLElement>('.mcal-event')
+    expect(timed?.textContent).toContain('Уулзалт')
+    expect(timed?.style.top).toBe('520px')
+    fireEvent.change(screen.getByLabelText('Харагдац'), { target: { value: 'week' } })
+    expect(container.querySelectorAll('.mcal-day-column')).toHaveLength(7)
   })
 
   it('renders every calendar type in collision-free spanning lanes and slices week wraps', () => {

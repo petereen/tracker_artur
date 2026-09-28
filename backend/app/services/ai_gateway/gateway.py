@@ -40,6 +40,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.enterprise_deps import ActorContext
 from app.models.models import Department, Employee, EmployeeDetails, Organization, Task, TaskAssignee, WorkTimeEntry
+from app.services.ai_gateway.access_policy import FULL_ACCESS, AccessPolicy
 from app.services.ai_gateway.cache import ResponseCache
 from app.services.ai_gateway.runtime import AIRuntime, build_runtime, resolve_ai_runtime
 from app.services.ai_gateway.tools.registry import ToolRegistry
@@ -242,7 +243,7 @@ class AIGateway:
             log.warning("ai_gateway.context_lookup_failed part=%s", label, exc_info=True)
             return None
 
-    async def _snapshot(self, db: Any, employee_id: int, organization_id: int, zone: ZoneInfo) -> dict:
+    async def _snapshot(self, db: Any, employee_id: int, organization_id: int, zone: ZoneInfo, access: AccessPolicy = FULL_ACCESS) -> dict:
         now = datetime.now(timezone.utc)
         local_today = datetime.now(zone).date()
         day_start = datetime.combine(local_today, datetime.min.time(), tzinfo=zone)
@@ -254,22 +255,24 @@ class AIGateway:
             return int(value) if isinstance(value, int) else None
 
         snapshot: dict[str, Any] = {}
-        open_tasks = await count()
+        open_tasks = await count() if access.can_read("tasks") else None
         if open_tasks is not None:
             snapshot["my_open_tasks"] = open_tasks
             snapshot["my_overdue_tasks"] = await count(Task.deadline_at < now)
             snapshot["my_tasks_due_today"] = await count(Task.deadline_at >= day_start, Task.deadline_at < day_start + timedelta(days=1))
+        if not access.can_read("worktime"):
+            return {key: value for key, value in snapshot.items() if value is not None}
         entry = await db.scalar(select(WorkTimeEntry).where(WorkTimeEntry.employee_id == employee_id, WorkTimeEntry.ended_at.is_(None)).order_by(WorkTimeEntry.started_at.desc()).limit(1))
         if isinstance(entry, WorkTimeEntry):
             snapshot["my_worktime_now"] = "on_break" if entry.entry_type == "break" else f"working_{entry.mode or 'in_person'}"
             snapshot["my_worktime_since"] = entry.started_at.astimezone(zone).isoformat(timespec="minutes")
-        elif open_tasks is not None:
+        elif open_tasks is not None or not access.can_read("tasks"):
             snapshot["my_worktime_now"] = "not_clocked_in"
         return {key: value for key, value in snapshot.items() if value is not None}
 
-    def _available_data(self, actor: ActorContext, *, sensitive_allowed: bool) -> list[str]:
+    def _available_data(self, actor: ActorContext, *, sensitive_allowed: bool, access: AccessPolicy = FULL_ACCESS) -> list[str]:
         domains: list[str] = []
-        for definition in self.tool_registry.visible_definitions(actor):
+        for definition in self.tool_registry.visible_definitions(actor, access=access):
             if definition.domain in SENSITIVE_DOMAINS and not sensitive_allowed:
                 continue
             label = DOMAIN_LABELS.get(definition.domain, definition.domain)
@@ -284,6 +287,8 @@ class AIGateway:
             "reply_language": actor.detected_language if actor.detected_language in {"mn", "ru", "en"} else "mn",
             "roles": sorted(actor.roles),
         }
+        runtime = await self._optional(db, "runtime", lambda: resolve_ai_runtime(db, actor.organization_id))
+        access = runtime.access if isinstance(runtime, AIRuntime) else FULL_ACCESS
         organization = await self._optional(db, "organization", lambda: db.get(Organization, actor.organization_id))
         if isinstance(organization, Organization) and organization.name:
             context["company"] = {"name": organization.name}
@@ -322,10 +327,10 @@ class AIGateway:
         context["current_time"] = now.isoformat()
         context["weekday"] = now.strftime("%A")
         if actor.employee_id is not None and employee is not None:
-            snapshot = await self._optional(db, "snapshot", lambda: self._snapshot(db, actor.employee_id, actor.organization_id, zone))
+            snapshot = await self._optional(db, "snapshot", lambda: self._snapshot(db, actor.employee_id, actor.organization_id, zone, access))
             if snapshot:
                 context["my_snapshot"] = snapshot
-        context["AVAILABLE_DATA"] = self._available_data(actor, sensitive_allowed=sensitive_allowed)
+        context["AVAILABLE_DATA"] = self._available_data(actor, sensitive_allowed=sensitive_allowed, access=access)
         return context
 
     async def execute_turn(
@@ -367,7 +372,7 @@ class AIGateway:
         )
         # A standalone "I have a meeting tomorrow at 16" needs no model: the
         # deterministic parser prepares the same confirmation preview.
-        if is_simple_self_meeting(current):
+        if is_simple_self_meeting(current) and request.runtime.access.allows("oyuns_tasks_prepare_create"):
             fast = await self._offline_task_preview(db, request, fast=True)
             if fast is not None:
                 return fast
@@ -523,6 +528,8 @@ class AIGateway:
         """Prepare only unambiguous self meetings through the governed tool."""
         if request.actor_context is None or not is_simple_self_meeting(request.text):
             return None
+        if request.runtime is not None and not request.runtime.access.allows("oyuns_tasks_prepare_create"):
+            return None
         context = request.grounding_context or {}
         timezone_name = context.get("timezone", "Asia/Ulaanbaatar")
         try:
@@ -653,6 +660,8 @@ class AIGateway:
     async def _preflight_grounding(self, db: Any, actor: ActorContext, text: str, runtime: AIRuntime | None = None) -> PreflightGrounding:
         if not getattr(settings, "AI_PREFLIGHT_RAG_ENABLED", True) or not getattr(settings, "AI_UNIFIED_KNOWLEDGE_SEARCH_ENABLED", True):
             return PreflightGrounding(KnowledgeSearchResult("empty", ()))
+        if runtime is not None and not runtime.access.can_read("knowledge"):
+            return PreflightGrounding(KnowledgeSearchResult("empty", ()))
         principal = FileSearchPrincipal.from_actor(actor)
         lexical = await search_knowledge_documents(db, principal, query=text, search_mode="keyword", limit=5)
         threshold = float(getattr(settings, "AI_PREFLIGHT_CONFIDENCE_THRESHOLD", 0.82))
@@ -738,8 +747,9 @@ class AIGateway:
         actor = request.actor_context
         if actor is None:
             return ([request.mcp_tool] if request.mcp_tool else (list(request.tools) if request.execute_tool else [])), set()
+        access = request.runtime.access if request.runtime is not None else FULL_ACCESS
         definitions = [
-            definition for definition in self.tool_registry.visible_definitions(actor)
+            definition for definition in self.tool_registry.visible_definitions(actor, access=access)
             if request.sensitive_allowed or definition.domain not in SENSITIVE_DOMAINS
         ]
         tools = [
@@ -964,6 +974,7 @@ class AIGateway:
             and request.actor_context is not None
             and request.database is not None
             and failure.retryable
+            and (request.runtime is None or request.runtime.access.can_read("knowledge"))
         ):
             return await self._offline_knowledge_response(request.database, request, failure=failure)
         raise failure

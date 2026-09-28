@@ -9,6 +9,7 @@ import { QuestionsPage } from './QuestionsPage'
 import { SchedulePage } from './SchedulePage'
 import { AdminAccessPanel, ManagerSettingsPage } from './ManagerSettingsPage'
 import { KnowledgePage } from './KnowledgePage'
+import { AiAccessSettings } from '../components/AiAccessSettings'
 import { AiAgentSettings } from '../components/AiAgentSettings'
 import { OnboardingPage } from './OnboardingPage'
 import { DeveloperPage } from './DeveloperPage'
@@ -368,6 +369,7 @@ export function OyunsAssistantSettingsPage() {
   const canManageAgent = roles.includes('admin')
   return <SettingsPage categoryId="ai" activeTab="/administration/ai/knowledge" title="OYUNS AI ба сургалт">
     {canManageAgent && <SettingsSection title="AI модель ба API түлхүүр" icon={KeyRound} className="settings-embedded" defaultOpen><AiAgentSettings /></SettingsSection>}
+    {canManageAgent && <SettingsSection title="AI туслахын хандах эрх" icon={ShieldCheck} className="settings-embedded"><AiAccessSettings /></SettingsSection>}
     <SettingsSection title="Компанийн өгөгдлийн сан" icon={BookOpen} className="settings-embedded"><KnowledgePage /></SettingsSection>
     {canManageAgent && <SettingsSection title="OYUNS сургалт" icon={Code2} className="settings-embedded"><DeveloperPage /></SettingsSection>}
   </SettingsPage>

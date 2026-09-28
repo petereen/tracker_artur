@@ -5,6 +5,8 @@ from typing import Any
 from uuid import uuid4
 
 from app.core.enterprise_deps import ActorContext, permissions_for_roles
+from app.services.ai_gateway.access_policy import AccessPolicy
+from app.services.ai_gateway.runtime import resolve_ai_runtime
 from app.services.mcp import adapters
 from app.services.mcp.catalog import CATALOG, ToolDefinition, get_tool, tool_list
 
@@ -29,9 +31,10 @@ class ToolRegistry:
         # tool schemas cannot drift apart.
         return tool_list(actor, intents, action_intents=action_intents)
 
-    def visible_definitions(self, actor: ActorContext, intents: set[str] | frozenset[str] | None = None, *, action_intents: set[str] | frozenset[str] = frozenset()) -> list[ToolDefinition]:
+    def visible_definitions(self, actor: ActorContext, intents: set[str] | frozenset[str] | None = None, *, action_intents: set[str] | frozenset[str] = frozenset(), access: AccessPolicy | None = None) -> list[ToolDefinition]:
         names = {item["name"] for item in self.visible_tools(actor, intents, action_intents=action_intents)}
-        return [definition for definition in self._definitions.values() if definition.name in names]
+        return [definition for definition in self._definitions.values()
+                if definition.name in names and (access is None or access.allows(definition.name))]
 
     @staticmethod
     def _denied(request_id: str, summary: str = "The requested tool is unavailable.") -> ToolResult:
@@ -48,6 +51,10 @@ class ToolRegistry:
             return self._denied(request_id)
         if not definition.required_permissions.issubset(permissions):
             return self._denied(request_id)
+        # The organization's AI access settings may switch sections off.
+        runtime = await resolve_ai_runtime(db, actor_context.organization_id)
+        if not runtime.access.allows(tool_name):
+            return self._denied(request_id, "This data is disabled in the organization's AI assistant access settings.")
         # Adapters validate the strict schema again and apply resource-level
         # ACLs. No HTTP edge, JWT, or internal shared-secret hop is involved.
         return await adapters.execute(

@@ -80,3 +80,31 @@ export function useTestAiConnection() {
     mutationFn: (input: { api_key?: string | null; model?: string | null }) => api.post('/v1/settings/ai-agent/test', input).then((response) => response.data as AiConnectionTest),
   })
 }
+
+export interface AiAccessEntry { read: boolean; write: boolean }
+export interface AiAccessSection { key: string; label: string; description: string; has_write: boolean }
+export interface AiAccessGroup { key: string; label: string; sections: AiAccessSection[] }
+export interface AiAccessSettings {
+  groups: AiAccessGroup[]
+  sections: Record<string, AiAccessEntry>
+  configured: boolean
+  updated_at: string | null
+}
+
+const ACCESS_KEY = [...SETTINGS_KEY, 'access']
+
+export function useAiAccessSettings(enabled = true) {
+  return useQuery<AiAccessSettings>({ queryKey: ACCESS_KEY, queryFn: () => api.get('/v1/settings/ai-agent/access').then((response) => response.data), enabled })
+}
+
+export function useUpdateAiAccessSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (sections: Record<string, AiAccessEntry>) => api.put('/v1/settings/ai-agent/access', { sections }).then((response) => response.data as AiAccessSettings),
+    onSuccess: (data) => {
+      queryClient.setQueryData(ACCESS_KEY, data)
+      toast.success('AI туслахын эрх хадгалагдлаа')
+    },
+    onError: (error: any) => toast.error(typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'AI туслахын эрх хадгалагдсангүй'),
+  })
+}

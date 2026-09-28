@@ -46,7 +46,7 @@ async def create_voice_session(db: AsyncSession = Depends(get_db), actor: ActorC
         raise HTTPException(status_code=429, detail="rate_limited")
     context = await gateway._build_context(db, actor, sensitive_allowed=True)
     context["input_mode"] = "live_voice_call"
-    definitions = voice_call.visible_voice_tools(gateway.tool_registry, actor)
+    definitions = voice_call.visible_voice_tools(gateway.tool_registry, actor, access=runtime.access)
     tools = voice_call.realtime_tools(definitions)
     try:
         secret = await voice_call.create_client_secret(runtime, voice_call.build_instructions(context), tools)
@@ -73,7 +73,8 @@ async def create_voice_session(db: AsyncSession = Depends(get_db), actor: ActorC
 async def run_voice_tool(data: VoiceToolCall, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     """Run one model tool call for the caller, re-checking permission."""
     _require_assistant(actor)
-    allowed = {definition.name for definition in voice_call.visible_voice_tools(gateway.tool_registry, actor)}
+    runtime = await resolve_ai_runtime(db, actor.organization_id)
+    allowed = {definition.name for definition in voice_call.visible_voice_tools(gateway.tool_registry, actor, access=runtime.access)}
     if data.name not in allowed:
         result = {"status": "denied", "summary": "The requested tool is unavailable in a voice call.", "data": {}, "sources": [], "warnings": ["ACCESS_DENIED"]}
         return {"call_id": data.call_id, "output": voice_call.tool_output(result)}

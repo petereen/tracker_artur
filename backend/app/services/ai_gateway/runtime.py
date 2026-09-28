@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.models.models import Organization
+from app.services.ai_gateway.access_policy import FULL_ACCESS, AccessPolicy, policy_from_config
 from app.services.ai_gateway.config import registry
 from app.services.secret_box import decrypt_secret
 
@@ -49,6 +50,7 @@ class AIRuntime:
     realtime_model: str = DEFAULT_REALTIME_MODEL
     realtime_voice: str = DEFAULT_REALTIME_VOICE
     realtime_enabled: bool = True
+    access: AccessPolicy = FULL_ACCESS
 
     @property
     def models(self) -> list[str]:
@@ -110,6 +112,7 @@ def build_runtime(organization_settings: dict | None) -> AIRuntime:
         max_output_tokens=_clamp_tokens(stored.get("max_output_tokens", DEFAULT_OUTPUT_TOKENS)),
         web_search_enabled=bool(stored.get("web_search_enabled", True)),
         source=source,
+        access=policy_from_config(stored),
     )
 
 

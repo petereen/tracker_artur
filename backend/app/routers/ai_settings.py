@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, require_roles
 from app.models.models import Organization
+from app.services.ai_gateway import access_policy
 from app.services.ai_gateway import runtime as ai_runtime
 from app.services.enterprise_events import record_change
 from app.services.secret_box import encrypt_secret
@@ -85,6 +86,24 @@ class AiAgentSettingsInput(BaseModel):
     @classmethod
     def validate_model(cls, value: str | None) -> str | None:
         return _model_id(value)
+
+
+class AccessEntry(BaseModel):
+    read: bool
+    write: bool = False
+
+
+class AiAccessInput(BaseModel):
+    sections: dict[str, AccessEntry]
+
+    @field_validator("sections")
+    @classmethod
+    def validate_sections(cls, value: dict[str, AccessEntry]) -> dict[str, AccessEntry]:
+        known = {section.key for section in access_policy.SECTIONS}
+        unknown = sorted(set(value) - known)
+        if unknown:
+            raise ValueError(f"Unknown sections: {', '.join(unknown)}")
+        return value
 
 
 class AiAgentTestInput(BaseModel):
@@ -159,6 +178,44 @@ async def update_ai_agent_settings(data: AiAgentSettingsInput, db: AsyncSession 
     ai_runtime.invalidate(organization.id)
     _models_cache.clear()
     return _settings_out(organization)
+
+
+def _access_out(organization: Organization) -> dict:
+    stored = ai_runtime.stored_config(organization.settings)
+    return {
+        "groups": access_policy.catalog(),
+        "sections": access_policy.normalize(stored.get(access_policy.ACCESS_KEY)),
+        "configured": isinstance(stored.get(access_policy.ACCESS_KEY), dict),
+        "updated_at": stored.get("access_updated_at"),
+    }
+
+
+@router.get("/access")
+async def get_ai_access(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_admin)):
+    organization = await db.get(Organization, actor.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return _access_out(organization)
+
+
+@router.put("/access")
+async def update_ai_access(data: AiAccessInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_admin)):
+    """Replace which data sections the AI assistant may read or prepare changes in."""
+    organization = await db.get(Organization, actor.organization_id, with_for_update=True)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    stored = ai_runtime.stored_config(organization.settings)
+    before = access_policy.normalize(stored.get(access_policy.ACCESS_KEY))
+    after = access_policy.normalize({key: entry.model_dump() for key, entry in data.sections.items()})
+    stored[access_policy.ACCESS_KEY] = after
+    stored["access_updated_at"] = datetime.now(timezone.utc).isoformat()
+    stored["access_updated_by_account_id"] = actor.account_id
+    organization.settings = {**(organization.settings or {}), ai_runtime.AI_AGENT_SETTINGS_KEY: stored}
+    changes = {key: value for key, value in after.items() if before.get(key) != value}
+    await record_change(db, actor=actor, topic="settings", aggregate_type="ai_agent_access", aggregate_id=organization.id, operation="updated", before={key: before[key] for key in changes}, after=changes)
+    await db.commit()
+    ai_runtime.invalidate(organization.id)
+    return _access_out(organization)
 
 
 async def _active_key(db: AsyncSession, actor: ActorContext, explicit: str | None) -> str:

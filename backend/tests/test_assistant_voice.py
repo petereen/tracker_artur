@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.core.enterprise_deps import build_actor_context, get_actor
 from app.routers import assistant_voice
 from app.services.ai_gateway import voice_call
+from app.services.ai_gateway.access_policy import FULL_ACCESS
 from app.services.ai_gateway.runtime import build_runtime
 
 
@@ -96,7 +97,7 @@ def test_session_mints_a_client_secret_with_grounded_instructions(client, monkey
     captured = {}
 
     async def resolve(_db, _organization_id):
-        return SimpleNamespace(api_key="sk-test-key", realtime_enabled=True, realtime_model="gpt-realtime", realtime_voice="marin")
+        return SimpleNamespace(api_key="sk-test-key", realtime_enabled=True, realtime_model="gpt-realtime", realtime_voice="marin", access=FULL_ACCESS)
 
     async def mint(runtime, instructions, tools):
         captured.update(instructions=instructions, tools=tools)

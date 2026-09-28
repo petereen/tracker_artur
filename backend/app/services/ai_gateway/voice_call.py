@@ -22,6 +22,7 @@ from typing import Any
 import aiohttp
 
 from app.core.enterprise_deps import ActorContext
+from app.services.ai_gateway.access_policy import AccessPolicy
 from app.services.ai_gateway.runtime import AIRuntime
 from app.services.mcp.catalog import SENSITIVE_DOMAINS, ToolDefinition, _strict_schema
 
@@ -166,9 +167,9 @@ def tool_output(result: dict) -> str:
     return json.dumps(trimmed, ensure_ascii=False, default=str)
 
 
-def visible_voice_tools(registry: Any, actor: ActorContext, *, sensitive_allowed: bool = True) -> list[ToolDefinition]:
+def visible_voice_tools(registry: Any, actor: ActorContext, *, sensitive_allowed: bool = True, access: AccessPolicy | None = None) -> list[ToolDefinition]:
     definitions = [
-        definition for definition in registry.visible_definitions(actor)
+        definition for definition in registry.visible_definitions(actor, access=access)
         if sensitive_allowed or definition.domain not in SENSITIVE_DOMAINS
     ]
     return voice_tool_definitions(definitions)
