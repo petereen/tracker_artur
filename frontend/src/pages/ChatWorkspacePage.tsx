@@ -149,7 +149,7 @@ function NewChatDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
     if (!title.trim() || selected.length < 2) return
     try { onCreated(await createGroup.mutateAsync({ title: title.trim(), member_account_ids: selected })) } catch (error: any) { toast.error(error.response?.data?.detail || 'Бүлэг үүссэнгүй') }
   }
-  return <div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}>
+  return createPortal(<div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}>
     <section ref={modalRef} className="chat-modal" role="dialog" aria-modal="true" aria-labelledby="new-chat-title">
       <header><div><span className="eyebrow">OYUNS CHAT</span><h2 id="new-chat-title">Шинэ чат</h2></div><button className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
       <div className="chat-segments"><button className={mode === 'direct' ? 'active' : ''} onClick={() => setMode('direct')}>Шууд чат</button><button className={mode === 'group' ? 'active' : ''} onClick={() => setMode('group')}>Бүлэг</button></div>
@@ -165,7 +165,7 @@ function NewChatDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
       </div>
       {mode === 'group' && <footer><span>{selected.length} сонгосон · хамгийн багадаа 2</span><button className="chat-primary-button" disabled={!title.trim() || selected.length < 2 || createGroup.isPending} onClick={create}>Бүлэг үүсгэх</button></footer>}
     </section>
-  </div>
+  </div>, document.body)
 }
 
 function GroupManager({ conversation, onClose, onLeft }: { conversation: ChatConversation; onClose: () => void; onLeft: () => void }) {
@@ -182,23 +182,23 @@ function GroupManager({ conversation, onClose, onLeft }: { conversation: ChatCon
   const available = (contacts.data ?? []).filter((contact) => !memberIds.has(contact.account_id))
   const saveTitle = async () => { if (title.trim() && title.trim() !== conversation.title) await rename.mutateAsync(title.trim()) }
   const leaveGroup = async () => { if (!window.confirm('Энэ бүлгээс гарах уу?')) return; await leave.mutateAsync(); onLeft() }
-  return <div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section ref={modalRef} className="chat-modal chat-manage-modal" role="dialog" aria-modal="true" aria-label="Бүлгийн тохиргоо">
+  return createPortal(<div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section ref={modalRef} className="chat-modal chat-manage-modal" role="dialog" aria-modal="true" aria-label="Бүлгийн тохиргоо">
     <header><div><span className="eyebrow">GROUP CHAT</span><h2>Бүлгийн тохиргоо</h2></div><button className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
     {conversation.can_manage && <div className="chat-manage-title"><label className="chat-field"><span>Бүлгийн нэр</span><input value={title} maxLength={80} onChange={(event) => setTitle(event.target.value)} /></label><button className="chat-secondary-button" onClick={saveTitle} disabled={!title.trim() || rename.isPending}>Хадгалах</button></div>}
     <div className="chat-member-heading"><strong>{conversation.member_count} гишүүн</strong>{conversation.can_manage && <button className="chat-secondary-button" onClick={() => setAdding((value) => !value)}><Plus /> Гишүүн нэмэх</button>}</div>
     {adding && <><label className="chat-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Нэмэх хүн хайх…" /></label><div className="chat-contact-list compact">{available.map((contact) => <button key={contact.account_id} onClick={() => add.mutateAsync([contact.account_id])}><Avatar identity={contact} /><span><strong>{contact.name}</strong><small>{contact.email}</small></span><Plus /></button>)}</div></>}
     <div className="chat-member-list">{conversation.members.map((member) => <div key={member.account_id}><span className="chat-avatar-wrap"><Avatar identity={member} /><PresenceDot online={member.is_online} /></span><span><strong>{member.name}</strong><small>{member.role === 'owner' ? 'Эзэмшигч' : member.email}</small></span>{conversation.can_manage && member.role !== 'owner' && <button className="chat-icon-button danger" onClick={() => remove.mutate(member.account_id)} aria-label={`${member.name}-г хасах`}><UserMinus /></button>}</div>)}</div>
     <footer><button className="chat-danger-button" onClick={leaveGroup} disabled={leave.isPending}>Бүлгээс гарах</button></footer>
-  </section></div>
+  </section></div>, document.body)
 }
 
 function ReceiptDialog({ conversationId, messageId, onClose }: { conversationId: string; messageId: number; onClose: () => void }) {
   const receipts = useChatReceiptDetails(conversationId, messageId)
   const modalRef = useFocusTrap<HTMLElement>(true, onClose)
-  return <div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section ref={modalRef} className="chat-modal receipt-modal" role="dialog" aria-modal="true" aria-label="Мессежийн төлөв">
+  return createPortal(<div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section ref={modalRef} className="chat-modal receipt-modal" role="dialog" aria-modal="true" aria-label="Мессежийн төлөв">
     <header><div><span className="eyebrow">MESSAGE INFO</span><h2>Мессежийн төлөв</h2></div><button className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
     {receipts.isLoading ? <p className="chat-state">Ачаалж байна…</p> : <><div className="receipt-totals"><span><CheckCheck />Уншсан<strong>{receipts.data?.counts.read ?? 0}</strong></span><span><Check />Хүрсэн<strong>{receipts.data?.counts.delivered ?? 0}</strong></span><span><Send />Нийт<strong>{receipts.data?.counts.total ?? 0}</strong></span></div><div className="receipt-list">{receipts.data?.items.map((item) => <div key={item.account.account_id}><Avatar identity={item.account} /><span><strong>{item.account.name}</strong><small>{item.status === 'read' ? `Уншсан · ${formatTimestamp(item.read_at)}` : item.status === 'delivered' ? `Хүрсэн · ${formatTimestamp(item.delivered_at)}` : 'Илгээсэн'}</small></span></div>)}</div></>}
-  </section></div>
+  </section></div>, document.body)
 }
 
 type PendingUpload = { localId: string; file: File; progress: number; status: 'uploading' | 'ready' | 'failed'; attachment?: ChatAttachment; controller: AbortController; error?: string }
@@ -453,7 +453,7 @@ function ChatActionMenu({ anchorRef, boundsRef, onClose, children }: ChatActionM
 function ForwardDialog({ message, conversations, onClose, onForward }: { message: ChatMessage; conversations: ChatConversation[]; onClose: () => void; onForward: (ids: string[]) => void }) {
   const [selected, setSelected] = useState<string[]>([])
   const modalRef = useFocusTrap<HTMLElement>(true, onClose)
-  return <div className="chat-modal-backdrop"><section ref={modalRef} className="chat-modal" role="dialog" aria-modal="true" aria-label="Мессеж дамжуулах"><header><div><span className="eyebrow">FORWARD</span><h2>Мессеж дамжуулах</h2></div><button className="chat-icon-button" onClick={onClose}><X /></button></header><div className="chat-contact-list">{conversations.map((conversation) => <button key={conversation.public_id} onClick={() => setSelected((items) => items.includes(conversation.public_id) ? items.filter((id) => id !== conversation.public_id) : items.length < 10 ? [...items, conversation.public_id] : items)}><Avatar conversation={conversation} /><span><strong>{conversation.title}</strong><small>{conversation.kind === 'group' ? `${conversation.member_count} гишүүн` : 'Шууд чат'}</small></span><i className={`chat-check ${selected.includes(conversation.public_id) ? 'selected' : ''}`}>{selected.includes(conversation.public_id) && <Check />}</i></button>)}</div><footer><span>{selected.length} сонгосон</span><button className="chat-primary-button" disabled={!selected.length} onClick={() => onForward(selected)}><Forward /> Дамжуулах</button></footer></section></div>
+  return createPortal(<div className="chat-modal-backdrop"><section ref={modalRef} className="chat-modal" role="dialog" aria-modal="true" aria-label="Мессеж дамжуулах"><header><div><span className="eyebrow">FORWARD</span><h2>Мессеж дамжуулах</h2></div><button className="chat-icon-button" onClick={onClose}><X /></button></header><div className="chat-contact-list">{conversations.map((conversation) => <button key={conversation.public_id} onClick={() => setSelected((items) => items.includes(conversation.public_id) ? items.filter((id) => id !== conversation.public_id) : items.length < 10 ? [...items, conversation.public_id] : items)}><Avatar conversation={conversation} /><span><strong>{conversation.title}</strong><small>{conversation.kind === 'group' ? `${conversation.member_count} гишүүн` : 'Шууд чат'}</small></span><i className={`chat-check ${selected.includes(conversation.public_id) ? 'selected' : ''}`}>{selected.includes(conversation.public_id) && <Check />}</i></button>)}</div><footer><span>{selected.length} сонгосон</span><button className="chat-primary-button" disabled={!selected.length} onClick={() => onForward(selected)}><Forward /> Дамжуулах</button></footer></section></div>, document.body)
 }
 
 const SHARE_GROUP_ICONS: Record<ChatShareGroup, typeof ListChecks> = { tasks: ListChecks, plans: CalendarRange, contracts: FileSignature, reports: BarChart3 }

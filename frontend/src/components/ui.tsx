@@ -1,4 +1,5 @@
 import React from 'react'
+import { createPortal } from 'react-dom'
 import { DropdownSelect } from './DropdownSelect'
 
 // --- Badge ---
@@ -89,7 +90,7 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: 
 
 // --- Modal ---
 export function Modal({ title, onClose, children, className = '' }: { title: string; onClose: () => void; children: React.ReactNode; className?: string }) {
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
       <div className={`bg-surface border border-border rounded-2xl p-7 w-full max-w-lg ${className}`} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
@@ -98,7 +99,8 @@ export function Modal({ title, onClose, children, className = '' }: { title: str
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

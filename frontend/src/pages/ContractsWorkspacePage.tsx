@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentProps } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   FileCheck2,
@@ -867,7 +868,7 @@ function ContractDetailView({
           </div>
         )}
       </section>
-      {approvedModal && (
+      {approvedModal && createPortal(
         <div className="contract-modal-backdrop">
           <div className="contract-modal">
             <button
@@ -892,7 +893,8 @@ function ContractDetailView({
               Хэвлэх / PDF татах
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </section>
   );

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { motion } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -156,7 +157,7 @@ export function ReportInsightsPanel({ onClose }: { onClose: () => void }) {
   const saveMarkdown = (content: string, suffix: string) => saveBlob(new Blob([content], { type: 'text/markdown;charset=utf-8' }), `oyuns_${suffix}_${period.date_from}_${period.date_to}.md`)
   const copy = async (content: string) => { try { await navigator.clipboard.writeText(content); toast.success('Хуулагдлаа') } catch { toast.error('Хуулж чадсангүй') } }
 
-  return <motion.div className="sheet-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
+  return createPortal(<motion.div className="sheet-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
     <motion.aside className="detail-sheet report-insights-sheet" role="dialog" aria-modal="true" aria-labelledby="report-insights-title" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', bounce: 0, duration: .4 }} onMouseDown={(event) => event.stopPropagation()}>
       <div className="sheet-header"><div><span className="eyebrow">REPORT INSIGHTS</span><h2 id="report-insights-title">Тайлан татах ба хураангуй</h2></div><button onClick={onClose} aria-label="Хаах"><X /></button></div>
 
@@ -234,5 +235,5 @@ export function ReportInsightsPanel({ onClose }: { onClose: () => void }) {
         </form>
       </section>}
     </motion.aside>
-  </motion.div>
+  </motion.div>, document.body)
 }

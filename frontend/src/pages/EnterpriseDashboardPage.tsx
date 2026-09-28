@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import {
   Archive,
@@ -156,7 +157,7 @@ function DelegatedTaskSheet({
       onClose();
     }
   };
-  return (
+  return createPortal(
     <div
       className="sheet-backdrop delegated-task-backdrop"
       onMouseDown={onClose}
@@ -314,7 +315,8 @@ function DelegatedTaskSheet({
           </div>
         </form>
       </aside>
-    </div>
+    </div>,
+    document.body
   );
 }
 
