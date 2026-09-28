@@ -24,13 +24,12 @@ def _sanitize_arguments(value: Any) -> Any:
     """Normalize text before schema validation; tools never receive SQL."""
     if isinstance(value, str):
         normalized = unicodedata.normalize("NFC", value)
-        if any(unicodedata.category(char).startswith("C") for char in normalized):
-            raise ValueError("INVALID_INPUT")
-        # Parameterized service calls make this defense-in-depth, but rejecting
-        # explicit SQL separators/comments prevents accidental generic-query
-        # expansion if a future adapter is added incorrectly.
-        if any(fragment in normalized.casefold() for fragment in ("--", "/*", "*/", ";")):
-            raise ValueError("INVALID_INPUT")
+        # Ordinary text (task descriptions, meeting notes) legitimately has
+        # line breaks, tabs, and punctuation such as ";". Every adapter uses
+        # parameterized queries, so only non-whitespace control characters
+        # are rejected.
+        if any(unicodedata.category(char).startswith("C") and char not in "\n\r\t" for char in normalized):
+            raise ValueError("Text arguments must not contain control characters")
         return normalized
     if isinstance(value, list):
         return [_sanitize_arguments(item) for item in value]
@@ -49,9 +48,18 @@ def _summary(result: dict, fallback: str) -> str:
         return "Authorized company-file metadata was found, but content enrichment is incomplete."
     if status == "denied":
         return "You do not have access to that resource."
+    if status == "invalid_input":
+        reason = (result.get("data") or {}).get("reason") if isinstance(result.get("data"), dict) else None
+        return f"The request could not be processed: {reason}" if reason else "The tool arguments were invalid."
     if status == "unavailable":
         return "The requested OYUNS capability is temporarily unavailable."
     return fallback
+
+
+def _failure_reason(result: dict) -> dict:
+    """Keep a failed preview's reason so the model can explain or fix it."""
+    reason = result.get("data", {}).get("reason") if isinstance(result.get("data"), dict) else None
+    return {"reason": reason} if reason else {}
 
 
 async def _directory(db, actor: ActorContext, *, query: str | None, include_inactive: bool, limit: int) -> dict:
@@ -134,13 +142,17 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
         arguments = _sanitize_arguments(arguments)
         if tool_name == "oyuns_knowledge_search":
             data = schemas.KnowledgeSearchInput.model_validate(arguments)
-            result = await enterprise_tools.execute(db, actor, "file_search_tool", {"operation": "search", "query": data.query, "search_mode": data.search_mode, "file_types": data.file_types, "limit": data.limit, "delivery": data.delivery}, channel=channel, prompt=data.query, conversation_id=conversation_id)
+            limit = data.limit if data.operation == "list" else min(data.limit, 5)
+            result = await enterprise_tools.execute(db, actor, "file_search_tool", {"operation": data.operation, "query": data.query, "search_mode": data.search_mode, "file_types": data.file_types, "limit": limit, "delivery": data.delivery}, channel=channel, prompt=data.query or "list company files", conversation_id=conversation_id)
             rows = result.get("data", {}).get("results", [])
-            items = [{"reference": resource_reference(actor, "knowledge_source", row["source_id"]), "title": row.get("title"), "excerpt": row.get("excerpt"), "locator": row.get("locator"), "classification": row.get("classification"), "content_state": row.get("content_state"), "content_type": row.get("content_type"), "extension": row.get("extension")} for row in rows]
+            items = [{"reference": resource_reference(actor, "knowledge_source", row["source_id"]), "title": row.get("title"), "kind": row.get("kind"), "excerpt": row.get("excerpt"), "locator": row.get("locator"), "classification": row.get("classification"), "content_state": row.get("content_state"), "content_type": row.get("content_type"), "extension": row.get("extension")} for row in rows]
             sources = [{"reference": item["reference"], "title": item["title"], "locator": item.get("locator")} for item in items]
             safe_deliveries = [{"reference": item["reference"], "kind": "company_file_attachment" if data.delivery == "attachment" else "authenticated_file_reference"} for item in items] if data.delivery != "none" else []
             trusted = frozenset({("items", str(index), "excerpt") for index, row in enumerate(rows) if str(row.get("source_id", "")).startswith("company_knowledge:")})
-            return envelope(result=result, request_id=request_id, summary=_summary(result, f"Found {len(items)} authorized company knowledge sources."), data={"items": items, "deliveries": safe_deliveries}, sources=sources, sanitization_policy=SanitizationPolicy(trusted_operational_paths=trusted))
+            body = {"items": items, "deliveries": safe_deliveries}
+            if result.get("status") in {"denied", "invalid_input"} and result.get("data", {}).get("reason"):
+                body["reason"] = result["data"]["reason"]
+            return envelope(result=result, request_id=request_id, summary=_summary(result, f"Found {len(items)} authorized company knowledge sources."), data=body, sources=sources, sanitization_policy=SanitizationPolicy(trusted_operational_paths=trusted))
 
         if tool_name == "oyuns_knowledge_fetch":
             data = schemas.KnowledgeFetchInput.model_validate(arguments)
@@ -255,7 +267,7 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
                 action_type = "create_task"
             result = await enterprise_tools.execute(db, actor, action_type, data.model_dump(mode="json"), channel=channel, prompt=data.title, conversation_id=conversation_id)
             pending = _safe_pending_action(actor, result.get("data", {}).get("pending_action") or {}, channel=channel)
-            safe = {"pending_action": pending} if pending else {}
+            safe = {"pending_action": pending} if pending else _failure_reason(result)
             return envelope(result=result, request_id=request_id, summary=_summary(result, "Task preview created. Ask the user to confirm it in the current channel."), data=safe)
 
         if tool_name == "oyuns_tasks_prepare_update":
@@ -268,11 +280,12 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
                 changes = {key: value for key, value in data.model_dump(exclude={"task_reference"}, exclude_none=True, mode="json").items()}
                 result = await enterprise_tools.execute(db, actor, "project_mgmt_update_tool", {"operation": "update_task", "task_id": task.id, "changes": changes}, channel=channel, prompt="MCP task update", conversation_id=conversation_id)
             pending = _safe_pending_action(actor, result.get("data", {}).get("pending_action") or {}, channel=channel)
-            return envelope(result=result, request_id=request_id, summary=_summary(result, "Task update preview created. Ask the user to confirm it in the current channel."), data={"pending_action": pending} if pending else {})
+            return envelope(result=result, request_id=request_id, summary=_summary(result, "Task update preview created. Ask the user to confirm it in the current channel."), data={"pending_action": pending} if pending else _failure_reason(result))
 
         return envelope(result={"status": "denied", "data": {}, "warnings": ["INVALID_INPUT"]}, request_id=request_id, summary="Unknown MCP tool.")
     except ValueError as exc:
-        return envelope(result={"status": "denied", "data": {}, "warnings": ["INVALID_INPUT"]}, request_id=request_id, summary=str(exc))
+        reason = enterprise_tools._input_error_reason(exc)
+        return envelope(result={"status": "invalid_input", "data": {"reason": reason}, "warnings": ["INVALID_INPUT"]}, request_id=request_id, summary=f"The request could not be processed: {reason}")
     except Exception:
         log.exception("mcp_tool_failed tool=%s", tool_name)
         return envelope(result={"status": "unavailable", "data": {}}, request_id=request_id, summary="The requested OYUNS capability is temporarily unavailable.")

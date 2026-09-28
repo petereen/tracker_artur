@@ -57,6 +57,7 @@ def _forbidden_key(key: object) -> bool:
 )
 DEFAULT_STATUS_CODE = {
     "denied": "ACCESS_DENIED",
+    "invalid_input": "INVALID_INPUT",
     "empty": "NOT_FOUND_OR_NOT_VISIBLE",
     "indexing": "CONTENT_INDEXING_PENDING",
     "partial": "CONTENT_ENRICHMENT_PARTIAL",

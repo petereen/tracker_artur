@@ -30,7 +30,7 @@ def test_tool_schemas_are_strict_and_bounded():
     with pytest.raises(ValidationError):
         FileSearchInput(query="policy", unexpected=True)
     with pytest.raises(ValidationError):
-        FileSearchInput(query="policy", limit=11)
+        FileSearchInput(query="policy", limit=31)
 
 
 def test_file_search_supports_directory_listing_without_a_query():
