@@ -7087,7 +7087,8 @@ html.capacitor-native .native-boot-error {
   max-height: 470px;
   overflow-y: auto;
 }
-.notification-list > p {
+.notification-list > p,
+.notification-list .query-region__result-layer > p {
   color: var(--color-muted);
   font-size: 0.72rem;
   margin: 0;
@@ -12738,3 +12739,473 @@ html.capacitor-native .native-boot-error {
   .page-tabs-actions > * { flex: 1 1 auto; justify-content: center; }
 }
 :is(.hr-workspace, .crm-workspace, .contract-archive-workspace, .contracts-workspace, .contract-detail) > .page-tabs { margin-bottom: 0; }
+
+/* ==========================================================================
+   Mobile-native layer (phones ≤ 800px). Kept last so it wins over the older
+   responsive rules above. `:is(html, html.capacitor-native)` lifts shell rules
+   above the Capacitor-only overrides while applying to the browser too.
+   ========================================================================== */
+:root {
+  --m-header-h: 56px;
+  --m-tabbar-h: 58px;
+  --m-sheet-radius: 22px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body { -webkit-tap-highlight-color: transparent; }
+.header-avatar, .workers-scrim { display: none; }
+
+@keyframes mobile-sheet-up { from { transform: translate3d(0, 100%, 0); } to { transform: translate3d(0, 0, 0); } }
+@keyframes mobile-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mobile-pop-in { from { opacity: 0; transform: translate3d(0, -6px, 0) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 800px) {
+  html, body { overscroll-behavior-y: none; }
+  html { scroll-padding-top: calc(var(--m-header-h) + var(--safe-area-top) + 8px); }
+  .workspace-header, .mobile-tabbar, .mobile-more-grid, .mobile-more-list, .mobile-more-profile {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* --- App bar ------------------------------------------------------------ */
+  :is(html, html.capacitor-native) .workspace-shell .workspace-sidebar,
+  :is(html, html.capacitor-native) .workspace-shell .mobile-menu-button,
+  :is(html, html.capacitor-native) .workspace-shell .sidebar-scrim { display: none; }
+  :is(html, html.capacitor-native) .workspace-shell .workspace-main { margin-left: 0; }
+  :is(html, html.capacitor-native) .workspace-shell .workspace-header {
+    background: color-mix(in srgb, var(--color-bg) 82%, transparent);
+    backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid transparent;
+    gap: 10px;
+    height: calc(var(--m-header-h) + var(--safe-area-top));
+    justify-content: flex-start;
+    padding: var(--safe-area-top) max(10px, var(--safe-area-right)) 0 max(14px, var(--safe-area-left));
+    transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease;
+  }
+  .workspace-shell .workspace-header::after { display: none; }
+  .workspace-shell .workspace-header.is-scrolled {
+    background: color-mix(in srgb, var(--color-surface) 86%, transparent);
+    border-bottom-color: var(--color-border-soft);
+    box-shadow: 0 6px 18px rgb(11 23 42 / 6%);
+  }
+  .workspace-shell .header-avatar {
+    display: flex;
+    flex: 0 0 auto;
+    font-size: .8rem;
+    height: 34px;
+    padding: 0;
+    width: 34px;
+  }
+  .workspace-shell .header-avatar:active { transform: scale(.94); }
+  .workspace-shell .workspace-header h1 {
+    flex: 1 1 auto;
+    font-size: 1.04rem;
+    font-weight: 760;
+    letter-spacing: -.02em;
+    margin: 0;
+    max-width: none;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .workspace-shell .header-actions { align-items: center; flex: 0 0 auto; gap: 2px; }
+  .workspace-shell .header-actions .workspace-mode-toggle,
+  .workspace-shell .header-actions .theme-toggle,
+  .workspace-shell .header-actions .search-trigger span,
+  .workspace-shell .header-actions .search-trigger kbd { display: none; }
+  .workspace-shell .header-actions .search-trigger,
+  .workspace-shell .header-actions .notification-trigger,
+  .workspace-shell .header-actions .ai-trigger {
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    color: var(--color-text);
+    font-size: 0;
+    gap: 0;
+    height: 40px;
+    justify-content: center;
+    min-height: 40px;
+    min-width: 40px;
+    padding: 0;
+    width: 40px;
+  }
+  .workspace-shell .header-actions .ai-trigger { background: var(--color-accent-soft); color: var(--color-accent); margin-left: 4px; }
+  .workspace-shell .header-actions :is(.search-trigger, .notification-trigger, .ai-trigger) > svg { height: 21px; margin: 0; width: 21px; }
+  .workspace-shell .header-actions :is(.search-trigger, .notification-trigger):active { background: var(--color-surface-3); }
+  .workspace-shell .header-actions .ai-trigger:active { transform: scale(.94); }
+  .workspace-shell .notification-trigger > span { right: 3px; top: 3px; }
+
+  /* --- Content ------------------------------------------------------------ */
+  :is(html, html.capacitor-native) .workspace-shell .workspace-content {
+    padding: 14px max(14px, var(--safe-area-right)) calc(var(--m-tabbar-h) + 28px + var(--safe-area-bottom)) max(14px, var(--safe-area-left));
+  }
+
+  /* --- Tab bar ------------------------------------------------------------ */
+  :is(html, html.capacitor-native) .workspace-shell .mobile-tabbar {
+    background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    backdrop-filter: blur(22px) saturate(180%);
+    border-top: 1px solid var(--color-border-soft);
+    bottom: 0;
+    box-shadow: 0 -6px 20px rgb(11 23 42 / 5%);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 0;
+    padding: 5px max(4px, var(--safe-area-right)) calc(5px + var(--safe-area-bottom)) max(4px, var(--safe-area-left));
+    position: fixed;
+    right: 0;
+    transition: transform .26s var(--ease-out);
+    z-index: 30;
+  }
+  html.keyboard-open .workspace-shell .mobile-tabbar { pointer-events: none; transform: translate3d(0, 110%, 0); }
+  .workspace-shell .mobile-tabbar a,
+  .workspace-shell .mobile-tabbar button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: var(--color-muted);
+    display: flex;
+    flex-direction: column;
+    font-size: .62rem;
+    font-weight: 650;
+    gap: 3px;
+    justify-content: center;
+    min-height: 48px;
+    min-width: 0;
+    padding: 2px 0;
+    transform: none;
+  }
+  .workspace-shell .mobile-tabbar .mobile-tab-icon {
+    align-items: center;
+    border-radius: 999px;
+    display: inline-flex;
+    height: 30px;
+    justify-content: center;
+    padding: 0;
+    position: relative;
+    transition: background-color .22s ease, color .22s ease, transform .15s ease;
+    width: min(56px, 100%);
+  }
+  .workspace-shell .mobile-tabbar :is(a, button):active .mobile-tab-icon { transform: scale(.9); }
+  .workspace-shell .mobile-tabbar :is(a, button).active { color: var(--color-text); font-weight: 760; }
+  .workspace-shell .mobile-tabbar :is(a, button).active .mobile-tab-icon { background: var(--color-accent-soft); color: var(--color-accent); }
+  .workspace-shell .mobile-tabbar .mobile-tab-icon .nav-unread-badge {
+    border: 2px solid var(--color-surface);
+    box-sizing: content-box;
+    font-size: .55rem;
+    height: 15px;
+    min-width: 15px;
+    padding: 0 3px;
+    position: absolute;
+    right: 4px;
+    top: -4px;
+  }
+  .workspace-shell .mobile-tabbar :is(a, button) > span:last-child { max-width: 100%; overflow: hidden; padding: 0 2px; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* --- Chat keeps its fixed-height layout between the bars ----------------- */
+  .workspace-content.chat-route-content { padding: 0 0 calc(var(--m-tabbar-h) + var(--safe-area-bottom)) !important; }
+  .chat-workspace { height: calc(100dvh - var(--m-header-h) - var(--m-tabbar-h) - var(--safe-area-top) - var(--safe-area-bottom)); }
+  .chat-pane-shell,
+  .chat-drawer-scrim { bottom: calc(var(--m-tabbar-h) + var(--safe-area-bottom)); top: calc(var(--m-header-h) + var(--safe-area-top)); }
+  html.keyboard-open .workspace-content.chat-route-content { padding-bottom: 0 !important; }
+  html.keyboard-open .chat-workspace { height: calc(100dvh - var(--m-header-h) - var(--safe-area-top)); }
+  html.keyboard-open .chat-pane-shell,
+  html.keyboard-open .chat-drawer-scrim { bottom: 0; }
+
+  /* --- "More" app drawer --------------------------------------------------- */
+  .mobile-more-root { inset: 0; position: fixed; z-index: 90; }
+  .mobile-more-scrim { animation: mobile-fade-in .22s ease both; background: rgb(4 6 9 / 44%); border: 0; inset: 0; position: absolute; }
+  .mobile-more-sheet {
+    animation: mobile-sheet-up .34s var(--ease-out) backwards;
+    background: var(--color-surface);
+    border-radius: var(--m-sheet-radius) var(--m-sheet-radius) 0 0;
+    bottom: 0;
+    box-shadow: 0 -14px 44px rgb(11 23 42 / 20%);
+    display: flex;
+    flex-direction: column;
+    left: 0;
+    max-height: calc(100dvh - var(--safe-area-top) - 28px);
+    outline: none;
+    padding-bottom: var(--safe-area-bottom);
+    position: absolute;
+    right: 0;
+    transition: transform .3s var(--ease-out);
+  }
+  .mobile-more-sheet.is-dragging { transition: none; }
+  .mobile-sheet-grabber { background: var(--color-border); border-radius: 99px; flex: 0 0 auto; height: 5px; margin: 8px auto 2px; width: 38px; }
+  .mobile-more-body { display: grid; gap: 14px; overflow-y: auto; overscroll-behavior: contain; padding: 8px max(16px, var(--safe-area-right)) 18px max(16px, var(--safe-area-left)); }
+  .mobile-more-profile {
+    align-items: center;
+    background: var(--color-surface-2);
+    border-radius: 16px;
+    color: var(--color-text);
+    display: grid;
+    gap: 12px;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    padding: 10px 12px;
+  }
+  .mobile-more-profile .avatar { font-size: 1rem; height: 44px; width: 44px; }
+  .mobile-more-profile strong,
+  .mobile-more-profile small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-more-profile strong { font-size: .9rem; }
+  .mobile-more-profile small { color: var(--color-muted); font-size: .7rem; margin-top: 1px; text-transform: capitalize; }
+  .mobile-more-profile > svg { color: var(--color-muted); }
+  .mobile-more-search {
+    align-items: center;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 12px;
+    color: var(--color-muted);
+    display: flex;
+    font-size: .85rem;
+    gap: 10px;
+    height: 44px;
+    padding: 0 14px;
+    text-align: left;
+  }
+  .mobile-more-grid { display: grid; gap: 14px 6px; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 2px 0; }
+  .mobile-more-grid a { align-items: center; color: var(--color-text); display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: center; }
+  .mobile-more-tile {
+    align-items: center;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 17px;
+    color: var(--color-accent);
+    display: flex;
+    height: 56px;
+    justify-content: center;
+    position: relative;
+    transition: transform .15s ease, background-color .2s ease;
+    width: 56px;
+  }
+  .mobile-more-grid a:active .mobile-more-tile { transform: scale(.9); }
+  .mobile-more-grid a.active .mobile-more-tile { background: var(--color-accent); border-color: var(--color-accent); color: #fff; }
+  .mobile-more-tile .nav-unread-badge { border: 2px solid var(--color-surface); box-sizing: content-box; height: 16px; min-width: 16px; padding: 0 3px; position: absolute; right: -6px; top: -6px; }
+  .mobile-more-label { -webkit-box-orient: vertical; display: -webkit-box; font-size: .68rem; font-weight: 650; -webkit-line-clamp: 2; line-height: 1.2; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; }
+  .mobile-more-list { background: var(--color-surface-2); border-radius: 16px; overflow: hidden; }
+  .mobile-more-row {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--color-border-soft);
+    color: var(--color-text);
+    display: flex;
+    font-size: .86rem;
+    font-weight: 620;
+    gap: 12px;
+    min-height: 52px;
+    padding: 0 14px;
+    text-align: left;
+    width: 100%;
+  }
+  .mobile-more-row:last-child { border-bottom: 0; }
+  .mobile-more-row > span { flex: 1 1 auto; }
+  .mobile-more-row > svg:first-child { color: var(--color-muted); flex: 0 0 auto; }
+  .mobile-more-row > svg:last-child:not(:first-child) { color: var(--color-muted); }
+  button.mobile-more-row:active { background: var(--color-surface-3); }
+  .mobile-more-row.danger, .mobile-more-row.danger > svg:first-child { color: var(--color-red); }
+  .mobile-more-mode { padding: 6px 8px; }
+  .mobile-more-mode:empty { display: none; }
+  .mobile-more-mode .workspace-mode-toggle { background: transparent; border: 0; gap: 12px; height: 40px; max-width: none; padding: 0 6px; width: 100%; }
+  .mobile-more-mode .workspace-mode-toggle .workspace-mode-copy { display: flex; }
+  .mobile-more-mode .workspace-mode-toggle .workspace-mode-copy strong { font-size: .84rem; }
+  .mobile-more-mode .workspace-mode-toggle .workspace-mode-copy small { font-size: .68rem; }
+  .mobile-more-mode .workspace-mode-toggle .workspace-mode-icon { height: 26px; width: 26px; }
+  .mobile-more-mode .workspace-mode-toggle .workspace-mode-track { display: inline-flex; height: 26px; width: 44px; }
+  .mobile-more-mode .workspace-mode-toggle .workspace-mode-track i { height: 22px; width: 22px; }
+  .mobile-more-mode .workspace-mode-toggle.is-manager .workspace-mode-track i { transform: translateX(18px); }
+  .mobile-switch { background: var(--color-border); border-radius: 99px; flex: 0 0 auto; height: 26px; padding: 2px; position: relative; transition: background-color .2s ease; width: 44px; }
+  .mobile-switch::after { background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgb(0 0 0 / 25%); content: ""; display: block; height: 22px; transition: transform .22s var(--ease-out); width: 22px; }
+  .mobile-switch.on { background: var(--color-accent); }
+  .mobile-switch.on::after { transform: translateX(18px); }
+
+  /* --- Workers directory becomes a bottom sheet ---------------------------- */
+  .workspace-shell .workers-toggle { display: none; }
+  .workspace-shell .workers-drawer:not(.open) { display: none; }
+  .workspace-shell .workers-drawer.open {
+    animation: mobile-sheet-up .34s var(--ease-out) backwards;
+    background: var(--color-surface);
+    border: 0;
+    border-radius: var(--m-sheet-radius) var(--m-sheet-radius) 0 0;
+    bottom: 0;
+    box-shadow: 0 -14px 44px rgb(11 23 42 / 20%);
+    height: auto;
+    left: 0;
+    max-height: calc(100dvh - var(--safe-area-top) - 40px);
+    padding-bottom: var(--safe-area-bottom);
+    right: 0;
+    top: auto;
+    width: auto;
+    z-index: 90;
+  }
+  .workspace-shell .workers-drawer.open .workers-content { padding: 18px max(16px, var(--safe-area-right)) 16px max(16px, var(--safe-area-left)); transform: none; }
+  .workspace-shell .worker-list > button { min-height: 56px; }
+  .workers-scrim { animation: mobile-fade-in .22s ease both; background: rgb(4 6 9 / 44%); border: 0; display: block; inset: 0; position: fixed; z-index: 89; }
+
+  /* --- Page sheets & drawers slide up from the bottom ---------------------- */
+  .sheet-backdrop > .detail-sheet,
+  .sheet-backdrop > .archive-sheet {
+    align-self: flex-end;
+    animation: mobile-sheet-up .34s var(--ease-out) backwards;
+    border-left: 0;
+    border-radius: var(--m-sheet-radius) var(--m-sheet-radius) 0 0;
+    border-top: 1px solid var(--color-border);
+    height: calc(100% - var(--safe-area-top) - 12px);
+    max-height: calc(100% - var(--safe-area-top) - 12px);
+    max-width: none;
+    padding-bottom: calc(24px + var(--safe-area-bottom));
+    width: 100%;
+  }
+  .hr-drawer-backdrop .hr-drawer.hr-drawer {
+    animation: mobile-sheet-up .34s var(--ease-out) backwards;
+    border-radius: var(--m-sheet-radius) var(--m-sheet-radius) 0 0;
+    bottom: 0;
+    height: calc(100% - var(--safe-area-top) - 12px);
+    left: 0;
+    max-width: none;
+    right: 0;
+    top: auto;
+    width: 100%;
+  }
+  .ui-modal-backdrop.fixed { align-items: flex-end; animation: mobile-fade-in .2s ease both; }
+  .ui-modal-backdrop .ui-modal {
+    animation: mobile-sheet-up .34s var(--ease-out) backwards;
+    border-radius: var(--m-sheet-radius) var(--m-sheet-radius) 0 0;
+    max-height: calc(100dvh - var(--safe-area-top) - 24px);
+    max-width: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 22px max(18px, var(--safe-area-right)) calc(22px + var(--safe-area-bottom)) max(18px, var(--safe-area-left));
+  }
+
+  /* --- Header popovers, search & assistant --------------------------------- */
+  .workspace-shell .notification-center .notification-popover {
+    animation: mobile-pop-in .2s var(--ease-out) backwards;
+    border-radius: 18px;
+    left: 8px;
+    max-height: calc(100dvh - var(--m-header-h) - var(--m-tabbar-h) - var(--safe-area-top) - var(--safe-area-bottom) - 24px);
+    position: fixed;
+    right: 8px;
+    top: calc(var(--m-header-h) + var(--safe-area-top) + 4px);
+    width: auto;
+  }
+  .command-backdrop { padding-top: calc(var(--safe-area-top) + 10px); }
+  .command-panel { border-radius: 18px; max-height: calc(100dvh - var(--safe-area-top) - 20px); width: calc(100% - 16px); }
+  .border-beam.assistant-panel-beam {
+    --border-beam-radius: var(--m-sheet-radius);
+    animation: mobile-sheet-up .34s var(--ease-out) backwards;
+    bottom: 0;
+    height: calc(100dvh - var(--safe-area-top) - 12px);
+    left: 0;
+    right: 0;
+    width: 100%;
+  }
+  .assistant-panel { border-radius: var(--m-sheet-radius) var(--m-sheet-radius) 0 0; padding-bottom: var(--safe-area-bottom); }
+
+  /* --- Pull to refresh ----------------------------------------------------- */
+  .pull-refresh-indicator {
+    left: 50%;
+    pointer-events: none;
+    position: fixed;
+    top: calc(var(--m-header-h) + var(--safe-area-top) - 40px);
+    z-index: 19;
+  }
+  .pull-refresh-indicator > span:first-child {
+    align-items: center;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 50%;
+    box-shadow: 0 6px 18px rgb(11 23 42 / 16%);
+    color: var(--color-accent);
+    display: flex;
+    height: 38px;
+    justify-content: center;
+    width: 38px;
+  }
+  .pull-refresh-indicator.is-refreshing svg { animation: ptr-spin .75s linear infinite; }
+
+  /* --- Page-level patterns ------------------------------------------------- */
+  .segmented-control { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .segmented-control::-webkit-scrollbar { display: none; }
+  .segmented-control > * { flex: 0 0 auto; }
+}
+
+@media (max-width: 640px) {
+  /* Settings hub reads as a grouped iOS-style list instead of a squeezed card grid. */
+  .settings-category-grid { gap: 0; grid-template-columns: minmax(0, 1fr); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 16px; overflow: hidden; }
+  .settings-category-grid a { align-items: center; border: 0; border-bottom: 1px solid var(--color-border-soft); border-radius: 0; gap: 14px; min-height: 60px; padding: 12px 14px; }
+  .settings-category-grid a:last-child { border-bottom: 0; }
+  .settings-category-grid a::after { color: var(--color-muted); content: "›"; font-size: 1.4rem; line-height: 1; margin-left: auto; }
+  .settings-category-grid a > svg { flex: 0 0 auto; }
+  .settings-category-grid a strong { font-size: .88rem; }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* 16px text inputs stop iOS Safari from zooming the page on focus. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea { font-size: max(16px, 1em); font-weight: 500; }
+  /* Hover lifts feel broken on touch (they stick after a tap); use press feedback instead. */
+  .admin-hub a:hover, .settings-category-grid a:hover, .project-card:hover, .kanban-card:hover, .panel:hover { transform: none; }
+  :is(.primary-action, .secondary-action, .workspace-btn, .admin-hub a, .settings-category-grid a, .project-card, .worker-list > button, .today-task-row):active:not(:disabled) {
+    transform: scale(.975);
+    transition: transform .1s ease;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-more-sheet, .mobile-more-scrim, .workers-scrim, .workspace-shell .workers-drawer.open,
+  .sheet-backdrop > .detail-sheet, .sheet-backdrop > .archive-sheet, .hr-drawer-backdrop .hr-drawer.hr-drawer,
+  .ui-modal-backdrop .ui-modal, .border-beam.assistant-panel-beam, .workspace-shell .notification-center .notification-popover { animation: none; }
+  .workspace-shell .mobile-tabbar, .mobile-more-sheet { transition: none; }
+}
+
+/* Mobile pass over features merged from origin/master (report policy, voice call, page tabs, kanban drag). */
+@media (max-width: 800px) {
+  /* Icon-only toolbar actions get their label back on phones. */
+  .report-toolbar-actions { gap: 10px; margin-left: 0; width: 100%; }
+  .report-toolbar-actions > .archive-icon-action { flex: 1 1 0; gap: 8px; justify-content: center; min-height: 44px; padding: 0 12px; width: auto; }
+  .report-toolbar-actions > .archive-icon-action::after,
+  .contract-new-document-button[title]::after { content: attr(title); font-size: .8rem; font-weight: 700; white-space: nowrap; }
+  .contract-new-document-button[title] { align-items: center; display: inline-flex; flex-direction: row; gap: 8px; min-height: 44px; padding: 0 14px; text-decoration: none; width: auto; }
+
+  /* Report policy settings: grid tracks must be allowed to shrink below their inputs' min-content. */
+  .report-policy-settings, .report-policy-block { grid-template-columns: minmax(0, 1fr); }
+  .report-policy-settings .report-custom-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-policy-settings .report-custom-form > :is(:first-child, :nth-child(4), :last-child) { grid-column: 1 / -1; }
+  .report-policy-settings .report-custom-form > button { justify-content: center; min-height: 44px; }
+  .report-policy-settings :is(.report-custom-form, .report-reminder-days) :is(input, select) { min-width: 0; width: 100%; }
+  .report-policy-settings .report-reminder-days input { flex: 0 0 88px; }
+  .report-policy-settings .report-department-list { grid-template-columns: minmax(0, 1fr); }
+  .report-policy-settings .report-frequency-picker { min-width: 0; }
+  .report-policy-actions > button { min-height: 44px; width: 100%; }
+
+  /* In-page tabs: full-height touch targets. */
+  .page-tabs-list > :is(a, button) { min-height: 44px; }
+
+  /* Long-press to drag a kanban card must not open the iOS link/callout menu. */
+  .kanban-card.is-draggable { -webkit-touch-callout: none; }
+
+  /* OYUNS voice call is a full-screen call screen on phones. */
+  body > .oyuns-voice-overlay { align-items: stretch; background: var(--color-surface); padding: 0; }
+  .oyuns-voice-overlay .oyuns-voice-card {
+    animation: mobile-sheet-up .34s var(--ease-out) backwards;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    grid-template-rows: auto 1fr auto auto auto;
+    max-width: none;
+    padding: calc(16px + var(--safe-area-top)) max(20px, var(--safe-area-right)) calc(28px + var(--safe-area-bottom)) max(20px, var(--safe-area-left));
+  }
+  .oyuns-voice-card .oyuns-voice-orb { align-self: center; width: min(58vw, 220px); }
+  .oyuns-voice-card .oyuns-voice-status { font-size: .9rem; }
+  .oyuns-voice-card .oyuns-voice-transcript { max-height: 28dvh; }
+  .oyuns-voice-card .oyuns-voice-controls { gap: 28px; }
+  .oyuns-voice-card .oyuns-voice-controls button { height: 64px; width: 64px; }
+  .oyuns-voice-card .oyuns-voice-controls button svg { height: 26px; width: 26px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .oyuns-voice-overlay .oyuns-voice-card { animation: none; }
+}

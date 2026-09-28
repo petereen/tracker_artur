@@ -1,4 +1,4 @@
-import { StrictMode, type ReactNode } from 'react'
+import { StrictMode, useEffect, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
@@ -26,7 +26,28 @@ const queryClient = new QueryClient({
 
 function ThemedRoot({ children }: { children: ReactNode }) {
   const mode = useColorThemeStore((state) => state.theme)
+  useEffect(() => {
+    // Browser chrome (Android address bar, installed-app status bar) follows the app theme.
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', mode === 'dark' ? '#0b172a' : '#f4f6fa')
+  }, [mode])
   return <Theme theme={oyunsTheme} mode={mode}>{children}</Theme>
+}
+
+const PHONE_QUERY = '(max-width: 800px)'
+
+function AppToaster() {
+  const [phone, setPhone] = useState(() => window.matchMedia(PHONE_QUERY).matches)
+  useEffect(() => {
+    const query = window.matchMedia(PHONE_QUERY)
+    const onChange = () => setPhone(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+  return <Toaster
+    position={phone ? 'top-center' : 'top-right'}
+    containerStyle={phone ? { top: 'calc(10px + env(safe-area-inset-top))' } : undefined}
+    toastOptions={{ style: { background: '#161B22', color: '#E6EDF3', border: '1px solid #30363D', ...(phone ? { borderRadius: '14px', maxWidth: 'calc(100vw - 24px)' } : {}) } }}
+  />
 }
 
 createRoot(document.getElementById('root')!).render(
@@ -34,7 +55,7 @@ createRoot(document.getElementById('root')!).render(
     <ThemedRoot>
       <QueryClientProvider client={queryClient}>
         <NativeBootBoundary><App /></NativeBootBoundary>
-        <Toaster position="top-right" toastOptions={{ style: { background: '#161B22', color: '#E6EDF3', border: '1px solid #30363D' } }} />
+        <AppToaster />
       </QueryClientProvider>
     </ThemedRoot>
   </StrictMode>,

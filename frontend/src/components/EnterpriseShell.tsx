@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 import { api } from '../api/client'
 import {
   BarChart3, BriefcaseBusiness, Calculator, Handshake, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine, UserRoundCog,
-  FolderArchive, LayoutDashboard, LogOut, Menu, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
+  FolderArchive, LayoutDashboard, LayoutGrid, LogOut, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { acknowledgeChatReceipt, useActor, useBrandingSettings, useChatUnreadCount, useEnterpriseLogout, useERPMetadata, useOpenDirectConversation, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { useCRMCapabilities } from '../api/crm'
@@ -15,6 +15,8 @@ import { periodFromPreset } from './TimePeriodFilter'
 import { WorkspaceModeProvider } from './WorkspaceModeProvider'
 import { WorkspaceModeToggle } from './WorkspaceModeToggle'
 import { WorkspaceRouteSkeleton } from './Loading'
+import { MobileMoreSheet } from './MobileMoreSheet'
+import { PullToRefresh } from './PullToRefresh'
 import { getRealtimeUrl, resolvePublicAssetUrl, safeLocalStorage, safeSessionStorage } from '../platform/runtime'
 import { useColorThemeStore } from '../store/colorTheme'
 import { showDesktopChatAlert } from '../platform/chat-notifications'
@@ -57,6 +59,7 @@ const TITLES: Record<string, string> = {
   '/administration/organization/profile': 'Байгууллагын профайл / Company Profile',
   '/administration/organization/modules': 'Модуль ба боломжууд / Modules & Features',
   '/administration/workflows/worktime': 'Ажлын цаг ба процесс / Worktime & Processes',
+  '/administration/workflows/reports': 'Тайлангийн тохиргоо / Report Settings',
   '/administration/people/users': 'Ажилтан ба хэрэглэгч / Employees & Users',
   '/administration/people/permissions': 'Үүрэг ба эрх / Roles & Permissions',
   '/administration/integrations/overview': 'Интеграци ба төхөөрөмж / Integrations & Devices',
@@ -164,15 +167,49 @@ export function EnterpriseShell() {
   const unreadChat = useChatUnreadCount(Boolean(token))
   const openDirectChat = useOpenDirectConversation()
 
+  const [headerScrolled, setHeaderScrolled] = useState(false)
   useEffect(() => setMobileOpen(false), [location.pathname])
   useEffect(() => {
-    if (!mobileOpen) return
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMobileOpen(false) }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    document.addEventListener('keydown', closeOnEscape)
-    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', closeOnEscape) }
-  }, [mobileOpen])
+    let frame = 0
+    const onScroll = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => { frame = 0; setHeaderScrolled(window.scrollY > 4) })
+    }
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { window.removeEventListener('scroll', onScroll); if (frame) window.cancelAnimationFrame(frame) }
+  }, [])
+  useEffect(() => {
+    // Phones: hide the tab bar while the on-screen keyboard is up, like native apps do. A focused
+    // field alone isn't enough (autofocus shows no keyboard), so also require the viewport to shrink.
+    const root = document.documentElement
+    const viewport = window.visualViewport
+    const coarse = window.matchMedia?.('(pointer: coarse)')
+    const isEditable = (node: Element | null) => node instanceof HTMLElement && (node.isContentEditable || (node.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'submit', 'file', 'color'].includes((node as HTMLInputElement).type)) || node.tagName === 'TEXTAREA')
+    const height = () => viewport?.height ?? window.innerHeight
+    let baseline = height()
+    let baselineWidth = window.innerWidth
+    const update = () => {
+      const current = height()
+      const editing = isEditable(document.activeElement)
+      if (window.innerWidth !== baselineWidth) { baselineWidth = window.innerWidth; baseline = current }
+      if (!editing) baseline = current
+      baseline = Math.max(baseline, current)
+      root.classList.toggle('keyboard-open', Boolean(coarse?.matches) && editing && baseline - current > 150)
+    }
+    const deferredUpdate = () => window.setTimeout(update, 80)
+    viewport?.addEventListener('resize', update)
+    window.addEventListener('resize', update)
+    document.addEventListener('focusin', deferredUpdate)
+    document.addEventListener('focusout', deferredUpdate)
+    return () => {
+      viewport?.removeEventListener('resize', update)
+      window.removeEventListener('resize', update)
+      document.removeEventListener('focusin', deferredUpdate)
+      document.removeEventListener('focusout', deferredUpdate)
+      root.classList.remove('keyboard-open')
+    }
+  }, [])
   useEffect(() => {
     const normalizedRoute = location.pathname
       .replace(/\/\d+(?=\/|$)/g, '/:id')
@@ -239,7 +276,11 @@ export function EnterpriseShell() {
   const workerPerformance = useWorkerPerformance(selectedWorker, periodFromPreset('week'), canReviewWorkers)
   const workerProfile = useWorkerProfile(selectedWorker)
   const visibleWorkers = useMemo(() => (workers.data ?? []).filter((worker) => worker.name.toLowerCase().includes(workerSearch.toLowerCase())), [workerSearch, workers.data])
-  const title = TITLES[location.pathname] ?? 'OYUNS Workspace'
+  const title = useMemo(() => {
+    if (TITLES[location.pathname]) return TITLES[location.pathname]
+    const section = Object.keys(TITLES).filter((path) => path !== '/' && location.pathname.startsWith(`${path}/`)).sort((a, b) => b.length - a.length)[0]
+    return section ? TITLES[section] : 'OYUNS Workspace'
+  }, [location.pathname])
   const logo = theme === 'dark' ? branding.data?.dark_logo : branding.data?.light_logo
   const commandChannels = useMemo(() => [...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }].map((item) => ({ id: item.to, type: 'channel' as const, title: 'settings' in item ? String(item.label) : t(item.label), subtitle: 'Workspace section', icon: item.icon, run: () => navigate(item.to) })), [nav, navigate, t])
   const commandFeatures = useMemo(() => [
@@ -254,6 +295,11 @@ export function EnterpriseShell() {
     { id: 'profile', type: 'feature' as const, title: 'Open profile', subtitle: 'Manage your account', icon: UserCircle2, run: () => navigate('/profile') },
   ], [navigate, roles])
   const mobileNav = useMemo(() => ['/', '/calendar', '/tasks', '/chat'].map((to) => nav.find((item) => item.to === to)).filter(Boolean) as typeof nav, [nav])
+  const moreNav = useMemo(() => nav.filter((item) => !mobileNav.includes(item)), [mobileNav, nav])
+  const moreActive = !mobileNav.some((item) => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to))
+  const unreadCount = unreadChat.data?.unread_count ?? 0
+  const isChatRoute = location.pathname.startsWith('/chat')
+  const avatarContent = actorQuery.data?.avatar_url ? <img src={resolvePublicAssetUrl(actorQuery.data.avatar_url) || undefined} alt="" /> : actorQuery.data?.name?.[0]?.toUpperCase() ?? actorQuery.data?.email?.[0]?.toUpperCase() ?? 'O'
   const openWorkerChat = async (employeeId: number) => {
     try {
       const conversation = await openDirectChat.mutateAsync({ employee_id: employeeId })
@@ -303,9 +349,8 @@ export function EnterpriseShell() {
     <WorkspaceModeProvider>
     <RealtimeProvider>
       <div className="workspace-shell">
-        <button className="mobile-menu-button" onClick={() => setMobileOpen(true)} aria-label="Цэс нээх" aria-expanded={mobileOpen}><Menu /></button>
-        <aside className={`workspace-sidebar ${mobileOpen ? 'is-open' : ''}`}>
-          <div className="sidebar-brand"><img src={logo || (theme === 'dark' ? '/oyuns-aio-logo.png' : '/favicon.png')} alt="OYUNS" /><button onClick={() => setMobileOpen(false)} aria-label="Цэс хаах"><X /></button></div>
+        <aside className="workspace-sidebar">
+          <div className="sidebar-brand"><img src={logo || (theme === 'dark' ? '/oyuns-aio-logo.png' : '/favicon.png')} alt="OYUNS" /></div>
           <nav aria-label="Үндсэн цэс">
             {nav.map(({ to, label, icon: Icon }) => (
               <div className={NAV_GROUP_BREAKS.has(to) ? 'nav-group nav-group-break' : 'nav-group'} key={to}>
@@ -318,15 +363,15 @@ export function EnterpriseShell() {
           <div className="sidebar-footer">
             <NavLink to="/company-files" className={({ isActive }) => isActive ? 'sidebar-library-link active' : 'sidebar-library-link'}><FolderArchive size={17} /><span>{t('nav.companyFiles')}</span></NavLink>
             <div className="sidebar-profile">
-              <button className="avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{actorQuery.data?.avatar_url ? <img src={resolvePublicAssetUrl(actorQuery.data.avatar_url) || undefined} alt="" /> : actorQuery.data?.name?.[0]?.toUpperCase() ?? actorQuery.data?.email?.[0]?.toUpperCase() ?? 'O'}</button>
+              <button className="avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{avatarContent}</button>
               <button className="profile-identity" onClick={() => navigate('/profile')}><strong>{actorQuery.data?.name ?? actorQuery.data?.email ?? '…'}</strong><span>{roles[0] ?? 'member'}</span></button>
               <button onClick={() => logout.mutate()} aria-label={t('action.logout')}><LogOut size={17} /></button>
             </div>
           </div>
         </aside>
-        {mobileOpen && <button className="sidebar-scrim" onClick={() => setMobileOpen(false)} aria-label="Цэс хаах" />}
         <main className="workspace-main">
-          <header className="workspace-header">
+          <header className={`workspace-header ${headerScrolled ? 'is-scrolled' : ''}`}>
+            <button className="avatar header-avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{avatarContent}</button>
             <h1>{title}</h1>
             <div className="header-actions">
               <WorkspaceModeToggle />
@@ -336,20 +381,35 @@ export function EnterpriseShell() {
               <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>
             </div>
           </header>
-          <div className={`workspace-content ${location.pathname.startsWith('/chat') ? 'chat-route-content' : ''}`}><Suspense fallback={<WorkspaceRouteSkeleton pathname={location.pathname} />}><Outlet /></Suspense></div>
+          <PullToRefresh enabled={!isChatRoute} />
+          <div className={`workspace-content ${isChatRoute ? 'chat-route-content' : ''}`}><Suspense fallback={<WorkspaceRouteSkeleton pathname={location.pathname} />}><Outlet /></Suspense></div>
         </main>
         <nav className="mobile-tabbar" aria-label="Шуурхай цэс">
           {mobileNav.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => isActive ? 'active' : ''}>
-              <span className="mobile-tab-icon"><Icon size={19} strokeWidth={1.9} aria-hidden />{to === '/chat' && Boolean(unreadChat.data?.unread_count) && <b className="nav-unread-badge">{(unreadChat.data?.unread_count ?? 0) > 99 ? '99+' : unreadChat.data?.unread_count}</b>}</span>
+            <NavLink key={to} to={to} end={to === '/'} onTouchStart={() => preloadRoute(to)} onClick={() => { if (location.pathname === to) window.scrollTo({ top: 0, behavior: 'smooth' }) }} className={({ isActive }) => isActive ? 'active' : ''}>
+              <span className="mobile-tab-icon"><Icon size={20} strokeWidth={1.9} aria-hidden />{to === '/chat' && unreadCount > 0 && <b className="nav-unread-badge" aria-label={`${unreadCount} уншаагүй чат`}>{unreadCount > 99 ? '99+' : unreadCount}</b>}</span>
               <span>{t(label)}</span>
             </NavLink>
           ))}
-          <button onClick={() => setMobileOpen(true)} aria-label="Бусад цэс нээх">
-            <Menu size={20} aria-hidden />
+          <button className={mobileOpen || moreActive ? 'active' : ''} onClick={() => setMobileOpen(true)} aria-label="Бусад цэс нээх" aria-expanded={mobileOpen} aria-haspopup="dialog">
+            <span className="mobile-tab-icon"><LayoutGrid size={20} strokeWidth={1.9} aria-hidden /></span>
             <span>Бусад</span>
           </button>
         </nav>
+        <MobileMoreSheet
+          open={mobileOpen}
+          onClose={() => setMobileOpen(false)}
+          items={moreNav}
+          unreadChat={unreadCount}
+          actor={actorQuery.data}
+          role={roles[0]}
+          theme={theme}
+          onToggleTheme={() => setTheme((current) => current === 'light' ? 'dark' : 'light')}
+          onSearch={() => setCommandOpen(true)}
+          onWorkers={() => setWorkersOpen(true)}
+          onLogout={() => logout.mutate()}
+        />
+        {workersOpen && <button type="button" className="workers-scrim" aria-label="Ажилтны жагсаалт хаах" onClick={() => setWorkersOpen(false)} />}
         <aside ref={workersDrawerRef} className={`workers-drawer ${workersOpen ? 'open' : ''} ${workersDragging ? 'is-dragging' : ''}`} style={{ '--workers-toggle-y': `${workersToggleY}px` } as React.CSSProperties} aria-label="Ажилтны төлөв"><button ref={workersToggleRef} className="workers-toggle" onPointerDown={handleWorkersPointerDown} onPointerMove={handleWorkersPointerMove} onPointerUp={finishWorkersPointer} onPointerCancel={finishWorkersPointer} onClick={handleWorkersClick} aria-label="Ажилтны жагсаалт нээх"><ChevronLeft /><Users2 /></button><div className="workers-content"><header><div><span className="eyebrow">OYUNS</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)} aria-label="Ажилтны жагсаалт хаах"><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={resolvePublicAssetUrl(worker.avatar_url) || undefined} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Ажлын алба оруулаагүй'}</p><div className="worker-chat-actions"><button className="worker-inapp-chat" disabled={!workerProfile.data?.chat_available || openDirectChat.isPending} onClick={() => selectedWorker && openWorkerChat(selectedWorker)}>Чатлах</button>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer" aria-label="Telegram-аар чатлах" title="Telegram-аар чатлах"><Send size={17} /></a>}</div>{!workerProfile.data?.chat_available && <small className="worker-chat-hint">Workspace хандалт холбосны дараа чатлах боломжтой.</small>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div></aside>
         {assistantOpen && <Suspense fallback={null}><LazyOyunsAssistant open onClose={() => setAssistantOpen(false)} /></Suspense>}
         {commandOpen && <Suspense fallback={null}><LazyGlobalCommandBar open onClose={() => setCommandOpen(false)} accountId={actorQuery.data?.id} channels={commandChannels} features={commandFeatures} onWorker={(id) => { setSelectedWorker(id); setWorkersOpen(true) }} /></Suspense>}

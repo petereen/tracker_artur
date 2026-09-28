@@ -728,6 +728,7 @@ export function EnterpriseTasksPage() {
   };
   const onDragStart = (event: DragStartEvent) => {
     setActiveDragId(Number(event.active.id));
+    if (event.activatorEvent.type.startsWith("touch")) navigator.vibrate?.(10);
   };
   const onDragEnd = (event: DragEndEvent) => {
     setActiveDragId(null);
