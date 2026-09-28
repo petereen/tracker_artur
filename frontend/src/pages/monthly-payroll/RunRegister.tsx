@@ -17,6 +17,7 @@ import {
 } from './shared'
 import { plainNumber } from '../../utils/numbers'
 import { RowDrawer } from './RowDrawer'
+import { WorkedHoursInfo } from './WorkedHoursInfo'
 
 type Row = MonthlyPayrollRunRow
 type Kind = 'text' | 'money' | 'hours' | 'days'
@@ -115,7 +116,8 @@ function Cell({ column, row, index, editing }: { column: Column; row: Row; index
   const manual = column.manual?.(row)
   const body = <>{content}{manual && <span className="mp-manual-dot" title="Гараар зассан" aria-label="Гараар зассан" />}</>
   if (column.sticky === 'index' || column.sticky === 'name') return <th scope="row" className={classes}>{body}</th>
-  return <td className={classes}>{overtimeCell && !editing ? <OvertimeInfo row={row}>{body}</OvertimeInfo> : body}</td>
+  // Worked hours carry their own per-day breakdown (overtime days included).
+  return <td className={classes}>{overtimeCell && column.key !== 'worked_normal_hours' && !editing ? <OvertimeInfo row={row}>{body}</OvertimeInfo> : body}</td>
 }
 
 type MenuItem = { label: string; icon?: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; hidden?: boolean; file?: boolean }
@@ -249,7 +251,6 @@ export function RunRegister({ runId }: { runId: number }) {
   ]
   // Plan §7.2 Excel order. Advance rows show the same month columns from their
   // full-month projection, so Суутгалын дүн = урьдчилгаа + НДШ + ХХОАТ + хоол унаа + бусад there.
-  const workedTitle = (row: Row) => isFinal ? undefined : `${data?.cutoff_date || 'Таслах өдөр'} хүртэл ${formatHours(row.inputs.worked_to_date_hours)} цаг + үлдсэн ${formatHours(row.inputs.projected_remaining_hours)} цаг`
   const advanceTitle = (row: Row) => isFinal
     ? ((row.result.advance_lines || []).length ? `${row.result.advance_lines.length} батлагдсан урьдчилгааны бодолтоос` : undefined)
     : [
@@ -259,7 +260,7 @@ export function RunRegister({ runId }: { runId: number }) {
   const monthColumns: Column[] = [
     { key: 'planned_days', label: 'Өдөр', group: 'Ажиллах', kind: 'days', value: (row) => row.result.planned_days ?? '—' },
     { key: 'planned_hours', label: 'Цаг', group: 'Ажиллах', kind: 'hours', value: (row) => row.result.planned_hours },
-    { key: 'worked_normal_hours', label: 'Ажилласан цаг', kind: 'hours', short: true, value: (row) => row.inputs.worked_normal_hours, manual: (row) => sourceDiffers(row, 'worked_normal_hours'), render: (row, isEditing) => isEditing ? numberInput('Ажилласан цаг', draft.worked_normal_hours, (value) => setDraftValue('worked_normal_hours', value)) : <span title={workedTitle(row)}>{formatHours(row.inputs.worked_normal_hours)}</span> },
+    { key: 'worked_normal_hours', label: 'Ажилласан цаг', kind: 'hours', short: true, value: (row) => row.inputs.worked_normal_hours, manual: (row) => sourceDiffers(row, 'worked_normal_hours'), render: (row, isEditing) => isEditing ? numberInput('Ажилласан цаг', draft.worked_normal_hours, (value) => setDraftValue('worked_normal_hours', value)) : <WorkedHoursInfo row={row} isFinal={isFinal} cutoff={data?.cutoff_date}>{formatHours(row.inputs.worked_normal_hours)}</WorkedHoursInfo> },
     { key: 'worked_days', label: 'Ажилласан өдөр', kind: 'days', value: (row) => row.inputs.worked_days ?? monthFigures(row).allowance_days, manual: (row) => sourceDiffers(row, 'worked_days'), render: (row, isEditing) => isEditing ? numberInput('Ажилласан өдөр', draft.worked_days, (value) => setDraftValue('worked_days', value)) : (row.inputs.worked_days == null ? '—' : formatHours(row.inputs.worked_days)) },
     { key: 'base_pay', label: 'Тооцсон цалин', kind: 'money', value: (row) => monthFigures(row).base_pay },
     { key: 'overtime_hours', label: 'Илүү цаг', kind: 'hours', value: overtimeTotal, manual: (row) => sourceDiffers(row, 'overtime_hours'), render: (row, isEditing) => isEditing ? <span className="mp-ot-edit">{BUCKETS.map((bucket) => <label key={bucket.key} title={bucket.label}><b className={`mp-ot-mark ${bucket.key}`}>{bucket.mark}</b><input className="mp-inline-input" aria-label={bucket.label} type="text" inputMode="decimal" value={String(draft.overtime_hours?.[bucket.key] ?? '')} onChange={(event) => setDraftValue('overtime_hours', { ...draft.overtime_hours, [bucket.key]: event.target.value.replace(/[^\d.]/g, '') })} /></label>)}</span> : formatHours(overtimeTotal(row)) },
@@ -343,13 +344,13 @@ export function RunRegister({ runId }: { runId: number }) {
     { label: 'Дахин бодох', icon: <RefreshCw size={13} />, hidden: !editable || !capabilities.calculate, disabled: calculate.isPending, onClick: () => runAction(calculate.mutateAsync(runId), 'Дахин бодлоо (батлагдсан мөр өөрчлөгдөөгүй)') },
     { label: 'Ажилтан нэмэх', icon: <UserPlus size={13} />, hidden: !editable || isFinal, onClick: () => setAdding((value) => !value) },
     { label: 'Урьдчилгаа дахин татах', icon: <RefreshCw size={13} />, hidden: !editable || !isFinal, disabled: refreshAdvances.isPending, onClick: () => runAction(refreshAdvances.mutateAsync(runId), 'Урьдчилгаа дахин татагдлаа') },
-    { label: 'Оролтын загвар (Excel)', icon: <Download size={13} />, hidden: !editable || !capabilities.export, onClick: () => { downloadMonthlyPayrollInputTemplate(runId).catch((error) => toast.error(requestError(error))) } },
-    { label: 'Excel оролт оруулах', icon: <Upload size={13} />, hidden: !editable, disabled: importInputs.isPending, onClick: () => fileRef.current?.click() },
+    { label: 'Import template татах(Excel)', icon: <Download size={13} />, hidden: !editable || !capabilities.export, onClick: () => { downloadMonthlyPayrollInputTemplate(runId).catch((error) => toast.error(requestError(error))) } },
+    { label: 'Import (Excel)', icon: <Upload size={13} />, hidden: !editable, disabled: importInputs.isPending, onClick: () => fileRef.current?.click() },
     { label: 'Батлалт цуцлах', hidden: !(data.status === 'approved' && monthOpen && capabilities.approve), disabled: unapprove.isPending, onClick: () => runAction(unapprove.mutateAsync(runId), 'Батлалт цуцлагдлаа') },
     { label: 'Төлсөнийг буцаах', hidden: !(data.status === 'paid' && monthOpen && capabilities.pay), disabled: unpay.isPending, onClick: () => runAction(unpay.mutateAsync(runId), 'Төлөөгүй болголоо') },
     { label: 'Дахин нээх', icon: <LockKeyhole size={13} />, hidden: !(['approved', 'paid'].includes(data.status) && monthOpen && capabilities.administer), disabled: reopen.isPending, onClick: reopenRun },
     { label: 'Сар хаах', icon: <LockKeyhole size={13} />, hidden: !(isFinal && monthOpen), onClick: () => navigate(`/erp/payroll/monthly?month=${monthValue}&close=1`) },
-    { label: 'Архив', onClick: () => navigate('/erp/payroll/monthly/archive') },
+    { label: 'Архивлах', onClick: () => navigate('/erp/payroll/monthly/archive') },
     { label: 'Бодолт устгах', icon: <Trash2 size={13} />, danger: true, hidden: !canDelete, disabled: deleteRun.isPending, onClick: removeRun },
   ]
 
@@ -419,7 +420,7 @@ export function RunRegister({ runId }: { runId: number }) {
     {header}
     {isFinal && <ul className="mp-checklist" aria-label="Сүүл цалингийн шалгах жагсаалт">{checklist.map((item) => <li key={item.label} className={item.done ? 'done' : 'pending'}>{item.done ? <Check size={12} /> : <CircleAlert size={12} />}{item.label}<small>{item.detail}</small></li>)}</ul>}
     {notices}
-    <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) importInputs.mutate(file, { onSuccess: (result) => toast.success(`${result.updated_rows} мөр шинэчлэгдлээ`), onError: (error) => toast.error(requestError(error)) }); event.currentTarget.value = '' }} />
+    <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) importInputs.mutate(file, { onSuccess: (result) => result.updated_rows ? toast.success(`${result.updated_rows} мөр шинэчлэгдлээ`) : toast('Өөрчлөгдсөн нүд олдсонгүй'), onError: (error) => toast.error(requestError(error)) }); event.currentTarget.value = '' }} />
 
     <section className="mp-register">
       <div className="mp-register-toolbar">

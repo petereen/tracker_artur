@@ -548,7 +548,7 @@ async def _conversation_summary(db: AsyncSession, conversation: ChatConversation
         select(func.count(ChatMessageReceipt.id))
         .join(ChatMessage, ChatMessage.id == ChatMessageReceipt.message_id)
         .where(
-            ChatMessage.conversation_id == conversation.id,
+            *message_filters,
             ChatMessageReceipt.account_id == actor.account_id,
             ChatMessageReceipt.read_at.is_(None),
             ChatMessage.deleted_at.is_(None),
@@ -722,6 +722,9 @@ async def unread_count(db: AsyncSession = Depends(get_db), actor: ActorContext =
             ChatMessageReceipt.read_at.is_(None),
             ChatParticipant.account_id == actor.account_id,
             ChatParticipant.left_at.is_(None),
+            # Messages before a re-join are invisible to the reader, so they
+            # can never be opened and must not keep the badge lit.
+            or_(ChatParticipant.visible_after_message_id.is_(None), ChatMessage.id > ChatParticipant.visible_after_message_id),
             ChatMessage.deleted_at.is_(None),
             ~hidden_message,
         )
@@ -1528,7 +1531,9 @@ async def acknowledge_receipts(
                 ChatMessageReceipt.account_id == actor.account_id,
                 ChatMessage.conversation_id == conversation.id,
                 ChatMessage.id <= data.message_id,
-                *((ChatMessage.id > participant.visible_after_message_id,) if participant.visible_after_message_id is not None else ()),
+                # Also settle receipts hidden behind visible_after_message_id:
+                # the reader can never open them, so they are read by definition.
+                *((ChatMessageReceipt.read_at.is_(None),) if data.status == "read" else (ChatMessageReceipt.delivered_at.is_(None),)),
             )
         )
     ).all()

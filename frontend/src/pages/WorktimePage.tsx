@@ -1,27 +1,73 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { IScannerControls } from '@zxing/browser'
-import { Camera, CheckCircle2, Clock3, Coffee, Laptop2, LocateFixed, MapPin, RefreshCw, ScanLine, ShieldAlert } from 'lucide-react'
+import { Camera, CheckCircle2, Coffee, Laptop2, LocateFixed, LogIn, LogOut, MapPin, RefreshCw, ScanLine, X } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { useClock, useWorktimeQrClock } from '../api/enterprise'
+import { Banner } from '@astryxdesign/core/Banner'
+import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
+import { EmptyState } from '@astryxdesign/core/EmptyState'
+import { Grid } from '@astryxdesign/core/Grid'
+import { Heading } from '@astryxdesign/core/Heading'
+import { HStack } from '@astryxdesign/core/HStack'
+import { List, ListItem } from '@astryxdesign/core/List'
+import { Skeleton } from '@astryxdesign/core/Skeleton'
+import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { Text } from '@astryxdesign/core/Text'
+import { Token } from '@astryxdesign/core/Token'
+import { VStack } from '@astryxdesign/core/VStack'
+import { useClock, useWorktimeMethods, useWorktimeQrClock, type ClockEntry } from '../api/enterprise'
 import { WorkdayStartButton } from '../components/WorkdayStartButton'
+
+type ScanResult = { action: string; replayed: boolean; at: string }
 
 function formatTime(value: string | null, timezone = 'Asia/Ulaanbaatar') {
   if (!value) return '—'
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', timeZone: timezone }).format(new Date(value))
 }
 
+function formatDuration(minutes: number) {
+  const whole = Math.max(0, Math.floor(minutes))
+  const hours = Math.floor(whole / 60)
+  return hours ? `${hours}ц ${String(whole % 60).padStart(2, '0')}м` : `${whole}м`
+}
+
+const entryMinutes = (entry: ClockEntry, now: number) => ((entry.ended_at ? new Date(entry.ended_at).getTime() : now) - new Date(entry.started_at).getTime()) / 60_000
+const entryLabel = (entry: ClockEntry) => entry.entry_type === 'break' ? 'Завсарлага' : entry.mode === 'remote' ? 'Remote' : 'Оффис'
+const scanMessage = (result: ScanResult) => result.replayed ? 'Энэ QR аль хэдийн бүртгэгдсэн байна.' : result.action === 'clock_out' ? 'Оффисын цаг дууслаа' : result.action === 'switched_to_office' ? 'Remote хаагдаж, оффисын цаг эхэллээ' : 'Оффисын цаг эхэллээ'
+
+function playScanTone() {
+  if (navigator.vibrate) navigator.vibrate(80)
+  try {
+    const audio = new AudioContext()
+    const oscillator = audio.createOscillator()
+    const gain = audio.createGain()
+    oscillator.frequency.value = 880
+    gain.gain.value = 0.05
+    oscillator.connect(gain).connect(audio.destination)
+    oscillator.start()
+    oscillator.stop(audio.currentTime + 0.12)
+  } catch { /* audio feedback is optional */ }
+}
+
 export function WorktimePage() {
   const clock = useClock()
+  const methods = useWorktimeMethods()
   const scan = useWorktimeQrClock()
+  const [params, setParams] = useSearchParams()
   const videoRef = useRef<HTMLVideoElement>(null)
   const controlsRef = useRef<IScannerControls | null>(null)
   const handledRef = useRef(false)
   const [scanning, setScanning] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
-  const [lastResult, setLastResult] = useState<{ action: string; replayed: boolean } | null>(null)
+  const [lastResult, setLastResult] = useState<ScanResult | null>(null)
+  const [now, setNow] = useState(() => Date.now())
   const scanRef = useRef(scan)
   scanRef.current = scan
+  const qrEnabled = methods.data?.qr_enabled ?? false
+  const locationEnabled = methods.data?.location_enabled ?? false
 
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(timer) }, [])
   useEffect(() => () => { controlsRef.current?.stop(); controlsRef.current = null }, [])
 
   const stopScanner = () => {
@@ -40,6 +86,14 @@ export function WorktimePage() {
     setScanning(true)
   }
 
+  // Dashboard «Оффис эхлэх» lands here with ?scan=1 when QR is the office method.
+  useEffect(() => {
+    if (params.get('scan') !== '1' || !qrEnabled) return
+    startScanner()
+    setParams((current) => { const next = new URLSearchParams(current); next.delete('scan'); return next }, { replace: true })
+  }, [params, qrEnabled, setParams])
+  useEffect(() => { if (!qrEnabled && scanning) stopScanner() }, [qrEnabled, scanning])
+
   useEffect(() => {
     if (!scanning || !videoRef.current) return
     let cancelled = false
@@ -55,19 +109,10 @@ export function WorktimePage() {
           stopScanner()
           try {
             const value = await scanRef.current.mutateAsync({ token: result.getText(), client_timestamp: new Date().toISOString() })
-            setLastResult({ action: value.action, replayed: value.replayed })
-            toast.success(value.action === 'clock_out' ? 'Оффисын цаг дууслаа' : value.action === 'switched_to_office' ? 'Оффисын цаг эхэллээ' : 'Оффисын цаг бүртгэгдлээ')
-            if (navigator.vibrate) navigator.vibrate(80)
-            try {
-              const audio = new AudioContext()
-              const oscillator = audio.createOscillator()
-              const gain = audio.createGain()
-              oscillator.frequency.value = 880
-              gain.gain.value = 0.05
-              oscillator.connect(gain).connect(audio.destination)
-              oscillator.start()
-              oscillator.stop(audio.currentTime + 0.12)
-            } catch { /* audio feedback is optional */ }
+            const next = { action: value.action, replayed: value.replayed, at: new Date().toISOString() }
+            setLastResult(next)
+            toast.success(scanMessage(next))
+            playScanTone()
           } catch (error: any) {
             const detail = error?.response?.data?.detail
             setCameraError(typeof detail === 'object' ? detail.message : detail || 'QR код бүртгэгдсэнгүй')
@@ -78,7 +123,7 @@ export function WorktimePage() {
       } catch (error: any) {
         if (cancelled) return
         setScanning(false)
-        setCameraError(error?.name === 'NotAllowedError' ? 'Камер ашиглах зөвшөөрөл олгогдоогүй байна.' : 'Камер нээж чадсангүй. HTTPS холболт болон камерын тохиргоог шалгана уу.')
+        setCameraError(error?.name === 'NotAllowedError' ? 'Камер ашиглах зөвшөөрөл олгогдоогүй байна. Browser-ийн тохиргооноос камерын эрхийг нээнэ үү.' : 'Камер нээж чадсангүй. HTTPS холболт болон камерын тохиргоог шалгана уу.')
       }
     }
     void start()
@@ -94,28 +139,71 @@ export function WorktimePage() {
 
   const active = clock.data?.active
   const timezone = clock.data?.timezone
+  const entries = clock.data?.today_entries ?? []
+  const workedMinutes = useMemo(() => entries.filter((entry) => entry.entry_type === 'work').reduce((sum, entry) => sum + entryMinutes(entry, now), 0), [entries, now])
+  const officeActive = active?.entry_type === 'work' && active.mode === 'in_person'
+  const state = !active ? { label: 'Ажил эхлээгүй', variant: 'neutral' as const } : active.entry_type === 'break' ? { label: 'Завсарлага', variant: 'warning' as const } : active.mode === 'remote' ? { label: 'Remote ажиллаж байна', variant: 'accent' as const } : { label: 'Оффист ажиллаж байна', variant: 'success' as const }
+  const plainStart = methods.isSuccess && !qrEnabled && !locationEnabled
+
   return <div className="worktime-page">
-    <section className="worktime-status panel" aria-live="polite">
-      <div className={`worktime-state ${active ? 'active' : ''}`}><Clock3 size={17} /><span>{active ? active.mode === 'remote' ? 'Remote ажиллаж байна' : active.entry_type === 'break' ? 'Завсарлага' : 'Ажиллаж байна' : 'Идэвхгүй'}</span></div>
-    </section>
-    <section className="worktime-start panel">
-      <div><span className="eyebrow">БАЙРШЛААР ЭХЛҮҮЛЭХ</span><h2>Ажлын өдрөө эхлүүлэх</h2><p>Оффисын тохируулсан периметр дотор байхад шууд бүртгүүлнэ.</p></div>
-      <WorkdayStartButton className="primary-action" disabled={Boolean(active)}><LocateFixed size={16} />{active ? 'Ажиллаж байна' : 'Оффис эхлэх'}</WorkdayStartButton>
-    </section>
-    <div className="worktime-grid">
-      <section className="worktime-scanner panel">
-        <div className="panel-heading"><div><span className="eyebrow">QR SCANNER</span><h2>Оффисын QR уншуулах</h2></div><ScanLine size={22} /></div>
-        <div className={`scanner-viewport ${scanning ? 'scanning' : ''}`}>
-          {scanning ? <><video ref={videoRef} autoPlay muted playsInline onLoadedMetadata={(event) => { void event.currentTarget.play().catch(() => undefined) }} aria-label="Оффисын QR камер" /><div className="scanner-frame" aria-hidden="true" /></> : <div className="scanner-placeholder"><Camera size={32} /><span>Камер нээж, дэлгэц дээрх QR кодыг уншуулна уу.</span></div>}
-        </div>
-        {cameraError && <div className="worktime-alert error" role="alert"><ShieldAlert size={17} />{cameraError}</div>}
-        {lastResult && <div className="worktime-alert success" role="status"><CheckCircle2 size={17} /><span>{lastResult.replayed ? 'Давхар хүсэлт баталгаажлаа.' : lastResult.action === 'clock_out' ? 'Оффисын цаг дууслаа.' : lastResult.action === 'switched_to_office' ? 'Remote цаг хаагдаж, оффисын цаг эхэллээ.' : 'Оффисын цаг эхэллээ.'} Дахин бүртгэхийн тулд товчийг дахин дарна уу.</span></div>}
-        <div className="scanner-actions">{scanning ? <button type="button" className="secondary-action" onClick={stopScanner}><RefreshCw size={16} />Болих</button> : <button type="button" className="primary-action" onClick={startScanner} disabled={scan.isPending}><ScanLine size={16} />QR уншуулах</button>}</div>
-      </section>
-      <section className="worktime-today panel">
-        <div className="panel-heading"><div><span className="eyebrow">ӨНӨӨДӨР</span><h2>Өнөөдрийн ажлын цаг</h2></div><Coffee size={21} /></div>
-        <div className="worktime-intervals">{clock.isLoading ? <p className="text-muted">Ачаалж байна…</p> : (clock.data?.today_entries ?? []).map((entry) => <div className="worktime-interval" key={entry.id}><span className={`interval-icon ${entry.entry_type}`}><>{entry.entry_type === 'break' ? <Coffee size={15} /> : entry.mode === 'remote' ? <Laptop2 size={15} /> : <MapPin size={15} />}</></span><div><strong>{entry.entry_type === 'break' ? 'Завсарлага' : entry.mode === 'remote' ? 'Remote' : 'Оффис'}</strong><small>{formatTime(entry.started_at, timezone)} – {entry.ended_at ? formatTime(entry.ended_at, timezone) : 'одоо'}</small></div></div>)}{!clock.isLoading && !clock.data?.today_entries.length && <p className="text-muted">Өнөөдөр та бүртгэл хийгээгүй байна.</p>}</div>
-      </section>
+    <Card padding={5}>
+      <VStack gap={4}>
+        <HStack gap={4} hAlign="between" vAlign="center" wrap="wrap">
+          <VStack gap={1}>
+            <HStack gap={2} vAlign="center"><StatusDot variant={state.variant} label={state.label} isPulsing={Boolean(active && active.entry_type === 'work')} /><Text type="label" weight="semibold">{state.label}</Text></HStack>
+            <Heading level={2}>{active ? `${formatTime(active.started_at, timezone)}-с хойш · ${formatDuration(entryMinutes(active, now))}` : 'Ажлын өдрөө эхлүүлэх'}</Heading>
+            <Text type="supporting">{active ? 'Оффисын QR-ийг дахин уншуулахад цаг дуусна.' : qrEnabled && locationEnabled ? 'Оффисын дэлгэц дээрх QR-ийг уншуулах эсвэл байршлаараа бүртгүүлнэ.' : qrEnabled ? 'Оффисын дэлгэц дээрх QR-ийг уншуулж бүртгүүлнэ.' : locationEnabled ? 'Оффисын периметр дотор байхдаа байршлаараа бүртгүүлнэ.' : 'Товч дарж ажлын өдрөө эхлүүлнэ.'}</Text>
+          </VStack>
+          <HStack gap={2} wrap="wrap" vAlign="center">
+            {qrEnabled && !scanning && <Button variant={active && !officeActive ? 'secondary' : 'primary'} label={officeActive ? 'QR уншуулж дуусгах' : 'QR уншуулах'} icon={officeActive ? <LogOut size={16} /> : <ScanLine size={16} />} onClick={startScanner} isDisabled={scan.isPending || active?.entry_type === 'break'} tooltip={active?.entry_type === 'break' ? 'Эхлээд завсарлагаа дуусгана уу' : undefined} />}
+            {(locationEnabled || plainStart) && !active && <WorkdayStartButton className={qrEnabled ? 'secondary-action' : 'primary-action'}>{plainStart ? <><LogIn size={16} />Ажил эхлүүлэх</> : <><LocateFixed size={16} />Байршлаар эхлэх</>}</WorkdayStartButton>}
+          </HStack>
+        </HStack>
+        <Grid columns={{ minWidth: 140 }} gap={3}>
+          <VStack gap={0.5}><Text type="supporting">Өнөөдөр ажилласан</Text><Text type="large" weight="semibold" hasTabularNumbers>{formatDuration(workedMinutes)}</Text></VStack>
+          <VStack gap={0.5}><Text type="supporting">Бүртгэл</Text><Text type="large" weight="semibold" hasTabularNumbers>{entries.length}</Text></VStack>
+          <VStack gap={0.5}><Text type="supporting">Бүртгэх арга</Text><HStack gap={1} wrap="wrap">{methods.isLoading ? <Skeleton width={90} height={22} /> : <>{qrEnabled && <Token size="sm" color="blue" label="QR" />}{locationEnabled && <Token size="sm" color="green" label="Байршил" />}{plainStart && <Token size="sm" label="Энгийн" />}</>}</HStack></VStack>
+        </Grid>
+      </VStack>
+    </Card>
+    <div className={qrEnabled ? 'worktime-grid' : undefined}>
+      {qrEnabled && <Card padding={5}>
+        <VStack gap={3}>
+          <HStack gap={2} hAlign="between" vAlign="center">
+            <VStack gap={0.5}><Heading level={3}>Оффисын QR уншуулах</Heading><Text type="supporting">Дэлгэцийн QR 30 секунд тутам шинэчлэгдэнэ.</Text></VStack>
+            {scanning && <Button variant="ghost" label="Болих" icon={<X size={16} />} onClick={stopScanner} />}
+          </HStack>
+          <div className={`scanner-viewport ${scanning ? 'scanning' : ''} ${lastResult && !scanning ? 'scanned' : ''}`}>
+            {scanning ? <><video ref={videoRef} autoPlay muted playsInline onLoadedMetadata={(event) => { void event.currentTarget.play().catch(() => undefined) }} aria-label="Оффисын QR камер" /><div className="scanner-frame" aria-hidden="true"><i /></div></>
+              : lastResult ? <div className="scanner-placeholder"><CheckCircle2 size={44} /><Heading level={3} color="inherit">{scanMessage(lastResult)}</Heading><Text color="inherit">{formatTime(lastResult.at, timezone)}</Text></div>
+              : <div className="scanner-placeholder"><Camera size={36} /><Text color="inherit">Камер нээгээд оффисын дэлгэц дээрх QR кодыг уншуулна уу.</Text></div>}
+          </div>
+          {scanning && <Text type="supporting" justify="center">QR-ийг ногоон хүрээн дотор багтаана уу — автоматаар уншина.</Text>}
+          {cameraError && <Banner status="error" title="QR бүртгэгдсэнгүй" description={cameraError} collapsible={false} endContent={<Button size="sm" label="Дахин оролдох" icon={<RefreshCw size={14} />} onClick={startScanner} />} />}
+          {!scanning && <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
+            <List listStyle="decimal" density="compact">
+              <ListItem label="Дэлгэц рүү утсаа чиглүүлнэ" />
+              <ListItem label="QR-ийг ногоон хүрээнд багтаана" />
+              <ListItem label="Автоматаар бүртгэгдэж, дуут дохио өгнө" />
+            </List>
+            <Button variant="primary" label={lastResult ? 'Дахин уншуулах' : 'Камер нээх'} icon={<ScanLine size={16} />} onClick={startScanner} isDisabled={scan.isPending} isLoading={scan.isPending} />
+          </HStack>}
+        </VStack>
+      </Card>}
+      <Card padding={5}>
+        <VStack gap={3}>
+          <HStack gap={2} hAlign="between" vAlign="center"><Heading level={3}>Өнөөдрийн бүртгэл</Heading><Text type="supporting" hasTabularNumbers>{formatDuration(workedMinutes)}</Text></HStack>
+          {clock.isLoading ? <Skeleton height={120} /> : entries.length ? <List hasDividers density="compact">
+            {[...entries].reverse().map((entry) => <ListItem
+              key={entry.id}
+              label={entryLabel(entry)}
+              description={`${formatTime(entry.started_at, timezone)} – ${entry.ended_at ? formatTime(entry.ended_at, timezone) : 'одоо'}`}
+              startContent={entry.entry_type === 'break' ? <Coffee size={16} /> : entry.mode === 'remote' ? <Laptop2 size={16} /> : <MapPin size={16} />}
+              endContent={entry.ended_at ? <Text type="supporting" hasTabularNumbers>{formatDuration(entryMinutes(entry, now))}</Text> : <Token size="sm" color="green" label="Идэвхтэй" />}
+            />)}
+          </List> : <EmptyState isCompact title="Өнөөдөр бүртгэл алга" description={qrEnabled ? 'Оффисын QR-ийг уншуулж ажлаа эхлүүлнэ үү.' : 'Ажлаа эхлүүлэхэд энд харагдана.'} icon={<Coffee size={24} />} />}
+        </VStack>
+      </Card>
     </div>
   </div>
 }

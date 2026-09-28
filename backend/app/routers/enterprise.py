@@ -101,7 +101,7 @@ from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services import assistant_ai, exchange_rate_service
 from app.services.assistant_text import detect_language
 from app.services.attendance_service import sync_worktime_attendance
-from app.services.worktime_geofence import WORKTIME_GEOFENCE_KEY, WORKTIME_GEOFENCE_MAX_RADIUS_METERS, WORKTIME_GEOFENCE_MIN_RADIUS_METERS, WORKTIME_GEOFENCE_RADIUS_METERS, configured_worktime_location, configured_worktime_radius, validate_worktime_location
+from app.services.worktime_geofence import WORKTIME_GEOFENCE_KEY, WORKTIME_GEOFENCE_MAX_RADIUS_METERS, WORKTIME_GEOFENCE_MIN_RADIUS_METERS, WORKTIME_GEOFENCE_RADIUS_METERS, WORKTIME_METHODS_KEY, configured_worktime_location, configured_worktime_radius, validate_worktime_location, worktime_methods
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
@@ -287,6 +287,28 @@ async def update_worktime_geofence_settings(data: WorktimeGeofenceInput, db: Asy
     )
     await db.commit()
     return _worktime_geofence_out(organization)
+
+
+class WorktimeMethodsInput(BaseModel):
+    qr_enabled: bool | None = None
+    location_enabled: bool | None = None
+
+
+@router.get("/settings/worktime-methods")
+async def get_worktime_methods(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    organization = await db.get(Organization, actor.organization_id)
+    return worktime_methods(organization.settings)
+
+
+@router.put("/settings/worktime-methods")
+async def update_worktime_methods(data: WorktimeMethodsInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin"))):
+    organization = await db.get(Organization, actor.organization_id, with_for_update=True)
+    before = worktime_methods(organization.settings)
+    after = {**before, **data.model_dump(exclude_none=True)}
+    organization.settings = {**(organization.settings or {}), WORKTIME_METHODS_KEY: after}
+    await record_change(db, actor=actor, topic="settings", aggregate_type="organization_worktime_methods", aggregate_id=organization.id, operation="updated", before=before, after=after)
+    await db.commit()
+    return after
 
 
 @router.get("/settings/branding")
@@ -2414,6 +2436,14 @@ async def clock_start(data: ClockStartInput, db: AsyncSession = Depends(get_db),
                 detail={
                     "code": "worktime_geofence_not_configured",
                     "message": "Оффисын байршлыг админ тохиргоонд хадгалсны дараа ажил эхлүүлнэ үү.",
+                },
+            )
+        if geofence_error == "worktime_location_disabled":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "worktime_location_disabled",
+                    "message": "Байршлаар бүртгэх боломжийг хаасан байна. Оффисын QR кодыг уншуулж ажлаа эхлүүлнэ үү.",
                 },
             )
         if geofence_error == "worktime_location_required":

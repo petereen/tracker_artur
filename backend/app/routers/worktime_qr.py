@@ -21,9 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
-from app.models.models import Employee, IdempotencyRecord, WorkReport, WorkTimeEntry, WorktimeQrKiosk
+from app.models.models import Employee, IdempotencyRecord, Organization, WorkReport, WorkTimeEntry, WorktimeQrKiosk
 from app.services.attendance_service import sync_worktime_attendance
 from app.services.enterprise_events import record_change
+from app.services.worktime_geofence import worktime_methods
 
 try:
     import redis.asyncio as redis
@@ -259,6 +260,7 @@ async def pair_kiosk(data: PairInput, request: Request, response: Response, db: 
 @router.get("/display-token")
 async def display_token(response: Response, kiosk_cookie: str | None = Cookie(default=None, alias=KIOSK_COOKIE), db: AsyncSession = Depends(get_db)):
     kiosk = await _kiosk_from_cookie(kiosk_cookie, db)
+    await _require_qr_enabled(db, kiosk.organization_id)
     if not await _limit(f"display:{kiosk.id}", 10):
         raise HTTPException(status_code=429, detail={"code": "rate_limited", "message": "Please wait before refreshing the display"})
     now = datetime.now(timezone.utc)
@@ -295,10 +297,17 @@ def _summary(entries: list[WorkTimeEntry], now: datetime) -> dict:
     return {"active": _entry_out(next((entry for entry in reversed(entries) if entry.ended_at is None), None)), "today_entries": [_entry_out(entry) for entry in entries]}
 
 
+async def _require_qr_enabled(db: AsyncSession, organization_id: int) -> None:
+    organization = await db.get(Organization, organization_id)
+    if not worktime_methods(organization.settings if organization else None)["qr_enabled"]:
+        raise HTTPException(status_code=403, detail={"code": "worktime_qr_disabled", "message": "QR-аар цаг бүртгэх боломжийг админ хаасан байна."})
+
+
 @router.post("/clock")
 async def qr_clock(data: ClockInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if not actor.employee_id:
         raise HTTPException(status_code=409, detail={"code": "employee_unlinked", "message": "Account is not linked to an employee"})
+    await _require_qr_enabled(db, actor.organization_id)
     if not await _limit(f"clock:{actor.account_id}", 10):
         raise HTTPException(status_code=429, detail={"code": "rate_limited", "message": "Too many scan attempts"})
     payload = _decode(data.token)

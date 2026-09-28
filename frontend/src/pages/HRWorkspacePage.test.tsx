@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HRWorkspacePage } from './HRWorkspacePage'
 
-const mocks = vi.hoisted(() => ({ updateWorker: vi.fn(), createWorker: vi.fn(), createDepartment: vi.fn(), deleteDepartment: vi.fn(), deleteForever: vi.fn() }))
+const mocks = vi.hoisted(() => ({ updateWorker: vi.fn(), createWorker: vi.fn(), createDepartment: vi.fn(), deleteDepartment: vi.fn(), deleteForever: vi.fn(), downloadWorktime: vi.fn() }))
 
 const worker = {
   id: 5, name: 'Бат Дорж', first_name: 'Бат', last_name: 'Дорж', telegram_id: null, telegram_username: null, photo_url: null, timezone: 'Asia/Ulaanbaatar', is_active: true,
@@ -33,8 +33,15 @@ vi.mock('../api/enterprise', () => ({
   useCreateHRDepartment: () => ({ ...idle, mutateAsync: mocks.createDepartment }),
   useUpdateHRDepartment: () => idle,
   useDeleteHRDepartment: () => ({ ...idle, mutateAsync: mocks.deleteDepartment }),
-  useRegenerateHRInvite: () => idle,
-  useRevokeHRInvite: () => idle,
+  useHREmployeeRoles: () => ({ data: undefined }),
+  useSetHREmployeeRoles: () => idle,
+  useEnterpriseSummary: () => ({ isLoading: false, isError: false, data: { completion_rate: 75 } }),
+  useDailyAnalytics: () => ({ isLoading: false, isError: false, data: { days: [
+    { date: '2026-09-21', worked_minutes: 480, completed_tasks: 2 },
+    { date: '2026-09-22', worked_minutes: 0, completed_tasks: 0 },
+    { date: '2026-09-23', worked_minutes: 300, completed_tasks: 1 },
+  ] } }),
+  downloadWorktimeReport: mocks.downloadWorktime,
   useSubmitHRLeave: () => idle,
   useDecideHRLeave: () => idle,
   useUpdateHRLeave: () => idle,
@@ -50,6 +57,21 @@ const choose = (label: string, option: string) => { fireEvent.click(screen.getBy
 
 describe('HRWorkspacePage worker and department management', () => {
   beforeEach(() => { Object.values(mocks).forEach((mock) => mock.mockReset().mockResolvedValue({})); vi.spyOn(window, 'confirm').mockReturnValue(true) })
+
+  it('shows worktime stats in the person panel without the invite section', async () => {
+    renderPage()
+    fireEvent.click(screen.getByText('Бат Дорж'))
+    const panel = screen.getByRole('dialog', { name: 'Бат Дорж profile' })
+    expect(within(panel).queryByText('Урилга ба профайл')).not.toBeInTheDocument()
+    expect(within(panel).getByRole('heading', { name: 'Ажлын цагийн статистик' })).toBeInTheDocument()
+    expect(within(panel).getByText('13ц')).toBeInTheDocument()
+    expect(within(panel).getByText('75%')).toBeInTheDocument()
+    const headings = [...panel.querySelectorAll('h3')].map((node) => node.textContent)
+    expect(headings.indexOf('Ажлын цагийн статистик')).toBeGreaterThan(headings.indexOf('Цалингийн тохиргоо'))
+    expect(headings.indexOf('Ажлын цагийн статистик')).toBeLessThan(headings.indexOf('Платформын эрх'))
+    fireEvent.click(within(panel).getByRole('button', { name: 'Excel татах' }))
+    await waitFor(() => expect(mocks.downloadWorktime).toHaveBeenCalledWith(expect.objectContaining({ worker_id: 5 }), 'xlsx'))
+  })
 
   it('edits a worker status and sends only the changed field', async () => {
     renderPage()

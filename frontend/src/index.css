@@ -3413,6 +3413,12 @@ body:has(.assistant-backdrop) {
 .scanner-placeholder { display: grid; place-items: center; gap: 10px; padding: 40px; color: #fff; text-align: center; }
 .scanner-frame { position: absolute; width: min(62vw, 250px); aspect-ratio: 1; border: 3px solid #00C885; border-radius: 20px; box-shadow: 0 0 0 999px rgb(11 23 42 / 28%); pointer-events: none; }
 .scanner-actions { display: flex; justify-content: flex-end; }
+.scanner-frame > i { position: absolute; left: 8%; right: 8%; top: 10%; height: 2px; border-radius: 2px; background: #00C885; box-shadow: 0 0 12px #00C885; animation: scanner-sweep 1.8s ease-in-out infinite alternate; }
+.scanner-viewport.scanned { background: color-mix(in srgb, #00C885 14%, #0B172A); border-color: color-mix(in srgb, #00C885 40%, transparent); }
+.scanner-viewport.scanned .scanner-placeholder { color: #fff; }
+.scanner-viewport.scanned .scanner-placeholder > svg { color: #00C885; }
+@keyframes scanner-sweep { from { top: 10%; } to { top: 88%; } }
+@media (prefers-reduced-motion: reduce) { .scanner-frame > i { animation: none; top: 50%; } }
 .worktime-alert { display: flex; align-items: flex-start; gap: 9px; max-width: 100%; padding: 12px 14px; border-radius: 12px; font-size: 13px; overflow-wrap: anywhere; }
 .worktime-alert.error { color: #a31932; background: rgb(255 59 87 / 10%); }
 .worktime-alert.success { color: #007a52; background: rgb(0 200 133 / 11%); }

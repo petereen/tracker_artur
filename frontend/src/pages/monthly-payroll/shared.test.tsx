@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { formatAmount, formatMoney, requestError, rowState, runTitle, shiftMonth } from './shared'
-import { PayrollTrendChart } from './Dashboard'
+import { PayrollTrendChart, payoutParts } from './Dashboard'
 
 const row = (overrides: Record<string, unknown> = {}) => ({ id: 1, employee_id: 1, status: 'draft', identity: {}, profile: {}, inputs: {}, result: {}, warnings: [], approved_at: null, audit: [], ...overrides }) as any
 
@@ -9,6 +9,11 @@ describe('monthly payroll helpers', () => {
   it('formats whole tugrik with thousand separators and no decimals', () => {
     expect(formatMoney('838142.4')).toBe('838,142 ₮')
     expect(formatAmount('1788000')).toBe('1,788,000')
+  })
+
+  it('spells out what the company pays: cash plus НДШ and ХХОАТ, zero parts dropped', () => {
+    expect(payoutParts({ cash: '768000', employee_shi: '191820', pit: '131618' })).toBe('Гарт олгох 768,000 + НДШ 191,820 + ХХОАТ 131,618')
+    expect(payoutParts({ cash: '576562', employee_shi: '-4600', pit: '0', other_deductions: '0' })).toBe('Гарт олгох 576,562 + НДШ -4,600')
   })
 
   it('turns structured API errors into readable Mongolian messages', () => {

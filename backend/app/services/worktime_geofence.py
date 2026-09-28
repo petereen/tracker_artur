@@ -9,6 +9,16 @@ WORKTIME_GEOFENCE_KEY = "worktime_geofence"
 WORKTIME_GEOFENCE_RADIUS_METERS = 150
 WORKTIME_GEOFENCE_MIN_RADIUS_METERS = 25
 WORKTIME_GEOFENCE_MAX_RADIUS_METERS = 5_000
+WORKTIME_METHODS_KEY = "worktime_methods"
+
+
+def worktime_methods(settings: dict[str, Any] | None) -> dict[str, bool]:
+    """Which office check-in methods the organization allows; both on by default."""
+    value = (settings or {}).get(WORKTIME_METHODS_KEY) or {}
+    return {
+        "qr_enabled": value.get("qr_enabled") is not False,
+        "location_enabled": value.get("location_enabled") is not False,
+    }
 
 
 def configured_worktime_location(settings: dict[str, Any] | None) -> tuple[float, float] | None:
@@ -48,6 +58,11 @@ def distance_meters(latitude: float, longitude: float, target_latitude: float, t
 
 def validate_worktime_location(settings: dict[str, Any] | None, latitude: float | None, longitude: float | None) -> tuple[str | None, float | None]:
     """Return a stable failure code and measured distance for an office start."""
+    methods = worktime_methods(settings)
+    if not methods["location_enabled"]:
+        # With QR on, the office is entered by scanning only; with every
+        # method off, an office start needs no verification.
+        return ("worktime_location_disabled", None) if methods["qr_enabled"] else (None, None)
     office_location = configured_worktime_location(settings)
     if office_location is None:
         return "worktime_geofence_not_configured", None

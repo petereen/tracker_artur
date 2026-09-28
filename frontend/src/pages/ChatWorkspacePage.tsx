@@ -643,13 +643,28 @@ export function ChatWorkspacePage() {
     if (!orderedMessages.length) return
     if (highlightId) document.getElementById(`chat-message-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     else logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
+  }, [conversationId, highlightId, orderedMessages])
+  // Mark the open conversation read whenever new messages land or the tab
+  // becomes visible again — messages that arrive while the tab is hidden
+  // must not keep the badge lit once the reader returns.
+  const [pageVisibleTick, setPageVisibleTick] = useState(0)
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') setPageVisibleTick((tick) => tick + 1) }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => { document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible) }
+  }, [])
+  useEffect(() => {
     const latest = [...orderedMessages].reverse().find((message) => message.kind !== 'call' && message.id > 0 && !message.is_mine)
     if (!latest || !conversationId || document.visibilityState !== 'visible') return
-    const key = `${conversationId}:${latest.id}:read`
+    // A still-unread conversation retries on the next visibility tick only,
+    // so a failed ack can never spin into a request loop.
+    const unread = conversation.data?.unread_count ?? 0
+    const key = `${conversationId}:${latest.id}:${unread}:${unread ? pageVisibleTick : 0}`
     if (lastAckRef.current === key) return
     lastAckRef.current = key
     acknowledge.mutate({ message_id: latest.id, status: 'read' })
-  }, [conversationId, highlightId, orderedMessages]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [conversationId, orderedMessages, pageVisibleTick, conversation.data?.unread_count]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { uploadsRef.current = uploads }, [uploads])
   useEffect(() => {

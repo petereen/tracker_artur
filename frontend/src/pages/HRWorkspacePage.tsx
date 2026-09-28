@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
 import { Archive, ArchiveRestore, Building2, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Download, Filter, Link2, Pencil, Plus, Search, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { downloadHRAttendanceCsv, useHREmployeeRoles, useSetHREmployeeRoles, useActor, useArchiveHREmployee, useBulkUpdateHRAttendance, useCreateHRDepartment, useCreateHREmployee, useDecideHRLeave, useDeleteHRDepartment, useDeleteHREmployeePermanently, useHRDepartments, useHRAttendance, useHREmployees, useHRLeaveBalances, useHRLeaveRequests, useRegenerateHRInvite, useRevokeHRInvite, useSetHRLeaveBalance, useSubmitHRLeave, useUpdateHRAttendance, useUpdateHRDepartment, useUpdateHREmployee, useUpdateHRLeave } from '../api/enterprise'
+import { downloadHRAttendanceCsv, useHREmployeeRoles, useSetHREmployeeRoles, useActor, useArchiveHREmployee, useBulkUpdateHRAttendance, useCreateHRDepartment, useCreateHREmployee, useDecideHRLeave, useDeleteHRDepartment, useDeleteHREmployeePermanently, useHRDepartments, useHRAttendance, useHREmployees, useHRLeaveBalances, useHRLeaveRequests, useSetHRLeaveBalance, useSubmitHRLeave, useUpdateHRAttendance, useUpdateHRDepartment, useUpdateHREmployee, useUpdateHRLeave } from '../api/enterprise'
 import type { HRAttendanceItem, HRDepartment, HREmployee, HREmploymentStatus, HREmploymentType, HRLeaveRequest } from '../api/enterprise'
 import { Badge, Btn, Card, Input, Modal, Select } from '../components/ui'
 import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
 import { MonthlyPayrollProfileDrawer } from '../components/MonthlyPayrollProfileDrawer'
+import { EmployeeWorktimeStats } from '../components/EmployeeWorktimeStats'
 import { normalizeRegistrationNumber, parseRegistrationNumber } from '../utils/registrationNumber'
 
 type Tab = 'directory' | 'departments' | 'leave' | 'attendance' | 'payroll'
@@ -67,7 +69,7 @@ export function HRWorkspacePage() {
     {tab === 'leave' && <LeavePanel isHR={isHR} isManager={isManager} balances={balances.data || []} requests={leave.data || []} employees={employees.data?.items || []} />}
     {tab === 'attendance' && <AttendancePanel enabled={isManager} />}
     {tab === 'payroll' && isHR && <PayrollPanel onGoEmployees={() => setTab('directory')} />}
-    {selected && <EmployeeDrawer employee={selected} isHR={isHR} onClose={() => setSelected(null)} onInvite={(url) => setInvite(url)} onEdit={() => { setEditing(selected); setSelected(null) }} />}
+    {selected && <EmployeeDrawer employee={selected} isHR={isHR} canSeeStats={isManager} onClose={() => setSelected(null)} onEdit={() => { setEditing(selected); setSelected(null) }} />}
     {editing && <WorkerFormModal employee={editing === 'new' ? null : editing} departments={departments.data || []} employees={allEmployees.data?.items || []} onClose={() => setEditing(null)} onCreated={(url) => { setEditing(null); setInvite(url) }} />}
     {invite && <Modal title="Telegram урилга бэлэн" onClose={() => setInvite(null)}><div className="hr-invite-result"><p>Энэ холбоосыг ажилтанд илгээнэ үү. Нэг удаа ашиглагдана.</p><code>{invite}</code><div><Btn variant="primary" onClick={() => { void navigator.clipboard?.writeText(invite); toast.success('Хууллаа') }}><Copy size={14} />Хуулах</Btn><a className="secondary-action" href={invite} target="_blank" rel="noreferrer"><Link2 size={14} />Нээх</a></div></div></Modal>}
   </div>
@@ -211,12 +213,12 @@ function EmployeeRolesSection({ employee }: { employee: HREmployee }) {
   return <section className="hr-drawer-section"><h3>Платформын эрх</h3>{!employee.account_id ? <p>Энэ ажилтанд платформын хэрэглэгч үүсээгүй байна. Эхлээд Administration → Хэрэглэгч хэсгээс акаунт үүсгэнэ.</p> : !data ? <p>Ачаалж байна…</p> : <><fieldset className="role-editor" disabled={data.locked || setRoles.isPending}><legend>Access roles</legend>{data.assignable_roles.map((role) => <label key={role}><input type="checkbox" checked={data.roles.includes(role)} onChange={() => toggle(role)} /><span>{ROLE_LABELS[role] || role}</span></label>)}</fieldset>{data.locked && <p>Admin эрхтэй хэрэглэгчийн эрхийг зөвхөн Administration хэсгээс өөрчилнө.</p>}</>}</section>
 }
 
-function EmployeeDrawer({ employee, isHR, onClose, onInvite, onEdit }: { employee: HREmployee; isHR: boolean; onClose: () => void; onInvite: (url: string) => void; onEdit: () => void }) {
-  const regenerate = useRegenerateHRInvite(); const revoke = useRevokeHRInvite();
+function EmployeeDrawer({ employee, isHR, canSeeStats, onClose, onEdit }: { employee: HREmployee; isHR: boolean; canSeeStats: boolean; onClose: () => void; onEdit: () => void }) {
   const [showPayrollSettings, setShowPayrollSettings] = useState(false);
-  const inviteAgain = async () => { try { const result = await regenerate.mutateAsync(employee.id); onInvite(result.deep_link) } catch (error) { toast.error(errorText(error)) } }
   const hasPrivate = isHR || Boolean(employee.registration_number || employee.phone_number || employee.email || employee.birthday)
-  return <>{!showPayrollSettings && <div className="hr-drawer-backdrop" onClick={onClose}><aside className="hr-drawer" role="dialog" aria-label={`${employee.name} profile`} onClick={(event) => event.stopPropagation()}>
+  // Portaled: the route enter animation leaves a stacking context on the page,
+  // which would otherwise trap the fixed drawer under the sticky top navbar.
+  return createPortal(<>{!showPayrollSettings && <div className="hr-drawer-backdrop" onClick={onClose}><aside className="hr-drawer" role="dialog" aria-label={`${employee.name} profile`} onClick={(event) => event.stopPropagation()}>
     <header><div><span className="eyebrow">EMPLOYEE PROFILE</span><h2>{employee.name}</h2><p>{employee.telegram_username ? `@${employee.telegram_username.replace(/^@/, '')}` : 'Telegram холбогдоогүй'}</p><div className="hr-drawer-badges"><StatusBadge employee={employee} /></div></div><div className="hr-drawer-header-actions">{isHR && <button onClick={onEdit} aria-label="Засах"><Pencil size={16} /></button>}<button onClick={onClose} aria-label="Хаах"><X size={18} /></button></div></header>
     <section className="hr-drawer-section"><h3>Ажил эрхлэлт</h3><dl>
       <dt>Хэлтэс</dt><dd>{employee.department_name || '—'}</dd>
@@ -238,8 +240,10 @@ function EmployeeDrawer({ employee, isHR, onClose, onInvite, onEdit }: { employe
       <dt>Хаяг</dt><dd>{employee.address || '—'}</dd>
       <dt>Яаралтай үед</dt><dd>{[employee.emergency_contact_name, employee.emergency_contact_phone].filter(Boolean).join(' · ') || '—'}</dd>
     </dl></section>}
-    {isHR && <><section className="hr-drawer-section"><h3>Урилга ба профайл</h3>{!employee.telegram_id && <><Btn variant="primary" onClick={inviteAgain} disabled={regenerate.isPending}><Link2 size={14} />Шинэ урилга үүсгэх</Btn>{employee.telegram_status === 'pending_invite' && <button className="secondary-action" onClick={() => revoke.mutate(employee.id)} disabled={revoke.isPending}>Урилгыг цуцлах</button>}</>}</section><section className="hr-drawer-section"><h3>Цалингийн тохиргоо</h3><p>Үндсэн цалин, төлбөрийн өдөр болон урьдчилгааны нөхцөлийг тохируулна.</p><button className="secondary-action" onClick={() => setShowPayrollSettings(true)}><Pencil size={14} />Цалингийн тохиргоо нээх</button></section><EmployeeRolesSection employee={employee} /></>}
-  </aside></div>}{showPayrollSettings && <MonthlyPayrollProfileDrawer employee={{ id: employee.id, name: employee.name }} onClose={() => setShowPayrollSettings(false)} />}</>
+    {isHR && <section className="hr-drawer-section"><h3>Цалингийн тохиргоо</h3><p>Үндсэн цалин, төлбөрийн өдөр болон урьдчилгааны нөхцөлийг тохируулна.</p><button className="secondary-action" onClick={() => setShowPayrollSettings(true)}><Pencil size={14} />Цалингийн тохиргоо нээх</button></section>}
+    {canSeeStats && <section className="hr-drawer-section"><EmployeeWorktimeStats employeeId={employee.id} employeeName={employee.name} /></section>}
+    {isHR && <EmployeeRolesSection employee={employee} />}
+  </aside></div>}{showPayrollSettings && <MonthlyPayrollProfileDrawer employee={{ id: employee.id, name: employee.name }} onClose={() => setShowPayrollSettings(false)} />}</>, document.body)
 }
 
 function DepartmentsPanel({ departments, employees }: { departments: HRDepartment[]; employees: HREmployee[] }) {

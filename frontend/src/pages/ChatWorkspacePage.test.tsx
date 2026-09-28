@@ -73,6 +73,21 @@ describe('chat workspace', () => {
     Element.prototype.scrollTo = vi.fn()
   })
 
+  it('marks the open conversation read once a hidden tab becomes visible again', async () => {
+    const visibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    try {
+      renderChat()
+      expect(mocks.acknowledge).not.toHaveBeenCalled()
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' })
+      fireEvent(document, new Event('visibilitychange'))
+      await waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledWith({ message_id: 12, status: 'read' }))
+    } finally {
+      delete (document as any).visibilityState
+      if (visibility) Object.defineProperty(Document.prototype, 'visibilityState', visibility)
+    }
+  })
+
   it('renders the conversation list, presence, thread, and auto-resizing composer', async () => {
     renderChat()
     expect(screen.getAllByText('Ану').length).toBeGreaterThan(0)

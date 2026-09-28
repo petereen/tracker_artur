@@ -248,9 +248,28 @@ export function usePairWorktimeQrKiosk() {
   return useMutation({ mutationFn: (code: string) => publicApi.post('/v1/worktime-qr/pair', { code }).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: [...worktimeQrKeys, 'display-token'] }) })
 }
 
+export interface WorktimeMethods { qr_enabled: boolean; location_enabled: boolean }
+const worktimeMethodsKey = ['v1', 'settings', 'worktime-methods'] as const
+
+/** Which office check-in methods the organization allows (admin settings). */
+export function useWorktimeMethods(enabled = true) {
+  return useQuery<WorktimeMethods>({ queryKey: worktimeMethodsKey, queryFn: () => api.get('/v1/settings/worktime-methods').then((response) => response.data), enabled, staleTime: 60_000 })
+}
+
+export function useUpdateWorktimeMethods() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: Partial<WorktimeMethods>) => api.put('/v1/settings/worktime-methods', input).then((response) => response.data as WorktimeMethods),
+    onSuccess: (data) => queryClient.setQueryData(worktimeMethodsKey, data),
+  })
+}
+
 export function useWorktimeQrDisplayToken(enabled = true) {
   return useQuery<WorktimeQrDisplayToken>({ queryKey: [...worktimeQrKeys, 'display-token'], queryFn: () => publicApi.get('/v1/worktime-qr/display-token', { headers: { 'Cache-Control': 'no-cache' } }).then((response) => response.data), enabled, refetchInterval: (query) => {
     const expiresAt = query.state.data?.expires_at
+    // A display whose QR check-in was switched off keeps polling slowly so it
+    // comes back on its own once an admin re-enables it.
+    if ((query.state.error as any)?.response?.data?.detail?.code === 'worktime_qr_disabled') return 30_000
     if (query.state.error) return expiresAt ? 5_000 : false
     if (expiresAt) return Math.max(1_000, new Date(expiresAt).getTime() - Date.now() - 4_000)
     return 30_000
@@ -557,12 +576,16 @@ export interface MonthlyPayrollRunRow {
 export interface MonthlyPayrollRun { id: number; month_id: number; run_type: 'advance' | 'final'; pay_date: string; cutoff_date: string | null; department_id: number | null; status: string; note: string | null; advance_snapshot: Record<string, unknown>; approved_at?: string | null; paid_at?: string | null; rows?: MonthlyPayrollRunRow[] }
 export interface MonthlyPayrollApprovalSummary { approved: number; skipped: Array<{ employee_id: number; employee_name?: string; issues: string[]; message?: string }> }
 export interface MonthlyPayrollAdvanceDate { day: number; date: string; workers: number; worked_to_date_workers: number; run_exists: boolean }
+export interface MonthlyPayrollPayoutParts { cash: string; employee_shi: string; pit: string; other_deductions: string }
 export interface MonthlyPayrollDashboard {
   month: string; month_id: number | null; status: string | null; has_final: boolean
-  pipeline: Array<MonthlyPayrollRun & { workers: number; approved_rows: number; total: string; gross: string | null }>
-  stats: Record<string, any> | null; advance: { paid: string; planned: string }
+  pipeline: Array<MonthlyPayrollRun & { workers: number; approved_rows: number; total: string; gross: string | null; company_total: string; company_breakdown: MonthlyPayrollPayoutParts }>
+  stats: Record<string, any> | null
+  /** Company payouts: advance = урьдчилгаа + НДШ + ХХОАТ (Суутгалын дүн); final = the rest of the gross. */
+  advance: { paid: string; planned: string; cash: string; employee_shi: string; pit: string }
+  final: (MonthlyPayrollPayoutParts & { company_total: string }) | null
   upcoming: Array<{ pay_date: string; run_type: 'advance' | 'final'; run_id: number | null; workers: number; amount: string | null; status: string }>
-  alerts: Record<'blocking_rows' | 'warning_rows' | 'incomplete_profiles' | 'hr_changed' | 'advance_changed' | 'advance_not_calculated' | 'flagged', number>
+  alerts: Record<'blocking_rows' | 'warning_rows' | 'incomplete_profiles' | 'hr_changed' | 'advance_changed' | 'advance_not_calculated' | 'withholding_changed' | 'flagged', number>
   trend: Array<{ month: string; status: string; gross: string; company_cost: string; headcount: number }>
 }
 export interface MonthlyPayrollMonth { id: number; year: number; month: number; status: string; rule_set_id: number; rule_snapshot: Record<string, unknown>; calendar_snapshot: Record<string, string>; runs: MonthlyPayrollRun[] }
@@ -1286,6 +1309,10 @@ export function useChatUnreadCount(enabled = true) {
     queryKey: ['v1', 'chat', 'unread-count'],
     queryFn: () => api.get('/v1/chat/unread-count').then((response) => response.data),
     enabled,
+    // Realtime events invalidate this instantly; the interval only covers a
+    // dropped socket so the nav badge never goes stale.
+    refetchInterval: enabled ? 30_000 : false,
+    refetchIntervalInBackground: true,
   })
 }
 
@@ -1432,7 +1459,27 @@ export function useAcknowledgeChat(publicId?: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: { message_id: number; status: 'delivered' | 'read' }) => acknowledgeChatReceipt(publicId!, input.message_id, input.status),
-    onSuccess: () => { invalidateChat(queryClient); queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'messages', publicId] }) },
+    onMutate: (input) => {
+      if (input.status !== 'read' || !publicId) return
+      // Clear the conversation and nav badges immediately; the server
+      // refetch below reconciles the exact counts.
+      let cleared = 0
+      queryClient.setQueriesData<ChatConversationPage>({ queryKey: ['v1', 'chat', 'conversations'] }, (page) => {
+        if (!page?.items) return page
+        return { ...page, items: page.items.map((item) => {
+          if (item.public_id !== publicId || !item.unread_count) return item
+          cleared = Math.max(cleared, item.unread_count)
+          return { ...item, unread_count: 0 }
+        }) }
+      })
+      queryClient.setQueryData<ChatConversation>(['v1', 'chat', 'conversation', publicId], (item) => {
+        if (!item?.unread_count) return item
+        cleared = Math.max(cleared, item.unread_count)
+        return { ...item, unread_count: 0 }
+      })
+      if (cleared) queryClient.setQueryData<{ unread_count: number }>(['v1', 'chat', 'unread-count'], (count) => count && { unread_count: Math.max(0, count.unread_count - cleared) })
+    },
+    onSettled: () => { invalidateChat(queryClient); queryClient.invalidateQueries({ queryKey: ['v1', 'chat', 'messages', publicId] }) },
   })
 }
 

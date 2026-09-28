@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { CircleAlert, Plus } from 'lucide-react'
 import { useMonthlyPayrollDashboard, usePayrollCapabilities } from '../../api/enterprise'
-import type { MonthlyPayrollDashboard as DashboardData } from '../../api/enterprise'
+import type { MonthlyPayrollDashboard as DashboardData, MonthlyPayrollPayoutParts } from '../../api/enterprise'
 import { MonthStepper, MonthlyShell, RunStatusChip, formatAmount, formatHours, formatMoney, monthKey, monthTitle, requestError, runTitle, toNumber } from './shared'
 
 type TrendPoint = DashboardData['trend'][number]
@@ -14,7 +14,12 @@ const BUCKET_LABELS: Record<string, string> = { weekday: 'Ажлын өдрий�
 const ALERT_LABELS: Record<string, string> = {
   blocking_rows: 'Батлах боломжгүй мөр', warning_rows: 'Анхааруулгатай мөр', incomplete_profiles: 'Цалингийн профайл дутуу', hr_changed: 'HR өөрчлөлт хүлээгдэж буй',
   advance_changed: 'Урьдчилгаа өөрчлөгдсөн', advance_not_calculated: 'Урьдчилгаа бодоогүй', flagged: 'Шалгахаар тэмдэглэсэн',
+  withholding_changed: 'НДШ/ХХОАТ урьдчилгааны үеийнхээс өөрчлөгдсөн',
 }
+/** «Гарт олгох · НДШ · ХХОАТ · Бусад суутгал» parts of a company payout; zero parts are left out. */
+export const payoutParts = (parts: MonthlyPayrollPayoutParts | Omit<MonthlyPayrollPayoutParts, 'other_deductions'>) => ([
+  ['Гарт олгох', parts.cash], ['НДШ', parts.employee_shi], ['ХХОАТ', parts.pit], ['Бусад суутгал', 'other_deductions' in parts ? parts.other_deductions : 0],
+] as Array<[string, unknown]>).filter(([, value]) => toNumber(value) !== 0).map(([label, value]) => `${label} ${formatAmount(value)}`).join(' + ')
 const millions = (value: number) => (value >= 1_000_000 ? `${(value / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 1 })} сая` : formatAmount(value))
 
 function niceMax(value: number) {
@@ -88,13 +93,17 @@ export function MonthlyPayrollDashboard() {
   const setMonth = (value: string) => setParams((current) => { const next = new URLSearchParams(current); next.set('month', value); return next }, { replace: true })
   const finalKpis: Array<[string, unknown, string?]> = data?.has_final ? [
     ['Олговол зохих цалин', totals.gross], ['ХХОАТ (хөнгөлөлтийн дараа)', totals.pit, `Хөнгөлөлт ${formatAmount(totals.relief)}`], ['Ажилтны НДШ', totals.employee_shi],
-    ['БНДШ', totals.employer_shi], ['Бусад суутгал', totals.other_deductions], ['Сүүл цалин', totals.net_pay], ['Нийт зардал', totals.company_cost, 'Олговол зохих + БНДШ'],
+    ['БНДШ', totals.employer_shi], ['Бусад суутгал', totals.other_deductions], ['Сүүл цалин (гарт олгох)', totals.net_pay],
+    // The remaining payment from the company's side: the gross not already paid with the advances.
+    ...(data.final ? [['Сүүл цалин — байгууллага төлөх', data.final.company_total, payoutParts(data.final)] as [string, unknown, string]] : []),
+    ['Нийт зардал', totals.company_cost, 'Олговол зохих + БНДШ'],
   ] : []
   return <MonthlyShell canAdminister={Boolean(caps.data?.capabilities.administer)} actions={<Link className="payroll-v2-button primary" to={`/erp/payroll/monthly?month=${month}`}><Plus size={15} />Шинэ бодолт</Link>}>
     <header className="payroll-v2-page-title mp-page-head"><div><h1>{monthTitle(month)}</h1><p>{data?.status === 'closed' ? 'Хаасан сар — архивын өгөгдөл.' : data?.month_id ? 'Нээлттэй сар.' : 'Энэ сард цалингийн бүртгэл нээгдээгүй.'}</p></div><MonthStepper value={month} onChange={setMonth} /></header>
     {dashboard.isLoading ? <p className="payroll-v2-loading">Самбар ачаалж байна…</p> : dashboard.error ? <p role="alert">{requestError(dashboard.error)}</p> : data && <>
       <section className="payroll-v2-metric-grid compact mp-kpis">
-        <article><span>Урьдчилгаа (төлсөн / төлөвлөсөн)</span><strong>{formatMoney(data.advance.paid)}</strong><small>{formatMoney(data.advance.planned)} төлөвлөсөн</small></article>
+        <article><span>Урьдчилгаа — байгууллага төлөх (Суутгалын дүн)</span><strong>{formatMoney(data.advance.planned)}</strong>
+          {toNumber(data.advance.planned) > 0 && <small>{payoutParts(data.advance)}</small>}<small>{formatMoney(data.advance.paid)} төлсөн</small></article>
         {finalKpis.map(([label, value, hint]) => <article key={label}><span>{label}</span><strong>{formatMoney(value)}</strong>{hint && <small>{hint}</small>}</article>)}
         {!data.has_final && <article className="mp-kpi-empty"><span>Сүүл цалин</span><strong>—</strong><small>Сүүл цалингийн бодолт үүссэний дараа олговол зохих, татвар, НДШ, зардал харагдана.</small></article>}
       </section>
@@ -102,7 +111,8 @@ export function MonthlyPayrollDashboard() {
       <section className="payroll-v2-section"><div className="payroll-v2-section-head"><h2>Бодолтын явц</h2><Link to={`/erp/payroll/monthly?month=${month}`}>Сарын бодолт нээх</Link></div>
         {data.pipeline.length ? <div className="mp-pipeline">{data.pipeline.map((run) => <article key={run.id} className="mp-pipeline-card">
           <div><Link to={`/erp/payroll/monthly/runs/${run.id}`}><strong>{runTitle(run)}</strong></Link><RunStatusChip status={run.status} /></div>
-          <span>{run.pay_date} · {run.workers} ажилтан</span><b>{formatMoney(run.total)}</b>
+          <span>{run.pay_date} · {run.workers} ажилтан</span><b title="Байгууллагаас төлөх дүн">{formatMoney(run.company_total)}</b>
+          {toNumber(run.company_total) !== toNumber(run.company_breakdown.cash) && <small>{payoutParts(run.company_breakdown)}</small>}
           <div className="mp-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={run.workers} aria-valuenow={run.approved_rows}><i style={{ width: `${run.workers ? (run.approved_rows * 100) / run.workers : 0}%` }} /></div>
           <small>{run.approved_rows} / {run.workers} батлагдсан{run.paid_at ? ' · төлсөн' : ''}</small>
           {run.approved_rows < run.workers && run.status === 'draft' && <Link className="mp-inline-link" to={`/erp/payroll/monthly/runs/${run.id}?status=draft`}>Батлагдаагүй мөр харах</Link>}

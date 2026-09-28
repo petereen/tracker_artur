@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../api/enterprise", () => ({
   useClock: () => mocks.clock,
   useClockAction: () => mocks.action,
+  useWorktimeMethods: () => ({ data: { qr_enabled: true, location_enabled: true } }),
   useCalendarEvents: (scope: string) => ({ data: scope === "private" ? mocks.privateCalendar : mocks.companyCalendar }),
   useEnterpriseSummary: () => ({ data: { active_projects: 1, completed_tasks: 2, completion_rate: 80, worked_minutes: 60 } }),
   useTodayCheckin: () => ({ data: {} }),

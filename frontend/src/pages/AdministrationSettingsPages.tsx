@@ -13,6 +13,7 @@ import { OnboardingPage } from './OnboardingPage'
 import { DeveloperPage } from './DeveloperPage'
 import { ERPBuilderPanels } from '../components/ERPBuilderPanels'
 import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
+import { WorktimeMethodsSettings } from '../components/WorktimeMethodsSettings'
 
 type SettingsTab = { to: string; label: string; roles?: string[] }
 type SettingsCategory = { id: string; to: string; label: string; icon: typeof Settings2; roles: string[]; tabs: SettingsTab[] }
@@ -171,6 +172,7 @@ export function CollaborationSettingsPage() {
     <SettingsSection title="Check-in асуултууд" icon={ClipboardList} className="settings-embedded"><QuestionsPage /></SettingsSection>
     <SettingsSection title="Ажилтны хуваарь" icon={CalendarDays} className="settings-embedded"><SchedulePage /></SettingsSection>
     <WorktimeHolidayPanel />
+    <SettingsSection title="Цаг бүртгэх арга" icon={ScanLine} className="settings-embedded" defaultOpen><WorktimeMethodsSettings /></SettingsSection>
     <WorktimeQrKioskPanel />
     <WorktimeGeofencePanel />
   </SettingsPage>
@@ -221,18 +223,18 @@ function WorktimeQrKioskPanel() {
 const WORKTIME_QR_SETUP_STEPS = [
   { icon: Settings2, title: 'Дэлгэцээ бүртгэх', text: 'Нэр, Location ID, харагдах нэрээ оруулаад “Pairing код үүсгэх” дээр дарна.' },
   { icon: ClipboardList, title: 'Нэг удаагийн код авах', text: 'Үүссэн 8 тэмдэгттэй код 10 минут хүчинтэй. Хугацаа дуусвал шинэ код үүсгээрэй.' },
-  { icon: MonitorUp, title: 'Дэлгэц дээр нээх', text: 'Tablet, kiosk эсвэл TV-ийн browser-оор энэ системийн /worktimeqr хуудсыг HTTPS-ээр нээгээд кодыг оруулна.' },
-  { icon: Wifi, title: 'Холболтоо баталгаажуулах', text: '“Дэлгэц холбох” дарсны дараа код оруулах хэсэг алга болж, дэлгэц дээр Live төлөв болон шинэчлэгддэг QR гарна.' },
-  { icon: ScanLine, title: 'Туршилтын уншилт хийх', text: 'Ажилтны OYUNS Worktime scanner-аар QR-ийг уншуулж, check-in/check-out бүртгэл зөв үүссэнийг шалгана. Дэлгэцийн QR 30 секунд тутам солигдоно.' },
-  { icon: MapPin, title: 'Бусад байршлыг нэмэх', text: 'Дэлгэц бүрт тусдаа бичлэг, ялгаатай нэр өгч, тухайн байршлын Location ID-г сонгоод төхөөрөмж бүрийг тус тусад нь pair хийнэ.' },
+  { icon: MonitorUp, title: 'Дэлгэц дээр нээх', text: 'Tablet, kiosk эсвэл TV-ийн browser-оор энэ системийн erp.oyuns.mn/worktimeqr хуудсыг нээгээд кодыг оруулна.' },
+  { icon: Wifi, title: 'Холболтоо баталгаажуулах', text: '“Дэлгэц холбох” дарсны дараа дэлгэц дээр холбогдсон төлөв болон байнгийн шинэчлэгддэг QR гарч ирнэ.' },
+  { icon: ScanLine, title: 'Туршилтын уншилт хийх', text: 'Ажилтан цаг бүртгэх "Ажлын цаг" хэсгээс QR-ийг уншуулж, check-in/check-out бүртгэл зөв үүсч буйг шалгана. Дэлгэцийн QR 30 секунд тутамд солигдоно.' },
+  { icon: MapPin, title: '2 ба түүнээс дээш дэлгэц холбох', text: 'Цаг бүртгэх QR гаргах дэлгэц бүрт ялгаатай нэр өгч, тухайн байршлыг сонгоод төхөөрөмж бүрийг тус тусын pairing кодоор холболт хийнэ.' },
 ]
 
 function WorktimeQrSetupGuide() {
   return <section className="worktime-qr-guide" data-slot="worktime-qr-guide" aria-labelledby="worktime-qr-guide-title">
     <header className="worktime-qr-guide-header" data-slot="worktime-qr-guide-header"><div><span className="worktime-qr-guide-kicker">ТОХИРУУЛАХ ЗААВАР · 6 АЛХАМ</span><h3 id="worktime-qr-guide-title">QR дэлгэцээ холбоорой</h3><p>Дэлгэц pairing хийхдээ кодыг төхөөрөмж дээр нэг удаа оруулна.</p></div><div className="worktime-qr-guide-progress" aria-label="Нийт 6 алхам"><span>6</span><small>алхам</small></div></header>
     <ol className="worktime-qr-guide-steps" data-slot="worktime-qr-guide-steps" aria-label="Тохируулах алхмууд">{WORKTIME_QR_SETUP_STEPS.map(({ icon: Icon, title, text }, index) => <li key={title} data-slot="worktime-qr-guide-step"><span className="worktime-qr-step-icon"><Icon size={19} aria-hidden="true" /></span><span className="worktime-qr-step-number">{String(index + 1).padStart(2, '0')}</span><div><strong>{title}</strong><p>{text}</p></div></li>)}</ol>
-    <aside className="worktime-qr-troubleshooting" data-slot="worktime-qr-troubleshooting"><div className="worktime-qr-trouble-title"><ShieldAlert size={17} /><strong>Түгээмэл асуудал</strong></div><div><p><b>Кодын хугацаа дууссан:</b> Дэлгэцийн жагсаалтаас “Дахин pair хийх” дарж шинэ код авч оруулна.</p><p><b>Дэлгэц Offline/Disconnected:</b> Интернэтээ шалгаад /worktimeqr хуудсыг дахин ачаална. Холболт сэргээгүй бол pairing кодоо шинэчилж дахин холбоно.</p><p><b>Олон дэлгэц холбох:</b> Байршил бүрт тусдаа дэлгэц үүсгээд, нэг кодыг зөвхөн нэг төхөөрөмжид ашиглана.</p></div></aside>
-    <p className="worktime-qr-guide-note">Тусгай pairing линк үүсдэггүй: төхөөрөмж дээр /worktimeqr хуудсыг нээж, энд гарсан кодыг оруулна.</p>
+    <aside className="worktime-qr-troubleshooting" data-slot="worktime-qr-troubleshooting"><div className="worktime-qr-trouble-title"><ShieldAlert size={17} /><strong>Түгээмэл асуудал</strong></div><div><p><b>Кодын хугацаа дууссан:</b> Дэлгэцийн жагсаалтаас “Дахин pair хийх” дарж шинэ код авч оруулна.</p><p><b>Дэлгэц Offline/Disconnected:</b> Интернэтээ шалгаад /worktimeqr хуудсыг дахин ачаална. Холболт сэргээгүй бол pairing кодоо шинэчилж дахин холбоно.</p><p><b>Олон дэлгэц холбох:</b> 2 ба түүнээс дээш дэлгэц холбох тохиолдолд платформ дээр дахин шинээр дэлгэц үүсгэнэ. Нэг кодыг зөвхөн нэг дэлгэц/төхөөрөмжид холбон ашиглах боломжтой.</p></div></aside>
+    <p className="worktime-qr-guide-note">Тусгай pairing линк үүсдэггүй: төхөөрөмж дээр erp.oyuns.mn/worktimeqr хуудсыг нээж, энд гарсан кодыг оруулна.</p>
   </section>
 }
 

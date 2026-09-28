@@ -318,6 +318,9 @@ async def _change_work_time(message: Message, employee, mode: str, action: str, 
     if result == "worktime_geofence_not_configured":
         await message.answer("⚠️ Оффисын байршлыг админ тохиргоонд хадгалсны дараа ажил эхлүүлнэ үү.", reply_markup=reply_markup)
         return
+    if result == "worktime_location_disabled":
+        await message.answer("⚠️ Байршлаар бүртгэх боломжийг хаасан байна. Оффисын QR кодыг OYUNS Worktime-аар уншуулж ажлаа эхлүүлнэ үү.", reply_markup=reply_markup)
+        return
     if result == "worktime_location_required":
         await message.answer("⚠️ Ажил эхлүүлэхийн тулд Telegram-ийн байршил илгээх товчийг ашиглана уу.", reply_markup=reply_markup)
         return

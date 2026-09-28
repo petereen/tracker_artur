@@ -223,8 +223,9 @@ async def _scenario(client, ids, sessions, organization_id):
     assert template.status_code == 200
     workbook = load_workbook(BytesIO(template.content))
     sheet = workbook.active
-    headers = [cell.value for cell in sheet[1]]
-    target = next(row for row in sheet.iter_rows(min_row=3) if row[0].value == ids["weekly"])
+    from app.payroll.monthly_input_template import KEY_ROW
+    headers = [cell.value for cell in sheet[KEY_ROW]]
+    target = next(row for row in sheet.iter_rows(min_row=KEY_ROW + 1) if row[headers.index("employee_id")].value == ids["weekly"])
     target[headers.index("bonus")].value = 100000
     target[headers.index("reason")].value = "Урамшуулал"
     buffer = BytesIO()
