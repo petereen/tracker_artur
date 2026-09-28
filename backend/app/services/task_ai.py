@@ -76,7 +76,9 @@ _TASK_RESPONSE_SCHEMA = {
 
 def ai_enabled() -> bool:
     """True, если задан OPENAI_API_KEY."""
-    return bool(os.getenv("OPENAI_API_KEY", "").strip())
+    from app.services.ai_gateway.runtime import has_api_key_hint
+
+    return has_api_key_hint()
 
 
 def parse_llm_json(raw: str, roster_ids: set[int]) -> Optional[dict]:
@@ -208,7 +210,9 @@ async def structure_task(
         priority, needs_clarification, clarification.
     Возвращает None при отсутствии ключа, ошибке сети или таймауте.
     """
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    from app.services.ai_gateway.runtime import openai_api_key
+
+    api_key = await openai_api_key()
     if not api_key:
         return None
 

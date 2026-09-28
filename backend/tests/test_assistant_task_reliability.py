@@ -16,7 +16,8 @@ from app.core.enterprise_deps import build_actor_context
 from app.core.security import create_action_preview_token, decode_action_preview_token, verify_action_preview_token
 from app.services import enterprise_tools
 from app.services.ai_gateway import gateway as gateway_module
-from app.services.ai_gateway.gateway import AIGateway, Classification, GatewayRequest, GatewayResponse
+from app.services.ai_gateway.gateway import AIGateway, GatewayRequest, GatewayResponse
+from app.services.ai_gateway.runtime import AIRuntime
 from app.services.mcp.references import action_reference
 from app.services.task_parser import is_simple_self_meeting, task_schedule_fields
 
@@ -137,9 +138,6 @@ def test_live_model_missing_time_is_repaired_without_second_model_call(monkeypat
     gateway = AIGateway()
     posts = []
 
-    async def classify(_):
-        return Classification(category="simple_qa", language="mn", requires_freshness=False, requires_enterprise_tools=True, cache_eligible=False, enterprise_intents=["tasks_write"])
-
     async def post(*_, **__):
         posts.append(1)
         assert len(posts) == 1
@@ -154,11 +152,10 @@ def test_live_model_missing_time_is_repaired_without_second_model_call(monkeypat
     async def circuit(_):
         return False
 
-    monkeypatch.setattr(gateway, "_classify", classify)
     monkeypatch.setattr(gateway, "_post", post)
     monkeypatch.setattr(gateway.cache, "circuit_open", circuit)
     monkeypatch.setattr(gateway.tool_registry, "dispatch_tool", dispatch)
-    request = GatewayRequest(text="Баттай маргааш 16 цагаас хуралтай даалгавар үүсгэ", history=[], channel="telegram", actor_context=actor(), database=Session(), grounding_context={"current_time": NOW.isoformat(), "timezone": "Asia/Ulaanbaatar"})
+    request = GatewayRequest(text="Баттай маргааш 16 цагаас хуралтай даалгавар үүсгэ", history=[], channel="telegram", actor_context=actor(), database=Session(), grounding_context={"current_time": NOW.isoformat(), "timezone": "Asia/Ulaanbaatar"}, runtime=AIRuntime(api_key="sk-test", primary_model="gpt-5.6-luna", fallback_model=None, reasoning_effort="low", max_output_tokens=2_000, web_search_enabled=True, source="organization"))
     response = asyncio.run(gateway.respond(request.database, request))
     assert "2026-09-10T16:00:00+08:00" in response.answer
     assert len(posts) == 1

@@ -20,10 +20,18 @@ CHIMEGE_SYNTHESIZE_URL = "https://api.chimege.com/v1.2/synthesize"
 
 
 def transcription_enabled() -> bool:
-    return bool(
-        os.getenv("CHIMEGE_API_TOKEN", "").strip()
-        or os.getenv("OPENAI_API_KEY", "").strip()
-    )
+    from app.services.ai_gateway.runtime import has_api_key_hint
+
+    return bool(os.getenv("CHIMEGE_API_TOKEN", "").strip() or has_api_key_hint())
+
+
+async def transcription_available() -> bool:
+    """Async variant that also resolves a key saved in platform settings."""
+    if os.getenv("CHIMEGE_API_TOKEN", "").strip():
+        return True
+    from app.services.ai_gateway.runtime import openai_api_key
+
+    return bool(await openai_api_key())
 
 
 def synthesis_enabled() -> bool:
@@ -217,14 +225,28 @@ def _api_error_message(body: str) -> str:
 
 
 async def transcribe(audio: bytes, filename: str = "voice.ogg") -> tuple[Optional[str], Optional[str]]:
-    """Возвращает распознанный текст и безопасное для пользователя описание ошибки."""
+    """Return recognized text and a user-safe error description.
+
+    Chimege (Mongolian STT) is primary. If it fails and an OpenAI key is
+    configured (platform settings or env), OpenAI transcription is the fallback.
+    """
+    from app.services.ai_gateway.runtime import openai_api_key
+
+    chimege_error: Optional[str] = None
     chimege_token = os.getenv("CHIMEGE_API_TOKEN", "").strip()
     if chimege_token:
-        return await _transcribe_chimege(audio, chimege_token)
-
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        text, chimege_error = await _transcribe_chimege(audio, chimege_token)
+        if text:
+            return text, None
+    api_key = await openai_api_key()
     if not api_key:
-        return None, "OpenAI API түлхүүр тохируулагдаагүй байна."
+        return None, chimege_error or "OpenAI API түлхүүр тохируулагдаагүй байна."
+    if chimege_error:
+        log.info("Chimege STT failed; falling back to OpenAI transcription")
+    return await _transcribe_openai(audio, api_key, filename)
+
+
+async def _transcribe_openai(audio: bytes, api_key: str, filename: str) -> tuple[Optional[str], Optional[str]]:
     model = os.getenv("OPENAI_WHISPER_MODEL", "gpt-4o-mini-transcribe")
     try:
         # Do not force Russian: Whisper can auto-detect Mongolian, English,

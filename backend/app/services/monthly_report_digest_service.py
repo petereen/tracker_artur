@@ -87,7 +87,9 @@ def seed_dummy_monthly_test_reports(period: date) -> int:
 
 
 async def _ai_summary(reports: list[tuple[str, str]]) -> str | None:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    from app.services.ai_gateway.runtime import openai_api_key
+
+    api_key = await openai_api_key()
     if not api_key:
         return None
     report_text = "\n\n".join(

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Department, Employee, EmployeeDetails, Task, WorkReport, WorkReportRevision, WorkTimeEntry
 from app.services.ai_gateway import AIGateway, GatewayError
+from app.services.ai_gateway.runtime import resolve_ai_runtime
 
 log = logging.getLogger(__name__)
 
@@ -376,7 +377,8 @@ async def generate_summary(
     input_items.append({"role": "user", "content": question[:2_000]})
     degraded = False
     try:
-        answer = await _gateway.generate_text(instructions=SUMMARY_INSTRUCTIONS, input_items=input_items, model_key="terra", max_output_tokens=2_500)
+        runtime = await resolve_ai_runtime(db, organization_id)
+        answer = await _gateway.generate_text(instructions=SUMMARY_INSTRUCTIONS, input_items=input_items, runtime=runtime, max_output_tokens=2_500)
     except GatewayError:
         log.warning("report_insights.summary_fallback", exc_info=True)
         answer = fallback_summary(scope_label, date_from, date_to, kpis, records)

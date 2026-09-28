@@ -13,6 +13,8 @@ from app.services.mcp import schemas
 
 
 AccessMode = Literal["read", "preview"]
+# Domains hidden from shared spaces (team group chats) even for entitled actors.
+SENSITIVE_DOMAINS = frozenset({"payroll"})
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,12 @@ CATALOG: tuple[ToolDefinition, ...] = (
     ToolDefinition("oyuns_stats_get", "Get governed statistics", "Return authorized OYUNS ERP metrics; unsupported metrics are rejected.", schemas.StatsGetInput, "analytics", "read", required_permissions=frozenset({"assistant.analytics"}), intent_tags=frozenset({"analytics"})),
     ToolDefinition("oyuns_erp_read", "Read ERP records", "Read authorized ERP dashboard totals or documents. This never creates, posts, pays, or finalizes payroll.", schemas.ERPReadInput, "erp", "read", required_permissions=frozenset({"assistant.erp"}), intent_tags=frozenset({"erp"})),
     ToolDefinition("oyuns_exchange_rate_get", "Get exchange rate", "Retrieve a current exchange rate from the configured provider.", schemas.ExchangeRateInput, "exchange", "read", intent_tags=frozenset({"exchange_rates"})),
+    ToolDefinition("oyuns_reports_search", "Search work reports", "Read employees' daily/monthly work reports and next-month plans with text excerpts. Everyone sees their own; management sees the organization. Use for what someone worked on, missing reports, or report content.", schemas.ReportsSearchInput, "reports", "read", intent_tags=frozenset({"reports"})),
+    ToolDefinition("oyuns_worktime_get", "Get work time", "Clock-in/out and worked hours. status_now = who is working, remote, or on break right now; totals = hours per employee for a period; daily = per-day clock times. Everyone sees their own; managers, HR, and team leads see their scope.", schemas.WorktimeGetInput, "worktime", "read", intent_tags=frozenset({"worktime"})),
+    ToolDefinition("oyuns_hr_get", "Get HR data", "Departments, leave (time-off) requests, leave balances, and monthly attendance, scoped like the HR page: own data for everyone, direct reports for managers, all for HR/admin.", schemas.HRGetInput, "hr", "read", intent_tags=frozenset({"hr"})),
+    ToolDefinition("oyuns_crm_search", "Search CRM", "CRM clients/partners and CRM activities (calls, meetings, follow-ups), plus a pipeline summary. Requires CRM access.", schemas.CRMSearchInput, "crm", "read", intent_tags=frozenset({"crm"})),
+    ToolDefinition("oyuns_contracts_search", "Search contracts", "Contracts, agreements, and official letters with status and effective/expiry dates. Visible to admins, authors, and reviewers only.", schemas.ContractsSearchInput, "contracts", "read", intent_tags=frozenset({"contracts"})),
+    ToolDefinition("oyuns_payroll_summary", "Get payroll summary", "Monthly payroll: months and run status, company totals (gross, taxes, social insurance, net), or per-employee gross/net. Admin/HR with payroll access only.", schemas.PayrollSummaryInput, "payroll", "read", required_roles=frozenset({"admin", "hr"}), intent_tags=frozenset({"payroll"})),
     ToolDefinition("oyuns_tasks_prepare_create", "Prepare task creation", "Prepare a task for explicit Web or Telegram confirmation. This never creates a task directly.", schemas.TaskPrepareCreateInput, "tasks", "preview", required_permissions=frozenset({"assistant.preview"}), intent_tags=frozenset({"tasks_write"}), is_mutation=True),
     ToolDefinition("oyuns_tasks_prepare_update", "Prepare task update", "Prepare a task update for explicit Web or Telegram confirmation. This never changes a task directly.", schemas.TaskPrepareUpdateInput, "tasks", "preview", required_permissions=frozenset({"assistant.preview"}), intent_tags=frozenset({"tasks_write"}), is_mutation=True),
 )
@@ -73,13 +81,17 @@ def _strict_schema(model: type[BaseModel]) -> dict:
 
 
 def allowed_tool_names(actor: ActorContext, intents: set[str] | frozenset[str] | None = None, *, action_intents: set[str] | frozenset[str] = frozenset()) -> list[str]:
-    """Return all permitted reads; only explicit action intents gate previews."""
-    action_intents = set(action_intents or intents or ())
+    """Return every tool the actor's roles and permissions allow.
+
+    Previews never mutate (the user confirms them in the channel), so they are
+    gated by permission only, not by guessing the request's intent.
+    ``intents``/``action_intents`` are accepted for caller compatibility.
+    """
+    del intents, action_intents
     permissions = actor.permissions or permissions_for_roles(actor.roles)
     return [tool.name for tool in CATALOG
             if (not tool.required_roles or actor.has_any_role(*tool.required_roles))
-            and tool.required_permissions.issubset(permissions)
-            and (tool.read_only or bool(tool.intent_tags.intersection(action_intents)))]
+            and tool.required_permissions.issubset(permissions)]
 
 
 def get_tool(name: str) -> ToolDefinition | None:

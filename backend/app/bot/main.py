@@ -47,6 +47,14 @@ async def main():
 
     scheduler.start()
     rebuild_jobs()
+    try:
+        # Warm the OpenAI key cache so sync availability checks (voice, task
+        # AI) also see a key configured only in platform settings.
+        from app.services.ai_gateway.runtime import openai_api_key
+
+        await openai_api_key()
+    except Exception:
+        log.warning("bot.ai_runtime_warmup_failed", exc_info=True)
     await setup_bot_menus(bot, settings.MANAGER_TG_ID, settings.MINI_APP_URL)
     log.info("Scheduler started, bot polling...")
 

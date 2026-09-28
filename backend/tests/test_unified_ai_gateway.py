@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from app.core.enterprise_deps import ActorContext, permissions_for_roles
 from app.core.security import create_action_preview_token, decode_action_preview_token, verify_action_preview_token
-from app.services.ai_gateway.gateway import AIGateway
 from app.services.ai_gateway.tools.registry import ToolRegistry
 from app.services.mcp.catalog import get_tool
 
@@ -24,14 +23,16 @@ def test_unassigned_authenticated_accounts_can_search_company_knowledge():
     assert "oyuns_tasks_prepare_create" not in names
 
 
-def test_registry_keeps_reads_visible_and_gates_previews_by_permission():
-    member = {item["name"] for item in ToolRegistry().visible_tools(actor(), {"tasks_write", "erp"})}
+def test_registry_gates_previews_and_sensitive_domains_by_role():
+    contractor = {item["name"] for item in ToolRegistry().visible_tools(actor("contractor"))}
+    assert "oyuns_knowledge_search" in contractor
+    member = {item["name"] for item in ToolRegistry().visible_tools(actor())}
+    # Previews never mutate, so they are visible to every role with
+    # assistant.preview without intent keywords.
     assert "oyuns_tasks_prepare_create" in member
-    assert "oyuns_erp_read" not in member
-    admin = {item["name"] for item in ToolRegistry().visible_tools(actor("admin"), {"erp"})}
-    assert "oyuns_erp_read" in admin
-    assert "oyuns_knowledge_search" in admin
-    assert "oyuns_tasks_prepare_create" not in admin
+    assert "oyuns_payroll_summary" not in member
+    admin = {item["name"] for item in ToolRegistry().visible_tools(actor("admin"))}
+    assert {"oyuns_erp_read", "oyuns_payroll_summary", "oyuns_tasks_prepare_create"} <= admin
 
 
 def test_strict_tool_schemas_require_all_properties_for_responses():
@@ -50,9 +51,3 @@ def test_preview_is_explicitly_mutating_and_compactly_signed():
     assert claims and claims["action_id"] == "123"
     assert verify_action_preview_token(token, payload_digest="a" * 64, account_id=7, organization_id=3, channel="telegram")
     assert not verify_action_preview_token(token, payload_digest="b" * 64, account_id=7, organization_id=3, channel="telegram")
-
-
-def test_multilingual_intent_fallback_keeps_authorized_data_tools_visible():
-    assert "directory" in AIGateway._infer_enterprise_intents("ажилчдын жагсаалт")
-    for query in ("presentation template файл", "презентация шаблон", "презентаци загвар"):
-        assert "knowledge" in AIGateway._infer_enterprise_intents(query)

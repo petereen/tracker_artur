@@ -12,19 +12,16 @@ from app.services.enterprise_tools import (
     ProjectQueryInput,
     ProjectUpdateInput,
     StatsInput,
-    _capability_answer,
     _chunks,
     attachment_metadata,
-    _offline_route,
     _is_personal_meeting_task,
     _is_self_meeting_task,
     _meeting_description,
-    is_high_confidence_request,
     extract_content,
-    tool_specs,
     wants_file_attachment,
 )
 from app.core.enterprise_deps import ActorContext
+from app.services.mcp.catalog import CATALOG, _strict_schema
 from app.models.models import ResourceGrant, ResourcePolicy
 
 
@@ -55,8 +52,8 @@ def test_all_enterprise_function_schemas_satisfy_responses_strict_mode():
             for value in node:
                 visit(value)
 
-    for spec in tool_specs():
-        visit(spec["parameters"])
+    for tool in CATALOG:
+        visit(_strict_schema(tool.model))
 
 
 def test_governed_tool_inputs_cover_the_public_contract():
@@ -66,7 +63,6 @@ def test_governed_tool_inputs_cover_the_public_contract():
     assert CalendarInput(intent="availability", scope="team").scope == "team"
     preview = ProjectUpdateInput(operation="update_task", task_id=4, changes={"workflow_status": "done"})
     assert preview.changes.workflow_status == "done"
-    assert {spec["name"] for spec in tool_specs()} == {"file_search_tool", "get_stats_tool", "project_mgmt_tool", "project_mgmt_update_tool", "calendar_tool", "employee_directory_tool", "create_task", "delegate_task", "erp_query_tool"}
     task = AssistantTaskInput(title="Prepare access review", assignee="Ada", priority=1, start_at="2026-06-02T08:00:00+08:00")
     assert task.assignee == "Ada"
     assert task.start_at is not None
@@ -107,36 +103,9 @@ def test_text_extraction_produces_safe_locations_and_overlap_chunks():
     assert chunks[1][1]["word_start"] == 680
 
 
-def test_offline_route_recognizes_mongolian_enterprise_requests():
-    assert _offline_route("файлын сангаас powerpoint template ол") == (
-        "file_search_tool",
-        {"query": "файлын сангаас powerpoint template ол", "file_types": [], "limit": 5, "delivery": "none"},
-    )
-    assert _offline_route("Ажилчдын жагсаалт") == (
-        "employee_directory_tool",
-        {"include_inactive": False},
-    )
-    assert _offline_route("компанийн төлөвлөгөө юу вэ") == (
-        "project_mgmt_tool",
-        {"operation": "query", "entity": "plans", "completion_state": "all", "limit": 20},
-    )
-    assert _offline_route("компанийн хийгдэж буй төслүүд байгаа юу?") == (
-        "project_mgmt_tool",
-        {"operation": "query", "entity": "projects", "completion_state": "all", "active_only": True, "limit": 20},
-    )
-    assert _offline_route("файлын санд ямар файлууд байна?") == (
-        "file_search_tool",
-        {"operation": "list", "folder_id": None, "file_types": [], "limit": 10, "delivery": "none"},
-    )
-
-
 def test_explicit_file_delivery_requests_create_safe_attachment_metadata():
     assert wants_file_attachment("Надад leave policy файлыг хавсаргаж өгөөч") is True
     assert wants_file_attachment("файлын жагсаалтыг харуул") is False
-    assert _offline_route("Надад powerpoint template-ийг илгээ") == (
-        "file_search_tool",
-        {"query": "Надад powerpoint template-ийг илгээ", "file_types": [], "limit": 5, "delivery": "attachment"},
-    )
     deliveries = [
         {"kind": "company_file_attachment", "item_id": 7, "filename": "policy.pdf", "content_type": "application/pdf", "size": 12},
         {"kind": "company_file_attachment", "item_id": 7, "filename": "policy.pdf", "content_type": "application/pdf", "size": 12},
@@ -148,20 +117,6 @@ def test_explicit_file_delivery_requests_create_safe_attachment_metadata():
         "size": 12,
         "download_url": "/v1/company-files/7/download",
     }]
-
-
-def test_offline_capability_answer_is_mongolian():
-    answer = _capability_answer("Чи юу хийж чадах вэ")
-    assert "компанийн файлуудаас" in answer
-    assert "календарь" in answer
-
-
-def test_high_confidence_requests_bypass_legacy_unknown_fallback():
-    assert is_high_confidence_request("Чи юу хийж чадах вэ")
-    assert is_high_confidence_request("файлын сангаас powerpoint template ол")
-    assert is_high_confidence_request("Ажилчдын жагсаалт")
-    assert is_high_confidence_request("компанийн төлөвлөгөө юу вэ")
-    assert is_high_confidence_request("компанийн хийгдэж буй төслүүд байгаа юу?")
 
 
 class _GrantRows:

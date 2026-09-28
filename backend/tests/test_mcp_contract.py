@@ -4,7 +4,8 @@ import pytest
 
 from app.core.enterprise_deps import ActorContext
 from app.core.security import create_mcp_access_token, decode_mcp_access_token
-from app.services.ai_gateway.gateway import AIGateway, Classification, GatewayRequest
+from app.services.ai_gateway.gateway import AIGateway, GatewayRequest
+from app.services.ai_gateway.runtime import AIRuntime
 from app.services.mcp.catalog import allowed_tool_names, tool_list
 from app.services.mcp.references import resolve_resource_reference, resource_reference
 from app.services.mcp.results import MAX_RESULT_BYTES, envelope
@@ -27,11 +28,11 @@ def test_mcp_catalog_uses_strict_versioned_tool_contracts():
     tools = tool_list(_actor())
     names = {tool["name"] for tool in tools}
     assert "oyuns_knowledge_search" in names
-    assert "oyuns_tasks_prepare_create" not in names
+    # Previews are permission-gated only; they never mutate without confirmation.
+    assert "oyuns_tasks_prepare_create" in names
     assert all(name.startswith("oyuns_") for name in names)
     assert all(tool["inputSchema"].get("additionalProperties") is False for tool in tools)
     assert set(allowed_tool_names(_actor())) == names
-    assert "oyuns_tasks_prepare_create" in set(allowed_tool_names(_actor(), action_intents={"tasks_write"}))
 
 
 def test_mcp_token_is_actor_scoped_and_audience_bound():
@@ -102,14 +103,8 @@ def test_gateway_uses_remote_mcp_and_preserves_deferred_list_context(monkeypatch
         async def record_model_success(self, _key): return None
         async def record_model_failure(self, _key): return None
 
-    async def classify(_text):
-        return Classification(
-            category="simple_qa", language="en", requires_freshness=False,
-            requires_enterprise_tools=True, requested_modalities=["text"], cache_eligible=False,
-        )
-
-    async def post(payload, *, model_key, retries=2):
-        del model_key, retries
+    async def post(payload, *, api_key, model_key, retries=2, stage="answer"):
+        del api_key, model_key, retries, stage
         assert payload["tools"][0]["type"] == "mcp"
         assert payload["tools"][0]["defer_loading"] is True
         return {
@@ -122,11 +117,11 @@ def test_gateway_uses_remote_mcp_and_preserves_deferred_list_context(monkeypatch
         }
 
     gateway.cache = Cache()
-    monkeypatch.setattr(gateway, "_classify", classify)
     monkeypatch.setattr(gateway, "_post", post)
     response = asyncio.run(gateway.respond(None, GatewayRequest(
         text="find company policy", history=[], channel="web",
         mcp_tool={"type": "mcp", "server_url": "https://mcp.example.test/mcp", "defer_loading": True},
+        runtime=AIRuntime(api_key="sk-test", primary_model="gpt-5.6-luna", fallback_model=None, reasoning_effort="low", max_output_tokens=2_000, web_search_enabled=False, source="organization"),
     )))
     assert response.answer == "Done."
     assert response.tool_results[0]["status"] == "ok"

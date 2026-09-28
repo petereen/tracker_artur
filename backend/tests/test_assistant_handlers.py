@@ -20,15 +20,6 @@ from app.bot.tasks_handlers import (
     apply_task_draft_edit,
     task_draft_text,
 )
-from app.services.assistant_ai import (
-    AssistantIntent,
-    AssistantLanguage,
-    AssistantToolName,
-    DateRangeKind,
-    RouteDecision,
-    RouterIntent,
-    TaskScope,
-)
 from app.services.file_search_service import FileSearchPrincipal
 
 
@@ -41,6 +32,8 @@ class FakeMessage:
     def __init__(self, text: str = ""):
         self.text = text
         self.voice = object()
+        self.audio = None
+        self.video_note = None
         self.bot = FakeBot()
         self.from_user = SimpleNamespace(full_name="Tester", username="tester")
         self.chat = SimpleNamespace(id=1234)
@@ -80,155 +73,61 @@ EMPLOYEE = SimpleNamespace(
 
 
 @pytest.fixture(autouse=True)
-def _empty_worker_directory(monkeypatch):
-    assistant_handlers._conversation_history.clear()
-    monkeypatch.setattr(
-        assistant_handlers.employee_directory_service,
-        "list_workers",
-        lambda: [],
-    )
-    monkeypatch.setattr(assistant_handlers.unknown_request_service, "active_context_examples", lambda: [])
+def _tts_switch_on(monkeypatch):
     monkeypatch.setattr(assistant_handlers.voice_service, "tts_answers_enabled", lambda: True)
 
 
-def _decision(intent: AssistantIntent) -> RouteDecision:
-    router_intent = {
-        AssistantIntent.DELEGATE_TASK: RouterIntent.CREATE_TASK,
-        AssistantIntent.QUERY_MY_TASKS: RouterIntent.VIEW_MY_TASKS,
-        AssistantIntent.DISCOVER_CAPABILITIES: RouterIntent.AGENT_CAPABILITIES,
-    }.get(intent, RouterIntent.UNKNOWN)
-    return RouteDecision(
-        intent=intent,
-        router_intent=router_intent,
-        language=AssistantLanguage.EN,
-        confidence=0.95,
-        task_scope=TaskScope.BOTH,
-        date_range=DateRangeKind.NONE,
-        start_date=None,
-        end_date=None,
-        include_completed=False,
-        time_budget_minutes=None,
-        knowledge_terms=[],
-        clarification=None,
-    )
+class GatewaySession:
+    """Minimal async session for the Telegram route; records added rows."""
+
+    def __init__(self):
+        self.added = []
+        self.committed = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def scalar(self, _statement):
+        return None
+
+    async def execute(self, _statement):
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+
+    def add(self, record):
+        self.added.append(record)
+
+    async def flush(self):
+        return None
+
+    async def commit(self):
+        self.committed = True
+
+    async def rollback(self):
+        return None
 
 
-def _react_decision(intent: AssistantIntent, tool: AssistantToolName, arguments: dict):
-    return _decision(intent).model_copy(
-        update={
-            "selected_tool": tool,
-            "tool_arguments": arguments,
-            "react_messages": [{"role": "user", "content": "request"}],
-            "assistant_tool_message": {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [{"id": "call_1", "type": "function"}],
-            },
-            "tool_call_id": "call_1",
-        }
-    )
+async def _linked_actor(_tg_id, _db):
+    return build_actor_context(account_id=11, organization_id=1, employee_id=7, email="tester@example.com", locale="en", roles=frozenset({"member"}))
 
 
-def test_question_answers_use_voice_but_task_drafts_do_not():
-    question = _decision(AssistantIntent.QUERY_MY_TASKS).model_copy(
-        update={"direct_answer": "You have one active task."}
-    )
-    task = _react_decision(
-        AssistantIntent.DELEGATE_TASK,
-        AssistantToolName.CREATE_TASK_DRAFT,
-        {"assignee": "self", "title": "Prepare report", "priority": 2, "due_date": None},
-    )
-
-    assert assistant_handlers._should_answer_in_voice(question, text="What are my tasks?") is True
-    assert assistant_handlers._should_answer_in_voice(task, text="Prepare a report") is False
+def _gateway_reply(answer: str, **extra):
+    return SimpleNamespace(answer=answer, sources=[], deliveries=[], tool_results=[], memory=[{"tool": "oyuns_tasks_search", "items": [{"title": "Report"}]}], degraded=False, **extra)
 
 
 def test_chimege_tts_text_normalizes_uppercase_runs():
     assert voice_service._prepare_synthesis_text("OYUNS AI: АСУУЛТ байна уу? ✅") == ": асуулт байна уу?"
 
 
-def test_question_answer_falls_back_to_text_when_tts_fails(monkeypatch):
-    decision = _decision(AssistantIntent.DISCOVER_CAPABILITIES).model_copy(
-        update={"direct_answer": "I can help with company questions."}
-    )
-    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
-
-    async def synthesize(_text):
-        return None, "unavailable"
-
-    monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
-    message = FakeMessage("What can you do?")
-    asyncio.run(
-        assistant_handlers._answer_question(
-            message,
-            decision.direct_answer,
-            decision=decision,
-        )
-    )
-
-    assert message.answers == [
-        (
-            "I can help with company questions.",
-            {"parse_mode": None, "reply_markup": None},
-        )
-    ]
-
-
-def test_question_answer_sends_matching_text_and_audio(monkeypatch):
-    decision = _decision(AssistantIntent.DISCOVER_CAPABILITIES).model_copy(
-        update={"direct_answer": "Компаний мэдээлэлд тусална."}
-    )
-    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
-
-    async def synthesize(_text):
-        return b"wav-data", None
-
-    monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
-    message = FakeMessage("Юу хийж чадах вэ?")
-    asyncio.run(
-        assistant_handlers._answer_question(
-            message,
-            decision.direct_answer,
-            decision=decision,
-        )
-    )
-
-    assert message.answers[0][0] == decision.direct_answer
-    assert message.audios[0][1]["title"] == "OYUNS хариулт"
-
-
-def test_question_answer_switch_can_disable_audio(monkeypatch):
-    decision = _decision(AssistantIntent.DISCOVER_CAPABILITIES).model_copy(
-        update={"direct_answer": "Текстэн хариулт."}
-    )
-    monkeypatch.setattr(assistant_handlers.voice_service, "tts_answers_enabled", lambda: False)
-    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
-
-    async def synthesize(_text):
-        raise AssertionError("TTS must not be called while the admin switch is off")
-
-    monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
-    message = FakeMessage("Юу хийж чадах вэ?")
-    asyncio.run(
-        assistant_handlers._answer_question(
-            message,
-            decision.direct_answer,
-            decision=decision,
-        )
-    )
-
-    assert message.answers[0][0] == decision.direct_answer
-    assert message.audios == []
-
-
 def test_voice_transcript_uses_shared_router(monkeypatch):
     captured = {}
 
-    monkeypatch.setattr(
-        assistant_handlers.voice_service,
-        "transcription_enabled",
-        lambda: True,
-    )
+    async def available():
+        return True
+
+    monkeypatch.setattr(assistant_handlers.voice_service, "transcription_available", available)
 
     async def transcribe(_audio):
         return "What are my tasks?", None
@@ -256,67 +155,131 @@ def test_voice_transcript_uses_shared_router(monkeypatch):
     assert captured["employee"] is EMPLOYEE
 
 
-def test_telegram_linked_account_sends_gateway_answer(monkeypatch):
-    class Session:
-        async def __aenter__(self):
-            return self
+def test_telegram_linked_account_sends_gateway_answer_and_keeps_memory(monkeypatch):
+    session = GatewaySession()
+    captured = {}
 
-        async def __aexit__(self, *_args):
-            return None
+    async def execute_turn(_db, _actor, history, **kwargs):
+        captured.update(kwargs, history=history)
+        return _gateway_reply("**Telegram** gateway reply")
 
-        async def scalar(self, _statement):
-            return None
-
-        async def execute(self, _statement):
-            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
-
-        def add(self, _record):
-            return None
-
-        async def flush(self):
-            return None
-
-        async def commit(self):
-            return None
-
-    async def actor_lookup(_tg_id, _db):
-        return build_actor_context(
-            account_id=11,
-            organization_id=1,
-            employee_id=7,
-            email="tester@example.com",
-            locale="en",
-            roles=frozenset({"member"}),
-        )
-
-    async def execute_turn(_db, _actor, _history, *, conversation_id):
-        assert conversation_id is None
-        return SimpleNamespace(
-            answer="Telegram gateway reply",
-            sources=[],
-            deliveries=[],
-            tool_results=[],
-        )
-
-    monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", lambda: Session())
-    monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", actor_lookup)
+    monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", _linked_actor)
     monkeypatch.setattr(assistant_handlers.ai_gateway, "execute_turn", execute_turn)
 
     message = FakeMessage("What can you help me with?")
-    state = FakeState()
-    handled = asyncio.run(
-        assistant_handlers._enterprise_route(
-            message,
-            state,
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=False,
-            tg_id="77",
-        )
-    )
+    handled = asyncio.run(assistant_handlers._enterprise_route(message, FakeState(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77"))
 
     assert handled is True
-    assert message.answers[-1][0] == "Telegram gateway reply"
+    assert message.answers[-1] == ("<b>Telegram</b> gateway reply", {"parse_mode": "HTML", "reply_markup": None})
+    assert captured["input_mode"] == "text"
+    assert captured["memory"] == []
+    conversation = next(item for item in session.added if isinstance(item, assistant_handlers.AssistantConversation))
+    assert conversation.mcp_context == [{"tool": "oyuns_tasks_search", "items": [{"title": "Report"}]}]
+    assert session.committed
+
+
+def test_reply_to_task_draft_is_passed_to_the_agent(monkeypatch):
+    captured = {}
+
+    async def execute_turn(_db, _actor, history, **_kwargs):
+        captured["history"] = history
+        return _gateway_reply("ok")
+
+    monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", GatewaySession)
+    monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", _linked_actor)
+    monkeypatch.setattr(assistant_handlers.ai_gateway, "execute_turn", execute_turn)
+    message = FakeMessage("Хугацааг маргааш 17:00 болго")
+    message.reply_to_message = SimpleNamespace(text="🤖 Даалгаврын ноорог\n\nТайлан бэлдэх", caption=None, from_user=SimpleNamespace(is_bot=True))
+    asyncio.run(assistant_handlers._enterprise_route(message, FakeState(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77"))
+
+    assert captured["history"][-2] == {"role": "assistant", "content": "<task draft being edited>\n🤖 Даалгаврын ноорог\n\nТайлан бэлдэх\n</task draft being edited>"}
+    assert captured["history"][-1] == {"role": "user", "content": "Хугацааг маргааш 17:00 болго"}
+
+
+def test_voice_turn_is_flagged_and_answered_with_chimege_audio(monkeypatch):
+    captured = {}
+
+    async def execute_turn(_db, _actor, _history, **kwargs):
+        captured.update(kwargs)
+        return _gateway_reply("Танд 2 нээлттэй даалгавар байна.")
+
+    async def synthesize(text):
+        captured["tts"] = text
+        return b"wav", None
+
+    monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", GatewaySession)
+    monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", _linked_actor)
+    monkeypatch.setattr(assistant_handlers.ai_gateway, "execute_turn", execute_turn)
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
+    message = FakeMessage("миний даалгавар")
+    asyncio.run(assistant_handlers._enterprise_route(message, FakeState(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77", voice_mode=True))
+
+    assert captured["input_mode"] == "voice"
+    assert captured["tts"] == "Танд 2 нээлттэй даалгавар байна."
+    assert message.audios[0][1]["title"] == "OYUNS хариулт"
+
+
+def test_voice_task_preview_is_not_read_aloud(monkeypatch):
+    async def execute_turn(*_args, **_kwargs):
+        return SimpleNamespace(answer="Даалгаврын ноорог", sources=[], deliveries=[], memory=[], degraded=False, tool_results=[{"data": {"pending_action": {"token": "tok"}}}])
+
+    async def synthesize(_text):
+        raise AssertionError("a task preview must not be synthesized")
+
+    monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", GatewaySession)
+    monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", _linked_actor)
+    monkeypatch.setattr(assistant_handlers.ai_gateway, "execute_turn", execute_turn)
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
+    message = FakeMessage("маргааш хурал")
+    asyncio.run(assistant_handlers._enterprise_route(message, FakeState(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77", voice_mode=True))
+
+    assert message.audios == []
+    assert message.answers[-1][1]["reply_markup"].inline_keyboard[0][0].callback_data == "ac:tok"
+
+
+def test_voice_message_types_all_reach_the_agent(monkeypatch):
+    routed = []
+
+    async def transcribe(_audio):
+        return "Сайн байна уу", None
+
+    async def route(_message, _state, text, **kwargs):
+        routed.append((text, kwargs["voice_mode"]))
+
+    async def available():
+        return True
+
+    monkeypatch.setattr(assistant_handlers.voice_service, "transcription_available", available)
+    monkeypatch.setattr(assistant_handlers.voice_service, "transcribe", transcribe)
+    monkeypatch.setattr(assistant_handlers, "route_and_respond", route)
+    for attribute in ("voice", "audio", "video_note"):
+        message = FakeMessage()
+        message.voice = message.audio = message.video_note = None
+        setattr(message, attribute, object())
+        asyncio.run(assistant_handlers.msg_assistant_voice(message, object(), employee=EMPLOYEE, tg_id="77"))
+        assert message.answers[0][0].startswith("🎙")
+    assert routed == [("Сайн байна уу", True)] * 3
+
+
+def test_telegram_html_escapes_before_formatting():
+    assert assistant_handlers.telegram_html("## Гарчиг\n- **a<b** `x`") == "<b>Гарчиг</b>\n• <b>a&lt;b</b> <code>x</code>"
+
+
+def test_rejected_html_falls_back_to_plain_text():
+    from aiogram.exceptions import TelegramBadRequest
+
+    class Strict(FakeMessage):
+        async def answer(self, text, **kwargs):
+            if kwargs.get("parse_mode") == "HTML":
+                raise TelegramBadRequest(method=None, message="can't parse entities")
+            await super().answer(text, **kwargs)
+
+    message = Strict()
+    asyncio.run(assistant_handlers._answer(message, "**bold**", parse_mode="HTML"))
+    assert message.answers == [("**bold**", {"parse_mode": None, "reply_markup": None})]
 
 
 def test_telegram_route_reports_unexpected_failure_instead_of_silence(monkeypatch):
@@ -358,6 +321,7 @@ def test_missing_telegram_attachment_does_not_replace_successful_answer(monkeypa
             object(),
             FileSearchPrincipal(organization_id=1, employee_id=7, channel="telegram"),
             {"item_id": 9},
+            language="en",
         )
     )
 
@@ -397,64 +361,6 @@ def test_verified_telegram_employee_can_search_without_workspace_account(monkeyp
     assert "indexing" in message.answers[0][0]
 
 
-def test_delegate_route_enters_existing_draft_without_direct_creation(monkeypatch):
-    drafted = {}
-    tool_arguments = {
-        "assignee": "@alex",
-        "title": "Review landing page",
-        "priority": 2,
-        "due_date": None,
-    }
-
-    async def classify(*_args, **_kwargs):
-        return _react_decision(
-            AssistantIntent.DELEGATE_TASK,
-            AssistantToolName.CREATE_TASK_DRAFT,
-            tool_arguments,
-        )
-
-    async def begin(message, state, text, **kwargs):
-        drafted.update({"message": message, "state": state, "text": text, **kwargs})
-        return {
-            "ok": True,
-            "_presentation": "🤖 <b>Даалгаврын ноорог</b>",
-            "draft": {
-                "title": "Review landing page",
-                "assignee": "Alex",
-                "requires_confirmation": True,
-            },
-        }
-
-    async def synthesize(**kwargs):
-        raise AssertionError("A task draft should not need a second model request")
-
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "synthesize_tool_result", synthesize)
-    monkeypatch.setattr(assistant_handlers, "begin_task_draft", begin)
-
-    message = FakeMessage("Assign review to @alex")
-    state = object()
-    asyncio.run(
-        assistant_handlers.route_and_respond(
-            message,
-            state,
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=True,
-            tg_id="77",
-            voice_mode=False,
-        )
-    )
-
-    assert drafted["text"] == "Assign review to @alex"
-    assert drafted["is_manager"] is True
-    assert drafted["tool_arguments"] == tool_arguments
-    assert drafted["show_preview"] is False
-    assert message.answers[-1][0] == "🤖 <b>Даалгаврын ноорог</b>"
-    assert message.answers[-1][1]["parse_mode"] == "HTML"
-    assert message.answers[-1][1]["reply_markup"] is not None
-
-
 def test_task_draft_uses_the_required_mongolian_format():
     zone = pytz.timezone("Asia/Ulaanbaatar")
     text = task_draft_text(
@@ -474,211 +380,6 @@ def test_task_draft_uses_the_required_mongolian_format():
         "🟡 Тэргүүлэх зэрэг: 2\n"
         "🕒 Хугацаа: <b>24.07 18:00 УБ</b>"
     )
-
-
-def test_task_query_is_scoped_to_current_actor(monkeypatch):
-    captured = {}
-
-    async def classify(*_args, **_kwargs):
-        return _react_decision(
-            AssistantIntent.QUERY_MY_TASKS,
-            AssistantToolName.GET_USER_TASKS,
-            {"timeframe": "all"},
-        )
-
-    def list_for_actor(**kwargs):
-        captured.update(kwargs)
-        return [{"title": "Review", "status": "open", "priority": 1}]
-
-    async def synthesize(**kwargs):
-        captured["raw_result"] = kwargs["raw_result"]
-        return "Your highest priority is Review."
-
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "synthesize_tool_result", synthesize)
-    monkeypatch.setattr(assistant_handlers.task_service, "list_for_actor", list_for_actor)
-
-    message = FakeMessage("What are my tasks?")
-    asyncio.run(
-        assistant_handlers.route_and_respond(
-            message,
-            object(),
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=False,
-            tg_id="77",
-            voice_mode=False,
-        )
-    )
-
-    assert captured["employee_id"] == EMPLOYEE.id
-    assert captured["tg_id"] == "77"
-    assert captured["scope"] == "assigned"
-    assert captured["raw_result"]["tasks"][0]["title"] == "Review"
-    assert message.answers[-1][0] == "Your highest priority is Review."
-
-
-def test_worker_directory_is_supplied_as_context_for_direct_answer(monkeypatch):
-    captured = {}
-
-    async def classify(*_args, **kwargs):
-        captured["workers"] = kwargs["workers"]
-        return _decision(AssistantIntent.GENERAL_PRODUCTIVITY).model_copy(
-            update={"direct_answer": "Alex (@alex) is active."}
-        )
-
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    monkeypatch.setattr(
-        assistant_handlers.employee_directory_service,
-        "list_workers",
-        lambda: [
-            {
-                "id": 7,
-                "name": "Alex",
-                "telegram_username": "alex",
-                "is_active": True,
-                "is_manager": False,
-            }
-        ],
-    )
-
-    message = FakeMessage("Show me the worker list")
-    asyncio.run(
-        assistant_handlers.route_and_respond(
-            message,
-            object(),
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=False,
-            tg_id="77",
-            voice_mode=False,
-        )
-    )
-
-    assert "Alex" in message.answers[-1][0]
-    assert "@alex" in message.answers[-1][0]
-    assert captured["workers"][0]["name"] == "Alex"
-
-
-def test_previous_turn_is_passed_to_context_first_router(monkeypatch):
-    histories = []
-
-    async def classify(*_args, **kwargs):
-        histories.append(kwargs["chat_history"])
-        return _decision(AssistantIntent.GENERAL_PRODUCTIVITY).model_copy(
-            update={"direct_answer": "Understood."}
-        )
-
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-
-    first = FakeMessage("Tomorrow I have a meeting.")
-    second = FakeMessage("What time was it?")
-    for message in (first, second):
-        asyncio.run(
-            assistant_handlers.route_and_respond(
-                message,
-                object(),
-                message.text,
-                employee=EMPLOYEE,
-                is_manager=False,
-                tg_id="77",
-                voice_mode=False,
-            )
-        )
-
-    assert histories[0] == []
-    assert histories[1] == [
-        {"role": "user", "content": "Tomorrow I have a meeting."},
-        {"role": "assistant", "content": "Understood."},
-    ]
-
-
-def test_replied_message_is_added_to_openai_context(monkeypatch):
-    captured = {}
-
-    async def classify(*_args, **kwargs):
-        captured["history"] = kwargs["chat_history"]
-        return _decision(AssistantIntent.GENERAL_PRODUCTIVITY).model_copy(
-            update={"direct_answer": "Understood."}
-        )
-
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    message = FakeMessage("Тэгвэл үүнийг зас.")
-    message.reply_to_message = SimpleNamespace(
-        text="Өмнөх даалгаврын ноорог",
-        caption=None,
-        from_user=SimpleNamespace(is_bot=True),
-    )
-    asyncio.run(
-        assistant_handlers.route_and_respond(
-            message,
-            object(),
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=False,
-            tg_id="77",
-            voice_mode=False,
-        )
-    )
-
-    assert captured["history"] == [
-        {
-            "role": "assistant",
-            "content": "<previous assistant reply>\nӨмнөх даалгаврын ноорог\n</previous assistant reply>",
-        }
-    ]
-
-
-def test_reply_to_task_draft_is_routed_as_an_edit(monkeypatch):
-    captured = {}
-    revised_arguments = {
-        "assignee": "self",
-        "title": "Тайлан бэлдэх",
-        "priority": 1,
-        "due_date": "2026-07-24T17:00:00+08:00",
-    }
-
-    async def classify(*_args, **kwargs):
-        captured["history"] = kwargs["chat_history"]
-        return _react_decision(
-            AssistantIntent.DELEGATE_TASK,
-            AssistantToolName.CREATE_TASK_DRAFT,
-            revised_arguments,
-        )
-
-    async def begin(message, state, text, **kwargs):
-        captured.update({"message": message, "state": state, "text": text, **kwargs})
-        return {"ok": True, "_presentation": "🤖 <b>Даалгаврын ноорог</b>"}
-
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    monkeypatch.setattr(assistant_handlers, "begin_task_draft", begin)
-
-    message = FakeMessage("Хугацааг маргааш 17:00 болгож, яаралтай болго.")
-    message.reply_to_message = SimpleNamespace(
-        text="🤖 Даалгаврын ноорог\n\nТайлан бэлдэх",
-        caption=None,
-        from_user=SimpleNamespace(is_bot=True),
-    )
-    state = FakeState()
-    state.state = tasks_handlers.TaskDraft.confirming
-    asyncio.run(
-        assistant_handlers.msg_assistant_text(
-            message,
-            state,
-            employee=EMPLOYEE,
-            is_manager=False,
-            tg_id="77",
-        )
-    )
-
-    assert captured["tool_arguments"] == revised_arguments
-    assert captured["history"] == [
-        {
-            "role": "assistant",
-            "content": "<task draft being edited>\n🤖 Даалгаврын ноорог\n\nТайлан бэлдэх\n</task draft being edited>",
-        }
-    ]
-    assert message.answers[-1][0] == "🤖 <b>Даалгаврын ноорог</b>"
 
 
 def test_task_draft_reply_preserves_fields_and_applies_explicit_changes(monkeypatch):
@@ -794,41 +495,6 @@ def test_native_all_assignee_becomes_all_worker_draft():
     )
     assert structured is not None
     assert structured["assign_to_all"] is True
-
-
-def test_all_hands_fallback_drafts_without_legacy_second_ai_call(monkeypatch):
-    zone = pytz.timezone("Asia/Ulaanbaatar")
-
-    async def structure(*_args, **_kwargs):
-        raise AssertionError("assistant fallback must not invoke the legacy task AI")
-
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(tasks_handlers, "_now_tz", lambda _tz: zone.localize(datetime(2026, 6, 1, 10, 0)))
-    monkeypatch.setattr(
-        tasks_handlers,
-        "_roster",
-        lambda: [{"id": EMPLOYEE.id, "name": EMPLOYEE.name, "username": "tester"}],
-    )
-    monkeypatch.setattr(tasks_handlers.task_ai, "ai_enabled", lambda: True)
-    monkeypatch.setattr(tasks_handlers.task_ai, "structure_task", structure)
-
-    message = FakeMessage("Хоёр цагийн дараа бүгд офис дээр цуглаарай")
-    state = FakeState()
-    asyncio.run(
-        assistant_handlers.route_and_respond(
-            message,
-            state,
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=True,
-            tg_id="77",
-            voice_mode=False,
-        )
-    )
-
-    assert state.data["draft"]["assign_to_all"] is True
-    assert state.data["draft"]["deadline_at"] == zone.localize(datetime(2026, 6, 1, 12, 0))
-    assert "Даалгаврын ноорог" in message.answers[-1][0]
 
 
 def test_full_employee_name_resolves_ambiguous_first_name():
@@ -952,108 +618,39 @@ def test_native_task_arguments_skip_legacy_task_extraction_call(monkeypatch):
     assert state.data["draft"]["deadline_at"].hour == 15
 
 
-def test_company_tool_retrieves_postgres_knowledge(monkeypatch):
-    captured = {}
 
-    async def classify(*_args, **_kwargs):
-        return _react_decision(
-            AssistantIntent.GENERAL_PRODUCTIVITY,
-            AssistantToolName.SEARCH_COMPANY_KNOWLEDGE,
-            {"query": "Чөлөө авах журам"},
-        ).model_copy(
-            update={"router_intent": RouterIntent.COMPANY_INFO, "language": AssistantLanguage.MN}
-        )
+def test_transcription_uses_chimege_first_then_openai(monkeypatch):
+    from app.services.ai_gateway import runtime
 
-    async def synthesize(**kwargs):
-        captured["raw_result"] = kwargs["raw_result"]
-        return "Чөлөө авахын тулд Анужин менежерт өмнөх өдөр мэдэгдэнэ."
+    calls = []
 
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "synthesize_tool_result", synthesize)
-    monkeypatch.setattr(
-        assistant_handlers.knowledge_service,
-        "search_knowledge",
-        lambda *_args, **_kwargs: [
-            {
-                "id": 11,
-                "title": "Чөлөө авах журам",
-                "category": "Хүний нөөц",
-                "content": "Чөлөө авахын тулд Анужин менежерт өмнөх өдөр мэдэгдэнэ.",
-            }
-        ],
-    )
+    async def chimege(_audio, _token):
+        calls.append("chimege")
+        return None, "Chimege down"
 
-    message = FakeMessage("Чөлөө хэрхэн авах вэ?")
-    asyncio.run(
-        assistant_handlers.route_and_respond(
-            message,
-            object(),
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=True,
-            tg_id="77",
-            voice_mode=False,
-        )
-    )
+    async def openai(_audio, key, _filename):
+        calls.append(("openai", key))
+        return "Сайн байна уу", None
 
-    answer = message.answers[-1][0]
-    assert "Анужин" in answer
-    assert captured["raw_result"]["documents"][0]["title"] == "Чөлөө авах журам"
-    assert "id" not in captured["raw_result"]["documents"][0]
+    async def key(_organization_id=None):
+        return "sk-org-key"
+
+    monkeypatch.setenv("CHIMEGE_API_TOKEN", "token")
+    monkeypatch.setattr(voice_service, "_transcribe_chimege", chimege)
+    monkeypatch.setattr(voice_service, "_transcribe_openai", openai)
+    monkeypatch.setattr(runtime, "openai_api_key", key)
+    assert asyncio.run(voice_service.transcribe(b"audio")) == ("Сайн байна уу", None)
+    assert calls == ["chimege", ("openai", "sk-org-key")]
 
 
-def test_company_knowledge_is_delivered_when_synthesis_is_unavailable(monkeypatch):
-    async def classify(*_args, **_kwargs):
-        return _react_decision(
-            AssistantIntent.GENERAL_PRODUCTIVITY,
-            AssistantToolName.SEARCH_COMPANY_KNOWLEDGE,
-            {"query": "wifi"},
-        ).model_copy(update={"language": AssistantLanguage.MN})
+def test_chimege_success_skips_openai(monkeypatch):
+    async def chimege(_audio, _token):
+        return "Маргааш хурал", None
 
-    async def synthesize(**_kwargs):
-        return None
+    async def openai(*_args):
+        raise AssertionError("OpenAI must not be called when Chimege succeeds")
 
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "synthesize_tool_result", synthesize)
-    monkeypatch.setattr(
-        assistant_handlers.knowledge_service,
-        "search_knowledge",
-        lambda *_args, **_kwargs: [{"title": "Wi-Fi", "category": "Office", "content": "Сүлжээний нэр: CorpNet. Нууц үг: secure-pass."}],
-    )
-
-    message = FakeMessage("оффисын wifi юу вэ")
-    asyncio.run(assistant_handlers.route_and_respond(message, object(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77", voice_mode=False))
-
-    assert message.answers[-1][0] == "Сүлжээний нэр: CorpNet. Нууц үг: secure-pass."
-
-
-def test_unknown_request_is_stored_without_task_draft(monkeypatch):
-    async def classify(*_args, **_kwargs):
-        return _decision(AssistantIntent.GENERAL_PRODUCTIVITY)
-
-    captured = {}
-
-    def record(**kwargs):
-        captured.update(kwargs)
-
-    monkeypatch.setattr(assistant_handlers.assistant_ai, "classify_intent", classify)
-    monkeypatch.setattr(assistant_handlers.knowledge_service, "search_knowledge", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(assistant_handlers.unknown_request_service, "record_unknown_request", record)
-
-    message = FakeMessage("Do something unexpected")
-    asyncio.run(
-        assistant_handlers.route_and_respond(
-            message,
-            object(),
-            message.text,
-            employee=EMPLOYEE,
-            is_manager=True,
-            tg_id="77",
-            voice_mode=False,
-        )
-    )
-
-    assert captured["text"] == message.text
-    assert captured["channel"] == "text"
-    assert captured["reason"] == "no_confident_route"
-    assert "saved" in message.answers[-1][0].lower()
+    monkeypatch.setenv("CHIMEGE_API_TOKEN", "token")
+    monkeypatch.setattr(voice_service, "_transcribe_chimege", chimege)
+    monkeypatch.setattr(voice_service, "_transcribe_openai", openai)
+    assert asyncio.run(voice_service.transcribe(b"audio")) == ("Маргааш хурал", None)

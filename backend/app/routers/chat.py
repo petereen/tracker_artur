@@ -39,7 +39,6 @@ from app.services.attachment_storage import delete_attachment, get_attachment, p
 from app.services.enterprise_events import record_change
 from app.services.malware_scanner import MalwareDetected, scan_upload
 from app.services.ai_gateway import AIGateway, GatewayError
-from app.services import assistant_ai
 from app.services.assistant_text import detect_language
 from app.services import chat_share_service, enterprise_tools
 from app.services.file_search_service import FileSearchPrincipal, authorized_file
@@ -272,24 +271,39 @@ async def _send_oyuns_reply(
             )
         ).scalars().all()
     )
-    history = [
-        {"role": "assistant" if item.sender_account_id == agent.id else "user", "content": item.body or ""}
-        for item in reversed(rows)
-        if item.body
-    ]
-    if not history or history[-1]["role"] != "user":
+    rows = [item for item in reversed(rows) if item.body]
+    if not rows or rows[-1].sender_account_id == agent.id:
         return
+    group = conversation.kind == "group"
+    # Several people may talk to the agent in a group: name earlier speakers
+    # so the model can tell them apart. The latest message is the request.
+    names = await _identity_map(db, [item.sender_account_id for item in rows]) if group else {}
+
+    def content(item: ChatMessage, latest: bool) -> str:
+        if item.sender_account_id == agent.id or not group or latest:
+            return item.body or ""
+        return f"[{(names.get(item.sender_account_id) or {}).get('name') or 'user'}] {item.body}"
+
+    history = [
+        {"role": "assistant" if item.sender_account_id == agent.id else "user", "content": content(item, index == len(rows) - 1)}
+        for index, item in enumerate(rows)
+    ]
     text = history[-1]["content"]
+    language = detect_language(text).value
     routed_actor = actor
     routed = None
     pending_action = None
     try:
         from dataclasses import replace
-        routed_actor = replace(actor, channel="web", detected_language=detect_language(text).value)
-        routed = await ai_gateway.execute_turn(db, routed_actor, history, conversation_id=conversation.id)
+        routed_actor = replace(actor, channel="web", detected_language=language)
+        # Payroll and other sensitive domains stay out of shared group chats.
+        routed = await ai_gateway.execute_turn(db, routed_actor, history, conversation_id=conversation.id, sensitive_allowed=not group)
         answer = routed.answer.strip()
     except GatewayError:
-        answer = "Уучлаарай, OYUNS Agent одоогоор хариу өгөх боломжгүй байна. Түр хүлээгээд дахин илгээнэ үү."
+        answer = {
+            "en": "Sorry, OYUNS Agent cannot answer right now. Please try again shortly.",
+            "ru": "Извините, OYUNS Agent сейчас не может ответить. Попробуйте чуть позже.",
+        }.get(language, "Уучлаарай, OYUNS Agent одоогоор хариу өгөх боломжгүй байна. Түр хүлээгээд дахин илгээнэ үү.")
     if not answer:
         return
     delivery_rows = list(getattr(routed, "deliveries", [])) if routed else []

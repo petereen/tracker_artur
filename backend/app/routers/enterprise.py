@@ -98,7 +98,6 @@ from app.services.google_calendar import (
     stop_watch as google_stop_watch,
 )
 from app.services.secret_box import decrypt_secret, encrypt_secret
-from app.services import assistant_ai, exchange_rate_service
 from app.services.assistant_text import detect_language
 from app.services.attendance_service import sync_worktime_attendance
 from app.services.worktime_geofence import WORKTIME_GEOFENCE_KEY, WORKTIME_GEOFENCE_MAX_RADIUS_METERS, WORKTIME_GEOFENCE_MIN_RADIUS_METERS, WORKTIME_GEOFENCE_RADIUS_METERS, WORKTIME_METHODS_KEY, configured_worktime_location, configured_worktime_radius, validate_worktime_location, worktime_methods
@@ -3396,36 +3395,6 @@ async def worker_performance(
     }
 
 
-async def _assistant_web_tool(db: AsyncSession, decision, actor: ActorContext) -> tuple[dict, dict | None, list[dict]]:
-    """Async web adapter for the same classified OYUNS tools Telegram uses."""
-    tool = decision.selected_tool
-    arguments = decision.tool_arguments
-    if tool == assistant_ai.AssistantToolName.CREATE_TASK_DRAFT:
-        draft = {"title": arguments.get("title") or "Шинэ даалгавар", "description": None, "priority": arguments.get("priority", 2)}
-        if arguments.get("due_date"):
-            draft["deadline_at"] = arguments["due_date"]
-        return draft, {"type": "task_draft", "payload": draft}, []
-    if tool == assistant_ai.AssistantToolName.GET_USER_TASKS:
-        if not actor.employee_id:
-            return {"count": 0, "tasks": []}, None, []
-        tasks = (await db.execute(select(Task).where(Task.organization_id == actor.organization_id, _task_employee_scope(actor.employee_id), Task.is_archived.is_(False)).order_by(Task.deadline_at.nulls_last()).limit(50))).scalars().all()
-        return {"count": len(tasks), "tasks": [{"title": task.title, "description": task.description, "status": task.workflow_status, "deadline_at": task.deadline_at} for task in tasks]}, None, []
-    if tool == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE:
-        result = await enterprise_tools.execute(
-            db,
-            actor,
-            "file_search_tool",
-            {"query": arguments.get("query", ""), "search_mode": "hybrid", "limit": 5, "delivery": "none"},
-            channel="web",
-            prompt=arguments.get("query", ""),
-        )
-        return result.get("data", {}), None, result.get("sources", [])
-    if tool == assistant_ai.AssistantToolName.GET_EXCHANGE_RATE:
-        result = await exchange_rate_service.get_exchange_rate(provider=arguments["provider"], pair=arguments["pair"], force_refresh=arguments.get("force_refresh", False), request_type=arguments.get("request_type", "single"))
-        return result, None, []
-    return {}, None, []
-
-
 @router.post("/assistant/conversations")
 async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     conversation = await db.get(AssistantConversation, data.conversation_id) if data.conversation_id else None
@@ -3446,7 +3415,7 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     pending_action = None
 
     try:
-        routed = await ai_gateway.execute_turn(db, actor, [*history, {"role": "user", "content": text}], conversation_id=conversation.id)
+        routed = await ai_gateway.execute_turn(db, actor, [*history, {"role": "user", "content": text}], conversation_id=conversation.id, memory=list(conversation.mcp_context or []))
     except GatewayError as exc:
         await db.rollback()
         log.warning("assistant_gateway_failed conversation_id=%s status=%s detail=%s", conversation.id, exc.status_code, str(exc)[:300])
@@ -3464,12 +3433,13 @@ async def assistant_chat(data: AssistantChatInput, db: AsyncSession = Depends(ge
     attachments = enterprise_tools.attachment_metadata(tool_deliveries)
     assistant_message = AssistantMessage(conversation_id=conversation.id, role="assistant", content=answer, action=action, sources=sources, attachments=attachments)
     db.add(assistant_message)
-    conversation.mcp_context = []
+    # Reference-only digest of this turn's results for follow-up questions.
+    conversation.mcp_context = routed.memory
     conversation.updated_at = datetime.now(timezone.utc)
     await db.commit()
     result = {"conversation_id": conversation.id, "message": {"id": assistant_message.id, "role": "assistant", "content": answer, "action": action, "sources": sources, "attachments": attachments}}
     if actor.has_any_role("admin"):
-        result["routing"] = {"category": routed.route, "model": routed.model, "cache": routed.cache, "web_search_used": routed.web_search_used, "usage": routed.usage}
+        result["routing"] = {"category": routed.route, "model": routed.model, "cache": routed.cache, "web_search_used": routed.web_search_used, "usage": routed.usage, "tools_used": routed.tools_used}
     return result
 
 

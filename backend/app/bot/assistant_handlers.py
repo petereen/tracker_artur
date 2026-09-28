@@ -1,58 +1,89 @@
-"""Unified free-text and voice intake for the OYUNS corporate assistant."""
+"""Telegram intake for OYUNS: text and voice messages go to the shared agent.
+
+Voice: Telegram audio → Chimege STT (OpenAI fallback) → the same agent turn
+as text, flagged as a speech transcript → text answer plus an optional Chimege
+TTS audio reply.
+"""
 
 from __future__ import annotations
 
-import logging
 import html
-import time
-from collections import defaultdict, deque
-from datetime import datetime, timezone
+import logging
+import re
 from dataclasses import replace
+from datetime import datetime, timezone
 
-import pytz
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from sqlalchemy import select
 
+from app.bot.tasks_handlers import TaskDraft
 from app.bot.work_report_handlers import claim_report_text
-from app.bot.tasks_handlers import TaskDraft, begin_task_draft, task_draft_keyboard, task_draft_text
-from app.services import (
-    assistant_ai,
-    employee_directory_service,
-    exchange_rate_service,
-    knowledge_service,
-    task_service,
-    unknown_request_service,
-    voice_service,
-)
-from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.enterprise_deps import actor_from_telegram_id, file_search_principal_from_telegram_id
-from app.models.models import AssistantConversation, AssistantMessage, CompanyLibraryItem
-from app.services import enterprise_tools
+from app.models.models import AssistantConversation, AssistantMessage
+from app.services import enterprise_tools, voice_service
+from app.services.ai_gateway import AIGateway, GatewayError
 from app.services.assistant_text import detect_language
-from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
-from app.services.mcp.references import resolve_action_reference
 from app.services.attachment_storage import get_attachment
 from app.services.file_search_service import FileSearchPrincipal, FileSearchServiceError, authorized_file, is_file_search_query, search_files
-from sqlalchemy import select
+from app.services.mcp.references import resolve_action_reference
 
 log = logging.getLogger(__name__)
 router = Router()
-_conversation_history: dict[str, deque[dict]] = defaultdict(lambda: deque(maxlen=12))
 ai_gateway = AIGateway()
 
+TEXTS: dict[str, dict[str, str]] = {
+    "unavailable": {
+        "mn": "OYUNS одоогоор хариу өгөх боломжгүй байна. Түр хүлээгээд дахин оролдоно уу.",
+        "ru": "OYUNS сейчас недоступен. Попробуйте чуть позже.",
+        "en": "OYUNS is temporarily unavailable. Please try again shortly.",
+    },
+    "needs_account": {
+        "mn": "OYUNS ашиглахын тулд идэвхтэй платформын бүртгэлтэй холбогдсон байх шаардлагатай.",
+        "ru": "Для OYUNS нужна привязанная активная учётная запись платформы.",
+        "en": "OYUNS requires a linked active platform account.",
+    },
+    "empty": {
+        "mn": "Одоогоор хариулт боловсруулж чадсангүй. Дахин оролдоно уу.",
+        "ru": "Не удалось сформировать ответ. Попробуйте ещё раз.",
+        "en": "I could not generate a response right now. Please try again shortly.",
+    },
+    "recognizing": {
+        "mn": "🎙 Дуут мессежийг таньж байна…",
+        "ru": "🎙 Распознаю голосовое сообщение…",
+        "en": "🎙 Recognizing your message…",
+    },
+    "recognized": {"mn": "Танигдсан текст", "ru": "Распознано", "en": "Recognized"},
+    "stt_unavailable": {
+        "mn": "Дуу хоолой таних үйлчилгээ тохируулагдаагүй байна. Хүсэлтээ текстээр бичнэ үү.",
+        "ru": "Распознавание голоса не настроено. Отправьте запрос текстом.",
+        "en": "Voice transcription is unavailable. Please send your request as text.",
+    },
+    "download_failed": {
+        "mn": "Дуут мессежийг татаж чадсангүй. Дахин илгээх эсвэл текстээр бичнэ үү.",
+        "ru": "Не удалось скачать аудио. Повторите или отправьте текст.",
+        "en": "I could not download that audio. Please try again or send text.",
+    },
+    "not_understood": {
+        "mn": "Бичлэгийг ойлгож чадсангүй. Дахин оролдоно уу.",
+        "ru": "Не удалось разобрать запись. Попробуйте ещё раз.",
+        "en": "I could not understand that recording. Please try again.",
+    },
+    "open_file": {"mn": "Файл нээх", "ru": "Открыть файл", "en": "Open protected file"},
+    "file_unavailable": {
+        "mn": "Файл олдсон боловч хавсралтыг одоогоор илгээх боломжгүй байна.",
+        "ru": "Файл найден, но вложение сейчас недоступно.",
+        "en": "I found the file, but its attachment is currently unavailable.",
+    },
+}
 
-def _history_key(message: Message, tg_id: str | None) -> str:
-    chat = getattr(message, "chat", None)
-    return str(tg_id or getattr(chat, "id", "anonymous"))
 
-
-def _remember(history_key: str, user_text: str, assistant_text: str) -> None:
-    history = _conversation_history[history_key]
-    history.append({"role": "user", "content": user_text})
-    history.append({"role": "assistant", "content": assistant_text})
+def _t(key: str, language: str) -> str:
+    return TEXTS[key].get(language, TEXTS[key]["mn"])
 
 
 def _replied_message_context(message: Message) -> dict | None:
@@ -75,40 +106,26 @@ def _replied_message_context(message: Message) -> dict | None:
     }
 
 
-def _actor(employee, *, message: Message, is_manager: bool, tg_id: str | None) -> dict | None:
-    if employee:
-        if not employee.is_active and not is_manager:
-            return None
-        return {
-            "id": employee.id,
-            "name": employee.name,
-            "timezone": employee.timezone or "Asia/Ulaanbaatar",
-            "is_active": employee.is_active,
-        }
-    if is_manager and tg_id:
-        user = message.from_user
-        return task_service.ensure_employee(
-            tg_id,
-            name=user.full_name if user else "Удирдлага",
-            username=user.username if user else None,
-        )
-    return None
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_CODE_RE = re.compile(r"`([^`\n]+)`")
+_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+)$", re.M)
 
 
-def _now_in_timezone(timezone_name: str) -> datetime:
-    try:
-        zone = pytz.timezone(timezone_name)
-    except Exception:
-        zone = pytz.timezone("Asia/Ulaanbaatar")
-    return datetime.now(zone)
+def telegram_html(text: str) -> str:
+    """Render the model's light Markdown as Telegram HTML (escaped first)."""
+    escaped = html.escape(text, quote=False)
+    escaped = _HEADING_RE.sub(r"<b>\1</b>", escaped)
+    escaped = _BOLD_RE.sub(r"<b>\1</b>", escaped)
+    escaped = _CODE_RE.sub(r"<code>\1</code>", escaped)
+    return re.sub(r"^(\s*)[-*]\s+", r"\1• ", escaped, flags=re.M)
 
 
-async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=None) -> None:
-    """Send Telegram-sized chunks; model output remains plain text by default."""
+async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=None, language: str = "mn") -> None:
+    """Send Telegram-sized chunks; fall back to plain text if HTML is rejected."""
     remaining = (text or "").strip()
     if not remaining:
         log.warning("assistant.telegram_empty_response")
-        remaining = "I could not generate a response right now. Please try again shortly."
+        remaining = _t("empty", language)
     while remaining:
         if len(remaining) <= 3_900:
             chunk, remaining = remaining, ""
@@ -117,21 +134,35 @@ async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=
             if split_at < 1:
                 split_at = 3_900
             chunk, remaining = remaining[:split_at], remaining[split_at:].lstrip()
-        await message.answer(
-            chunk,
-            parse_mode=parse_mode,
-            reply_markup=reply_markup if not remaining else None,
-        )
+        markup = reply_markup if not remaining else None
+        if parse_mode == "HTML":
+            try:
+                await message.answer(telegram_html(chunk), parse_mode="HTML", reply_markup=markup)
+                continue
+            except TelegramBadRequest:
+                log.warning("assistant.telegram_html_rejected")
+        await message.answer(chunk, parse_mode=None, reply_markup=markup)
 
 
-async def _deliver_company_file_attachment(message: Message, db, principal: FileSearchPrincipal, delivery: dict) -> None:
+async def _send_voice_answer(message: Message, text: str) -> None:
+    """Add a Chimege TTS audio reply after the text answer when enabled."""
+    if not voice_service.synthesis_enabled() or not voice_service.tts_answers_enabled():
+        return
+    audio, error = await voice_service.synthesize(text)
+    if not audio:
+        log.warning("assistant.answer_tts_failed: %s", error)
+        return
+    await message.answer_audio(BufferedInputFile(audio, filename="oyuns-answer.wav"), title="OYUNS хариулт", performer="OYUNS")
+
+
+async def _deliver_company_file_attachment(message: Message, db, principal: FileSearchPrincipal, delivery: dict, *, language: str = "mn") -> None:
     """Deliver one already-authorized file without replacing the AI answer on failure."""
     try:
         item_id = int(delivery["item_id"])
         resolved = await authorized_file(db, principal, item_id)
     except Exception:
         log.exception("assistant.telegram_attachment_authorization_failed")
-        await _answer(message, "I found the file, but its attachment is temporarily unavailable.")
+        await _answer(message, _t("file_unavailable", language))
         return
     if not resolved:
         # Do not reveal whether a stale or revoked delivery reference exists.
@@ -140,17 +171,44 @@ async def _deliver_company_file_attachment(message: Message, db, principal: File
     item = resolved[0]
     if not item.storage_key:
         log.warning("assistant.telegram_attachment_missing_storage_key item_id=%s", item.id)
-        await _answer(message, "I found the file, but its attachment is currently unavailable.")
+        await _answer(message, _t("file_unavailable", language))
         return
     try:
         content = await get_attachment(item.storage_key)
         await message.answer_document(BufferedInputFile(content, filename=item.name))
     except (OSError, RuntimeError, ValueError):
         log.warning("assistant.telegram_attachment_storage_failed item_id=%s", item.id, exc_info=True)
-        await _answer(message, "I found the file, but its attachment is currently unavailable. Please try again later.")
+        await _answer(message, _t("file_unavailable", language))
     except Exception:
         log.exception("assistant.telegram_attachment_delivery_failed item_id=%s", item.id)
-        await _answer(message, "I found the file, but Telegram could not receive the attachment. Please try again later.")
+        await _answer(message, _t("file_unavailable", language))
+
+
+async def _employee_only_file_search(message: Message, db, principal: FileSearchPrincipal, text: str, language: str) -> None:
+    """Company file discovery for employees linked in Telegram without a platform account."""
+    request = type("FileRequest", (), {
+        "operation": "search", "query": text[:500], "search_mode": "hybrid",
+        "folder_id": None, "file_types": [], "limit": 5,
+        "delivery": "attachment" if enterprise_tools.wants_file_attachment(text) else "none",
+    })()
+    try:
+        result = await search_files(db, principal, request)
+    except FileSearchServiceError:
+        await _answer(message, _t("unavailable", language))
+        return
+    rows = result.get("data", {}).get("results", [])
+    if rows and result.get("status") not in {"unavailable", "denied"}:
+        lines = []
+        for row in rows:
+            state = row.get("content_state")
+            suffix = f" ({state})" if state in {"indexing", "empty", "failed"} else ""
+            lines.append(f"• {row.get('title') or 'file'}{suffix}")
+        await _answer(message, "\n".join(lines))
+    else:
+        await _answer(message, _t("unavailable" if result.get("status") == "unavailable" else "needs_account", language))
+    for delivery in result.get("deliveries", []):
+        if delivery.get("kind") == "company_file_attachment":
+            await _deliver_company_file_attachment(message, db, principal, delivery, language=language)
 
 
 async def _enterprise_route(
@@ -161,51 +219,21 @@ async def _enterprise_route(
     employee,
     is_manager: bool,
     tg_id: str | None,
+    voice_mode: bool = False,
 ) -> bool:
-    """Run Telegram enterprise turns through the shared gateway and file search."""
+    """Run one Telegram turn through the shared OYUNS agent."""
+    del state, employee, is_manager
     if not tg_id:
         return False
+    detected = detect_language(text).value
     async with AsyncSessionLocal() as db:
         actor = await actor_from_telegram_id(tg_id, db)
         if not actor:
-            # Telegram identity is already verified by the Employee link. A
-            # workspace UserAccount is not required for constrained company
-            # file discovery in the fixed internal tenant.
             principal = await file_search_principal_from_telegram_id(tg_id, db)
             if principal and is_file_search_query(text):
-                request = type("FileRequest", (), {
-                    "operation": "search", "query": text[:500], "search_mode": "hybrid",
-                    "folder_id": None, "file_types": [], "limit": 5,
-                    "delivery": "attachment" if enterprise_tools.wants_file_attachment(text) else "none",
-                })()
-                try:
-                    result = await search_files(db, principal, request)
-                except FileSearchServiceError:
-                    await _answer(message, "Company file search is temporarily unavailable. Please try again shortly.")
-                    return True
-                status_messages = {
-                    "empty": "No matching authorized company files were found.",
-                    "indexing": "I found matching file metadata, but content indexing is still in progress.",
-                    "partial": "I found an authorized file, but content enrichment is incomplete.",
-                    "unavailable": "Company file search is temporarily unavailable. Please try again shortly.",
-                    "denied": "That company-file request is not authorized.",
-                }
-                rows = result.get("data", {}).get("results", [])
-                if rows and result.get("status") not in {"unavailable", "denied"}:
-                    lines = ["Authorized company files:"]
-                    for row in rows:
-                        state = row.get("content_state")
-                        suffix = f" ({state})" if state in {"indexing", "empty", "failed"} else ""
-                        lines.append(f"• {row.get('title') or 'company file'}{suffix}")
-                    await _answer(message, "\n".join(lines))
-                else:
-                    await _answer(message, status_messages.get(result.get("status"), "Company file search returned no usable result."))
-                for delivery in result.get("deliveries", []):
-                    if delivery.get("kind") != "company_file_attachment":
-                        continue
-                    await _deliver_company_file_attachment(message, db, principal, delivery)
+                await _employee_only_file_search(message, db, principal, text, detected)
                 return True
-            await _answer(message, "OYUNS enterprise tools require a linked active platform account.")
+            await _answer(message, _t("needs_account", detected))
             return True
         chat = getattr(message, "chat", None)
         thread_key = str(getattr(chat, "id", tg_id))
@@ -215,23 +243,32 @@ async def _enterprise_route(
             db.add(conversation); await db.flush()
         rows = (await db.execute(select(AssistantMessage).where(AssistantMessage.conversation_id == conversation.id).order_by(AssistantMessage.id.desc()).limit(12))).scalars().all()
         history = [{"role": row.role, "content": row.content} for row in reversed(rows)]
+        # A reply to an earlier message (for example a task draft being
+        # edited) makes that message the immediate context of this request.
+        replied = _replied_message_context(message)
+        if replied:
+            history.append(replied)
         db.add(AssistantMessage(conversation_id=conversation.id, role="user", content=text))
-        detected = detect_language(text).value
         actor = replace(actor, channel="telegram", detected_language=detected)
         try:
-            routed = await ai_gateway.execute_turn(db, actor, [*history, {"role": "user", "content": text}], conversation_id=conversation.id)
+            routed = await ai_gateway.execute_turn(
+                db, actor, [*history, {"role": "user", "content": text}], conversation_id=conversation.id,
+                memory=list(getattr(conversation, "mcp_context", None) or []),
+                input_mode="voice" if voice_mode else "text",
+            )
         except GatewayError:
             await db.rollback()
-            await _answer(message, "OYUNS live AI service is temporarily unavailable. Please try again shortly.")
+            await _answer(message, _t("unavailable", detected))
             return True
         tool_sources: list[dict] = []
         tool_deliveries: list[dict] = list(routed.deliveries)
         pending_action = None
-        for mcp_result in routed.tool_results:
-            tool_sources.extend(mcp_result.get("sources", []))
-            tool_deliveries.extend(mcp_result.get("deliveries", []))
-            action_data = mcp_result.get("data", {}).get("pending_action")
+        for tool_result in routed.tool_results:
+            tool_sources.extend(tool_result.get("sources", []))
+            tool_deliveries.extend(tool_result.get("deliveries", []))
+            action_data = tool_result.get("data", {}).get("pending_action")
             pending_action = action_data or pending_action
+        principal = FileSearchPrincipal.from_actor(actor)
         validated_deliveries: list[dict] = []
         for delivery in tool_deliveries:
             try:
@@ -244,272 +281,42 @@ async def _enterprise_route(
                     item_id = int(source_id.split(":", 1)[1])
                 except (IndexError, ValueError):
                     continue
-            if await authorized_file(db, FileSearchPrincipal.from_actor(actor), item_id):
-                validated_deliveries.append(delivery)
-        tool_deliveries = validated_deliveries
+            if await authorized_file(db, principal, item_id):
+                validated_deliveries.append({**delivery, "item_id": item_id})
         action = {"type": "task_action_preview", "payload": pending_action} if pending_action else None
         source_map = {str(item.get("id") or item.get("reference")): item for item in [*tool_sources, *routed.sources] if item.get("id") or item.get("reference")}
-        result = {"answer": routed.answer, "action": pending_action, "sources": list(source_map.values()), "deliveries": tool_deliveries}
-        attachments = enterprise_tools.attachment_metadata(tool_deliveries)
-        db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=routed.answer, action=action, sources=result["sources"], attachments=attachments))
-        conversation.mcp_context = []
+        attachments = enterprise_tools.attachment_metadata(validated_deliveries)
+        db.add(AssistantMessage(conversation_id=conversation.id, role="assistant", content=routed.answer, action=action, sources=list(source_map.values()), attachments=attachments))
+        conversation.mcp_context = routed.memory
         conversation.updated_at = datetime.now(timezone.utc)
         await db.commit()
-        action_reference = (result.get("action") or {}).get("action_reference")
-        legacy_token = (result.get("action") or {}).get("token")
+        action_reference = (pending_action or {}).get("action_reference")
         if action_reference:
             try:
                 # Telegram callback payloads are capped at 64 bytes. Resolve
                 # the MCP-only encrypted reference inside the trusted bot,
-                # then send the existing compact pending-action token only to
-                # Telegram (never back to the model or conversation record).
+                # then send the compact pending-action token only to Telegram
+                # (never back to the model or the conversation record).
                 callback_token = resolve_action_reference(actor, action_reference, channel="telegram")
             except ValueError:
                 callback_token = None
         else:
-            callback_token = legacy_token
+            callback_token = (pending_action or {}).get("token")
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="✅ Баталгаажуулах" if detected == "mn" else "✅ Confirm", callback_data=f"ac:{callback_token}"),
             InlineKeyboardButton(text="❌ Татгалзах" if detected == "mn" else "❌ Reject", callback_data=f"ar:{callback_token}"),
             InlineKeyboardButton(text="✏️ Засах" if detected == "mn" else "✏️ Edit", callback_data=f"ae:{callback_token}"),
         ]]) if callback_token else None
-        await _answer(message, result["answer"], reply_markup=keyboard, parse_mode=None)
-        protected_links = [delivery.get("url") for delivery in result.get("deliveries", []) if delivery.get("kind") == "authenticated_link" and delivery.get("url")]
+        await _answer(message, routed.answer, reply_markup=keyboard, parse_mode="HTML", language=detected)
+        if voice_mode and not pending_action and not routed.degraded:
+            await _send_voice_answer(message, routed.answer)
+        protected_links = [delivery.get("url") for delivery in validated_deliveries if delivery.get("kind") == "authenticated_link" and delivery.get("url")]
         if protected_links:
-            await _answer(message, "Open protected file: " + "\n".join(protected_links), parse_mode=None)
-        for delivery in result.get("deliveries", []):
-            if delivery.get("kind") != "company_file_attachment":
-                continue
-            await _deliver_company_file_attachment(message, db, FileSearchPrincipal.from_actor(actor), delivery)
+            await _answer(message, f"{_t('open_file', detected)}: " + "\n".join(protected_links))
+        for delivery in validated_deliveries:
+            if delivery.get("kind") == "company_file_attachment":
+                await _deliver_company_file_attachment(message, db, principal, delivery, language=detected)
     return True
-
-
-def _should_answer_in_voice(
-    decision: assistant_ai.RouteDecision,
-    *,
-    text: str,
-) -> bool:
-    """Voice is for questions/answers, never for task creation or editing."""
-    if decision.selected_tool == assistant_ai.AssistantToolName.CREATE_TASK_DRAFT:
-        return False
-    if decision.selected_tool in {
-        assistant_ai.AssistantToolName.GET_USER_TASKS,
-        assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE,
-        assistant_ai.AssistantToolName.GET_EXCHANGE_RATE,
-    }:
-        return True
-    if decision.router_intent in {
-        assistant_ai.RouterIntent.VIEW_MY_TASKS,
-        assistant_ai.RouterIntent.COMPANY_INFO,
-        assistant_ai.RouterIntent.AGENT_CAPABILITIES,
-    }:
-        return True
-    return bool(decision.direct_answer and assistant_ai.is_information_question(text))
-
-
-async def _answer_question(
-    message: Message,
-    text: str,
-    *,
-    decision: assistant_ai.RouteDecision,
-    reply_markup=None,
-) -> None:
-    """Send a question answer as Chimege audio, with a text fallback."""
-    if (
-        not _should_answer_in_voice(decision, text=text)
-        or not voice_service.tts_answers_enabled()
-        or not voice_service.synthesis_enabled()
-    ):
-        await _answer(message, text, reply_markup=reply_markup)
-        return
-    audio, error = await voice_service.synthesize(text)
-    if audio:
-        await _answer(message, text, reply_markup=reply_markup)
-        await message.answer_audio(
-            BufferedInputFile(audio, filename="oyuns-answer.wav"),
-            title="OYUNS хариулт",
-            performer="OYUNS",
-        )
-        return
-    log.warning("assistant.answer_tts_failed: %s", error)
-    await _answer(message, text, reply_markup=reply_markup)
-
-
-async def _synthesize(
-    decision: assistant_ai.RouteDecision,
-    *,
-    raw_result,
-    voice_mode: bool,
-) -> str | None:
-    if not (
-        decision.react_messages
-        and decision.assistant_tool_message
-        and decision.tool_call_id
-    ):
-        return None
-    return await assistant_ai.synthesize_tool_result(
-        request_messages=decision.react_messages,
-        assistant_message=decision.assistant_tool_message,
-        tool_call_id=decision.tool_call_id,
-        raw_result=raw_result,
-        voice_mode=voice_mode,
-    )
-
-
-def _task_raw_data(tasks: list[dict], *, timezone_name: str) -> dict:
-    """Return only useful, privacy-safe records for the synthesis model."""
-    try:
-        zone = pytz.timezone(timezone_name)
-    except Exception:
-        zone = pytz.timezone("Asia/Ulaanbaatar")
-    records = []
-    for task in tasks[:50]:
-        deadline = task.get("deadline_at")
-        records.append(
-            {
-                "title": task.get("title"),
-                "description": task.get("description"),
-                "status": task.get("status"),
-                "priority": task.get("priority"),
-                "assignee_name": task.get("assignee_name"),
-                "deadline_local": (
-                    deadline.astimezone(zone).isoformat()
-                    if getattr(deadline, "astimezone", None)
-                    else None
-                ),
-            }
-        )
-    return {"count": len(tasks), "tasks": records, "timezone": zone.zone}
-
-
-def _knowledge_raw_data(entries: list[dict], *, query: str) -> dict:
-    return {
-        "query": query,
-        "count": len(entries),
-        "documents": [
-            {
-                "title": entry.get("title"),
-                "category": entry.get("category"),
-                "content": entry.get("content"),
-            }
-            for entry in entries
-        ],
-    }
-
-
-async def execute_tool(
-    tool_name: assistant_ai.AssistantToolName,
-    arguments: dict,
-    *,
-    message: Message,
-    state: FSMContext,
-    text: str,
-    employee,
-    actor: dict,
-    is_manager: bool,
-    tg_id: str | None,
-    timezone_name: str,
-    db=None,
-) -> tuple[dict, object | None, str | None]:
-    """Execute one validated assistant function and return raw data + UI controls."""
-    if tool_name == assistant_ai.AssistantToolName.CREATE_TASK_DRAFT:
-        result = await begin_task_draft(
-            message,
-            state,
-            text,
-            employee=employee,
-            is_manager=is_manager,
-            tg_id=tg_id,
-            tool_arguments=arguments,
-            show_preview=False,
-            allow_ai_structuring=False,
-        )
-        keyboard = task_draft_keyboard() if result.get("ok") else None
-        presentation = result.pop("_presentation", None)
-        return result, keyboard, presentation
-
-    if tool_name == assistant_ai.AssistantToolName.GET_USER_TASKS:
-        date_range = {
-            "today": "today",
-            "this_week": "this_week",
-            "all": "none",
-        }[arguments["timeframe"]]
-        start_at, end_at, include_overdue = task_service.local_date_bounds(
-            date_range,
-            tz=timezone_name,
-        )
-        tasks = task_service.list_for_actor(
-            employee_id=actor["id"],
-            tg_id=tg_id,
-            scope="assigned",
-            include_completed=False,
-            start_at=start_at,
-            end_at=end_at,
-            include_overdue_before_start=include_overdue,
-        )
-        return _task_raw_data(tasks, timezone_name=timezone_name), None, None
-
-    if tool_name == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE:
-        query = arguments["query"]
-        if db is None or not tg_id:
-            return {"status": "unavailable", "reason": "Company file search requires the shared storage context."}, None, None
-        principal = await file_search_principal_from_telegram_id(tg_id, db)
-        if not principal:
-            return {"status": "denied", "reason": "A verified Telegram employee link is required."}, None, None
-        request = type("FileRequest", (), {
-            "operation": "search", "query": query, "search_mode": "hybrid", "folder_id": None,
-            "file_types": [], "limit": 5, "delivery": "none",
-        })()
-        try:
-            result = await search_files(db, principal, request)
-        except FileSearchServiceError:
-            return {"status": "unavailable", "reason": "Company file search is temporarily unavailable."}, None, None
-        return result, None, None
-
-    if tool_name == assistant_ai.AssistantToolName.GET_EXCHANGE_RATE:
-        return await exchange_rate_service.get_exchange_rate(
-            provider=arguments["provider"],
-            pair=arguments["pair"],
-            force_refresh=arguments.get("force_refresh", False),
-            request_type=arguments.get("request_type", "single"),
-        ), None, None
-
-    raise ValueError(f"Unsupported assistant tool: {tool_name}")
-
-
-def _unknown_response(language: assistant_ai.AssistantLanguage) -> str:
-    return {
-        assistant_ai.AssistantLanguage.EN: (
-            "I could not classify that request yet. I saved it for review so OYUNS can be improved."
-        ),
-        assistant_ai.AssistantLanguage.RU: (
-            "Я пока не смог классифицировать этот запрос. Я сохранил его для проверки, чтобы улучшить OYUNS."
-        ),
-        assistant_ai.AssistantLanguage.MN: (
-            "Энэ хүсэлтийг одоогоор ангилж чадсангүй. OYUNS-ийг сайжруулахын тулд хяналтанд хадгаллаа."
-        ),
-    }[language]
-
-
-def _generation_unavailable(language: assistant_ai.AssistantLanguage) -> str:
-    """Explain an unavailable AI path without rendering static tool records."""
-    if not assistant_ai.assistant_enabled():
-        return {
-            assistant_ai.AssistantLanguage.EN: (
-                "OYUNS AI is not configured yet. Please ask an administrator to set OPENAI_API_KEY."
-            ),
-            assistant_ai.AssistantLanguage.RU: (
-                "OYUNS AI пока не настроен. Попросите администратора задать OPENAI_API_KEY."
-            ),
-            assistant_ai.AssistantLanguage.MN: (
-                "OYUNS AI одоогоор тохируулагдаагүй байна. Админаас OPENAI_API_KEY тохируулж өгөхийг хүснэ үү."
-            ),
-        }[language]
-    return {
-        assistant_ai.AssistantLanguage.EN: "I could not generate the response right now. Please try again shortly.",
-        assistant_ai.AssistantLanguage.RU: "Сейчас не удалось сформировать ответ. Попробуйте ещё раз чуть позже.",
-        assistant_ai.AssistantLanguage.MN: "Одоогоор хариулт боловсруулж чадсангүй. Түр хүлээгээд дахин оролдоно уу.",
-    }[language]
 
 
 async def route_and_respond(
@@ -522,179 +329,16 @@ async def route_and_respond(
     tg_id: str | None,
     voice_mode: bool,
 ) -> None:
+    language = detect_language(text).value
     try:
-        handled = await _enterprise_route(
-            message,
-            state,
-            text,
-            employee=employee,
-            is_manager=is_manager,
-            tg_id=tg_id,
-        )
+        handled = await _enterprise_route(message, state, text, employee=employee, is_manager=is_manager, tg_id=tg_id, voice_mode=voice_mode)
     except Exception:
         log.exception("assistant.telegram_route_failed", extra={"telegram_id": tg_id})
-        await _answer(message, "OYUNS is temporarily unavailable. Please try again shortly.")
+        await _answer(message, _t("unavailable", language))
         return
-    if handled:
-        return
-    # Telegram messages without a verified platform identity cannot safely be
-    # sent to the assistant. Do not drop into the historical heuristic router.
-    await _answer(message, "OYUNS access requires a linked active platform account.")
-    return
-
-    # Legacy implementation retained below temporarily for source-compatible
-    # imports/tests; the guarded return above makes it unreachable in
-    # production. It can be removed once downstream integrations stop
-    # importing its helpers.
-    started = time.monotonic()
-    actor = _actor(employee, message=message, is_manager=is_manager, tg_id=tg_id)
-    if not actor:
-        language = assistant_ai.detect_language(text)
-        denial = {
-            assistant_ai.AssistantLanguage.EN: "OYUNS access requires an active registered employee account.",
-            assistant_ai.AssistantLanguage.RU: "Для доступа к OYUNS нужна активная учётная запись сотрудника.",
-            assistant_ai.AssistantLanguage.MN: "OYUNS ашиглахын тулд идэвхтэй ажилтнаар бүртгүүлсэн байх шаардлагатай.",
-        }[language]
-        await _answer(message, denial)
-        return
-
-    timezone_name = actor.get("timezone") or "Asia/Ulaanbaatar"
-    workers = employee_directory_service.list_workers()
-    history_key = _history_key(message, tg_id)
-    reply_context = _replied_message_context(message)
-    chat_history = list(_conversation_history[history_key])
-    if reply_context:
-        chat_history.append(reply_context)
-    learned_contexts = unknown_request_service.active_context_examples()
-    decision = await assistant_ai.classify_intent(
-        text,
-        now=_now_in_timezone(timezone_name),
-        timezone_name=timezone_name,
-        is_manager=is_manager,
-        workers=workers,
-        voice_mode=voice_mode,
-        chat_history=chat_history,
-        learned_contexts=learned_contexts,
-    )
-    log.info(
-        "assistant.route intent=%s router_intent=%s tool=%s confidence=%.2f "
-        "language=%s channel=%s latency_ms=%d",
-        decision.intent.value,
-        decision.router_intent.value,
-        decision.selected_tool.value if decision.selected_tool else "direct_or_fallback",
-        decision.confidence,
-        decision.language.value,
-        "voice" if voice_mode else "text",
-        int((time.monotonic() - started) * 1_000),
-    )
-
-    if decision.confidence < 0.55 and decision.clarification:
-        await _answer(message, decision.clarification)
-        return
-
-    # True two-pass ReAct path: execute the selected function, append its raw
-    # JSON to the original OpenAI message chain, and let pass two write the
-    # only user-facing prose.
-    if decision.selected_tool:
-        raw_result, reply_markup, presentation = await execute_tool(
-            decision.selected_tool,
-            decision.tool_arguments,
-            message=message,
-            state=state,
-            text=text,
-            employee=employee,
-            actor=actor,
-            is_manager=is_manager,
-            tg_id=tg_id,
-            timezone_name=timezone_name,
-        )
-        # Rate-service failures have precise, safe user messages. Do not send
-        # them through the model, which could accidentally invent a rate.
-        if (
-            decision.selected_tool == assistant_ai.AssistantToolName.GET_EXCHANGE_RATE
-            and not raw_result.get("ok")
-        ):
-            answer = raw_result["user_message"]
-            await _answer_question(message, answer, decision=decision)
-            _remember(history_key, text, answer)
-            return
-        if presentation:
-            # A task draft has a known, confirmation-oriented layout. Rendering
-            # it locally avoids an unnecessary second model round trip and
-            # prevents translation drift such as “Тасалын төсөл”.
-            answer = presentation
-            await _answer(message, answer, reply_markup=reply_markup, parse_mode="HTML")
-        else:
-            answer = await _synthesize(
-                decision,
-                raw_result=raw_result,
-                voice_mode=voice_mode,
-            )
-            if not answer:
-                answer = (
-                    assistant_ai.knowledge_fallback_answer(raw_result, decision.language)
-                    if decision.selected_tool == assistant_ai.AssistantToolName.SEARCH_COMPANY_KNOWLEDGE
-                    else _generation_unavailable(decision.language)
-                )
-            await _answer_question(
-                message,
-                answer,
-                decision=decision,
-                reply_markup=reply_markup,
-            )
-        _remember(history_key, text, answer)
-        return
-
-    if decision.direct_answer:
-        deterministic = assistant_ai.fallback_route(text, is_manager=is_manager)
-        if deterministic.confidence <= 0.5:
-            unknown_request_service.record_unknown_request(
-                text=text,
-                language=decision.language.value,
-                channel="voice" if voice_mode else "text",
-                reason="model_direct_answer_without_confident_fallback",
-            )
-            log.info(
-                "assistant.unknown_direct_response_stored channel=%s",
-                "voice" if voice_mode else "text",
-            )
-        await _answer_question(message, decision.direct_answer, decision=decision)
-        _remember(history_key, text, decision.direct_answer)
-        return
-
-    if (
-        decision.router_intent == assistant_ai.RouterIntent.UNKNOWN
-        and decision.intent != assistant_ai.AssistantIntent.PLAN_WORK
-    ):
-        unknown_request_service.record_unknown_request(
-            text=text,
-            language=decision.language.value,
-            channel="voice" if voice_mode else "text",
-            reason="no_confident_route",
-        )
-        log.info("assistant.unknown_request_stored channel=%s", "voice" if voice_mode else "text")
-        await _answer(message, _unknown_response(decision.language))
-        return
-
-    # The deterministic router is only an availability/safety fallback. It may
-    # still prepare a confirmation draft, but it never renders DB or knowledge
-    # records as static strings.
-    if decision.intent == assistant_ai.AssistantIntent.DELEGATE_TASK:
-        await begin_task_draft(
-            message,
-            state,
-            text,
-            employee=employee,
-            is_manager=is_manager,
-            tg_id=tg_id,
-            tool_arguments=decision.tool_arguments,
-            allow_ai_structuring=False,
-        )
-        return
-
-    answer = _generation_unavailable(decision.language)
-    await _answer(message, answer)
-    _remember(history_key, text, answer)
+    if not handled:
+        # A Telegram message without a verified identity never reaches the agent.
+        await _answer(message, _t("needs_account", language))
 
 
 @router.callback_query(F.data.startswith("assistant-confirm:"))
@@ -734,17 +378,17 @@ async def confirm_enterprise_task_update(callback: CallbackQuery, tg_id: str | N
     if operation == "reject":
         success_text = "Ноорог татгалзагдлаа"
     else:
-        success_text = "Task created" if result.get("data", {}).get("created") else "Task updated"
+        success_text = "Даалгавар үүслээ" if result.get("data", {}).get("created") else "Даалгавар шинэчлэгдлээ"
     await callback.answer(success_text if result["status"] == "ok" else result["data"].get("reason", "Action unavailable"), show_alert=result["status"] != "ok")
     if callback.message and result["status"] == "ok":
         title = outcome.get("title") if isinstance(outcome, dict) else None
         if operation == "reject":
             await callback.message.answer("❌ Даалгаврын ноорог үүсгэлгүй цуцаллаа.")
         else:
-            await callback.message.answer(("Task created: " + title) if result.get("data", {}).get("created") and title else success_text + ".")
+            await callback.message.answer(f"✅ {success_text}: {title}" if title else f"✅ {success_text}.")
 
 
-@router.message(StateFilter(None, TaskDraft.confirming), F.voice)
+@router.message(StateFilter(None, TaskDraft.confirming), F.voice | F.audio | F.video_note)
 async def msg_assistant_voice(
     message: Message,
     state: FSMContext,
@@ -752,36 +396,27 @@ async def msg_assistant_voice(
     is_manager: bool = False,
     tg_id: str | None = None,
 ):
-    if not voice_service.transcription_enabled():
-        await _answer(message, "Voice transcription is unavailable. Please send your request as text.")
+    """Voice → Chimege speech-to-text → the same agent turn as a text message."""
+    language = getattr(employee, "primary_language", None) or "mn"
+    language = language if language in {"mn", "ru", "en"} else "mn"
+    if not await voice_service.transcription_available():
+        await _answer(message, _t("stt_unavailable", language))
         return
-    await _answer(message, "🎙 Recognizing your message…")
+    await _answer(message, _t("recognizing", language))
+    media = message.voice or message.audio or message.video_note
     try:
-        buffer = await message.bot.download(message.voice)
+        buffer = await message.bot.download(media)
         audio = buffer.read()
     except Exception:
         log.exception("assistant.voice_download_failed")
-        await _answer(message, "I could not download that audio. Please try again or send text.")
+        await _answer(message, _t("download_failed", language))
         return
     text, error = await voice_service.transcribe(audio)
     if not text:
-        await _answer(message, error or "I could not understand that recording. Please try again.")
+        await _answer(message, error or _t("not_understood", language))
         return
-    recognized_label = {
-        assistant_ai.AssistantLanguage.EN: "Recognized",
-        assistant_ai.AssistantLanguage.RU: "Распознано",
-        assistant_ai.AssistantLanguage.MN: "Танигдсан текст",
-    }[assistant_ai.detect_language(text)]
-    await _answer(message, f"{recognized_label}: {text}")
-    await route_and_respond(
-        message,
-        state,
-        text,
-        employee=employee,
-        is_manager=is_manager,
-        tg_id=tg_id,
-        voice_mode=True,
-    )
+    await _answer(message, f"{_t('recognized', detect_language(text).value)}: {text}")
+    await route_and_respond(message, state, text, employee=employee, is_manager=is_manager, tg_id=tg_id, voice_mode=True)
 
 
 @router.message(StateFilter(None, TaskDraft.confirming), F.text & ~F.text.startswith("/"))
@@ -797,12 +432,4 @@ async def msg_assistant_text(
     # not claimed by the report router above.
     if await claim_report_text(message, state, employee=employee):
         return
-    await route_and_respond(
-        message,
-        state,
-        message.text or "",
-        employee=employee,
-        is_manager=is_manager,
-        tg_id=tg_id,
-        voice_mode=False,
-    )
+    await route_and_respond(message, state, message.text or "", employee=employee, is_manager=is_manager, tg_id=tg_id, voice_mode=False)

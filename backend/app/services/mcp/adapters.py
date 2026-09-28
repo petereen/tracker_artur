@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import logging
 from typing import Any
 import unicodedata
 
@@ -12,9 +13,11 @@ from app.models.models import Employee, KnowledgeChunk, KnowledgeDocument, Task
 from app.services import enterprise_tools
 from app.services import exchange_rate_service
 from app.services.file_search_service import FileSearchPrincipal, authorize_knowledge_source
-from app.services.mcp import schemas
+from app.services.mcp import company_data, schemas
 from app.services.mcp.references import action_reference, resolve_resource_reference, resource_reference
 from app.services.mcp.results import SanitizationPolicy, envelope
+
+log = logging.getLogger(__name__)
 
 
 def _sanitize_arguments(value: Any) -> Any:
@@ -167,6 +170,26 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
             result = {"status": "ok", "data": {"entity": "employees", "group_by": data.group_by, "groups": dict(sorted(Counter(key(employee) for employee in employees).items()))}}
             return envelope(result=result, request_id=request_id, summary="Returned the authorized employee aggregate.")
 
+        company_tools = {
+            "oyuns_reports_search": (schemas.ReportsSearchInput, company_data.reports_search, "Returned authorized work reports."),
+            "oyuns_worktime_get": (schemas.WorktimeGetInput, company_data.worktime_get, "Returned authorized work time."),
+            "oyuns_hr_get": (schemas.HRGetInput, company_data.hr_get, "Returned authorized HR data."),
+            "oyuns_crm_search": (schemas.CRMSearchInput, company_data.crm_search, "Returned authorized CRM data."),
+            "oyuns_contracts_search": (schemas.ContractsSearchInput, company_data.contracts_search, "Returned authorized contracts."),
+            "oyuns_payroll_summary": (schemas.PayrollSummaryInput, company_data.payroll_summary, "Returned the authorized payroll summary."),
+        }
+        if tool_name in company_tools:
+            model, handler, fallback = company_tools[tool_name]
+            data = model.model_validate(arguments)
+            result = await company_data.run_guarded(handler(db, actor, data))
+            await enterprise_tools.audit_tool(db, actor, channel=channel, tool_name=tool_name, status=result.get("status", "unavailable"), prompt=tool_name, result=result, conversation_id=conversation_id)
+            return envelope(result=result, request_id=request_id, summary=_summary(result, fallback))
+
+        if tool_name == "oyuns_projects_search" and arguments.get("entity") == "ideas":
+            data = schemas.ProjectsSearchInput.model_validate(arguments)
+            result = await company_data.run_guarded(company_data.plan_ideas(db, actor, data))
+            return envelope(result=result, request_id=request_id, summary=_summary(result, "Returned authorized plan ideas."))
+
         if tool_name in {"oyuns_tasks_search", "oyuns_projects_search"}:
             data = (schemas.TasksSearchInput if tool_name == "oyuns_tasks_search" else schemas.ProjectsSearchInput).model_validate(arguments)
             employee_id = resolve_resource_reference(actor, data.employee_reference, kind="employee") if data.employee_reference else None
@@ -251,4 +274,5 @@ async def execute(db, actor: ActorContext, *, tool_name: str, arguments: dict, c
     except ValueError as exc:
         return envelope(result={"status": "denied", "data": {}, "warnings": ["INVALID_INPUT"]}, request_id=request_id, summary=str(exc))
     except Exception:
+        log.exception("mcp_tool_failed tool=%s", tool_name)
         return envelope(result={"status": "unavailable", "data": {}}, request_id=request_id, summary="The requested OYUNS capability is temporarily unavailable.")

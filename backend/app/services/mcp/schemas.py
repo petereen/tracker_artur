@@ -60,7 +60,7 @@ class TasksSearchInput(StrictInput):
 
 
 class ProjectsSearchInput(StrictInput):
-    entity: Literal["projects", "plans", "milestones"] = "projects"
+    entity: Literal["projects", "plans", "milestones", "ideas"] = Field(default="projects", description="plans = approved company plan items; ideas = employee plan ideas/suggestions.")
     completion_state: Literal["open", "completed", "all"] = "open"
     active_only: bool = False
     limit: int = Field(default=10, ge=1, le=50)
@@ -130,3 +130,57 @@ class TaskPrepareUpdateInput(StrictInput):
     priority: int | None = Field(default=None, ge=1, le=3)
     start_at: datetime | None = None
     deadline_at: datetime | None = None
+
+
+EMPLOYEE_REFERENCE_HELP = "Opaque employee reference (from current_employee or oyuns_records_search). Null means the caller's permitted scope."
+
+
+class ReportsSearchInput(StrictInput):
+    report_types: list[Literal["daily", "monthly", "next_month_plan"]] = Field(default_factory=lambda: ["daily", "monthly"], min_length=1, max_length=3)
+    employee_reference: str | None = Field(default=None, max_length=4096, description=EMPLOYEE_REFERENCE_HELP)
+    date_from: date | None = Field(default=None, description="Report period start (inclusive). Defaults to 7 days ago.")
+    date_to: date | None = Field(default=None, description="Report period end (inclusive). Defaults to today.")
+    status: Literal["any", "submitted", "approved", "missing"] = Field(default="any", description="missing = not yet submitted (awaiting/draft).")
+    text_query: str | None = Field(default=None, max_length=200, description="Words that must appear in the report text.")
+    include_text: bool = Field(default=True, description="Include report text excerpts.")
+    limit: int = Field(default=10, ge=1, le=30)
+
+
+class WorktimeGetInput(StrictInput):
+    view: Literal["status_now", "totals", "daily"] = Field(default="totals", description="status_now = who is working/on break right now; totals = hours per employee; daily = per-day clock in/out.")
+    scope: Literal["self", "team"] = Field(default="self", description="team = everyone the caller may see (managers, HR, team leads).")
+    employee_reference: str | None = Field(default=None, max_length=4096, description=EMPLOYEE_REFERENCE_HELP)
+    date_from: date | None = Field(default=None, description="Defaults to today.")
+    date_to: date | None = Field(default=None, description="Defaults to date_from.")
+
+
+class HRGetInput(StrictInput):
+    resource: Literal["departments", "leave_requests", "leave_balances", "attendance"]
+    employee_reference: str | None = Field(default=None, max_length=4096, description=EMPLOYEE_REFERENCE_HELP)
+    year: int | None = Field(default=None, ge=2000, le=2100)
+    leave_status: Literal["pending", "approved", "rejected", "cancelled"] | None = None
+    date_from: date | None = Field(default=None, description="Attendance range start; max 31 days. Defaults to this month.")
+    date_to: date | None = None
+
+
+class CRMSearchInput(StrictInput):
+    resource: Literal["summary", "parties", "activities"] = Field(default="summary", description="summary = open/overdue/pipeline counts; parties = clients/partners; activities = CRM interactions and follow-ups.")
+    query: str | None = Field(default=None, max_length=160)
+    party_kind: Literal["all", "customer", "supplier", "prospect"] = "all"
+    state: Literal["open", "closed", "all"] = "open"
+    overdue_only: bool = False
+    mine_only: bool = False
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class ContractsSearchInput(StrictInput):
+    query: str | None = Field(default=None, max_length=200)
+    status: Literal["DRAFT", "PENDING_REVIEW", "CHANGES_REQUESTED", "APPROVED", "REJECTED", "SIGNED_AND_STAMPED"] | None = None
+    expiring_within_days: int | None = Field(default=None, ge=1, le=366, description="Only contracts whose end date falls within this many days from today.")
+    limit: int = Field(default=10, ge=1, le=30)
+
+
+class PayrollSummaryInput(StrictInput):
+    view: Literal["months", "totals", "per_employee"] = Field(default="totals", description="months = list payroll months and run status; totals = company totals for a month; per_employee = gross/net per employee.")
+    month: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}$", description="YYYY-MM. Defaults to the latest payroll month.")
+    employee_reference: str | None = Field(default=None, max_length=4096, description=EMPLOYEE_REFERENCE_HELP)

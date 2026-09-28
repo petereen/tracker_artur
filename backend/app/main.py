@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
 from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssignment, UserAccount
-from app.routers import assistant_learning, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, questions, realtime, report_insights, schedules, tasks, work_reports, worktime_qr, worktime_reports
+from app.routers import ai_settings, assistant_learning, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, questions, realtime, report_insights, schedules, tasks, work_reports, worktime_qr, worktime_reports
 from app.erp import router as erp
 from app import mcp_executor
 from app.hr import router as hr_router
@@ -148,6 +148,7 @@ app.include_router(chat.router, prefix="/v1/chat", tags=["v1-chat"])
 app.include_router(calls.router, prefix="/v1/calls", tags=["v1-calls"])
 app.include_router(company_files.router, prefix="/v1/company-files", tags=["v1-company-files"])
 app.include_router(contracts.router, prefix="/v1", tags=["v1-contracts"])
+app.include_router(ai_settings.router, prefix="/v1/settings/ai-agent", tags=["v1-ai-settings"])
 app.include_router(enterprise.router, prefix="/v1", tags=["v1-enterprise"])
 app.include_router(worktime_qr.router, prefix="/v1/worktime-qr", tags=["v1-worktime-qr"])
 app.include_router(erp.router, prefix="/v1/erp", tags=["v1-erp"])
