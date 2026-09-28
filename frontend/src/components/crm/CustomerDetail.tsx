@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
 import { ExternalLink, Paperclip, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import {
@@ -48,7 +49,7 @@ export function CustomerDetail({ partyId, lookups, capabilities, isManager, onCl
     try { await remove.mutateAsync(data.id); toast.success('Устгалаа'); onClose() } catch (error) { toast.error(crmErrorText(error)) }
   }
 
-  return <div className="hr-drawer-backdrop" onClick={onClose}>
+  return createPortal(<div className="hr-drawer-backdrop" onClick={onClose}>
     <aside className="hr-drawer crm-detail" role="dialog" aria-label="Харилцагчийн дэлгэрэнгүй" onClick={(event) => event.stopPropagation()}>
       {!data ? <div className="hr-empty">{party.isError ? crmErrorText(party.error) : 'Ачаалж байна…'}</div> : <>
         <header>
@@ -88,7 +89,7 @@ export function CustomerDetail({ partyId, lookups, capabilities, isManager, onCl
         {tab === 'history' && <History partyId={data.id} lookups={lookups} />}
       </>}
     </aside>
-  </div>
+  </div>, document.body)
 }
 
 function Overview({ data, onOpenParty, onRefresh, refreshing, onDelete }: { data: CRMPartyDetail; onOpenParty: (id: number) => void; onRefresh?: () => void; refreshing: boolean; onDelete?: () => void }) {

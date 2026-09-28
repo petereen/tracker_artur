@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { CalendarRange, Check, X } from 'lucide-react'
 import { DateRange } from '../api/enterprise'
 
@@ -87,7 +88,7 @@ export function TimePeriodFilter({ preset, period, onChange }: { preset: PeriodP
       <span><small>Хугацаа</small><strong>{label}</strong></span>
       <span aria-hidden>⌄</span>
     </button>
-    {mobileOpen && <div className="period-filter-mobile-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setMobileOpen(false); triggerRef.current?.focus() } }}>
+    {mobileOpen && createPortal(<div className="period-filter-mobile-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setMobileOpen(false); triggerRef.current?.focus() } }}>
       <section className="period-filter-mobile-sheet" role="dialog" aria-modal="true" aria-labelledby="mobile-period-title">
         <header><div><span className="eyebrow">Хугацааны шүүлтүүр</span><h2 id="mobile-period-title">Хугацаа сонгох</h2></div><button type="button" onClick={() => { setMobileOpen(false); triggerRef.current?.focus() }} aria-label="Хаах"><X size={19} /></button></header>
         <div className="period-filter-mobile-presets">{OPTIONS.map((option) => <button type="button" key={option.key} className={draftPreset === option.key ? 'active' : ''} onClick={() => selectPreset(option.key)}><span>{option.label}</span>{draftPreset === option.key && <Check size={16} aria-hidden />}</button>)}</div>
@@ -98,6 +99,6 @@ export function TimePeriodFilter({ preset, period, onChange }: { preset: PeriodP
         </div>
         <footer><button type="button" className="secondary-action" onClick={() => { setMobileOpen(false); triggerRef.current?.focus() }}>Цуцлах</button><button type="button" className="primary-action" onClick={applyCustom}>Хэрэглэх</button></footer>
       </section>
-    </div>}
+    </div>, document.body)}
   </>
 }
