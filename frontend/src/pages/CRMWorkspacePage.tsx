@@ -54,9 +54,9 @@ export function CRMWorkspacePage() {
     {!caps.module_enabled && <div className="crm-warning">
       CRM модуль цэсэнд идэвхжээгүй байна. {actor.data?.roles?.includes('admin') ? <Link to="/administration/organization/modules">Модуль ба боломжууд</Link> : 'Админ'} хэсгээс идэвхжүүлнэ үү.
     </div>}
-    <nav className="hr-tabs" aria-label="CRM sections">
+    <nav className="page-tabs"><div className="page-tabs-list" aria-label="CRM sections">
       {visibleTabs.map((key) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(TAB_PATHS[key])}>{TAB_LABELS[key]}</button>)}
-    </nav>
+    </div></nav>
 
     {tab === 'activities' && caps.activities.view && <ActivitiesPanel lookups={data} capabilities={caps} isManager={isManager} onOpen={openActivity} onCreate={() => setEditingActivity('new')} />}
     {tab === 'customers' && caps.parties.view && <CustomersPanel lookups={data} capabilities={caps} onOpen={(party) => navigate(`${TAB_PATHS.customers}/${party.id}`)} onCreate={() => setEditingParty('new')} />}

@@ -94,7 +94,7 @@ function SettingsPage({ title, categoryId, activeTab, children }: { title: strin
       </aside>
       <main className="settings-main">
         <div className="view-toolbar settings-page-heading"><div><h2>{title}</h2></div><Settings2 /></div>
-        <nav className="settings-tab-nav" aria-label={`${category.label} tabs`}>{tabs.map((tab) => <NavLink key={tab.to} to={tab.to} className={tab.to === activeTab ? 'active' : undefined}><span>{tab.label}</span></NavLink>)}</nav>
+        <nav className="page-tabs"><div className="page-tabs-list" aria-label={`${category.label} tabs`}>{tabs.map((tab) => <NavLink key={tab.to} to={tab.to} className={tab.to === activeTab ? 'active' : undefined}>{tab.label}</NavLink>)}</div></nav>
         <div className="settings-content">{children}</div>
       </main>
     </div>

@@ -118,8 +118,8 @@ export function PlansPage() {
 
   return (
     <div className="plans-workspace">
-      <div className="workspace-toolbar plan-toolbar">
-        <div className="segmented-control">
+      <nav className="page-tabs" aria-label="Төлөвлөгөөний хэсгүүд">
+        <div className="page-tabs-list">
           <button
             onClick={() => setTab("ideas")}
             className={tab === "ideas" ? "active" : ""}
@@ -133,12 +133,14 @@ export function PlansPage() {
             Компаний төлөвлөгөө
           </button>
         </div>
-        <input
-          type="month"
-          value={month}
-          onChange={(event) => setMonth(event.target.value)}
-        />
-      </div>
+        <div className="page-tabs-actions">
+          <input
+            type="month"
+            value={month}
+            onChange={(event) => setMonth(event.target.value)}
+          />
+        </div>
+      </nav>
       {tab === "ideas" && (
         <>
           <IdeaComposer month={monthDate(month)} />

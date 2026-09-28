@@ -67,11 +67,11 @@ const tabs: Array<{ id: PayrollSection; label: string; href: string }> = [
 export function PayrollWorkspaceTabs() {
   const location = useLocation()
   const active = payrollSectionForPath(location.pathname)
-  return <nav className="payroll-reference-tabs" aria-label="Payroll module sections">
-    {tabs.map((tab) => <Link key={tab.id} to={tab.href} className={`payroll-reference-tab${active === tab.id ? ' active' : ''}`} aria-current={active === tab.id ? 'page' : undefined}>{tab.label}</Link>)}
-    <Link className="payroll-reference-tab payroll-reference-tab-shortcut" to="/erp/payroll/additional-salaries">Нэмэлт цалин</Link>
-    <Link className="payroll-reference-tab payroll-reference-tab-shortcut" to="/erp/payroll/tax-benefits">Татвар &amp; benefits</Link>
-  </nav>
+  return <nav className="page-tabs"><div className="page-tabs-list" aria-label="Payroll module sections">
+    {tabs.map((tab) => <Link key={tab.id} to={tab.href} className={active === tab.id ? 'active' : undefined} aria-current={active === tab.id ? 'page' : undefined}>{tab.label}</Link>)}
+    <Link to="/erp/payroll/additional-salaries">Нэмэлт цалин</Link>
+    <Link to="/erp/payroll/tax-benefits">Татвар &amp; benefits</Link>
+  </div></nav>
 }
 
 export function PayrollMetricCard({ label, value, detail, icon: Icon, tone = 'blue' }: { label: string; value: string; detail: string; icon: LucideIcon; tone?: 'blue' | 'green' | 'orange' | 'purple' }) {

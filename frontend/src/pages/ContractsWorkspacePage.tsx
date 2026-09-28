@@ -516,7 +516,7 @@ function ContractDetailView({
   );
   return (
     <section className="contract-detail">
-      <div className="contract-module-tabs"><a href="/contracts" className="active">Гэрээний төсөл</a><a href="/contracts/archive">Архив</a></div>
+      <nav className="page-tabs" aria-label="Гэрээний хэсгүүд"><div className="page-tabs-list"><a href="/contracts" className="active" aria-current="page">Гэрээний төсөл</a><a href="/contracts/archive">Архив</a></div></nav>
       <div className="workspace-toolbar contract-detail-toolbar">
         <button className="back-link" onClick={onBack}>
           ← Гэрээний жагсаалт
@@ -920,7 +920,7 @@ export function ContractsWorkspacePage() {
     );
   return (
     <section className="contracts-workspace">
-      <div className="contract-module-tabs"><a href="/contracts" className="active">Гэрээний төсөл</a><a href="/contracts/archive">Архив</a></div>
+      <nav className="page-tabs" aria-label="Гэрээний хэсгүүд"><div className="page-tabs-list"><a href="/contracts" className="active" aria-current="page">Гэрээний төсөл</a><a href="/contracts/archive">Архив</a></div></nav>
       <div className="workspace-toolbar contracts-toolbar">
         <div className="toolbar-start">
           <div className="contract-tabs" role="tablist">

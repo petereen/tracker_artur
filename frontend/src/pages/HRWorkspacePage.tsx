@@ -62,8 +62,10 @@ export function HRWorkspacePage() {
   const visibleTabs: Tab[] = isHR ? ['directory', 'departments', 'leave', 'attendance', 'payroll'] : ['directory', 'leave', 'attendance']
   const navLabels: Record<Tab, string> = { directory: 'Ажилтны лавлах', departments: 'Хэлтэс', leave: 'Чөлөө', attendance: 'Ирц', payroll: 'Цалин' }
   return <div className="hr-workspace">
-    {isHR && <div className="flex justify-end"><Btn variant="primary" onClick={() => setEditing('new')}><UserPlus size={15} />Ажилтан нэмэх</Btn></div>}
-    <nav className="hr-tabs" aria-label="HR sections">{visibleTabs.map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{navLabels[item]}</button>)}</nav>
+    <div className="page-tabs">
+      <nav className="page-tabs-list" aria-label="HR sections">{visibleTabs.map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{navLabels[item]}</button>)}</nav>
+      {isHR && <div className="page-tabs-actions"><Btn variant="primary" onClick={() => setEditing('new')}><UserPlus size={15} />Ажилтан нэмэх</Btn></div>}
+    </div>
     {tab === 'directory' && <Directory employees={employees.data?.items || []} departments={departments.data || []} search={search} setSearch={setSearch} department={department} setDepartment={setDepartment} statusFilter={statusFilter} setStatusFilter={setStatusFilter} includeArchived={includeArchived} setIncludeArchived={setIncludeArchived} canEdit={isHR} onSelect={setSelected} onEdit={setEditing} />}
     {tab === 'departments' && isHR && <DepartmentsPanel departments={departments.data || []} employees={allEmployees.data?.items || []} />}
     {tab === 'leave' && <LeavePanel isHR={isHR} isManager={isManager} balances={balances.data || []} requests={leave.data || []} employees={employees.data?.items || []} />}
