@@ -10,10 +10,18 @@ from sqlalchemy.exc import IntegrityError
 from app.bot.db import get_session
 from app.models.models import AttendanceLog, Employee, Organization, PlanIdea, UserAccount, WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
 from app.services.attendance_service import apply_worktime_attendance
+from app.services.report_policy import ReportPeriod
 from app.services.worktime_geofence import validate_worktime_location
 
 
 TEST_REPORT_TYPES = frozenset({"daily_test", "monthly_test", "next_month_plan_test"})
+# Telegram prompts that accept the worker's report text as a reply.
+REPORT_PROMPT_TYPES = frozenset({
+    "daily_report", "test_daily_report",
+    "monthly_report", "test_monthly_report",
+    "next_month_plan", "test_next_month_plan",
+    "periodic_report",
+})
 WORK_TIME_MODES = frozenset({"in_person", "remote"})
 
 
@@ -57,38 +65,76 @@ def period_for(report_type: str, local_day: date) -> date:
     return period
 
 
+def _personal_report_clause(employee_id: int, report_type: str, period_date: date, period_key: str = ""):
+    return (
+        WorkReport.employee_id == employee_id,
+        WorkReport.report_type == report_type,
+        WorkReport.period_key == period_key,
+        WorkReport.period_date == period_date,
+        WorkReport.department_id.is_(None),
+    )
+
+
+def _get_or_create(s, clause: tuple, values: dict) -> WorkReport:
+    report = s.execute(select(WorkReport).where(*clause)).scalar_one_or_none()
+    if report is None:
+        report = WorkReport(status="awaiting", title="", **values)
+        s.add(report)
+        try:
+            s.commit()
+        except IntegrityError:
+            s.rollback()
+            report = s.execute(select(WorkReport).where(*clause)).scalar_one()
+        s.refresh(report)
+    s.expunge(report)
+    return report
+
+
 def get_or_create_report(employee_id: int, report_type: str, local_day: date) -> WorkReport:
     period_date = period_for(report_type, local_day)
     with get_session() as s:
-        report = s.execute(
-            select(WorkReport).where(
-                WorkReport.employee_id == employee_id,
-                WorkReport.report_type == report_type,
-                WorkReport.period_date == period_date,
+        return _get_or_create(
+            s,
+            _personal_report_clause(employee_id, report_type, period_date),
+            {"employee_id": employee_id, "report_type": report_type, "period_date": period_date},
+        )
+
+
+def get_or_create_period_report(employee_id: int, period: ReportPeriod, *, department_id: int | None = None) -> WorkReport:
+    """Create the policy-driven report for ``period`` (personal or department).
+
+    Department reports are unique per department and period, so a change of
+    department head keeps the existing report instead of creating a second.
+    """
+    with get_session() as s:
+        if department_id is None:
+            clause = _personal_report_clause(employee_id, period.report_type, period.start, period.period_key)
+        else:
+            clause = (
+                WorkReport.department_id == department_id,
+                WorkReport.report_type == period.report_type,
+                WorkReport.period_key == period.period_key,
+                WorkReport.period_date == period.start,
             )
-        ).scalar_one_or_none()
-        if report is None:
-            report = WorkReport(
-                employee_id=employee_id,
-                report_type=report_type,
-                period_date=period_date,
-                status="awaiting",
+        return _get_or_create(s, clause, {
+            "employee_id": employee_id, "report_type": period.report_type, "period_key": period.period_key,
+            "period_date": period.start, "period_end": period.end, "department_id": department_id,
+        })
+
+
+def period_report_needs_submission(employee_id: int, period: ReportPeriod, *, department_id: int | None = None) -> bool:
+    with get_session() as s:
+        if department_id is None:
+            clause = _personal_report_clause(employee_id, period.report_type, period.start, period.period_key)
+        else:
+            clause = (
+                WorkReport.department_id == department_id,
+                WorkReport.report_type == period.report_type,
+                WorkReport.period_key == period.period_key,
+                WorkReport.period_date == period.start,
             )
-            s.add(report)
-            try:
-                s.commit()
-            except IntegrityError:
-                s.rollback()
-                report = s.execute(
-                    select(WorkReport).where(
-                        WorkReport.employee_id == employee_id,
-                        WorkReport.report_type == report_type,
-                        WorkReport.period_date == period_date,
-                    )
-                ).scalar_one()
-            s.refresh(report)
-        s.expunge(report)
-        return report
+        status = s.execute(select(WorkReport.status).where(*clause)).scalar_one_or_none()
+        return status not in {"submitted", "approved"}
 
 
 def reset_test_reports(report_types: frozenset[str] = TEST_REPORT_TYPES) -> int:
@@ -172,11 +218,7 @@ def report_for_reply(employee_id: int, telegram_chat_id: str, message_id: int) -
             select(WorkReportPrompt).where(
                 WorkReportPrompt.telegram_chat_id == str(telegram_chat_id),
                 WorkReportPrompt.telegram_message_id == message_id,
-                WorkReportPrompt.prompt_type.in_({
-                    "daily_report", "test_daily_report",
-                    "monthly_report", "test_monthly_report",
-                    "next_month_plan", "test_next_month_plan",
-                }),
+                WorkReportPrompt.prompt_type.in_(REPORT_PROMPT_TYPES),
             )
         ).scalar_one_or_none()
         if not prompt:
@@ -196,11 +238,7 @@ def awaiting_report_for_message(employee_id: int, telegram_chat_id: str) -> Work
     is absent, but deliberately refuses to guess when more than one report is
     awaiting text.
     """
-    report_prompt_types = {
-        "daily_report", "test_daily_report",
-        "monthly_report", "test_monthly_report",
-        "next_month_plan", "test_next_month_plan",
-    }
+    report_prompt_types = REPORT_PROMPT_TYPES
     with get_session() as s:
         # Test flows are explicitly started and strictly sequential. They do
         # not need Telegram reply metadata, and must win over the assistant.
@@ -596,9 +634,7 @@ def report_is_approved(employee_id: int, report_type: str, local_day: date) -> b
     with get_session() as s:
         return bool(s.execute(
             select(WorkReport.id).where(
-                WorkReport.employee_id == employee_id,
-                WorkReport.report_type == report_type,
-                WorkReport.period_date == period_for(report_type, local_day),
+                *_personal_report_clause(employee_id, report_type, period_for(report_type, local_day)),
                 WorkReport.status == "approved",
             )
         ).scalar_one_or_none())
@@ -613,9 +649,44 @@ def report_needs_submission(employee_id: int, report_type: str, local_day: date)
     with get_session() as s:
         report = s.execute(
             select(WorkReport.status).where(
-                WorkReport.employee_id == employee_id,
-                WorkReport.report_type == report_type,
-                WorkReport.period_date == period_for(report_type, local_day),
+                *_personal_report_clause(employee_id, report_type, period_for(report_type, local_day)),
             )
         ).scalar_one_or_none()
         return report not in {"submitted", "approved"}
+
+
+def employee_report_scope(employee_id: int) -> dict:
+    """Policy view for one worker: personal and department report periods.
+
+    Returns ``{"policy", "department_id", "frequencies", "led_departments"}``
+    where ``led_departments`` maps department ids the worker heads to their
+    department-report frequencies.
+    """
+    from app.models.models import Department, EmployeeDetails
+    from app.services.report_policy import department_frequencies, report_policy, worker_frequencies
+
+    with get_session() as s:
+        employee = s.get(Employee, employee_id)
+        organization = s.get(Organization, employee.organization_id) if employee and employee.organization_id else None
+        if organization is None:
+            organization = s.execute(select(Organization).order_by(Organization.id)).scalars().first()
+        policy = report_policy(organization.settings if organization else None)
+        department_id = s.execute(
+            select(EmployeeDetails.department_id).where(EmployeeDetails.employee_id == employee_id)
+        ).scalars().first()
+        led = s.execute(
+            select(Department.id).where(Department.manager_employee_id == employee_id, Department.is_active.is_(True))
+        ).scalars().all()
+    return {
+        "policy": policy,
+        "department_id": department_id,
+        "frequencies": worker_frequencies(policy, department_id),
+        "led_departments": {item: department_frequencies(policy, item) for item in led if department_frequencies(policy, item)},
+    }
+
+
+def daily_reports_enabled(employee_id: int) -> bool:
+    try:
+        return "daily" in employee_report_scope(employee_id)["frequencies"]
+    except Exception:  # noqa: BLE001 - never block the legacy daily flow on a policy lookup
+        return True

@@ -33,6 +33,7 @@ const ContractPrintPage = lazy(() => import('./pages/ContractsWorkspacePage').th
 const AdministrationHubPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdministrationHubPage })))
 const WorkspaceIdentitySettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.WorkspaceIdentitySettingsPage })))
 const CollaborationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.CollaborationSettingsPage })))
+const ReportSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.ReportSettingsPage })))
 const PermissionsSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.PermissionsSettingsPage })))
 const AccessControlSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AccessControlSettingsPage })))
 const AutomationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AutomationSettingsPage })))
@@ -163,6 +164,7 @@ function AuthenticatedApp() {
           <Route path="administration" element={<AdministrationHubPage />} />
           <Route path="administration/organization/profile" element={<WorkspaceIdentitySettingsPage />} />
           <Route path="administration/workflows/worktime" element={<CollaborationSettingsPage />} />
+          <Route path="administration/workflows/reports" element={<ReportSettingsPage />} />
           <Route path="administration/integrations/overview" element={<AutomationSettingsPage />} />
         </Route>
         <Route path="administration/ai/knowledge" element={<OyunsAssistantSettingsPage />} />

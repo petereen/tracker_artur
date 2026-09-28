@@ -407,7 +407,10 @@ class UserNotification(Base):
 
 # ─── Ажлын тайлангууд ────────────────────────────────────────────────────────
 
-WORK_REPORT_TYPES = ("daily", "monthly", "next_month_plan", "daily_test", "monthly_test", "next_month_plan_test")
+WORK_REPORT_TYPES = (
+    "daily", "weekly", "monthly", "quarterly", "yearly", "custom", "next_month_plan",
+    "daily_test", "monthly_test", "next_month_plan_test",
+)
 WORK_REPORT_STATUSES = ("awaiting", "draft", "editing", "approved")
 WORK_REPORT_REVISION_STATUSES = ("draft", "superseded", "deleted", "approved")
 
@@ -416,14 +419,25 @@ class WorkReport(Base):
     """One report lifecycle for an employee and reporting period.
 
     ``period_date`` is the local work date for daily reports and the first day
-    of the reported month for monthly reports and their following plan.
+    of the reported period otherwise (month, week, quarter, year, custom
+    period); ``period_end`` is its last day for policy-driven periods.
+    ``period_key`` names the custom period definition (``""`` otherwise).
+    Department reports carry ``department_id`` and are written by the
+    department head (``employee_id``); personal reports have no department.
     """
 
     __tablename__ = "work_reports"
     __table_args__ = (
-        UniqueConstraint("employee_id", "report_type", "period_date", name="uq_work_report_period"),
+        Index(
+            "uq_work_report_personal_period", "employee_id", "report_type", "period_key", "period_date",
+            unique=True, postgresql_where=sa_text("department_id IS NULL"),
+        ),
+        Index(
+            "uq_work_report_department_period", "department_id", "report_type", "period_key", "period_date",
+            unique=True, postgresql_where=sa_text("department_id IS NOT NULL"),
+        ),
         CheckConstraint(
-            "report_type IN ('daily','monthly','next_month_plan','daily_test','monthly_test','next_month_plan_test')",
+            "report_type IN ('daily','weekly','monthly','quarterly','yearly','custom','next_month_plan','daily_test','monthly_test','next_month_plan_test')",
             name="ck_work_reports_type",
         ),
         CheckConstraint(
@@ -436,6 +450,9 @@ class WorkReport(Base):
     employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
     report_type = Column(Text, nullable=False)
     period_date = Column(Date, nullable=False)
+    period_end = Column(Date)
+    period_key = Column(Text, nullable=False, server_default="", default="")
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"))
     status = Column(Text, nullable=False, server_default="awaiting", default="awaiting")
     title = Column(Text, nullable=False)
     submitted_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))

@@ -1,0 +1,291 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Mic, MicOff, PhoneOff, X } from 'lucide-react'
+import { api } from '../api/client'
+
+type CallPhase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'ended' | 'error'
+type TranscriptLine = { id: number; role: 'user' | 'assistant' | 'tool'; text: string }
+
+interface VoiceSession {
+  session_id: string
+  client_secret: string
+  calls_url: string
+  model: string
+  voice: string
+}
+
+interface FunctionCallItem { type: string; name?: string; arguments?: string; call_id?: string }
+
+const PHASE_LABELS: Record<CallPhase, string> = {
+  connecting: 'Холбогдож байна…',
+  listening: 'Сонсож байна',
+  thinking: 'Бодож байна…',
+  speaking: 'OYUNS ярьж байна',
+  ended: 'Дуудлага дууслаа',
+  error: 'Холболт амжилтгүй',
+}
+
+const ERROR_LABELS: Record<string, string> = {
+  not_configured: 'OpenAI API түлхүүр тохируулаагүй байна. Админ “OYUNS AI” тохиргооноос оруулна.',
+  voice_disabled: 'Дуут дуудлага админ тохиргоонд идэвхгүй байна.',
+  rate_limited: 'Хэт олон дуудлага эхлүүллээ. Хэдэн минутын дараа дахин оролдоно уу.',
+  invalid_key: 'OpenAI API түлхүүр буруу байна.',
+  model_not_found: 'Тохируулсан realtime загвар олдсонгүй.',
+  network: 'OpenAI-тай холбогдож чадсангүй.',
+  microphone: 'Микрофон ашиглах зөвшөөрөл олгоно уу.',
+  unsupported: 'Энэ төхөөрөмж дуут дуудлагыг дэмжихгүй байна.',
+}
+
+// Short spoken-lookup labels for the tool trace in the transcript.
+const TOOL_LABELS: [RegExp, string][] = [
+  [/task/, 'даалгавар'], [/report/, 'тайлан'], [/worktime|attendance/, 'ажлын цаг'], [/hr|leave/, 'HR'],
+  [/crm/, 'CRM'], [/contract/, 'гэрээ'], [/payroll/, 'цалин'], [/knowledge|file/, 'мэдлэгийн сан'],
+  [/project|plan/, 'төсөл, төлөвлөгөө'], [/calendar/, 'календарь'], [/exchange/, 'ханш'], [/employee|directory|people/, 'ажилтан'],
+]
+
+function toolLabel(name: string) {
+  return TOOL_LABELS.find(([pattern]) => pattern.test(name))?.[1] ?? 'компанийн мэдээлэл'
+}
+
+function formatDuration(seconds: number) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+/**
+ * Live voice call with the OYUNS agent (OpenAI Realtime over WebRTC).
+ *
+ * The server mints a short-lived client secret with OYUNS' instructions and
+ * the caller's read-only tools; tool calls come back over the data channel
+ * and are executed by the server with the caller's permissions.
+ */
+export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
+  const [phase, setPhase] = useState<CallPhase>('connecting')
+  const [error, setError] = useState<string>()
+  const [muted, setMuted] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const [lines, setLines] = useState<TranscriptLine[]>([])
+  const pcRef = useRef<RTCPeerConnection | null>(null)
+  const channelRef = useRef<RTCDataChannel | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const orbRef = useRef<HTMLDivElement>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const frameRef = useRef<number | undefined>(undefined)
+  const lineId = useRef(0)
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const closedRef = useRef(false)
+
+  const addLine = useCallback((role: TranscriptLine['role'], text: string) => {
+    const value = text.trim()
+    if (!value) return
+    lineId.current += 1
+    const id = lineId.current
+    setLines((current) => [...current.slice(-40), { id, role, text: value }])
+  }, [])
+
+  const send = useCallback((event: Record<string, unknown>) => {
+    const channel = channelRef.current
+    if (channel?.readyState === 'open') channel.send(JSON.stringify(event))
+  }, [])
+
+  const cleanup = useCallback(() => {
+    closedRef.current = true
+    if (frameRef.current) cancelAnimationFrame(frameRef.current)
+    channelRef.current?.close()
+    pcRef.current?.getSenders().forEach((sender) => sender.track?.stop())
+    pcRef.current?.close()
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    if (audioRef.current) { audioRef.current.srcObject = null; audioRef.current.remove() }
+    void audioContextRef.current?.close().catch(() => undefined)
+    channelRef.current = null
+    pcRef.current = null
+    streamRef.current = null
+  }, [])
+
+  const runTools = useCallback(async (calls: FunctionCallItem[]) => {
+    setPhase('thinking')
+    await Promise.all(calls.map(async (call) => {
+      addLine('tool', `${toolLabel(call.name || '')} шалгаж байна…`)
+      let output: string
+      try {
+        const { data } = await api.post('/v1/assistant/voice/tool', { name: call.name, arguments: call.arguments ?? '{}', call_id: call.call_id })
+        output = data.output
+      } catch {
+        output = JSON.stringify({ status: 'unavailable', summary: 'The lookup failed.' })
+      }
+      send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: call.call_id, output } })
+    }))
+    if (!closedRef.current) send({ type: 'response.create' })
+  }, [addLine, send])
+
+  const onServerEvent = useCallback((event: any) => {
+    switch (event.type) {
+      case 'input_audio_buffer.speech_started':
+        setPhase('listening')
+        break
+      case 'input_audio_buffer.speech_stopped':
+      case 'response.created':
+        setPhase('thinking')
+        break
+      case 'output_audio_buffer.started':
+        setPhase('speaking')
+        break
+      case 'output_audio_buffer.stopped':
+      case 'output_audio_buffer.cleared':
+        setPhase('listening')
+        break
+      case 'conversation.item.input_audio_transcription.completed':
+        addLine('user', event.transcript || '')
+        break
+      case 'response.output_audio_transcript.done':
+      case 'response.audio_transcript.done':
+        addLine('assistant', event.transcript || '')
+        break
+      case 'response.done': {
+        const calls = ((event.response?.output ?? []) as FunctionCallItem[]).filter((item) => item.type === 'function_call' && item.call_id)
+        if (calls.length) void runTools(calls)
+        break
+      }
+      case 'error':
+        // Non-fatal protocol errors (e.g. a cancelled response) keep the call alive.
+        if (event.error?.code !== 'response_cancel_not_active') console.warn('OYUNS voice error', event.error)
+        break
+      default:
+        break
+    }
+  }, [addLine, runTools])
+
+  const watchLevel = useCallback((stream: MediaStream) => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+      if (!AudioContextClass) return
+      const context: AudioContext = new AudioContextClass()
+      audioContextRef.current = context
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 256
+      context.createMediaStreamSource(stream).connect(analyser)
+      const samples = new Uint8Array(analyser.frequencyBinCount)
+      const tick = () => {
+        analyser.getByteFrequencyData(samples)
+        const level = samples.reduce((sum, value) => sum + value, 0) / (samples.length * 255)
+        orbRef.current?.style.setProperty('--voice-level', String(1 + Math.min(0.35, level * 1.6)))
+        frameRef.current = requestAnimationFrame(tick)
+      }
+      tick()
+    } catch {
+      // The orb animation is decorative.
+    }
+  }, [])
+
+  useEffect(() => {
+    // Each mount owns its own attempt; a StrictMode remount or a fast close
+    // cancels the earlier attempt before it can publish any resources.
+    let cancelled = false
+    closedRef.current = false
+    const start = async () => {
+      if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') throw new Error('unsupported')
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+      } catch {
+        throw new Error('microphone')
+      }
+      if (cancelled) { stream.getTracks().forEach((track) => track.stop()); return }
+      streamRef.current = stream
+      const { data: session } = await api.post<VoiceSession>('/v1/assistant/voice/session')
+      if (cancelled) { stream.getTracks().forEach((track) => track.stop()); return }
+      const pc = new RTCPeerConnection()
+      pcRef.current = pc
+      const audio = document.createElement('audio')
+      audio.autoplay = true
+      audioRef.current = audio
+      pc.ontrack = (event) => {
+        audio.srcObject = event.streams[0]
+        watchLevel(event.streams[0])
+      }
+      pc.onconnectionstatechange = () => {
+        if (['failed', 'disconnected'].includes(pc.connectionState) && !closedRef.current) {
+          setError('network')
+          setPhase('error')
+        }
+      }
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream))
+      const channel = pc.createDataChannel('oai-events')
+      channelRef.current = channel
+      channel.onmessage = (message) => {
+        try { onServerEvent(JSON.parse(message.data)) } catch { /* ignore malformed events */ }
+      }
+      channel.onopen = () => {
+        setPhase('listening')
+        // Open the call with a short greeting in the caller's language.
+        send({ type: 'response.create', response: { instructions: 'Greet the caller briefly by first name in reply_language and ask how you can help. One short sentence.' } })
+      }
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      const answer = await fetch(session.calls_url, {
+        method: 'POST',
+        body: offer.sdp,
+        headers: { Authorization: `Bearer ${session.client_secret}`, 'Content-Type': 'application/sdp' },
+      })
+      if (!answer.ok) throw new Error('network')
+      const sdp = await answer.text()
+      if (cancelled) { pc.close(); return }
+      await pc.setRemoteDescription({ type: 'answer', sdp })
+    }
+    start().catch((failure: any) => {
+      if (cancelled || closedRef.current) return
+      const detail = failure?.response?.data?.detail
+      setError(typeof detail === 'string' ? detail : failure?.message || 'network')
+      setPhase('error')
+      cleanup()
+    })
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [cleanup, onServerEvent, send, watchLevel])
+
+  const running = phase === 'listening' || phase === 'thinking' || phase === 'speaking'
+  useEffect(() => {
+    if (!running) return
+    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [running])
+
+  useEffect(() => {
+    streamRef.current?.getAudioTracks().forEach((track) => { track.enabled = !muted })
+  }, [muted])
+
+  useEffect(() => {
+    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight })
+  }, [lines])
+
+  const hangUp = () => {
+    cleanup()
+    setPhase('ended')
+    onClose()
+  }
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') hangUp() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  return createPortal(<div className="oyuns-voice-overlay" role="dialog" aria-modal="true" aria-label="OYUNS Agent дуудлага">
+    <section className="oyuns-voice-card">
+      <header>
+        <div><strong>OYUNS Agent</strong><small>{phase === 'error' ? PHASE_LABELS.error : `Дуут дуудлага · ${formatDuration(elapsed)}`}</small></div>
+        <button type="button" className="chat-icon-button" onClick={hangUp} aria-label="Хаах"><X /></button>
+      </header>
+      <div ref={orbRef} className={`oyuns-voice-orb ${phase}`} aria-hidden="true" />
+      <p className="oyuns-voice-status" aria-live="polite">{muted && phase !== 'error' ? 'Микрофон хаалттай' : PHASE_LABELS[phase]}</p>
+      {error && <p className="oyuns-voice-error" role="alert">{ERROR_LABELS[error] ?? 'Дуудлага холбогдсонгүй. Дахин оролдоно уу.'}</p>}
+      {lines.length > 0 && <div ref={transcriptRef} className="oyuns-voice-transcript" aria-label="Ярианы бичвэр">{lines.map((line) => <p key={line.id} className={line.role}>{line.role === 'user' ? 'Та: ' : line.role === 'assistant' ? 'OYUNS: ' : ''}{line.text}</p>)}</div>}
+      <div className="oyuns-voice-controls">
+        <button type="button" className={`mute ${muted ? 'active' : ''}`} onClick={() => setMuted((value) => !value)} disabled={phase === 'error'} aria-pressed={muted} aria-label={muted ? 'Микрофон нээх' : 'Микрофон хаах'}>{muted ? <MicOff /> : <Mic />}</button>
+        <button type="button" className="hangup" onClick={hangUp} aria-label="Дуудлага дуусгах"><PhoneOff /></button>
+      </div>
+    </section>
+  </div>, document.body)
+}

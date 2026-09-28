@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.core.enterprise_deps import ActorContext
 from app.models.contracts import ContractDocument
 from app.models.models import (
+    Department,
     Employee,
     MonthlyPayrollMonth,
     MonthlyPayrollRun,
@@ -105,8 +106,9 @@ async def reports_search(db: AsyncSession, actor: ActorContext, data: schemas.Re
     target = _employee_id(actor, data.employee_reference)
     if target is not None and not ctx.management and target != actor.employee_id:
         return {"status": "denied", "data": {}}
-    # Monthly reports and plans are dated on the first day of their month.
-    filters = [clause, WorkReport.period_date >= date_from.replace(day=1), WorkReport.period_date <= date_to]
+    # Monthly reports and plans are dated on the first day of their month;
+    # policy-driven periods (week, quarter, year, custom) match on overlap.
+    filters = [clause, or_(WorkReport.period_date >= date_from.replace(day=1), func.coalesce(WorkReport.period_end, WorkReport.period_date) >= date_from), WorkReport.period_date <= date_to]
     if "daily" in data.report_types and len(data.report_types) == 1:
         filters[1] = WorkReport.period_date >= date_from
     if target is not None:
@@ -132,12 +134,19 @@ async def reports_search(db: AsyncSession, actor: ActorContext, data: schemas.Re
         item = {
             "employee": employee.name,
             "report_type": report.report_type,
-            "period": report.period_date.isoformat() if report.report_type == "daily" else report.period_date.strftime("%Y-%m"),
+            "period": (
+                report.period_date.isoformat() if report.report_type == "daily"
+                else f"{report.period_date.isoformat()}..{report.period_end.isoformat()}" if report.period_end
+                else report.period_date.strftime("%Y-%m")
+            ),
             "status": report.status,
             "title": report.title,
             "submitted_at": report.submitted_at.astimezone(ctx.tz).isoformat(timespec="minutes") if report.submitted_at else None,
             "open_url": _app_link(f"/reports?report={report.id}"),
         }
+        if report.department_id is not None:
+            department = await db.get(Department, report.department_id)
+            item["department_report"] = department.name if department else True
         if data.include_text:
             item["text"] = _excerpt(await chat_share_service._report_text(db, report), text_budget)
         items.append(item)

@@ -32,6 +32,7 @@ MODELS_URL = "https://api.openai.com/v1/models"
 RESPONSES_URL = "https://api.openai.com/v1/responses"
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$")
 CHAT_MODEL_RE = re.compile(r"^(?:gpt-|o\d|chatgpt-)")
+REALTIME_MODEL_RE = re.compile(r"^gpt-(?:[\w.-]*-)?realtime")
 EXCLUDED_MODEL_RE = re.compile(r"(?:audio|realtime|transcribe|tts|image|embedding|moderation|search|whisper|dall-e)", re.I)
 MODELS_CACHE_SECONDS = 600
 _models_cache: dict[str, tuple[float, list[str]]] = {}
@@ -56,6 +57,17 @@ class AiAgentSettingsInput(BaseModel):
     reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
     max_output_tokens: int | None = Field(default=None, ge=ai_runtime.MIN_OUTPUT_TOKENS, le=ai_runtime.MAX_OUTPUT_TOKENS)
     web_search_enabled: bool | None = None
+    realtime_model: str | None = Field(default=None, max_length=100, description="Realtime model for OYUNS voice calls; empty resets to the default.")
+    realtime_voice: Literal[ai_runtime.REALTIME_VOICES] | None = None  # type: ignore[valid-type]
+    realtime_enabled: bool | None = None
+
+    @field_validator("realtime_model")
+    @classmethod
+    def validate_realtime_model(cls, value: str | None) -> str | None:
+        value = _model_id(value)
+        if value and "realtime" not in value:
+            raise ValueError("Choose a realtime model (for example gpt-realtime)")
+        return value
 
     @field_validator("api_key")
     @classmethod
@@ -99,7 +111,11 @@ def _settings_out(organization: Organization) -> dict:
         "reasoning_effort": active.reasoning_effort,
         "max_output_tokens": active.max_output_tokens,
         "web_search_enabled": active.web_search_enabled,
-        "defaults": {"primary_model": primary, "fallback_model": fallback, "reasoning_effort": "low", "max_output_tokens": ai_runtime.DEFAULT_OUTPUT_TOKENS},
+        "realtime_model": active.realtime_model,
+        "realtime_voice": active.realtime_voice,
+        "realtime_enabled": active.realtime_enabled,
+        "realtime_voices": list(ai_runtime.REALTIME_VOICES),
+        "defaults": {"primary_model": primary, "fallback_model": fallback, "reasoning_effort": "low", "max_output_tokens": ai_runtime.DEFAULT_OUTPUT_TOKENS, "realtime_model": ai_runtime.DEFAULT_REALTIME_MODEL, "realtime_voice": ai_runtime.DEFAULT_REALTIME_VOICE},
         "limits": {"min_output_tokens": ai_runtime.MIN_OUTPUT_TOKENS, "max_output_tokens": ai_runtime.MAX_OUTPUT_TOKENS},
         "updated_at": stored.get("updated_at"),
     }
@@ -128,7 +144,7 @@ async def update_ai_agent_settings(data: AiAgentSettingsInput, db: AsyncSession 
         stored["api_key_enc"] = encrypt_secret(data.api_key)
         stored["api_key_last4"] = data.api_key[-4:]
         changes["api_key"] = f"replaced (…{data.api_key[-4:]})"
-    for field in ("primary_model", "fallback_model", "reasoning_effort", "max_output_tokens", "web_search_enabled"):
+    for field in ("primary_model", "fallback_model", "reasoning_effort", "max_output_tokens", "web_search_enabled", "realtime_model", "realtime_voice", "realtime_enabled"):
         value = getattr(data, field)
         if value is None or (field == "primary_model" and value == ""):
             continue
@@ -156,15 +172,25 @@ def _error_kind(status: int) -> str:
     return {401: "invalid_key", 403: "forbidden", 404: "model_not_found", 429: "rate_limited"}.get(status, "provider_error" if status >= 500 else "rejected")
 
 
-async def _list_models(key: str) -> tuple[list[str] | None, int, str]:
+async def _fetch_model_ids(key: str) -> tuple[list[str] | None, int, str]:
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
         async with session.get(MODELS_URL, headers={"Authorization": f"Bearer {key}"}) as response:
             if response.status != 200:
                 return None, response.status, (await response.text())[:300]
             body = await response.json()
-    ids = sorted(
+    return sorted(
         {str(item.get("id")) for item in body.get("data", []) if isinstance(item, dict) and item.get("id")},
-    )
+    ), 200, ""
+
+
+def _realtime_models(ids: list[str]) -> list[str]:
+    return [item for item in ids if REALTIME_MODEL_RE.match(item) and not re.search(r"(?:transcribe|tts)", item)]
+
+
+async def _list_models(key: str) -> tuple[list[str] | None, int, str]:
+    ids, status, detail = await _fetch_model_ids(key)
+    if ids is None:
+        return None, status, detail
     return [item for item in ids if CHAT_MODEL_RE.match(item) and not EXCLUDED_MODEL_RE.search(item)], 200, ""
 
 
@@ -176,15 +202,15 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), actor: ActorContext
     cache_key = hashlib.sha256(key.encode()).hexdigest()
     cached = _models_cache.get(cache_key)
     if cached and cached[0] > time.monotonic():
-        return {"models": cached[1], "error": None}
+        return {"models": [item for item in cached[1] if CHAT_MODEL_RE.match(item) and not EXCLUDED_MODEL_RE.search(item)], "realtime_models": _realtime_models(cached[1]), "error": None}
     try:
-        models, status, _ = await _list_models(key)
+        ids, status, _ = await _fetch_model_ids(key)
     except (aiohttp.ClientError, TimeoutError):
-        return {"models": [], "error": "network"}
-    if models is None:
-        return {"models": [], "error": _error_kind(status)}
-    _models_cache[cache_key] = (time.monotonic() + MODELS_CACHE_SECONDS, models)
-    return {"models": models, "error": None}
+        return {"models": [], "realtime_models": [], "error": "network"}
+    if ids is None:
+        return {"models": [], "realtime_models": [], "error": _error_kind(status)}
+    _models_cache[cache_key] = (time.monotonic() + MODELS_CACHE_SECONDS, ids)
+    return {"models": [item for item in ids if CHAT_MODEL_RE.match(item) and not EXCLUDED_MODEL_RE.search(item)], "realtime_models": _realtime_models(ids), "error": None}
 
 
 @router.post("/test")

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.enterprise_deps import ActorContext, get_actor, require_roles
+from app.core.enterprise_deps import WORKSPACE_MODE_ROLES, ActorContext, get_account_actor, get_actor, require_roles
 from app.core.security import (
     create_enterprise_access_token,
     hash_account_password,
@@ -93,6 +93,10 @@ class AccountOut(BaseModel):
     name: str | None = None
     avatar_url: str | None = None
     telegram_id: str | None = None
+    # ``roles`` are the roles effective for this request (narrowed in member
+    # workspace mode); ``account_roles`` are the roles actually granted.
+    account_roles: list[str] | None = None
+    workspace_mode: Literal["member", "manager"] | None = None
 
 
 class AccountCreate(BaseModel):
@@ -763,7 +767,12 @@ async def logout(
 @router.get("/me", response_model=AccountOut)
 async def me(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     employee = await db.get(Employee, actor.employee_id) if actor.employee_id else None
-    return AccountOut(id=actor.account_id, email=actor.email, employee_id=actor.employee_id, locale=actor.locale, roles=sorted(actor.roles), status="active", name=employee.name if employee else actor.email, avatar_url=(employee.metadata_json or {}).get("avatar_url") if employee else None)
+    return AccountOut(
+        id=actor.account_id, email=actor.email, employee_id=actor.employee_id, locale=actor.locale,
+        roles=sorted(actor.roles), status="active", name=employee.name if employee else actor.email,
+        avatar_url=(employee.metadata_json or {}).get("avatar_url") if employee else None,
+        account_roles=sorted(actor.granted_roles), workspace_mode=actor.workspace_mode,
+    )
 
 
 async def _profile_out(db: AsyncSession, actor: ActorContext, account: UserAccount, employee: Employee | None, password_setup_required: bool) -> dict:
@@ -792,7 +801,7 @@ async def _profile_out(db: AsyncSession, actor: ActorContext, account: UserAccou
         "employment_type": details.employment_type if details else None,
         "telegram_connected": bool(employee and employee.telegram_id),
         "requires_password_setup": password_setup_required,
-        "roles": sorted(actor.roles),
+        "roles": sorted(actor.granted_roles),
     }
 
 
@@ -836,9 +845,9 @@ async def update_world_clock_preferences(
 @router.get("/preferences/workspace-mode", response_model=WorkspaceModePreferences)
 async def workspace_mode_preferences(
     db: AsyncSession = Depends(get_db),
-    actor: ActorContext = Depends(get_actor),
+    actor: ActorContext = Depends(get_account_actor),
 ):
-    if not actor.has_any_role("admin", "manager", "team_lead"):
+    if not actor.granted_roles.intersection(WORKSPACE_MODE_ROLES):
         return WorkspaceModePreferences(mode="member")
     account = await db.get(UserAccount, actor.account_id)
     saved = (account.preferences or {}).get("workspace_mode") if account else None
@@ -850,8 +859,12 @@ async def workspace_mode_preferences(
 async def update_workspace_mode_preferences(
     data: WorkspaceModePreferences,
     db: AsyncSession = Depends(get_db),
-    actor: ActorContext = Depends(require_roles("admin", "manager", "team_lead")),
+    # The mode is read from the account's real grants: a manager working in
+    # member mode must still be able to switch back.
+    actor: ActorContext = Depends(get_account_actor),
 ):
+    if not actor.granted_roles.intersection(WORKSPACE_MODE_ROLES):
+        raise HTTPException(status_code=403, detail="Insufficient permission")
     account = await db.get(UserAccount, actor.account_id, with_for_update=True)
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, BookOpen, Boxes, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, KeyRound, Landmark, LocateFixed, MapPin, MonitorUp, ScanLine, Settings2, ShieldAlert, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, Wifi, X } from 'lucide-react'
+import { ArrowLeft, Bot, BookOpen, Boxes, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, FileCheck2, KeyRound, Landmark, LocateFixed, MapPin, MonitorUp, ScanLine, Settings2, ShieldAlert, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, Wifi, X } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useDeleteManagedAccount, useDeleteWorktimeQrKiosk, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useHolidaySettings, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useSetHolidayCountry, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
@@ -15,6 +15,7 @@ import { DeveloperPage } from './DeveloperPage'
 import { ERPBuilderPanels } from '../components/ERPBuilderPanels'
 import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
 import { WorktimeMethodsSettings } from '../components/WorktimeMethodsSettings'
+import { ReportPolicySettings } from '../components/ReportPolicySettings'
 
 type SettingsTab = { to: string; label: string; roles?: string[] }
 type SettingsCategory = { id: string; to: string; label: string; icon: typeof Settings2; roles: string[]; tabs: SettingsTab[] }
@@ -36,7 +37,10 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
   },
   {
     id: 'workflows', to: '/administration/workflows/worktime', label: 'Ажлын цаг ба процесс', icon: UserRoundCog, roles: ['admin', 'manager', 'team_lead'],
-    tabs: [{ to: '/administration/workflows/worktime', label: 'Ажлын цаг ба check-in' }],
+    tabs: [
+      { to: '/administration/workflows/worktime', label: 'Ажлын цаг ба check-in' },
+      { to: '/administration/workflows/reports', label: 'Тайлангийн тохиргоо' },
+    ],
   },
   {
     id: 'integrations', to: '/administration/integrations/overview', label: 'Автоматжуулалт ба интеграци', icon: CalendarClock, roles: ['admin', 'manager', 'team_lead'],
@@ -176,6 +180,12 @@ export function CollaborationSettingsPage() {
     <SettingsSection title="Цаг бүртгэх арга" icon={ScanLine} className="settings-embedded" defaultOpen><WorktimeMethodsSettings /></SettingsSection>
     <WorktimeQrKioskPanel />
     <WorktimeGeofencePanel />
+  </SettingsPage>
+}
+
+export function ReportSettingsPage() {
+  return <SettingsPage categoryId="workflows" activeTab="/administration/workflows/reports" title="Тайлангийн тохиргоо">
+    <SettingsSection title="Тайлангийн давтамж ба хэлтсийн тайлан" icon={FileCheck2} className="settings-embedded" defaultOpen><ReportPolicySettings /></SettingsSection>
   </SettingsPage>
 }
 
