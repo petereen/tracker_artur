@@ -77,7 +77,7 @@ export function CustomerDetail({ partyId, lookups, capabilities, isManager, onCl
           <div><small>Сүүлийн харилцаа</small><strong>{formatDate(data.stats.last_activity_at)}</strong></div>
         </div>
 
-        <nav className="hr-tabs crm-detail-tabs">{(Object.keys(TAB_LABELS) as Tab[]).map((key) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{TAB_LABELS[key]}</button>)}</nav>
+        <nav className="page-tabs crm-detail-tabs"><div className="page-tabs-list">{(Object.keys(TAB_LABELS) as Tab[]).map((key) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{TAB_LABELS[key]}</button>)}</div></nav>
 
         {tab === 'overview' && <Overview data={data} onOpenParty={onOpenParty} onRefresh={canEdit ? refresh : undefined} refreshing={refreshTax.isPending} onDelete={capabilities.parties.archive ? destroy : undefined} />}
         {tab === 'contacts' && <Contacts party={data} canEdit={canEdit} />}

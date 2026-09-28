@@ -111,8 +111,8 @@ export function useReasonDialog(): [ReactNode, (title: string, label?: string, c
 export function MonthlyShell({ children, actions, canAdminister = false }: { children: ReactNode; actions?: ReactNode; canAdminister?: boolean }) {
   const tab = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : undefined)
   return <main className="payroll-v2-shell"><div className="payroll-v2-content">
-    <div className="payroll-compact-toolbar">
-      <nav className="payroll-compact-nav" aria-label="Цалингийн навигаци">
+    <div className="page-tabs">
+      <nav className="page-tabs-list" aria-label="Цалингийн навигаци">
         <NavLink className={tab} to="/erp/payroll" end>Хянах самбар</NavLink>
         <NavLink className={tab} to="/erp/payroll/monthly" end>Сарын цалин</NavLink>
         <NavLink className={tab} to="/erp/payroll/monthly/reports">Тайлан</NavLink>
@@ -120,7 +120,7 @@ export function MonthlyShell({ children, actions, canAdminister = false }: { chi
         {canAdminister && <NavLink className={tab} to="/erp/payroll/monthly/settings">Тохиргоо</NavLink>}
         <NavLink to="/hr?tab=payroll">HR тохиргоо</NavLink>
       </nav>
-      {actions ? <div className="payroll-compact-actions">{actions}</div> : null}
+      {actions ? <div className="page-tabs-actions payroll-compact-actions">{actions}</div> : null}
     </div>
     {children}
   </div></main>
