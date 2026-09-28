@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 
 class StrictInput(BaseModel):
@@ -12,19 +12,24 @@ class StrictInput(BaseModel):
 
 
 class KnowledgeSearchInput(StrictInput):
-    query: str = Field(min_length=1, max_length=500)
+    operation: Literal["search", "list"] = Field(default="search", description="search = find files/knowledge matching query; list = browse the company files the caller may open (query may be null).")
+    query: str | None = Field(default=None, max_length=500)
     search_mode: Literal["hybrid", "semantic", "keyword"] = "hybrid"
     file_types: list[str] = Field(default_factory=list, max_length=10)
-    limit: int = Field(default=5, ge=1, le=5)
+    limit: int = Field(default=5, ge=1, le=30, description="search returns at most 5; list returns up to 30.")
     delivery: Literal["none", "attachment", "link"] = "none"
 
     @field_validator("query")
     @classmethod
-    def trim_query(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("query must not be blank")
-        return value
+    def trim_query(cls, value: str | None) -> str | None:
+        value = value.strip() if value is not None else None
+        return value or None
+
+    @model_validator(mode="after")
+    def require_query_for_search(self):
+        if self.operation == "search" and not self.query:
+            raise ValueError("query is required for operation=search; use operation=list to browse files")
+        return self
 
 
 class KnowledgeFetchInput(StrictInput):

@@ -21,7 +21,7 @@ from typing import Literal
 import aiohttp
 import aiofiles
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,7 +49,11 @@ from app.services.secret_box import encrypt_secret
 from app.erp.service import DOCUMENT_TYPES, as_money, require_capability
 
 log = logging.getLogger(__name__)
-TOOL_STATUS = Literal["ok", "empty", "indexing", "partial", "denied", "unavailable"]
+TOOL_STATUS = Literal["ok", "empty", "indexing", "partial", "denied", "invalid_input", "unavailable"]
+
+
+class ToolAccessDenied(ValueError):
+    """A permission failure, as opposed to an input the user can correct."""
 MANAGEMENT_ROLES = frozenset({"admin", "manager"})
 METRICS = frozenset({"task_completion", "deadline_health", "work_hours", "utilization", "billable_ratio", "report_compliance", "active_projects", "budget_burn"})
 
@@ -64,7 +68,7 @@ class FileSearchInput(_Strict):
     search_mode: Literal["hybrid", "semantic", "keyword"] = "hybrid"
     folder_id: int | None = None
     file_types: list[str] = Field(default_factory=list, max_length=10)
-    limit: int = Field(default=5, ge=1, le=10)
+    limit: int = Field(default=5, ge=1, le=30)
     delivery: Literal["none", "attachment", "link"] = "none"
 
     @field_validator("query")
@@ -190,13 +194,21 @@ class DelegateTaskInput(AssistantTaskInput):
 
 
 _MEETING_TEXT_RE = re.compile(r"\b(хурал\w*|уулзалт\w*|meeting|event)\b", re.IGNORECASE)
-_PERSONAL_MEETING_RE = re.compile(r"(хуралтай|уулзалттай|meeting with|бид\s*2|хамт)", re.IGNORECASE)
+_PERSONAL_MEETING_RE = re.compile(r"(хуралтай|уулзалттай|meeting with|бид\s*2|хамт|\w+(?:тай|тэй|той)\s+(?:хурал|уулзалт))", re.IGNORECASE)
+_SELF_ASSIGNEES = {"self", "me", "myself", "би", "өөрөө", "надад", "өөртөө"}
 
 
 def _is_personal_meeting_task(data: AssistantTaskInput) -> bool:
     """Recognize a user's own meeting statement, including named attendees."""
     text = " ".join(filter(None, [data.title, data.description]))
-    return bool(_MEETING_TEXT_RE.search(text) and _PERSONAL_MEETING_RE.search(text))
+    if not _MEETING_TEXT_RE.search(text):
+        return False
+    if _PERSONAL_MEETING_RE.search(text):
+        return True
+    # "Meeting" created for oneself with named attendees ("Хурал", participants
+    # ["Анужин хуульч"]) is the caller's own meeting reminder.
+    own = not data.assignee or data.assignee.strip().casefold() in _SELF_ASSIGNEES
+    return own and bool(data.participants)
 
 
 def _is_self_meeting_task(data: AssistantTaskInput, *, action_type: str) -> bool:
@@ -209,7 +221,7 @@ def _is_self_meeting_task(data: AssistantTaskInput, *, action_type: str) -> bool
     """
     if action_type != "create_task":
         return False
-    if data.assignee and data.assignee.casefold() not in {"self", "me", "myself", "би", "өөрөө", "надад", "өөртөө"}:
+    if data.assignee and data.assignee.strip().casefold() not in _SELF_ASSIGNEES:
         return False
     return _is_personal_meeting_task(data)
 
@@ -221,6 +233,17 @@ def _meeting_description(data: AssistantTaskInput) -> str | None:
     attendees = ", ".join(data.participants)
     note = f"Оролцогчид: {attendees}"
     return f"{data.description}\n{note}" if data.description else note
+
+
+def _input_error_reason(exc: ValueError) -> str:
+    if isinstance(exc, ValidationError):
+        parts = []
+        for error in exc.errors()[:5]:
+            location = ".".join(str(part) for part in error.get("loc", ()))
+            message = str(error.get("msg", "invalid value")).removeprefix("Value error, ")
+            parts.append(f"{location}: {message}" if location else message)
+        return "Invalid tool arguments: " + "; ".join(parts)
+    return str(exc)
 
 
 def _result(status: TOOL_STATUS, data: dict | None = None, *, sources: list[dict] | None = None, deliveries: list[dict] | None = None, warnings: list[str] | None = None) -> dict:
@@ -790,14 +813,15 @@ async def _resolve_employee_reference(db: AsyncSession, actor: ActorContext, ref
             raise ValueError("A target employee is required")
         return actor.employee_id
     normalized = reference.strip().casefold()
-    if normalized in {"self", "me", "myself", "би", "өөрөө", "надад", "өөртөө"}:
+    if normalized in _SELF_ASSIGNEES:
         if actor.employee_id is None:
             raise ValueError("Your account is not linked to an employee")
         return actor.employee_id
     employees = await _organization_employees(db, actor)
     matches = [employee for employee in employees if _employee_ref_matches(employee, reference)]
     if len(matches) != 1:
-        raise ValueError("The target employee could not be uniquely resolved")
+        problem = "matches several employees" if matches else "was not found in the employee directory"
+        raise ValueError(f"The person '{reference.strip()}' {problem}. Ask the user for the exact employee name or @username.")
     return matches[0].id
 
 
@@ -817,7 +841,7 @@ async def _resolve_project_reference(db: AsyncSession, actor: ActorContext, refe
     if not actor.has_any_role(*MANAGEMENT_ROLES):
         member = await db.scalar(select(ProjectMember.id).where(ProjectMember.project_id == project.id, ProjectMember.employee_id == actor.employee_id)) if actor.employee_id else None
         if project.manager_id != actor.employee_id and not member:
-            raise ValueError("You do not have access to that project")
+            raise ToolAccessDenied("You do not have access to that project")
     return project.id
 
 
@@ -874,7 +898,7 @@ async def _validate_task_mutation_targets(db: AsyncSession, actor: ActorContext,
             raise ValueError("One or more task targets are invalid")
     if any(employee_id != actor.employee_id for employee_id in target_ids):
         if not await actor_can_assign_tasks(db, organization_id=actor.organization_id, employee_id=actor.employee_id, roles=actor.roles):
-            raise ValueError("Your role is not authorized to assign work to another employee")
+            raise ToolAccessDenied("Your role is not authorized to assign work to another employee. You can still create the task for yourself.")
     if payload.get("project_id") is not None:
         project = await db.get(Project, payload["project_id"])
         if not project or project.organization_id != actor.organization_id or project.archived_at:
@@ -882,7 +906,7 @@ async def _validate_task_mutation_targets(db: AsyncSession, actor: ActorContext,
         if not actor.has_any_role(*MANAGEMENT_ROLES):
             member = await db.scalar(select(ProjectMember.id).where(ProjectMember.project_id == project.id, ProjectMember.employee_id == actor.employee_id)) if actor.employee_id else None
             if project.manager_id != actor.employee_id and not member:
-                raise ValueError("You do not have access to that project")
+                raise ToolAccessDenied("You do not have access to that project")
 
 
 def _assistant_task_output(task: Task, *, assignee_ids: list[int], reviewer_ids: list[int]) -> dict:
@@ -1195,8 +1219,12 @@ async def execute(db: AsyncSession, actor: ActorContext, tool_name: str, argumen
             ]})
         elif tool_name == "erp_query_tool": result = await erp_query(db, actor, ERPQueryInput.model_validate(arguments))
         else: result = _result("denied", {"reason": "Unknown tool"})
-    except ValueError as exc:
+    except ToolAccessDenied as exc:
         result = _result("denied", {"reason": str(exc)})
+    except ValueError as exc:
+        # Validation and name-resolution problems are fixable by the user or
+        # the model; they must not be reported as a permission restriction.
+        result = _result("invalid_input", {"reason": _input_error_reason(exc)})
     except Exception:
         log.exception("enterprise_tool_failed tool=%s", tool_name)
         result = _result("unavailable", {"reason": "Tool is temporarily unavailable"})
