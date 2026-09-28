@@ -17,7 +17,7 @@ from app.services.enterprise_events import record_change
 
 router = APIRouter()
 require_export_role = require_roles(*insights.EXPORT_ROLES)
-ReportType = Literal["daily", "monthly", "next_month_plan"]
+ReportType = Literal["daily", "weekly", "monthly", "quarterly", "yearly", "custom", "next_month_plan"]
 
 
 class HistoryItem(BaseModel):

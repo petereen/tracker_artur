@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Department, Employee, EmployeeDetails, Task, WorkReport, WorkReportRevision, WorkTimeEntry
@@ -25,11 +25,15 @@ from app.services.ai_gateway.runtime import resolve_ai_runtime
 log = logging.getLogger(__name__)
 
 EXPORT_ROLES = ("admin", "manager")
-REPORT_TYPES = ("daily", "monthly", "next_month_plan")
+REPORT_TYPES = ("daily", "weekly", "monthly", "quarterly", "yearly", "custom", "next_month_plan")
 MONTH_PERIOD_TYPES = {"monthly", "next_month_plan"}
 MAX_PERIOD_DAYS = 3 * 366
 NO_DEPARTMENT = "Хэлтэсгүй"
-REPORT_TYPE_LABEL = {"daily": "Өдрийн тайлан", "monthly": "Сарын тайлан", "next_month_plan": "Дараа сарын төлөвлөгөө"}
+REPORT_TYPE_LABEL = {
+    "daily": "Өдрийн тайлан", "weekly": "7 хоногийн тайлан", "monthly": "Сарын тайлан",
+    "quarterly": "Улирлын тайлан", "yearly": "Жилийн тайлан", "custom": "Тусгай тайлан",
+    "next_month_plan": "Дараа сарын төлөвлөгөө",
+}
 REPORT_STATUS_LABEL = {"awaiting": "Хүлээгдэж буй", "draft": "Ноорог", "editing": "Засварлаж буй", "submitted": "Илгээсэн", "revision_requested": "Засвар хүссэн", "approved": "Батлагдсан"}
 CONTEXT_CHAR_BUDGET = 60_000
 GroupBy = Literal["worker", "department"]
@@ -101,15 +105,18 @@ async def collect_reports(
     if not scoped:
         return []
     types = [item for item in report_types if item in REPORT_TYPES] or list(REPORT_TYPES)
-    # Month-based reports are stored on the first day of their month, so a
-    # period starting mid-month still includes that month's report.
-    month_from = date_from.replace(day=1)
+    # Legacy monthly reports are stored on the first day of their month without
+    # a period end; expand the lower bound to that month. Other periods match
+    # when they overlap the requested range (mirrors list_enterprise_reports).
+    monthly_period_from = date_from.replace(day=1)
     query = select(WorkReport).where(
         WorkReport.employee_id.in_(list(scoped)),
         WorkReport.report_type.in_(types),
         WorkReport.period_date <= date_to,
-        ((WorkReport.report_type == "daily") & (WorkReport.period_date >= date_from))
-        | ((WorkReport.report_type != "daily") & (WorkReport.period_date >= month_from)),
+        or_(
+            and_(WorkReport.report_type == "monthly", WorkReport.period_date >= monthly_period_from),
+            and_(WorkReport.report_type != "monthly", func.coalesce(WorkReport.period_end, WorkReport.period_date) >= date_from),
+        ),
     )
     if approved_only:
         query = query.where(WorkReport.status == "approved")
@@ -147,7 +154,11 @@ def safe_name(value: str | None, fallback: str = "Нэргүй") -> str:
 
 
 def _period_label(report: WorkReport) -> str:
-    return report.period_date.strftime("%Y-%m") if report.report_type in MONTH_PERIOD_TYPES else report.period_date.isoformat()
+    if report.report_type in MONTH_PERIOD_TYPES:
+        return report.period_date.strftime("%Y-%m")
+    if report.period_end and report.period_end != report.period_date:
+        return f"{report.period_date.isoformat()}_{report.period_end.isoformat()}"
+    return report.period_date.isoformat()
 
 
 def report_markdown(record: ReportRecord) -> str:
@@ -253,7 +264,13 @@ async def compute_kpis(db: AsyncSession, organization_id: int, scoped: dict[int,
         per[employee_id]["worked_minutes"] = round(float(minutes or 0))
     report_rows = (await db.execute(
         select(WorkReport.employee_id, WorkReport.status, func.count())
-        .where(WorkReport.employee_id.in_(ids), WorkReport.report_type.in_(REPORT_TYPES), WorkReport.period_date >= date_from.replace(day=1), WorkReport.period_date <= date_to)
+        .where(
+            WorkReport.employee_id.in_(ids), WorkReport.report_type.in_(REPORT_TYPES), WorkReport.period_date <= date_to,
+            or_(
+                and_(WorkReport.report_type == "monthly", WorkReport.period_date >= date_from.replace(day=1)),
+                and_(WorkReport.report_type != "monthly", func.coalesce(WorkReport.period_end, WorkReport.period_date) >= date_from),
+            ),
+        )
         .group_by(WorkReport.employee_id, WorkReport.status)
     )).all()
     for employee_id, status, count in report_rows:
