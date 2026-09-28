@@ -536,10 +536,12 @@ export function EnterpriseTasksPage() {
     kind: "all",
     scope: "mine",
   });
+  // Completed tasks pile up over time, so the board defaults to the current
+  // week; the filter panel's date inputs let anyone widen or clear it.
   const [dateFilters, setDateFilters] = useState<{
     date_from?: string;
     date_to?: string;
-  }>({});
+  }>(() => periodFromPreset("week"));
   const [conflict, setConflict] = useState<EnterpriseTask | null>(null);
   const sheetRef = useRef<HTMLElement>(null);
   const [lastMove, setLastMove] = useState<{
@@ -994,7 +996,7 @@ export function EnterpriseTasksPage() {
   const resetFilters = () => {
     setFilters({ kind: "all", scope: "mine" });
     setFilterProjectId(projectId);
-    setDateFilters({});
+    setDateFilters(periodFromPreset("week"));
   };
   return (
     <div className="task-workspace">
@@ -1034,9 +1036,10 @@ export function EnterpriseTasksPage() {
         <div className="toolbar-cluster">
           <div className="task-filter-control">
             <button
-              className="secondary-action compact"
+              className={`secondary-action compact ${dateFilters.date_from || dateFilters.date_to ? "active" : ""}`}
               onClick={() => setFiltersOpen(!filtersOpen)}
               aria-expanded={filtersOpen}
+              title={dateFilters.date_from && dateFilters.date_to ? `Хугацаа: ${dateFilters.date_from} – ${dateFilters.date_to}` : undefined}
             >
               <Filter size={15} />
               Шүүлтүүр

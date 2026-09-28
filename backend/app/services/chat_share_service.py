@@ -32,12 +32,15 @@ from app.models.models import (
     WorkReport,
     WorkReportRevision,
 )
+from app.services.report_policy import frequency_for, frequency_label, report_policy
 
 MANAGEMENT_ROLES = ("admin", "manager", "team_lead")
 ShareKind = Literal["task", "plan_item", "plan_idea", "plan_report", "contract", "report"]
 SHARE_KINDS: tuple[str, ...] = ("task", "plan_item", "plan_idea", "plan_report", "contract", "report")
 ACTIVE_TASK_EXCLUDED = ("done", "cancelled")
-REPORT_TYPES = ("daily", "monthly")
+# All periodic report types the report policy can produce; "next_month_plan" is a
+# separate share kind ("plan_report").
+REPORT_TYPES = ("daily", "weekly", "monthly", "quarterly", "yearly", "custom")
 GROUPS = (
     ("tasks", "Идэвхтэй даалгавар"),
     ("plans", "Төлөвлөгөө"),
@@ -49,7 +52,7 @@ KIND_GROUP = {"task": "tasks", "plan_item": "plans", "plan_idea": "plans", "plan
 TASK_STATUS = {"backlog": "Хойшлуулсан", "to_do": "Хийх", "in_progress": "Хийгдэж буй", "review": "Хянагдаж буй", "done": "Дууссан", "cancelled": "Цуцлагдсан"}
 PRIORITY = {1: "Яаралтай", 2: "Энгийн", 3: "Бага"}
 REPORT_STATUS = {"awaiting": "Хүлээгдэж буй", "draft": "Ноорог", "editing": "Засварлаж буй", "submitted": "Илгээсэн", "revision_requested": "Засвар хүссэн", "approved": "Батлагдсан"}
-REPORT_TYPE = {"daily": "Өдрийн тайлан", "monthly": "Сарын тайлан", "next_month_plan": "Дараа сарын төлөвлөгөө"}
+REPORT_TYPE = {"next_month_plan": "Дараа сарын төлөвлөгөө"}
 CONTRACT_STATUS = {"DRAFT": "Ноорог", "PENDING_REVIEW": "Хянагдаж буй", "CHANGES_REQUESTED": "Засвар хүссэн", "APPROVED": "Батлагдсан", "REJECTED": "Татгалзсан", "SIGNED_AND_STAMPED": "Гарын үсэг зурсан"}
 CONTRACT_TYPE = {"contract": "Гэрээ", "agreement": "Хэлэлцээр", "official_letter": "Албан бичиг", "other": "Бусад"}
 IDEA_STATUS = {"pending": "Хүлээгдэж буй", "approved": "Зөвшөөрсөн", "rejected": "Татгалзсан", "merged": "Нэгтгэсэн"}
@@ -66,6 +69,7 @@ class _Ctx:
     actor: ActorContext
     management: bool
     tz: ZoneInfo
+    policy: dict
 
 
 def _is_management(actor: ActorContext) -> bool:
@@ -78,7 +82,8 @@ async def _ctx(db: AsyncSession, actor: ActorContext) -> _Ctx:
         tz = ZoneInfo(organization.timezone if organization else "Asia/Ulaanbaatar")
     except Exception:
         tz = ZoneInfo("Asia/Ulaanbaatar")
-    return _Ctx(actor=actor, management=_is_management(actor), tz=tz)
+    policy = report_policy(organization.settings if organization else None)
+    return _Ctx(actor=actor, management=_is_management(actor), tz=tz, policy=policy)
 
 
 def _fmt_dt(value: datetime | None, tz: ZoneInfo) -> str | None:
@@ -93,6 +98,18 @@ def _fmt_date(value: date | None) -> str | None:
 
 def _fmt_month(value: date | None) -> str | None:
     return value.strftime("%Y-%m") if value else None
+
+
+def _report_type_label(ctx: _Ctx, report: WorkReport) -> str:
+    if report.report_type == "next_month_plan":
+        return REPORT_TYPE["next_month_plan"]
+    return frequency_label(ctx.policy, frequency_for(report.report_type, report.period_key))
+
+
+def _report_period_label(report: WorkReport) -> str:
+    if report.period_end and report.period_end != report.period_date:
+        return f"{_fmt_date(report.period_date)} – {_fmt_date(report.period_end)}"
+    return _fmt_date(report.period_date)
 
 
 def _excerpt(text: str | None, limit: int = 320) -> str | None:
@@ -261,9 +278,9 @@ async def search_shareable(db: AsyncSession, actor: ActorContext, q: str = "", *
         report_query = report_query.where(or_(WorkReport.title.ilike(term), WorkReport.employee_id.in_(select(Employee.id).where(Employee.name.ilike(term)))))
     for report in (await db.execute(report_query.order_by(WorkReport.period_date.desc(), WorkReport.id.desc()).limit(limit_per_group))).scalars().all():
         employee = names.get(report.employee_id, "")
-        period = _fmt_month(report.period_date) if report.report_type == "monthly" else _fmt_date(report.period_date)
-        title = report.title or f"{employee} — {REPORT_TYPE.get(report.report_type, report.report_type)}"
-        groups["reports"].append(_row("report", report.id, title, f"{employee} · {REPORT_TYPE.get(report.report_type)} · {period}", report.status, REPORT_STATUS.get(report.status), report.updated_at))
+        type_label = _report_type_label(ctx, report)
+        title = report.title or f"{employee} — {type_label}"
+        groups["reports"].append(_row("report", report.id, title, f"{employee} · {type_label} · {_report_period_label(report)}", report.status, REPORT_STATUS.get(report.status), report.updated_at))
 
     return {
         "query": q,
@@ -374,12 +391,11 @@ async def build_snapshot(db: AsyncSession, actor: ActorContext, kind: str, ref: 
         if not report:
             raise ShareItemNotFound(ref)
         employee = await db.get(Employee, report.employee_id)
-        period = _fmt_month(report.period_date) if report.report_type != "daily" else _fmt_date(report.period_date)
-        type_label = REPORT_TYPE.get(report.report_type, report.report_type)
+        type_label = _report_type_label(ctx, report)
         return _card(kind, report.id, title=report.title or f"{employee.name if employee else ''} — {type_label}", status=report.status, status_label=REPORT_STATUS.get(report.status), fields=[
             _field("Ажилтан", employee.name if employee else None),
             _field("Төрөл", type_label),
-            _field("Хугацаа", period),
+            _field("Хугацаа", _report_period_label(report)),
             _field("Илгээсэн", _fmt_dt(report.submitted_at, ctx.tz)),
             _field("Хянасан", _fmt_dt(report.reviewed_at, ctx.tz)),
         ], excerpt=_excerpt(await _report_text(db, report), 420), target_url=target_url(kind, str(report.id)))

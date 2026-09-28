@@ -73,11 +73,14 @@ export function TimePeriodFilter({ preset, period, onChange }: { preset: PeriodP
 
   return <>
     <div className="period-filter period-filter-desktop" aria-label="Хугацааны шүүлтүүр">
-      <CalendarRange size={16} aria-hidden />
+      <CalendarRange size={15} aria-hidden />
       <div className="period-presets">{OPTIONS.map((option) => <button type="button" key={option.key} className={preset === option.key ? 'active' : ''} onClick={() => onChange(option.key, periodFromPreset(option.key))}>{option.label}</button>)}</div>
-      <label><span className="sr-only">Эхлэх огноо</span><input type="date" value={period.date_from} onChange={(event) => onChange('custom', { ...period, date_from: event.target.value })} /></label>
-      <span>–</span>
-      <label><span className="sr-only">Дуусах огноо</span><input type="date" value={period.date_to} onChange={(event) => onChange('custom', { ...period, date_to: event.target.value })} /></label>
+      <span className="period-filter-divider" aria-hidden />
+      <div className="period-filter-dates">
+        <label><span className="sr-only">Эхлэх огноо</span><input type="date" value={period.date_from} onChange={(event) => onChange('custom', { ...period, date_from: event.target.value })} /></label>
+        <span aria-hidden>–</span>
+        <label><span className="sr-only">Дуусах огноо</span><input type="date" value={period.date_to} onChange={(event) => onChange('custom', { ...period, date_to: event.target.value })} /></label>
+      </div>
     </div>
     <button ref={triggerRef} type="button" className="period-filter-mobile-trigger" onClick={() => setMobileOpen(true)} aria-haspopup="dialog" aria-expanded={mobileOpen}>
       <CalendarRange size={17} aria-hidden />

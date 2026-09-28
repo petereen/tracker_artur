@@ -24,7 +24,11 @@ const PRESETS: Array<{ key: InsightPeriodPreset; label: string }> = [
 ]
 const REPORT_TYPES: Array<{ key: ReportType; label: string }> = [
   { key: 'daily', label: 'Өдрийн' },
+  { key: 'weekly', label: '7 хоногийн' },
   { key: 'monthly', label: 'Сарын' },
+  { key: 'quarterly', label: 'Улирлын' },
+  { key: 'yearly', label: 'Жилийн' },
+  { key: 'custom', label: 'Тусгай' },
   { key: 'next_month_plan', label: 'Дараа сарын төлөвлөгөө' },
 ]
 const PROMPT_CHIPS = [
@@ -84,7 +88,7 @@ export function ReportInsightsPanel({ onClose }: { onClose: () => void }) {
   const [employeeId, setEmployeeId] = useState('')
   const [departmentId, setDepartmentId] = useState('')
   const [groupBy, setGroupBy] = useState<ReportGroupBy>('worker')
-  const [types, setTypes] = useState<ReportType[]>(['daily', 'monthly', 'next_month_plan'])
+  const [types, setTypes] = useState<ReportType[]>(REPORT_TYPES.map((item) => item.key))
   const [approvedOnly, setApprovedOnly] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [summary, setSummary] = useState<ReportSummaryResult>()

@@ -3175,16 +3175,18 @@ body:has(.drag-overlay) {
   border: 1px solid var(--color-border);
   border-radius: 10px;
   display: flex;
-  gap: 6px;
-  min-height: 38px;
-  padding: 3px 7px;
+  gap: 2px;
+  min-height: 36px;
+  padding: 3px;
 }
 .period-filter > svg {
   color: var(--color-muted);
+  flex: 0 0 auto;
+  margin: 0 4px 0 5px;
 }
 .period-presets {
   display: flex;
-  gap: 2px;
+  gap: 1px;
 }
 .period-presets button {
   background: transparent;
@@ -3192,23 +3194,51 @@ body:has(.drag-overlay) {
   border-radius: 7px;
   color: var(--color-muted);
   font-size: 0.68rem;
-  min-height: 28px;
-  padding: 0 7px;
+  font-weight: 600;
+  min-height: 30px;
+  padding: 0 9px;
+  transition: background 0.14s ease, color 0.14s ease;
+  white-space: nowrap;
+}
+.period-presets button:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
 }
 .period-presets button.active {
   background: var(--color-accent-soft);
   color: var(--color-accent);
   font-weight: 700;
 }
+.period-filter-divider {
+  background: var(--color-border);
+  flex: 0 0 auto;
+  height: 18px;
+  margin: 0 4px;
+  width: 1px;
+}
+.period-filter-dates {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+.period-filter-dates > span {
+  color: var(--color-muted);
+  font-size: 0.66rem;
+}
 .period-filter input {
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border-soft);
-  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
   color: var(--color-text);
   font-size: 0.66rem;
-  max-width: 112px;
-  min-height: 28px;
+  max-width: 104px;
+  min-height: 30px;
   padding: 0 5px;
+  transition: background 0.14s ease;
+}
+.period-filter input:hover,
+.period-filter input:focus {
+  background: var(--color-surface-2);
 }
 .dashboard-period {
   align-items: center;
@@ -7468,6 +7498,11 @@ html.capacitor-native .native-boot-error {
 .task-filter-control {
   position: relative;
 }
+.task-filter-control > button.active {
+  background: var(--color-accent-soft);
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  color: var(--color-accent);
+}
 .task-filter-panel {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -11214,6 +11249,13 @@ html.capacitor-native .native-boot-error {
 .report-toolbar .report-summary {
   flex: 0 0 auto;
   gap: 12px;
+}
+.report-toolbar-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-left: auto;
 }
 .project-tools {
   flex-wrap: wrap;
