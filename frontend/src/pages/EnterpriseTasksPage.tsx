@@ -1,16 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  CollisionDetection,
   DndContext,
   DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
+  defaultDropAnimationSideEffects,
+  pointerWithin,
+  rectIntersection,
+  useDndContext,
   useDroppable,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { AnimatePresence, motion } from "motion/react";
 import {
   CalendarDays,
@@ -20,7 +27,6 @@ import {
   Download,
   FileText,
   Filter,
-  GripVertical,
   History,
   LayoutGrid,
   List,
@@ -128,35 +134,23 @@ function TaskCreatorAvatar({ task, large = false }: { task: EnterpriseTask; larg
 const statusLabel = (status: WorkflowStatus) =>
   COLUMNS.find((column) => column.key === status)?.label || status;
 
-function TaskCard({
-  task,
-  onOpen,
-  draggable = false,
-  subtasks = [],
-  onToggleSubtask,
-  subtaskUpdating = false,
-}: {
+type TaskCardProps = {
   task: EnterpriseTask;
   onOpen: (task?: EnterpriseTask) => void;
-  draggable?: boolean;
   subtasks?: EnterpriseTask[];
   onToggleSubtask?: (subtask: EnterpriseTask) => void;
   subtaskUpdating?: boolean;
-}) {
-  const sortable = useSortable({
-    id: task.id,
-    data: { status: task.workflow_status },
-    disabled: !draggable,
-  });
+};
+
+function TaskCardContent({
+  task,
+  onOpen,
+  subtasks = [],
+  onToggleSubtask,
+  subtaskUpdating = false,
+}: TaskCardProps) {
   return (
-    <div
-      ref={sortable.setNodeRef}
-      style={{
-        transform: CSS.Transform.toString(sortable.transform),
-        transition: sortable.transition,
-      }}
-      className={`kanban-card task-card-clear ${task.parent_task_id ? "subtask-card" : ""} ${sortable.isDragging ? "dragging" : ""}`}
-    >
+    <>
       <button className="task-card-body" onClick={() => onOpen()}>
         <div className="task-priority" data-priority={task.priority} />
         {task.parent_task_id && (
@@ -214,19 +208,61 @@ function TaskCard({
           ))}
         </div>
       )}
-      {draggable && (
-        <button
-          className="drag-handle"
-          aria-label={`${task.title} зөөх`}
-          {...sortable.attributes}
-          {...sortable.listeners}
-        >
-          <GripVertical size={15} />
-        </button>
-      )}
+    </>
+  );
+}
+
+function TaskCard({
+  draggable = false,
+  ...props
+}: TaskCardProps & { draggable?: boolean }) {
+  const { task } = props;
+  const sortable = useSortable({
+    id: task.id,
+    data: { status: task.workflow_status },
+    disabled: !draggable,
+  });
+  // The whole card is the drag source; the moving copy is rendered by
+  // <DragOverlay> in a portal, so the card itself stays in place as a
+  // placeholder instead of being transformed inside the column.
+  const setRef = (node: HTMLDivElement | null) => {
+    sortable.setNodeRef(node);
+    // Keyboard drags start only from the card itself, not its inner buttons.
+    sortable.setActivatorNodeRef(node);
+  };
+  return (
+    <div
+      ref={setRef}
+      className={`kanban-card task-card-clear ${task.parent_task_id ? "subtask-card" : ""} ${draggable ? "is-draggable" : ""} ${sortable.isDragging ? "dragging" : ""} ${sortable.isOver && !sortable.isDragging ? "drop-target" : ""}`}
+      {...(draggable ? sortable.attributes : {})}
+      {...(draggable ? sortable.listeners : {})}
+      aria-roledescription={draggable ? "зөөх боломжтой даалгавар" : undefined}
+      aria-label={draggable ? `${task.title} зөөх` : undefined}
+    >
+      <TaskCardContent {...props} />
     </div>
   );
 }
+
+// Prefer the card under the pointer (keeps drop position), then the column,
+// and fall back to rect intersection for keyboard drags.
+const kanbanCollision: CollisionDetection = (args) => {
+  const hits = pointerWithin(args);
+  if (hits.length) {
+    const card = hits.find((hit) => !String(hit.id).startsWith("column:"));
+    return card ? [card] : hits;
+  }
+  return rectIntersection(args);
+};
+
+const kanbanDropAnimation = {
+  duration: 220,
+  easing: "cubic-bezier(0.2, 0.9, 0.3, 1.1)",
+  sideEffects: defaultDropAnimationSideEffects({
+    styles: { active: { opacity: "0.35" } },
+  }),
+};
+
 function Column({
   status,
   children,
@@ -234,11 +270,16 @@ function Column({
   status: WorkflowStatus;
   children: React.ReactNode;
 }) {
-  const drop = useDroppable({ id: `column:${status}` });
+  const drop = useDroppable({ id: `column:${status}`, data: { status } });
+  const { active, over } = useDndContext();
+  const isTarget =
+    !!active &&
+    over?.data.current?.status === status &&
+    active.data.current?.status !== status;
   return (
     <div
       ref={drop.setNodeRef}
-      className={`kanban-dropzone ${drop.isOver ? "over" : ""}`}
+      className={`kanban-dropzone ${isTarget ? "over" : ""} ${active ? "drag-active" : ""}`}
     >
       {children}
     </div>
@@ -505,6 +546,7 @@ export function EnterpriseTasksPage() {
     task: EnterpriseTask;
     newVersion: number;
   } | null>(null);
+  const [activeDragId, setActiveDragId] = useState<number | null>(null);
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES);
   const employeeId = useAuthStore((state) => state.actor?.employee_id);
   const canReview = roles.some((role) =>
@@ -524,6 +566,10 @@ export function EnterpriseTasksPage() {
   const createTask = useCreateEnterpriseTask();
   const updateTask = useUpdateEnterpriseTask();
   const deleteTask = useDeleteEnterpriseTask();
+  const activeDragTask =
+    activeDragId == null
+      ? null
+      : tasks.data?.find((item) => item.id === activeDragId) ?? null;
   const grouped = useMemo(
     () =>
       Object.fromEntries(
@@ -547,7 +593,11 @@ export function EnterpriseTasksPage() {
     return result;
   }, [period]);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    // Long-press on touch so swiping over cards still scrolls the board.
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 220, tolerance: 8 },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
@@ -674,7 +724,11 @@ export function EnterpriseTasksPage() {
       /* hook reports */
     }
   };
+  const onDragStart = (event: DragStartEvent) => {
+    setActiveDragId(Number(event.active.id));
+  };
   const onDragEnd = (event: DragEndEvent) => {
+    setActiveDragId(null);
     const task = tasks.data?.find(
       (item) => item.id === Number(event.active.id),
     );
@@ -1123,7 +1177,13 @@ export function EnterpriseTasksPage() {
         }
       >
         {view === "board" && (
-          <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={kanbanCollision}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onDragCancel={() => setActiveDragId(null)}
+          >
             <div className="kanban-board">
               {COLUMNS.map((column) => {
                 const isAssignedReviewer = (task: EnterpriseTask) =>
@@ -1190,6 +1250,20 @@ export function EnterpriseTasksPage() {
                 );
               })}
             </div>
+            {createPortal(
+              <DragOverlay dropAnimation={kanbanDropAnimation}>
+                {activeDragTask ? (
+                  <div className={`kanban-card task-card-clear drag-overlay ${activeDragTask.parent_task_id ? "subtask-card" : ""}`}>
+                    <TaskCardContent
+                      task={activeDragTask}
+                      onOpen={() => undefined}
+                      subtasks={(tasks.data ?? []).filter((item) => item.parent_task_id === activeDragTask.id)}
+                    />
+                  </div>
+                ) : null}
+              </DragOverlay>,
+              document.body,
+            )}
           </DndContext>
         )}
         {view === "list" && (
