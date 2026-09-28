@@ -146,6 +146,7 @@ async def work_performance(
         select(func.count()).where(
             WorkReport.report_type == "monthly",
             WorkReport.status == "approved",
+            WorkReport.department_id.is_(None),
             *([WorkReport.period_date >= since] if since else []),
             *([WorkReport.period_date <= until] if until else []),
         )

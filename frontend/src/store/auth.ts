@@ -5,7 +5,11 @@ export interface Actor {
   email: string
   employee_id: number | null
   locale: string
+  /** Roles effective for the current workspace mode (narrowed in the personal view). */
   roles: string[]
+  /** Roles actually granted to the account, independent of the workspace mode. */
+  account_roles?: string[] | null
+  workspace_mode?: 'member' | 'manager' | null
   name?: string | null
   avatar_url?: string | null
 }

@@ -1,8 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Callable
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,15 @@ class ActorContext:
     permissions: frozenset[str] = frozenset()
     detected_language: str = "mn"
     channel: str = "web"
+    # Roles actually granted to the account. ``roles`` is narrowed to a
+    # personal member scope while a manager works in "member" workspace mode;
+    # this keeps the real grants for endpoints that manage the mode itself.
+    account_roles: frozenset[str] | None = None
+    workspace_mode: str = "manager"
+
+    @property
+    def granted_roles(self) -> frozenset[str]:
+        return self.account_roles if self.account_roles is not None else self.roles
 
     def has_any_role(self, *roles: str) -> bool:
         return bool(self.roles.intersection(roles))
@@ -168,11 +177,49 @@ async def file_search_principal_from_telegram_id(telegram_id: str, db: AsyncSess
     )
 
 
-async def get_actor(
+WORKSPACE_MODE_HEADER = "X-Workspace-Mode"
+# Roles that may switch between the company-wide manager view and the
+# personal member view. HR alone has no toggle and keeps its grants.
+WORKSPACE_MODE_ROLES = frozenset({"admin", "manager", "team_lead"})
+# Everything that widens data scope beyond the actor's own records.
+SCOPE_WIDENING_ROLES = frozenset({"admin", "manager", "team_lead", "hr", "client_auditor"})
+
+
+def apply_workspace_mode(actor: ActorContext, mode: str | None) -> ActorContext:
+    """Narrow a management actor to a personal scope in member workspace mode.
+
+    The mode can only remove privileges: every existing role check keeps
+    working, and in member mode a manager sees exactly what a regular worker
+    sees (own reports, tasks, calendar, statistics). Unknown values keep the
+    full manager scope.
+    """
+    requested = mode.strip().lower() if isinstance(mode, str) else ""
+    if requested != "member" or not actor.roles.intersection(WORKSPACE_MODE_ROLES):
+        return actor
+    roles = frozenset((actor.roles - SCOPE_WIDENING_ROLES) | {"member"})
+    return replace(
+        actor,
+        roles=roles,
+        permissions=permissions_for_roles(roles),
+        account_roles=actor.roles,
+        workspace_mode="member",
+    )
+
+
+async def get_account_actor(
     credentials: HTTPAuthorizationCredentials = Depends(bearer),
     db: AsyncSession = Depends(get_db),
 ) -> ActorContext:
+    """Actor with every granted role, ignoring the workspace mode."""
     return await actor_from_token(credentials.credentials, db)
+
+
+async def get_actor(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer),
+    db: AsyncSession = Depends(get_db),
+    workspace_mode: str | None = Header(default=None, alias=WORKSPACE_MODE_HEADER),
+) -> ActorContext:
+    return apply_workspace_mode(await actor_from_token(credentials.credentials, db), workspace_mode)
 
 
 def require_roles(*allowed: str) -> Callable:

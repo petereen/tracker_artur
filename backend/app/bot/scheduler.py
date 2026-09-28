@@ -93,10 +93,12 @@ def _rebuild_jobs_unlocked():
             hour=ed.hour, minute=ed.minute, timezone=tz,
             id=f"task_evening_{emp.id}", replace_existing=True, args=[emp.id])
 
-        # Monthly reports apply to every active employee. Employees without a
+        # Periodic (weekly/monthly/quarterly/yearly/custom) and department
+        # reports follow the admin report policy; the job checks each day
+        # whether a period's reminder window is open. Employees without a
         # legacy Schedule row use the same default start-of-day time.
         morning: time = sch.morning_time if sch and sch.morning_time else time(9, 15)
-        scheduler.add_job(send_monthly_report_prompt, "cron",
+        scheduler.add_job(send_periodic_report_prompts, "cron",
             hour=morning.hour, minute=morning.minute, timezone=tz,
             id=f"monthly_report_{emp.id}", replace_existing=True, args=[emp.id])
 
@@ -268,7 +270,12 @@ async def send_survey(employee_id: int):
         report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
         if not daily_report_reminders_enabled:
             return
+        # The report policy may drop daily reports for this worker; the
+        # check-in questionnaire itself is independent of the policy.
+        daily_reports = work_report_service.daily_reports_enabled(employee_id)
         if not get_questions(employee_id):
+            if not daily_reports:
+                return
             await send_report_prompt(
                 bot, report, telegram_chat_id=telegram_id,
                 prompt_type="daily_report", local_day=local_day,
@@ -281,6 +288,8 @@ async def send_survey(employee_id: int):
             )
             return
         if canonical_checkin_complete(employee_id, local_day):
+            if not daily_reports:
+                return
             await send_report_prompt(
                 bot, report, telegram_chat_id=telegram_id,
                 prompt_type="daily_report", local_day=local_day,
@@ -341,7 +350,10 @@ async def send_reminder(employee_id: int, num: int):
         if not daily_report_reminders_enabled:
             return
         checkin_complete = canonical_checkin_complete(employee_id, local_day) or sess is None
-        report_complete = not work_report_service.report_needs_submission(employee_id, "daily", local_day)
+        report_complete = (
+            not work_report_service.daily_reports_enabled(employee_id)
+            or not work_report_service.report_needs_submission(employee_id, "daily", local_day)
+        )
         missing = []
         if not checkin_complete:
             missing.append("чек-ин (/today)")
@@ -466,42 +478,94 @@ def _local_today(timezone_name: str | None):
     return datetime.now(zone).date()
 
 
-async def send_monthly_report_prompt(employee_id: int):
-    """Prompt on each of a month's last three local calendar days until approved."""
+def due_report_periods(scope: dict, local_day: date) -> list[tuple[object, int | None]]:
+    """Report periods whose reminder window is open today.
+
+    Returns ``(period, department_id)`` pairs: personal periods from the
+    worker's frequencies (daily stays with the evening check-in flow) and
+    department periods for departments the worker heads.
+    """
+    from app.services.report_policy import period_for_frequency, reminder_window_open
+
+    policy = scope["policy"]
+    due: list[tuple[object, int | None]] = []
+    candidates = [(frequency, None) for frequency in scope["frequencies"] if frequency != "daily"]
+    for department_id, frequencies in scope["led_departments"].items():
+        candidates.extend((frequency, department_id) for frequency in frequencies)
+    for frequency, department_id in candidates:
+        period = period_for_frequency(policy, frequency, local_day)
+        if period and reminder_window_open(period, local_day, policy["reminder_days"]):
+            due.append((period, department_id))
+    return due
+
+
+async def send_periodic_report_prompts(employee_id: int):
+    """Prompt for every enabled report period in its end-of-period window.
+
+    Each prompt is sent at most once per report and day (``reserve_prompt``)
+    and stops as soon as the report is submitted or approved.
+    """
     from app.bot.db import get_session
     from app.bot.work_report_handlers import send_report_prompt
-    from app.models.models import Employee
+    from app.models.models import Department, Employee
     from app.services import work_report_service
+    from app.services.user_notifications import mirror_existing_telegram_notification
 
-    bot = _make_bot()
+    with get_session() as s:
+        emp = s.get(Employee, employee_id)
+        if not emp or not emp.is_active:
+            return
+        telegram_id = emp.telegram_id
+        timezone_name = emp.timezone
+    local_day = _local_today(timezone_name)
+    scope = work_report_service.employee_report_scope(employee_id)
+    due = due_report_periods(scope, local_day)
+    if not due:
+        return
+    bot = _make_bot() if telegram_id else None
     try:
-        with get_session() as s:
-            emp = s.get(Employee, employee_id)
-            if not emp or not emp.is_active:
-                return
-            telegram_id = emp.telegram_id
-            timezone_name = emp.timezone
-        local_day = _local_today(timezone_name)
-        if not work_report_service.is_last_three_days(local_day):
-            return
-        if work_report_service.report_is_approved(employee_id, "monthly", local_day):
-            return
-        report = work_report_service.get_or_create_report(employee_id, "monthly", local_day)
-        await send_report_prompt(
-            bot,
-            report,
-            telegram_chat_id=telegram_id,
-            prompt_type="monthly_report",
-            local_day=local_day,
-        )
-        from app.services.user_notifications import mirror_existing_telegram_notification
-        mirror_existing_telegram_notification(
-            employee_id=employee_id, kind="monthly_report", title="Сарын тайлан",
-            body="Энэ сарын тайлангаа илгээнэ үү.", target_url="/reports",
-            dedup_key=f"monthly-report:{employee_id}:{local_day.strftime('%Y-%m')}",
-        )
+        for period, department_id in due:
+            if not work_report_service.period_report_needs_submission(employee_id, period, department_id=department_id):
+                continue
+            if period.report_type == "monthly" and department_id is None:
+                report = work_report_service.get_or_create_report(employee_id, "monthly", local_day)
+                prompt_type = "monthly_report"
+            else:
+                report = work_report_service.get_or_create_period_report(employee_id, period, department_id=department_id)
+                prompt_type = "periodic_report"
+            department_name = None
+            if department_id is not None:
+                with get_session() as s:
+                    department = s.get(Department, department_id)
+                    department_name = department.name if department else None
+            telegram_status = "unavailable"
+            if bot is not None:
+                try:
+                    await send_report_prompt(bot, report, telegram_chat_id=telegram_id, prompt_type=prompt_type, local_day=local_day)
+                    telegram_status = "sent"
+                except Exception:  # noqa: BLE001 - one failed prompt must not block the others
+                    telegram_status = "failed"
+                    log.exception("Periodic report prompt failed employee=%s report=%s", employee_id, report.id)
+            title = f"{department_name} · {period.label}" if department_name else period.label
+            mirror_existing_telegram_notification(
+                employee_id=employee_id,
+                kind="monthly_report" if prompt_type == "monthly_report" else "periodic_report",
+                title=title,
+                body=f"{period.start.isoformat()} – {period.end.isoformat()} хугацааны тайлангаа илгээнэ үү.",
+                target_url=f"/reports?report={report.id}",
+                dedup_key=(
+                    f"monthly-report:{employee_id}:{local_day.strftime('%Y-%m')}" if prompt_type == "monthly_report"
+                    else f"periodic-report:{report.id}:{local_day.isoformat()}"
+                ),
+                telegram_status=telegram_status,
+            )
     finally:
-        await bot.session.close()
+        if bot is not None:
+            await bot.session.close()
+
+
+# Persisted APScheduler jobs created before the report policy reference this name.
+send_monthly_report_prompt = send_periodic_report_prompts
 
 
 def _birthday_occurs_on_day(birthday: date, local_day: date) -> bool:

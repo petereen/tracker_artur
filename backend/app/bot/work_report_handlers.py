@@ -83,7 +83,27 @@ def _prompt_text(report_type: str, prompt_type: str | None = None) -> str:
         )
     if report_type in {"monthly", "monthly_test"}:
         return f"{test_prefix}📅 <b>Сарын тайлан</b>\n\nСарын тайлангаа энэ мессежид <b>Reply</b> хийж бичнэ үү."
+    if report_type in PERIODIC_LABELS:
+        return f"📅 <b>{PERIODIC_LABELS[report_type]}</b>\n\nТайлангаа энэ мессежид <b>Reply</b> хийж бичнэ үү."
     return f"{test_prefix}📌 <b>Дараа сарын төлөвлөгөө</b>\n\nДараа сарын төлөвлөгөөнд тусгах зүйл байна уу? Энэ мессежид <b>Reply</b> хийж бичнэ үү."
+
+
+PERIODIC_LABELS = {
+    "weekly": "7 хоногийн тайлан",
+    "quarterly": "Улирлын тайлан",
+    "yearly": "Жилийн тайлан",
+    "custom": "Тусгай хугацааны тайлан",
+}
+
+
+def _report_prompt_text(report: WorkReport, prompt_type: str | None = None) -> str:
+    text = _prompt_text(report.report_type, prompt_type)
+    period_end = getattr(report, "period_end", None)
+    if getattr(report, "department_id", None):
+        text = text.replace("</b>", " (хэлтсийн)</b>", 1)
+    if period_end and report.report_type in PERIODIC_LABELS:
+        text += f"\n\n🗓 Хугацаа: {report.period_date.isoformat()} – {period_end.isoformat()}"
+    return text
 
 
 async def send_report_prompt(
@@ -109,7 +129,7 @@ async def send_report_prompt(
             markup = checkin_keyboard(report.report_type == "daily_test")
         sent = await bot.send_message(
             telegram_chat_id,
-            _prompt_text(report.report_type, prompt_type),
+            _report_prompt_text(report, prompt_type),
             parse_mode="HTML",
             reply_markup=markup,
         )
@@ -172,7 +192,8 @@ def _draft_text(report: WorkReport, text: str) -> str:
     label = {
         "daily": "Өдрийн тайлан", "monthly": "Сарын тайлан", "next_month_plan": "Дараа сарын төлөвлөгөө",
         "daily_test": "Өдрийн тайлангийн тест", "monthly_test": "Сарын тайлангийн тест", "next_month_plan_test": "Дараа сарын төлөвлөгөөний тест",
-    }[report.report_type]
+        **PERIODIC_LABELS,
+    }.get(report.report_type, "Тайлан")
     return f"📝 <b>{label} — ноорог</b>\n\n{escape(text)}\n\nДоорх товчоор батлах, засах эсвэл устгана уу."
 
 

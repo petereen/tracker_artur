@@ -42,7 +42,9 @@ from app.models.models import (
     CompanyPlanItem,
     CompanyLibraryItem,
     CompanyKnowledge,
+    Department,
     Employee,
+    EmployeeDetails,
     EmployeeQuestion,
     ExchangeRateSnapshot,
     IdempotencyRecord,
@@ -100,6 +102,17 @@ from app.services.google_calendar import (
 from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services.assistant_text import detect_language
 from app.services.attendance_service import sync_worktime_attendance
+from app.services.report_policy import (
+    REPORT_POLICY_KEY,
+    REVIEWED_REPORT_TYPES,
+    department_frequencies,
+    frequency_for,
+    frequency_label,
+    period_for_frequency,
+    report_policy,
+    validate_policy_input,
+    worker_frequencies,
+)
 from app.services.worktime_geofence import WORKTIME_GEOFENCE_KEY, WORKTIME_GEOFENCE_MAX_RADIUS_METERS, WORKTIME_GEOFENCE_MIN_RADIUS_METERS, WORKTIME_GEOFENCE_RADIUS_METERS, WORKTIME_METHODS_KEY, configured_worktime_location, configured_worktime_radius, validate_worktime_location, worktime_methods
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
@@ -308,6 +321,75 @@ async def update_worktime_methods(data: WorktimeMethodsInput, db: AsyncSession =
     await record_change(db, actor=actor, topic="settings", aggregate_type="organization_worktime_methods", aggregate_id=organization.id, operation="updated", before=before, after=after)
     await db.commit()
     return after
+
+
+class CustomReportPeriodInput(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,39}$")
+    label: str = Field(min_length=1, max_length=80)
+    unit: Literal["day", "week", "month"]
+    interval: int = Field(ge=1, le=366)
+    anchor_date: date
+
+
+class DepartmentReportRuleInput(BaseModel):
+    department_id: int
+    # None inherits the company worker frequencies.
+    worker_frequencies: list[str] | None = Field(default=None, max_length=20)
+    department_frequencies: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ReportPolicyInput(BaseModel):
+    worker_frequencies: list[str] = Field(default_factory=list, max_length=20)
+    custom_periods: list[CustomReportPeriodInput] = Field(default_factory=list, max_length=12)
+    departments: list[DepartmentReportRuleInput] = Field(default_factory=list, max_length=200)
+    reminder_days: int = Field(default=3, ge=1, le=14)
+
+
+async def _report_policy_out(db: AsyncSession, organization: Organization) -> dict:
+    policy = report_policy(organization.settings)
+    departments = (await db.execute(
+        select(Department.id, Department.name, Department.manager_employee_id, Employee.name)
+        .outerjoin(Employee, Employee.id == Department.manager_employee_id)
+        .where(Department.organization_id == organization.id, Department.is_active.is_(True))
+        .order_by(Department.name)
+    )).all()
+    return {
+        **policy,
+        "available_frequencies": [
+            {"value": value, "label": frequency_label(policy, value)}
+            for value in ("daily", "weekly", "monthly", "quarterly", "yearly", *(f"custom:{item['id']}" for item in policy["custom_periods"]))
+        ],
+        "department_options": [
+            {"id": row[0], "name": row[1], "manager_employee_id": row[2], "manager_name": row[3]}
+            for row in departments
+        ],
+    }
+
+
+@router.get("/settings/report-policy")
+async def get_report_policy(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    organization = await db.get(Organization, actor.organization_id)
+    return await _report_policy_out(db, organization)
+
+
+@router.put("/settings/report-policy")
+async def update_report_policy(data: ReportPolicyInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin"))):
+    organization = await db.get(Organization, actor.organization_id, with_for_update=True)
+    try:
+        normalized = validate_policy_input(data.model_dump(mode="json"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    known_departments = set((await db.execute(
+        select(Department.id).where(Department.organization_id == organization.id)
+    )).scalars().all())
+    unknown = [rule["department_id"] for rule in normalized["departments"] if rule["department_id"] not in known_departments]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"unknown_department:{unknown[0]}")
+    before = report_policy(organization.settings)
+    organization.settings = {**(organization.settings or {}), REPORT_POLICY_KEY: normalized}
+    await record_change(db, actor=actor, topic="settings", aggregate_type="organization_report_policy", aggregate_id=organization.id, operation="updated", before=before, after=normalized)
+    await db.commit()
+    return await _report_policy_out(db, organization)
 
 
 @router.get("/settings/branding")
@@ -645,8 +727,12 @@ class ReportDraftInput(BaseModel):
 
 
 class ReportCreateInput(BaseModel):
-    report_type: Literal["daily", "monthly"] = "daily"
+    report_type: Literal["daily", "weekly", "monthly", "quarterly", "yearly", "custom"] = "daily"
     period_date: date
+    # Custom period id for report_type="custom".
+    period_key: str | None = Field(default=None, max_length=40)
+    # Set to write the department report of a department the actor heads.
+    department_id: int | None = None
 
 
 class CheckinAnswerInput(BaseModel):
@@ -2648,10 +2734,66 @@ async def create_resource_allocation(data: AllocationInput, db: AsyncSession = D
     return {"id": allocation.id, **data.model_dump()}
 
 
+async def _actor_report_scope(db: AsyncSession, actor: ActorContext) -> dict:
+    """The report policy as it applies to the actor (personal + led departments)."""
+    organization = await db.get(Organization, actor.organization_id)
+    policy = report_policy(organization.settings if organization else None)
+    department_id = None
+    led: dict[int, dict] = {}
+    if actor.employee_id:
+        department_id = await db.scalar(select(EmployeeDetails.department_id).where(EmployeeDetails.employee_id == actor.employee_id).limit(1))
+        rows = (await db.execute(select(Department.id, Department.name).where(
+            Department.organization_id == actor.organization_id,
+            Department.manager_employee_id == actor.employee_id,
+            Department.is_active.is_(True),
+        ))).all()
+        for led_id, name in rows:
+            frequencies = department_frequencies(policy, led_id)
+            if frequencies:
+                led[led_id] = {"name": name, "frequencies": frequencies}
+    return {"policy": policy, "department_id": department_id, "frequencies": worker_frequencies(policy, department_id), "led_departments": led}
+
+
+async def _is_report_author(db: AsyncSession, report: WorkReport, actor: ActorContext) -> bool:
+    """Owners write personal reports; the current head writes department reports."""
+    if not actor.employee_id:
+        return False
+    if report.employee_id == actor.employee_id:
+        return True
+    if report.department_id is None:
+        return False
+    department = await db.get(Department, report.department_id)
+    return bool(department and department.manager_employee_id == actor.employee_id)
+
+
+def _period_out(period) -> dict:
+    return {"start": period.start, "end": period.end}
+
+
+@router.get("/reports/options")
+async def report_options(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Report kinds the actor may create now, following the admin report policy."""
+    scope = await _actor_report_scope(db, actor)
+    policy = scope["policy"]
+    today = date.today()
+    personal = []
+    for frequency in scope["frequencies"]:
+        period = period_for_frequency(policy, frequency, today)
+        if period:
+            personal.append({"frequency": frequency, "report_type": period.report_type, "period_key": period.period_key or None, "label": period.label, "department_id": None, "department_name": None, "current_period": _period_out(period)})
+    department = []
+    for department_id, rule in scope["led_departments"].items():
+        for frequency in rule["frequencies"]:
+            period = period_for_frequency(policy, frequency, today)
+            if period:
+                department.append({"frequency": frequency, "report_type": period.report_type, "period_key": period.period_key or None, "label": period.label, "department_id": department_id, "department_name": rule["name"], "current_period": _period_out(period)})
+    return {"personal": personal, "department": department, "reminder_days": policy["reminder_days"]}
+
+
 @router.post("/reports/{report_id}/submit")
 async def submit_report(report_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     report = await db.get(WorkReport, report_id, with_for_update=True)
-    if not report or report.employee_id != actor.employee_id:
+    if not report or not await _is_report_author(db, report, actor):
         raise HTTPException(status_code=404, detail="Report not found")
     if report.status not in {"awaiting", "draft", "editing", "revision_requested"}:
         raise HTTPException(status_code=409, detail="Report cannot be submitted from its current state")
@@ -2675,34 +2817,50 @@ async def submit_report(report_id: int, db: AsyncSession = Depends(get_db), acto
 async def create_report(data: ReportCreateInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if not actor.employee_id:
         raise HTTPException(status_code=409, detail="Account is not linked to an employee")
-    period_date = data.period_date if data.report_type == "daily" else data.period_date.replace(day=1)
-    report = (await db.execute(select(WorkReport).where(
-        WorkReport.employee_id == actor.employee_id,
-        WorkReport.report_type == data.report_type,
-        WorkReport.period_date == period_date,
-    ))).scalar_one_or_none()
+    scope = await _actor_report_scope(db, actor)
+    policy = scope["policy"]
+    frequency = frequency_for(data.report_type, data.period_key)
+    if data.department_id is not None:
+        rule = scope["led_departments"].get(data.department_id)
+        if not rule or frequency not in rule["frequencies"]:
+            raise HTTPException(status_code=403, detail="report_frequency_not_enabled")
+    elif frequency not in scope["frequencies"]:
+        raise HTTPException(status_code=403, detail="report_frequency_not_enabled")
+    period = period_for_frequency(policy, frequency, data.period_date)
+    if period is None:
+        raise HTTPException(status_code=422, detail="unknown_report_period")
+    period_end = None if period.report_type == "daily" else period.end
+    if data.department_id is None:
+        clause = (
+            WorkReport.employee_id == actor.employee_id,
+            WorkReport.department_id.is_(None),
+        )
+    else:
+        clause = (WorkReport.department_id == data.department_id,)
+    clause = (*clause, WorkReport.report_type == period.report_type, WorkReport.period_key == period.period_key, WorkReport.period_date == period.start)
+    report = (await db.execute(select(WorkReport).where(*clause))).scalar_one_or_none()
     if report is None:
-        report = WorkReport(employee_id=actor.employee_id, report_type=data.report_type, period_date=period_date, status="awaiting")
+        report = WorkReport(
+            employee_id=actor.employee_id, report_type=period.report_type, period_key=period.period_key,
+            period_date=period.start, period_end=period_end, department_id=data.department_id,
+            status="awaiting", title="",
+        )
         db.add(report)
         try:
             await db.flush()
         except IntegrityError:
             await db.rollback()
-            report = (await db.execute(select(WorkReport).where(
-                WorkReport.employee_id == actor.employee_id,
-                WorkReport.report_type == data.report_type,
-                WorkReport.period_date == period_date,
-            ))).scalar_one()
+            report = (await db.execute(select(WorkReport).where(*clause))).scalar_one()
         else:
-            await record_change(db, actor=actor, topic="reports", aggregate_type="work_report", aggregate_id=report.id, operation="created", after={"report_type": report.report_type, "period_date": str(report.period_date), "status": report.status})
+            await record_change(db, actor=actor, topic="reports", aggregate_type="work_report", aggregate_id=report.id, operation="created", after={"report_type": report.report_type, "period_key": report.period_key, "period_date": str(report.period_date), "department_id": report.department_id, "status": report.status})
             await db.commit()
-    return {"id": report.id, "employee_id": report.employee_id, "report_type": report.report_type, "period_date": report.period_date, "status": report.status, "title": report.title, "version": report.version}
+    return {"id": report.id, "employee_id": report.employee_id, "report_type": report.report_type, "period_key": report.period_key or None, "period_date": report.period_date, "period_end": report.period_end, "department_id": report.department_id, "status": report.status, "title": report.title, "version": report.version}
 
 
 @router.get("/reports/{report_id}")
 async def report_detail(report_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     report = await db.get(WorkReport, report_id)
-    if not report or (not actor.has_any_role(*MANAGEMENT_ROLES) and report.employee_id != actor.employee_id):
+    if not report or (not actor.has_any_role(*MANAGEMENT_ROLES) and not await _is_report_author(db, report, actor)):
         raise HTTPException(status_code=404, detail="Report not found")
     revisions = (await db.execute(select(WorkReportRevision).where(WorkReportRevision.report_id == report_id).order_by(WorkReportRevision.created_at.desc()))).scalars().all()
     comments = (await db.execute(select(ReportComment).where(ReportComment.report_id == report_id).order_by(ReportComment.created_at))).scalars().all()
@@ -2712,7 +2870,7 @@ async def report_detail(report_id: int, db: AsyncSession = Depends(get_db), acto
 @router.put("/reports/{report_id}/draft")
 async def save_report_draft(report_id: int, data: ReportDraftInput, if_match: str | None = Header(default=None, alias="If-Match"), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     report = await db.get(WorkReport, report_id, with_for_update=True)
-    if not report or report.employee_id != actor.employee_id:
+    if not report or not await _is_report_author(db, report, actor):
         raise HTTPException(status_code=404, detail="Report not found")
     if report.status == "approved":
         raise HTTPException(status_code=409, detail="Approved reports are immutable")
@@ -2742,19 +2900,44 @@ async def list_enterprise_reports(
     db: AsyncSession = Depends(get_db),
     actor: ActorContext = Depends(get_actor),
 ):
-    query = select(WorkReport, Employee.name).join(Employee, Employee.id == WorkReport.employee_id)
+    query = (
+        select(WorkReport, Employee.name, Department.name)
+        .join(Employee, Employee.id == WorkReport.employee_id)
+        .outerjoin(Department, Department.id == WorkReport.department_id)
+    )
+    scope = await _actor_report_scope(db, actor)
+    policy = scope["policy"]
     if not actor.has_any_role(*MANAGEMENT_ROLES):
         if not actor.employee_id:
             return []
-        query = query.where(WorkReport.employee_id == actor.employee_id)
+        query = query.where(or_(
+            WorkReport.employee_id == actor.employee_id,
+            WorkReport.department_id.in_(list(scope["led_departments"]) or [-1]),
+        ))
+        # Workers see only the report kinds the policy asks of them. Reports
+        # they already started stay visible after a policy change.
+        enabled = scope["frequencies"]
+        standard = [value for value in enabled if not value.startswith("custom:")]
+        custom_keys = [value.split(":", 1)[1] for value in enabled if value.startswith("custom:")]
+        if "monthly" in standard:
+            standard.append("next_month_plan")
+        query = query.where(or_(
+            WorkReport.status != "awaiting",
+            WorkReport.department_id.is_not(None),
+            and_(WorkReport.report_type != "custom", WorkReport.report_type.in_(standard or ["-"])),
+            and_(WorkReport.report_type == "custom", WorkReport.period_key.in_(custom_keys or ["-"])),
+        ))
     if report_status:
         query = query.where(WorkReport.status == report_status)
     if date_from:
-        # Monthly reports are stored on the first day of their month. Expand
-        # the lower bound to that month so a report written near month-end is
-        # still visible in the rolling report view.
+        # Legacy monthly reports are stored on the first day of their month
+        # without a period end; expand the lower bound to that month. Other
+        # periods match when they overlap the requested range.
         monthly_period_from = date_from.replace(day=1)
-        query = query.where(or_(WorkReport.report_type != "monthly", WorkReport.period_date >= monthly_period_from))
+        query = query.where(or_(
+            and_(WorkReport.report_type == "monthly", WorkReport.period_date >= monthly_period_from),
+            and_(WorkReport.report_type != "monthly", func.coalesce(WorkReport.period_end, WorkReport.period_date) >= date_from),
+        ))
     if date_to:
         query = query.where(WorkReport.period_date <= date_to)
     rows = (await db.execute(query.order_by(WorkReport.period_date.desc(), WorkReport.id.desc()).limit(500))).all()
@@ -2762,10 +2945,14 @@ async def list_enterprise_reports(
         {
             "id": report.id, "employee_id": report.employee_id, "employee_name": employee_name,
             "report_type": report.report_type, "period_date": report.period_date,
+            "period_end": report.period_end, "period_key": report.period_key or None,
+            "frequency": frequency_for(report.report_type, report.period_key),
+            "frequency_label": frequency_label(policy, frequency_for(report.report_type, report.period_key)),
+            "department_id": report.department_id, "department_name": department_name,
             "status": report.status, "title": report.title, "submitted_at": report.submitted_at,
             "reviewed_at": report.reviewed_at, "version": report.version, "updated_at": report.updated_at,
         }
-        for report, employee_name in rows
+        for report, employee_name, department_name in rows
     ]
 
 
@@ -2773,8 +2960,8 @@ async def _review_report(report_id: int, target_status: str, operation: str, db:
     report = await db.get(WorkReport, report_id, with_for_update=True)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-    if report.report_type != "monthly":
-        raise HTTPException(status_code=409, detail="Only monthly reports require approval")
+    if report.report_type not in REVIEWED_REPORT_TYPES:
+        raise HTTPException(status_code=409, detail="Only periodic reports require approval")
     if report.status != "submitted":
         raise HTTPException(status_code=409, detail="Only submitted reports can be reviewed")
     report.status = target_status
@@ -2824,7 +3011,7 @@ async def batch_approve_reports(data: ReportBatchInput, db: AsyncSession = Depen
 @router.post("/reports/{report_id}/comments", status_code=status.HTTP_201_CREATED)
 async def add_report_comment(report_id: int, data: ReportCommentInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     report = await db.get(WorkReport, report_id)
-    if not report or (not actor.has_any_role(*MANAGEMENT_ROLES) and report.employee_id != actor.employee_id):
+    if not report or (not actor.has_any_role(*MANAGEMENT_ROLES) and not await _is_report_author(db, report, actor)):
         raise HTTPException(status_code=404, detail="Report not found")
     comment = ReportComment(report_id=report_id, author_account_id=actor.account_id, **data.model_dump())
     db.add(comment)
@@ -2837,7 +3024,7 @@ async def add_report_comment(report_id: int, data: ReportCommentInput, db: Async
 @router.patch("/reports/{report_id}/comments/{comment_id}")
 async def resolve_report_comment(report_id: int, comment_id: int, is_resolved: bool, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     report = await db.get(WorkReport, report_id)
-    if not report or (not actor.has_any_role(*MANAGEMENT_ROLES) and report.employee_id != actor.employee_id):
+    if not report or (not actor.has_any_role(*MANAGEMENT_ROLES) and not await _is_report_author(db, report, actor)):
         raise HTTPException(status_code=404, detail="Report not found")
     comment = await db.get(ReportComment, comment_id)
     if not comment or comment.report_id != report_id:
@@ -2857,8 +3044,8 @@ async def reopen_report(
     report = await db.get(WorkReport, report_id, with_for_update=True)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-    if report.report_type != "monthly":
-        raise HTTPException(status_code=409, detail="Only monthly reports can be reopened")
+    if report.report_type not in REVIEWED_REPORT_TYPES:
+        raise HTTPException(status_code=409, detail="Only periodic reports can be reopened")
     if report.status not in {"submitted", "approved"}:
         raise HTTPException(status_code=409, detail="Only sent reports can be reopened")
     before = {"status": report.status, "version": report.version}

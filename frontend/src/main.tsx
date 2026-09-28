@@ -13,6 +13,7 @@ import { NativeBootBoundary } from './platform/updater'
 import { installNativeTelegramAuth } from './platform/telegram-auth'
 import { startTelemetry } from './platform/telemetry'
 import './index.css'
+import './workspace-features.css'
 import './i18n'
 
 initializeRuntimeClass()

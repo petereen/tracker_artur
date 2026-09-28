@@ -29,6 +29,12 @@ DEFAULT_OUTPUT_TOKENS = 2_000
 CACHE_TTL_SECONDS = 60.0
 
 KeySource = Literal["organization", "environment", "none"]
+# Live voice calls with OYUNS use the OpenAI Realtime API. "gpt-realtime" is
+# OpenAI's alias for its latest generally available realtime model; admins
+# can pin another realtime model in platform settings.
+DEFAULT_REALTIME_MODEL = "gpt-realtime"
+DEFAULT_REALTIME_VOICE = "marin"
+REALTIME_VOICES = ("marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse")
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +46,9 @@ class AIRuntime:
     max_output_tokens: int
     web_search_enabled: bool
     source: KeySource
+    realtime_model: str = DEFAULT_REALTIME_MODEL
+    realtime_voice: str = DEFAULT_REALTIME_VOICE
+    realtime_enabled: bool = True
 
     @property
     def models(self) -> list[str]:
@@ -88,7 +97,11 @@ def build_runtime(organization_settings: dict | None) -> AIRuntime:
         source = "environment" if api_key else "none"
     primary, fallback = default_models()
     effort = str(stored.get("reasoning_effort") or "low")
+    voice = str(stored.get("realtime_voice") or DEFAULT_REALTIME_VOICE)
     return AIRuntime(
+        realtime_model=str(stored.get("realtime_model") or "").strip() or DEFAULT_REALTIME_MODEL,
+        realtime_voice=voice if voice in REALTIME_VOICES else DEFAULT_REALTIME_VOICE,
+        realtime_enabled=bool(stored.get("realtime_enabled", True)),
         api_key=api_key,
         primary_model=str(stored.get("primary_model") or "").strip() or primary,
         # An explicitly saved empty fallback disables the second model.

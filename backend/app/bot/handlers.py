@@ -153,7 +153,7 @@ async def _begin_checkin(message_or_cb: Message | CallbackQuery, state: FSMConte
         local_day = datetime.now(ZoneInfo(emp.timezone)).date()
         report_type = "daily_test" if session_type == "daily_test" else "daily"
         report = work_report_service.get_or_create_report(emp.id, report_type, local_day)
-        if daily_report_reminders_enabled or report_type == "daily_test":
+        if report_type == "daily_test" or (daily_report_reminders_enabled and work_report_service.daily_reports_enabled(emp.id)):
             await send_report_prompt(
                 target.bot, report, telegram_chat_id=str(target.chat.id),
                 prompt_type="test_daily_report" if report_type == "daily_test" else "daily_report",
@@ -254,6 +254,8 @@ async def _process_answer(message: Message, state: FSMContext, session_id: int, 
             from app.bot.work_report_handlers import send_report_prompt
             from app.services import work_report_service
 
+            if not work_report_service.daily_reports_enabled(employee_id):
+                return
             report = work_report_service.get_or_create_report(
                 employee_id, "daily", date.today()
             )

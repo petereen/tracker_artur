@@ -15,7 +15,12 @@ export interface AiAgentSettings {
   reasoning_effort: ReasoningEffort
   max_output_tokens: number
   web_search_enabled: boolean
-  defaults: { primary_model: string; fallback_model: string | null; reasoning_effort: ReasoningEffort; max_output_tokens: number }
+  /** Realtime model and voice for live voice calls with OYUNS. */
+  realtime_model?: string
+  realtime_voice?: string
+  realtime_enabled?: boolean
+  realtime_voices?: string[]
+  defaults: { primary_model: string; fallback_model: string | null; reasoning_effort: ReasoningEffort; max_output_tokens: number; realtime_model?: string; realtime_voice?: string }
   limits: { min_output_tokens: number; max_output_tokens: number }
   updated_at: string | null
 }
@@ -28,6 +33,9 @@ export interface AiAgentSettingsInput {
   reasoning_effort?: ReasoningEffort
   max_output_tokens?: number
   web_search_enabled?: boolean
+  realtime_model?: string
+  realtime_voice?: string
+  realtime_enabled?: boolean
 }
 
 export interface AiConnectionTest {
@@ -46,7 +54,7 @@ export function useAiAgentSettings(enabled = true) {
 }
 
 export function useAiModels(enabled = true) {
-  return useQuery<{ models: string[]; error: string | null }>({
+  return useQuery<{ models: string[]; realtime_models?: string[]; error: string | null }>({
     queryKey: [...SETTINGS_KEY, 'models'],
     queryFn: () => api.get('/v1/settings/ai-agent/models').then((response) => response.data),
     enabled,

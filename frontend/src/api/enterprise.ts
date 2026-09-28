@@ -917,12 +917,68 @@ export function useEnterpriseReports(status?: string, period?: DateRange) {
   return useQuery<any[]>({ queryKey: ['v1', 'reports', status, period], queryFn: () => api.get('/v1/reports', { params: { ...(status ? { status } : {}), ...period } }).then((response) => response.data) })
 }
 
+export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom'
+
+export interface ReportCreateInput {
+  report_type: ReportType
+  period_date: string
+  period_key?: string | null
+  department_id?: number | null
+}
+
 export function useCreateReport() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { report_type: 'daily' | 'monthly'; period_date: string }) => api.post('/v1/reports', input).then((response) => response.data),
+    mutationFn: (input: ReportCreateInput) => api.post('/v1/reports', input).then((response) => response.data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'reports'] }); toast.success('Тайлан үүслээ') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Тайлан үүссэнгүй'),
+    onError: (error: any) => toast.error(error.response?.data?.detail === 'report_frequency_not_enabled' ? 'Энэ төрлийн тайлан таньд тохируулагдаагүй байна' : error.response?.data?.detail || 'Тайлан үүссэнгүй'),
+  })
+}
+
+export interface ReportOption {
+  frequency: string
+  report_type: ReportType
+  period_key: string | null
+  label: string
+  department_id: number | null
+  department_name: string | null
+  current_period: { start: string; end: string }
+}
+
+export interface ReportOptions { personal: ReportOption[]; department: ReportOption[]; reminder_days: number }
+
+export function useReportOptions(enabled = true) {
+  return useQuery<ReportOptions>({ queryKey: ['v1', 'reports', 'options'], queryFn: () => api.get('/v1/reports/options').then((response) => response.data), enabled, staleTime: 60_000 })
+}
+
+export interface CustomReportPeriod { id: string; label: string; unit: 'day' | 'week' | 'month'; interval: number; anchor_date: string }
+export interface DepartmentReportRule { department_id: number; worker_frequencies: string[] | null; department_frequencies: string[] }
+export interface ReportPolicy {
+  worker_frequencies: string[]
+  custom_periods: CustomReportPeriod[]
+  departments: DepartmentReportRule[]
+  reminder_days: number
+  available_frequencies: { value: string; label: string }[]
+  department_options: { id: number; name: string; manager_employee_id: number | null; manager_name: string | null }[]
+}
+export type ReportPolicyInput = Pick<ReportPolicy, 'worker_frequencies' | 'custom_periods' | 'departments' | 'reminder_days'>
+
+const reportPolicyKey = ['v1', 'settings', 'report-policy'] as const
+
+export function useReportPolicy(enabled = true) {
+  return useQuery<ReportPolicy>({ queryKey: reportPolicyKey, queryFn: () => api.get('/v1/settings/report-policy').then((response) => response.data), enabled })
+}
+
+export function useUpdateReportPolicy() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: ReportPolicyInput) => api.put('/v1/settings/report-policy', input).then((response) => response.data as ReportPolicy),
+    onSuccess: (data) => {
+      queryClient.setQueryData(reportPolicyKey, data)
+      queryClient.invalidateQueries({ queryKey: ['v1', 'reports'] })
+      toast.success('Тайлангийн тохиргоо хадгалагдлаа')
+    },
+    onError: (error: any) => toast.error(typeof error.response?.data?.detail === 'string' ? `Хадгалагдсангүй: ${error.response.data.detail}` : 'Тайлангийн тохиргоо хадгалагдсангүй'),
   })
 }
 

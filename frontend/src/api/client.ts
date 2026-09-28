@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { clearNativeRefreshToken, getNativeRefreshToken, setNativeRefreshToken } from '../platform/secure-session'
 import { getApiBaseUrl, isNativePlatform } from '../platform/runtime'
 import { useAuthStore } from '../store/auth'
+import { workspaceModeHeader } from '../store/workspaceMode'
 
 const apiBaseUrl = getApiBaseUrl()
 
@@ -73,6 +74,9 @@ export function refreshAccessToken(): Promise<string> {
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token
   if (token) config.headers.Authorization = `Bearer ${token}`
+  // Managers in the personal view get member-scoped data from every endpoint;
+  // the server ignores the header for accounts without a management role.
+  config.headers['X-Workspace-Mode'] = workspaceModeHeader()
   return config
 })
 

@@ -40,6 +40,8 @@ def _reports_for_period(
                 WorkReport.report_type == report_type,
                 WorkReport.period_date == period,
                 WorkReport.status == "approved",
+                # Department reports are not part of the per-worker digest.
+                WorkReport.department_id.is_(None),
             )
             .order_by(Employee.name)
         ).all()
