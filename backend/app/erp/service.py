@@ -102,7 +102,7 @@ DEFAULT_ACCOUNTS = (
     ("5110", "Ажил олгогчийн НДШ-ийн зардал", "payroll_expense"),
 )
 # English names the chart was seeded with before 2026-09-29; bootstrap and
-# migration f7a8b9c0d1e2 rename rows that still carry them.
+# migrations a1c2e3g4i5k6 and f7a8b9c0d1e2 rename rows that still carry them.
 LEGACY_DEFAULT_ACCOUNT_NAMES = {
     "1000": ("Cash",), "1010": ("Payroll bank",), "1100": ("Accounts receivable",), "1200": ("Inventory",),
     "1300": ("Fixed assets",), "1301": ("Work in progress",), "1310": ("Accumulated depreciation",),

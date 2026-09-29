@@ -1,22 +1,18 @@
-"""Chart of accounts clarity, part 2 («Данс код», Dayansoft d047)
+"""Chart of accounts clarity («Данс код», Dayansoft d047)
 
-a1c2e3g4i5k6 added the bank columns and a first data repair. This revision
-finishes it with the final purpose → posting-type map (accumulated
-depreciation, advance clearing and depreciation expense get their own posting
-types so ``default_account`` never picks them for fixed assets, receivables or
-general expenses) and adopts more legacy import types. It only rewrites data
-and is safe to run again.
+Adds bank details to cash/bank accounts and renames seeded accounts that still
+carry their original English names to Mongolian. Accounts an organization has
+already renamed are left untouched.
 
-Renames seeded accounts that still carry their English names (organization
-renames are left untouched) and restores ``account_type`` (what document posting looks accounts up by)
+Also restores ``account_type`` (what document posting looks accounts up by)
 from the account purpose: editing an account used to overwrite it with the
 bare classification, so e.g. an edited «Cash» account stopped being found as
 the cash account for payments. Accounts still on purpose ``general`` whose
 ``account_type`` names a posting role (CSV imports, older API writes) get the
 matching purpose/classification, so purpose is the single source of truth.
 
-Revision ID: f7a8b9c0d1e2
-Revises: a1c2e3g4i5k6
+Revision ID: a1c2e3g4i5k6
+Revises: f6a7b8c9d0e1
 Create Date: 2026-09-29 15:00:00.000000
 
 """
@@ -26,12 +22,12 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "f7a8b9c0d1e2"
-down_revision: Union[str, Sequence[str], None] = "a1c2e3g4i5k6"
+revision: str = "a1c2e3g4i5k6"
+down_revision: Union[str, Sequence[str], None] = "f6a7b8c9d0e1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# code → (new name, names it may still carry from the English seed)
+# code → (Mongolian name, legacy English names)
 RENAMES = {
     "1000": ("Касс дахь мөнгө", ("Cash",)),
     "1010": ("Харилцах данс (цалин)", ("Payroll bank",)),
@@ -56,39 +52,36 @@ RENAMES = {
     "5200": ("Элэгдлийн зардал", ("Depreciation expense",)),
 }
 
-# purpose → posting account_type; mirrors app.erp.chart.PURPOSES (frozen here).
+# purpose → posting account_type; mirrors app.erp.chart.PURPOSE_POSTING_TYPES.
 POSTING_TYPES = {
-    "cash": "cash", "bank": "cash", "receivable": "receivable", "advance_clearing": "advance_clearing",
-    "inventory": "inventory", "fixed_asset": "fixed_asset", "accumulated_depreciation": "accumulated_depreciation", "wip": "wip",
+    "cash": "cash", "bank": "cash", "receivable": "receivable", "advance_clearing": "receivable",
+    "inventory": "inventory", "fixed_asset": "fixed_asset", "accumulated_depreciation": "fixed_asset", "wip": "wip",
     "payable": "payable", "payroll_payable": "payroll_payable", "net_pay_payable": "payroll_payable",
     "employee_shi_payable": "payroll_payable", "employer_shi_payable": "payroll_payable", "other_deductions_payable": "payroll_payable",
-    "pit_payable": "tax_payable", "revenue": "income", "expense": "expense", "depreciation_expense": "depreciation_expense",
+    "pit_payable": "tax_payable", "revenue": "income", "expense": "expense", "depreciation_expense": "expense",
     "salary_expense": "payroll_expense", "employer_shi_expense": "payroll_expense",
 }
 
 # Legacy posting account_type on a ``general`` account → (classification, purpose).
 LEGACY_TYPES = {
-    "cash": ("asset", "cash"), "bank": ("asset", "bank"), "receivable": ("asset", "receivable"), "inventory": ("asset", "inventory"),
-    "stock": ("asset", "inventory"), "fixed_asset": ("asset", "fixed_asset"), "wip": ("asset", "wip"), "tax_receivable": ("asset", "tax"),
+    "cash": ("asset", "cash"), "receivable": ("asset", "receivable"), "inventory": ("asset", "inventory"),
+    "fixed_asset": ("asset", "fixed_asset"), "wip": ("asset", "wip"), "tax_receivable": ("asset", "tax"),
     "payable": ("liability", "payable"), "tax_payable": ("liability", "tax"), "payroll_payable": ("liability", "payroll_payable"),
-    "income": ("income", "revenue"), "income_account": ("income", "revenue"), "expense": ("expense", "expense"),
-    "expense_account": ("expense", "expense"), "payroll_expense": ("expense", "salary_expense"),
-    "liability": ("liability", "general"), "equity": ("equity", "general"),
+    "income": ("income", "revenue"), "expense": ("expense", "expense"), "payroll_expense": ("expense", "salary_expense"),
 }
 
 
 def upgrade() -> None:
-    rename = sa.text("UPDATE erp_accounts SET name = :name WHERE code = :code AND name = ANY(:legacy)")
+    op.add_column("erp_accounts", sa.Column("bank_name", sa.String(length=120), nullable=True))
+    op.add_column("erp_accounts", sa.Column("bank_iban", sa.String(length=34), nullable=True))
+    op.add_column("erp_accounts", sa.Column("bank_account_number", sa.String(length=64), nullable=True))
+    op.add_column("erp_accounts", sa.Column("bank_account_holder", sa.String(length=200), nullable=True))
+    statement = sa.text("UPDATE erp_accounts SET name = :name WHERE code = :code AND name = ANY(:legacy)")
     for code, (name, legacy) in RENAMES.items():
-        op.execute(rename.bindparams(name=name, code=code, legacy=list(legacy)))
-
-    adopt = sa.text(
-        "UPDATE erp_accounts SET classification = :classification, purpose = :purpose "
-        "WHERE purpose = 'general' AND account_type = :account_type"
-    )
+        op.execute(statement.bindparams(name=name, code=code, legacy=list(legacy)))
+    adopt = sa.text("UPDATE erp_accounts SET classification = :classification, purpose = :purpose WHERE purpose = 'general' AND account_type = :account_type")
     for account_type, (classification, purpose) in LEGACY_TYPES.items():
         op.execute(adopt.bindparams(classification=classification, purpose=purpose, account_type=account_type))
-
     repair = sa.text("UPDATE erp_accounts SET account_type = :account_type WHERE purpose = :purpose AND account_type <> :account_type")
     for purpose, account_type in POSTING_TYPES.items():
         op.execute(repair.bindparams(purpose=purpose, account_type=account_type))
@@ -96,9 +89,11 @@ def upgrade() -> None:
         "UPDATE erp_accounts SET account_type = CASE WHEN classification = 'asset' THEN 'tax_receivable' ELSE 'tax_payable' END "
         "WHERE purpose = 'tax'"
     ))
-    op.execute(sa.text("UPDATE erp_accounts SET account_type = classification WHERE purpose = 'general' AND account_type <> classification"))
 
 
 def downgrade() -> None:
-    # Data-only repair; the previous values were inconsistent and are not restored.
-    pass
+    statement = sa.text("UPDATE erp_accounts SET name = :legacy WHERE code = :code AND name = :name")
+    for code, (name, legacy) in RENAMES.items():
+        op.execute(statement.bindparams(name=name, code=code, legacy=legacy[0]))
+    for column in ("bank_account_holder", "bank_account_number", "bank_iban", "bank_name"):
+        op.drop_column("erp_accounts", column)

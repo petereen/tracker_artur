@@ -14,7 +14,7 @@ import { RouterLink, budgetErrorText } from '../components/budget/shared'
 
 type BudgetTab = 'budgets' | 'analysis' | 'accounts'
 const TAB_PATHS: Record<BudgetTab, string> = { budgets: '/erp/budget', analysis: '/erp/budget/analysis', accounts: '/erp/budget/accounts' }
-const TAB_LABELS: Record<BudgetTab, string> = { budgets: 'Төсөв', analysis: 'Төсөв анализ', accounts: 'Төсөвт данс' }
+const TAB_LABELS: Record<BudgetTab, string> = { budgets: 'Төсөв', analysis: 'Төсвийн анализ', accounts: 'Төсөвт данс' }
 
 /** Төсөв, гүйцэтгэл (Dayansoft d161): plan → budget → actual → comparison → decision. */
 export function BudgetWorkspacePage() {
