@@ -13457,3 +13457,11 @@ body { -webkit-tap-highlight-color: transparent; }
   .mcal-fab:active { transform: translateX(-50%) scale(.94); }
   html.keyboard-open .mcal-fab { display: none; }
 }
+
+/* Contract data («Гэрээний бүртгэл») inside the archive info sheet */
+.archive-registry { border-top: 1px solid var(--color-border-soft); display: grid; gap: 12px; padding: 18px 22px; }
+.archive-registry-header { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
+.archive-registry-header h3 { font-size: 14px; margin: 0; }
+.archive-registry .contract-form-grid { grid-template-columns: 1fr; }
+.archive-registry .contract-registry-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.archive-registry-hint { color: var(--color-muted); font-size: 12px; margin: 0; }

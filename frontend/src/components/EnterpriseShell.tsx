@@ -260,7 +260,7 @@ export function EnterpriseShell() {
   }, [actorQuery.data?.locale, i18n])
   const nav = useMemo(() => {
     const hrItem = NAV.find((item) => item.to === '/hr')
-    const payrollItem = { to: '/erp/payroll', label: 'Payroll', icon: Calculator, roles: [] }
+    const payrollItem = { to: '/erp/payroll', label: 'Цалин', icon: Calculator, roles: [] }
     const base = NAV.filter((item) => item.to !== '/hr' && (!item.roles.length || item.roles.some((role) => roles.includes(role))))
     const showPayroll = Boolean(erp.data?.modules.payroll && roles.some((role) => PAYROLL_ROLES.includes(role)))
     const withHr = base.flatMap((item) => item.to === '/chat' && hrItem ? [hrItem, item] : [item])

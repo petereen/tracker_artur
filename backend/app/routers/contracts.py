@@ -336,6 +336,8 @@ async def contract_registry_options(db: AsyncSession = Depends(get_db), actor: A
     org = actor.organization_id
     groups = (await db.execute(select(ContractGroup).where(ContractGroup.organization_id == org).order_by(ContractGroup.code))).scalars().all()
     counts = dict((await db.execute(select(ContractDocument.group_id, func.count()).where(ContractDocument.organization_id == org, ContractDocument.group_id.is_not(None)).group_by(ContractDocument.group_id))).all())
+    for group_id, count in (await db.execute(select(ContractArchiveEntry.group_id, func.count()).where(ContractArchiveEntry.organization_id == org, ContractArchiveEntry.group_id.is_not(None), ContractArchiveEntry.deleted_at.is_(None)).group_by(ContractArchiveEntry.group_id))).all():
+        counts[group_id] = counts.get(group_id, 0) + count
     units = (await db.execute(select(ERPUnitOfMeasure).where(ERPUnitOfMeasure.organization_id == org, ERPUnitOfMeasure.is_active.is_(True)).order_by(ERPUnitOfMeasure.code))).scalars().all()
     terms = (await db.execute(select(ERPPaymentTerm).where(ERPPaymentTerm.organization_id == org, ERPPaymentTerm.is_active.is_(True)).order_by(ERPPaymentTerm.code))).scalars().all()
     return {
@@ -429,7 +431,7 @@ async def update_contract_group(group_id: int, data: registry.ContractGroupPatch
 async def delete_contract_group(group_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     _require_group_manager(actor)
     group = await _group_for_actor(db, actor, group_id)
-    in_use = await db.scalar(select(ContractDocument.id).where(ContractDocument.group_id == group.id).limit(1))
+    in_use = await db.scalar(select(ContractDocument.id).where(ContractDocument.group_id == group.id).limit(1)) or await db.scalar(select(ContractArchiveEntry.id).where(ContractArchiveEntry.group_id == group.id).limit(1))
     has_children = await db.scalar(select(ContractGroup.id).where(ContractGroup.parent_id == group.id).limit(1))
     if in_use or has_children:
         raise registry.registry_error(409, "contract_group_in_use", "Гэрээ эсвэл дэд бүлэгтэй бүлгийг устгах боломжгүй — идэвхгүй болгоно уу")
@@ -569,18 +571,30 @@ async def update_contract(public_id: UUID, data: ContractPatch, if_match: str | 
     return await _summary(db, contract, revision)
 
 
+async def _apply_registry_patch(db: AsyncSession, actor: ActorContext, target: ContractDocument | ContractArchiveEntry, data: registry.ContractRegistryPatch) -> None:
+    """Validate and apply a registry patch to a contract document or a manually archived contract."""
+    values = data.model_dump(exclude_unset=True)
+    if values.get("is_active") is not None:
+        target.is_active = values["is_active"]
+    values.pop("is_active", None)
+    code = values.pop("code", None)
+    await registry.assert_references(db, actor.organization_id, values, current=target)
+    if code and code != target.code:
+        if isinstance(target, ContractDocument):
+            target.code = await registry.assign_code(db, actor.organization_id, code, exclude_id=target.id)
+        else:
+            target.code = await registry.assign_code(db, actor.organization_id, code, exclude_archive_id=target.id)
+    registry.apply_registry(target, values)
+
+
 @router.patch("/contracts/{public_id}/registry")
 async def update_contract_registry(public_id: UUID, data: registry.ContractRegistryPatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
-    """Registry fields that stay editable in every status: official number, active flag, links, meta, note."""
+    """Registry data that stays editable in every status, so older or signed contracts can be completed."""
     contract = await _get_contract(db, public_id, actor, lock=True)
     if contract.author_account_id != actor.account_id and not actor.has_any_role(*ARCHIVE_MANAGER_ROLES):
         raise HTTPException(status_code=403, detail="Only the author, an admin or legal counsel can update the contract registry")
-    values = data.model_dump(exclude_unset=True)
     before = registry.registry_snapshot(contract)
-    if "is_active" in values and values["is_active"] is not None:
-        contract.is_active = values.pop("is_active")
-    values.pop("is_active", None)
-    registry.apply_registry(contract, values)
+    await _apply_registry_patch(db, actor, contract, data)
     contract.version += 1
     await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="registry_updated", version=contract.version, before=before, after=registry.registry_snapshot(contract))
     await db.commit()
@@ -1081,12 +1095,22 @@ async def _archive_entry_out(
     entry: ContractArchiveEntry,
     people: dict[int, dict[str, Any]] | None = None,
     actor: ActorContext | None = None,
+    *,
+    with_registry: bool = False,
 ) -> dict[str, Any]:
     people = people or await _archive_people(db, {value for value in (entry.author_account_id, entry.created_by_account_id, entry.reviewed_by_account_id) if value})
     author = people.get(entry.author_account_id or entry.created_by_account_id or -1)
     uploader = people.get(entry.created_by_account_id or -1)
     reviewer = people.get(entry.reviewed_by_account_id or -1)
     contract = await db.scalar(select(ContractDocument).where(ContractDocument.id == entry.contract_id, ContractDocument.organization_id == entry.organization_id)) if entry.contract_id else None
+    registry_data = None
+    if with_registry:
+        # Signed contracts keep their data on the contract document; uploaded files carry their own.
+        holder = contract or entry
+        registry_data = registry.registry_out(holder, await registry.load_registry_context(db, [holder]), date.today())
+        registry_data["file_count"] = 0 if holder is entry else registry_data["file_count"]
+        registry_data["holder"] = "contract" if contract else "entry"
+        registry_data["contract_public_id"] = str(contract.public_id) if contract else None
     return {
         "id": entry.id,
         "public_id": str(entry.public_id),
@@ -1116,6 +1140,7 @@ async def _archive_entry_out(
         "can_edit": bool(actor and actor.has_any_role(*ARCHIVE_MANAGER_ROLES)),
         "can_delete": bool(actor and actor.has_any_role(*ARCHIVE_MANAGER_ROLES)),
         "can_manage_access": bool(actor and actor.has_any_role(*ARCHIVE_MANAGER_ROLES)),
+        "registry": registry_data,
     }
 
 
@@ -1178,7 +1203,7 @@ async def list_contract_archive(
     if q and q.strip():
         needle = q.strip().casefold()
         child_folders = [row for row in child_folders if needle in row.name.casefold() or needle in (row.description or "").casefold()]
-        child_entries = [row for row in child_entries if needle in row.name.casefold() or needle in row.category.casefold()]
+        child_entries = [row for row in child_entries if needle in row.name.casefold() or needle in row.category.casefold() or needle in (row.code or "").casefold() or needle in (row.contract_number or "").casefold()]
     folder_outputs = {row.id: await _archive_folder_out(db, row, actor, by_id, grants, entries) for row in child_folders}
     if sort == "created_at":
         combined: list[tuple[str, Any]] = [
@@ -1397,7 +1422,7 @@ async def get_contract_archive_entry(entry_id: int, db: AsyncSession = Depends(g
     if not await _archive_entry_visible(db, entry, actor):
         raise HTTPException(status_code=404, detail="Archive item not found")
     events = (await db.execute(select(AuditLog).where(AuditLog.organization_id == actor.organization_id, AuditLog.entity_type == "contract_archive_entry", AuditLog.entity_id == entry_id).order_by(AuditLog.created_at))).scalars().all()
-    return {**await _archive_entry_out(db, entry, actor=actor), "timeline": [{"id": event.id, "operation": event.action, "actor_account_id": event.actor_account_id, "created_at": event.created_at, "before": event.before_data, "after": event.after_data} for event in events]}
+    return {**await _archive_entry_out(db, entry, actor=actor, with_registry=True), "timeline": [{"id": event.id, "operation": event.action, "actor_account_id": event.actor_account_id, "created_at": event.created_at, "before": event.before_data, "after": event.after_data} for event in events]}
 
 
 @router.patch("/contract-archive/entries/{entry_id}")
@@ -1422,6 +1447,28 @@ async def update_contract_archive_entry(entry_id: int, data: ArchiveEntryPatch |
         await db.rollback()
         raise HTTPException(status_code=409, detail="An archive item with this name already exists in the folder") from exc
     return await _archive_entry_out(db, entry, actor=actor)
+
+
+@router.patch("/contract-archive/entries/{entry_id}/registry")
+async def update_contract_archive_entry_registry(entry_id: int, data: registry.ContractRegistryPatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(_archive_require_manager)):
+    """Add or correct the contract data of an archived contract (uploaded file, or the signed contract behind the archive entry)."""
+    entry = await _archive_entry(db, entry_id, actor, lock=True)
+    contract = await db.scalar(select(ContractDocument).where(ContractDocument.id == entry.contract_id, ContractDocument.organization_id == actor.organization_id).with_for_update()) if entry.contract_id else None
+    target = contract or entry
+    before = registry.registry_snapshot(target)
+    await _apply_registry_patch(db, actor, target, data)
+    after = registry.registry_snapshot(target)
+    if contract is not None:
+        contract.version += 1
+        await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="registry_updated", version=contract.version, before=before, after=after)
+    await record_change(db, actor=actor, topic="contract_archive", aggregate_type="contract_archive_entry", aggregate_id=entry.id, operation="registry_updated", before=before, after=after)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise registry.registry_error(409, "contract_code_taken", "Энэ код өөр гэрээнд олгогдсон байна") from exc
+    await db.refresh(entry)
+    return await _archive_entry_out(db, entry, actor=actor, with_registry=True)
 
 
 @router.delete("/contract-archive/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)

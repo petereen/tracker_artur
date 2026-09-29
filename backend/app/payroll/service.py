@@ -414,7 +414,7 @@ async def preflight_run(db: AsyncSession, actor: ActorContext, data: PayrollRunI
             or not mapped_accounts[int(account_id)].is_active
             or mapped_accounts[int(account_id)].is_group
             or mapped_accounts[int(account_id)].currency != "MNT"
-            or mapped_accounts[int(account_id)].classification != PAYROLL_GL_CLASSIFICATIONS.get(role)
+            or not payroll_gl_classification_ok(role, mapped_accounts[int(account_id)].classification)
             or (int(account_id), role) not in purpose_tags)
         if invalid_roles:
             issue("payroll_gl_mapping_invalid", "One or more saved payroll mappings need an active tagged posting account.", severity="warning", remediation_url="/erp/payroll/setup?tab=accounting", metadata={"invalid_roles": invalid_roles})
@@ -1230,9 +1230,14 @@ PAYROLL_GL_CLASSIFICATIONS = {
     "salary_expense": "expense", "employer_shi_expense": "expense",
     "employee_shi_payable": "liability", "employer_shi_payable": "liability",
     "pit_payable": "liability", "net_pay_payable": "liability",
-    "bank": "asset", "advance_clearing": "asset",
+    "bank": "asset", "advance_clearing": ("asset", "expense"),
     "other_deductions_payable": "liability",
 }
+
+
+def payroll_gl_classification_ok(role: str, classification: str | None) -> bool:
+    expected = PAYROLL_GL_CLASSIFICATIONS.get(role)
+    return classification in ((expected,) if isinstance(expected, str) else expected or ())
 
 
 async def build_payroll_gl_lines(db: AsyncSession, organization_id: int, run: PayrollRun, roles: dict[str, int]) -> list[dict[str, Any]]:
@@ -1326,9 +1331,8 @@ async def build_payroll_gl_lines(db: AsyncSession, organization_id: int, run: Pa
     for line in candidate:
         role, account_id = line["role"], int(line["account_id"])
         account = accounts.get(account_id)
-        expected_class = PAYROLL_GL_CLASSIFICATIONS[role]
         if (not account or not account.is_active or account.is_group or account.currency != "MNT"
-                or account.classification != expected_class or (account_id, role) not in tags):
+                or not payroll_gl_classification_ok(role, account.classification) or (account_id, role) not in tags):
             invalid.append({"role": role, "account_id": account_id})
     if invalid:
         raise HTTPException(status_code=422, detail={"code": "payroll_posting_account_invalid", "accounts": invalid})

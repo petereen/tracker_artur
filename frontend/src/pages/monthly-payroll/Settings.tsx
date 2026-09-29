@@ -1,13 +1,34 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link as RouterLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { Plus, Trash2 } from 'lucide-react'
+import { Banner } from '@astryxdesign/core/Banner'
+import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
+import type { ISODateString } from '@astryxdesign/core/Calendar'
+import { Collapsible } from '@astryxdesign/core/Collapsible'
+import { DateInput } from '@astryxdesign/core/DateInput'
+import { Divider } from '@astryxdesign/core/Divider'
+import { FormLayout } from '@astryxdesign/core/FormLayout'
+import { Grid } from '@astryxdesign/core/Grid'
+import { Heading } from '@astryxdesign/core/Heading'
+import { HStack } from '@astryxdesign/core/HStack'
+import { IconButton } from '@astryxdesign/core/IconButton'
+import { Link } from '@astryxdesign/core/Link'
+import { NumberInput } from '@astryxdesign/core/NumberInput'
+import { Selector } from '@astryxdesign/core/Selector'
+import { Text } from '@astryxdesign/core/Text'
+import { TextArea } from '@astryxdesign/core/TextArea'
+import { TextInput } from '@astryxdesign/core/TextInput'
+import { Token } from '@astryxdesign/core/Token'
+import { VStack } from '@astryxdesign/core/VStack'
 import {
   useCreateMonthlyPayrollRuleDraft, useERPAccountOptions, useMonthlyPayrollCalendar, useMonthlyPayrollMonths, useMonthlyPayrollRuleSets,
   useMonthlyPayrollRuleTemplate, useMonthlyPayrollSettings, usePayrollCapabilities, usePublishMonthlyPayrollRuleDraft,
   useSaveMonthlyPayrollSettings, useSetMonthlyPayrollCalendarDay, useUpdateMonthlyPayrollRuleDraft, useValidateMonthlyPayrollRuleDraft,
 } from '../../api/enterprise'
 import type { ERPAccountClassification, ERPAccountOption, MonthlyPayrollCompanySettings, MonthlyPayrollRuleSet } from '../../api/enterprise'
-import { CHART_OF_ACCOUNTS_PATH, accountSelectorOptions } from '../../components/accounts/accountShared'
+import { CHART_OF_ACCOUNTS_PATH, CLASSIFICATION_LABELS, accountSelectorOptions } from '../../components/accounts/accountShared'
 import { MonthStepper, MonthlyShell, monthKey, parseMonthKey, requestError } from './shared'
 import { plainNumber } from '../../utils/numbers'
 
@@ -18,36 +39,128 @@ export function MonthlyPayrollSettingsPage() {
   const { year, month } = parseMonthKey(calendarMonth)
   if (caps.data && !caps.data.capabilities.administer) return <MonthlyShell><p className="mp-empty">Цалингийн тохиргоог зөвхөн админ өөрчилнө.</p></MonthlyShell>
   return <MonthlyShell canAdminister>
-    <header className="payroll-v2-page-title"><div><h1>Цалингийн тохиргоо</h1><p>Байгууллагын тохиргоо, хуулийн дүрмийн хувилбар, ажлын календарь. Нээсэн сарууд өөрийн хуулбарыг хадгална.</p></div></header>
-    <MonthlySettingsPanel />
-    <MonthlyRuleSetEditor />
-    <section className="payroll-v2-stage-card"><div className="payroll-v2-section-head"><h2>Ажлын календарь</h2><MonthStepper value={calendarMonth} onChange={setCalendarMonth} /></div><MonthlyCalendarEditor year={year} monthNumber={month} /></section>
+    <VStack gap={5}>
+      <VStack gap={0.5}>
+        <Heading level={2}>Цалингийн тохиргоо</Heading>
+        <Text type="supporting">Байгууллагын тохиргоо, хуулийн дүрмийн хувилбар, ажлын календарь. Нээсэн сарууд өөрийн хуулбарыг хадгална.</Text>
+      </VStack>
+      <MonthlySettingsPanel />
+      <MonthlyRuleSetEditor />
+      <Card padding={5}>
+        <VStack gap={4}>
+          <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
+            <SectionTitle title="Ажлын календарь" description="Ажлын, амралтын болон нийтийн амралтын өдрүүд. Илүү цагийн бодолт үүнийг ашиглана." />
+            <MonthStepper value={calendarMonth} onChange={setCalendarMonth} />
+          </HStack>
+          <MonthlyCalendarEditor year={year} monthNumber={month} />
+        </VStack>
+      </Card>
+    </VStack>
   </MonthlyShell>
 }
+
+function SectionTitle({ title, description }: { title: string; description?: string }) {
+  return <VStack gap={0.5}>
+    <Heading level={3}>{title}</Heading>
+    {description && <Text type="supporting">{description}</Text>}
+  </VStack>
+}
+
+function GroupTitle({ title, description }: { title: string; description?: string }) {
+  return <VStack gap={0.5}>
+    <Heading level={5}>{title}</Heading>
+    {description && <Text type="supporting">{description}</Text>}
+  </VStack>
+}
+
+const settingsFrom = (data: MonthlyPayrollCompanySettings): MonthlyPayrollCompanySettings => ({
+  ...data,
+  daily_norm_hours: plainNumber(data.daily_norm_hours),
+  weekday_overtime_multiplier: plainNumber(data.weekday_overtime_multiplier),
+  rest_day_overtime_multiplier: plainNumber(data.rest_day_overtime_multiplier),
+  public_holiday_overtime_multiplier: plainNumber(data.public_holiday_overtime_multiplier),
+  default_advance_percent: plainNumber(data.default_advance_percent),
+})
+
+const ADVANCE_BASES = [
+  { value: 'FIXED', label: 'Тогтмол дүн' },
+  { value: 'PERCENT', label: 'Үндсэн цалингийн хувь' },
+  { value: 'WORKED-TO-DATE', label: 'Ажилласан цагаар' },
+]
 
 function MonthlySettingsPanel() {
   const settings = useMonthlyPayrollSettings()
   const save = useSaveMonthlyPayrollSettings()
   const accounts = useERPAccountOptions()
+  const saved = useMemo(() => (settings.data ? settingsFrom(settings.data) : null), [settings.data])
   const [draft, setDraft] = useState<MonthlyPayrollCompanySettings | null>(null)
-  useEffect(() => { if (settings.data) setDraft({ ...settings.data, daily_norm_hours: plainNumber(settings.data.daily_norm_hours), weekday_overtime_multiplier: plainNumber(settings.data.weekday_overtime_multiplier), rest_day_overtime_multiplier: plainNumber(settings.data.rest_day_overtime_multiplier), public_holiday_overtime_multiplier: plainNumber(settings.data.public_holiday_overtime_multiplier), default_advance_percent: plainNumber(settings.data.default_advance_percent) }) }, [settings.data])
-  if (!draft) return null
-  const update = (key: keyof MonthlyPayrollCompanySettings, value: any) => setDraft((currentDraft) => currentDraft ? { ...currentDraft, [key]: value } : currentDraft)
-  return <details open className="payroll-v2-stage-card monthly-settings"><summary><strong>Байгууллагын цалингийн тохиргоо</strong></summary><div className="monthly-settings-grid">
-    <label>Компанийн нэр<input value={draft.legal_company_name || ''} onChange={(event) => update('legal_company_name', event.target.value || null)} /></label>
-    <label>Өдрийн норм цаг<input type="number" min="1" max="24" step="0.25" value={draft.daily_norm_hours} onChange={(event) => update('daily_norm_hours', event.target.value)} /></label>
-    <label>ҮОМШӨ хувь (%) · БНДШ {(12 + Number(draft.employer_injury_rate || 0) * 100).toFixed(1)}%<input type="number" min="0.5" max="2.5" step="0.1" value={String(Math.round(Number(draft.employer_injury_rate || 0) * 1000) / 10)} onChange={(event) => update('employer_injury_rate', String(Number(event.target.value || 0) / 100))} /></label>
-    <label>Ажлын өдрийн илүү цаг<input type="number" min="1.5" max="10" step="0.1" value={draft.weekday_overtime_multiplier} onChange={(event) => update('weekday_overtime_multiplier', event.target.value)} /></label>
-    <label>Амралтын өдрийн нэмэгдэл<input type="number" min="1.5" max="10" step="0.1" value={draft.rest_day_overtime_multiplier} onChange={(event) => update('rest_day_overtime_multiplier', event.target.value)} /></label>
-    <label>Баярын өдрийн нэмэгдэл<input type="number" min="2" max="10" step="0.1" value={draft.public_holiday_overtime_multiplier} onChange={(event) => update('public_holiday_overtime_multiplier', event.target.value)} /></label>
-    <label>Урьдчилгааны үндсэн арга<select value={draft.default_advance_basis} onChange={(event) => update('default_advance_basis', event.target.value)}><option value="FIXED">Тогтмол дүн</option><option value="PERCENT">Үндсэн цалингийн хувь</option><option value="WORKED-TO-DATE">Ажилласан цагаар</option></select></label>
-    <label>Урьдчилгааны үндсэн хувь<input type="number" min="1" max="100" value={draft.default_advance_percent} onChange={(event) => update('default_advance_percent', event.target.value)} /></label>
-    <label>Бусад суутгалын төрлүүд (мөр тус бүрээр)<textarea rows={4} value={draft.deduction_types.join('\n')} onChange={(event) => update('deduction_types', event.target.value.split('\n').map((value: string) => value.trim()).filter(Boolean))} /></label>
-    <PayrollAccountSelect label="Цалингийн зардлын данс" hint="Зардал ангиллын данс (жишээ: 5100 Цалингийн зардал)" accounts={accounts.data} value={draft.salary_expense_account_id} classifications={['expense']} purposes={['salary_expense']} onChange={(value) => update('salary_expense_account_id', value)} />
-    <PayrollAccountSelect label="Ажил олгогчийн НДШ-ийн зардлын данс" hint="Зардал ангиллын данс (жишээ: 5110)" accounts={accounts.data} value={draft.employer_shi_account_id} classifications={['expense']} purposes={['employer_shi_expense']} onChange={(value) => update('employer_shi_account_id', value)} />
-    <PayrollAccountSelect label="Урьдчилгааны тооцооны данс" hint="Хөрөнгө ангиллын данс (жишээ: 2350 Цалингийн урьдчилгааны тооцоо)" accounts={accounts.data} value={draft.advance_clearing_account_id} classifications={['asset']} purposes={['advance_clearing']} onChange={(value) => update('advance_clearing_account_id', value)} />
-    <p className="monthly-settings-note">Дансыг <Link to={CHART_OF_ACCOUNTS_PATH}>Дансны төлөвлөгөө</Link> хэсэгт нээж, нэрлэж, зориулалтыг нь тохируулна.</p>
-  </div><button className="payroll-v2-button secondary" disabled={save.isPending} onClick={() => save.mutate(draft, { onSuccess: () => toast.success('Тохиргоо хадгалагдлаа'), onError: (error) => toast.error(requestError(error)) })}>Тохиргоо хадгалах</button><small>Эдгээр тохиргоо дараа нээх саруудад үйлчилнэ. Нээсэн сарын дүрэм, хуанли өөрчлөгдөхгүй.</small></details>
+  useEffect(() => { if (saved) setDraft(saved) }, [saved])
+  if (!draft || !saved) return null
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
+  const update = (key: keyof MonthlyPayrollCompanySettings, value: unknown) => setDraft((current) => (current ? { ...current, [key]: value } : current))
+  const numeric = (key: keyof MonthlyPayrollCompanySettings) => (value: number | null) => update(key, String(value ?? 0))
+  const injuryPercent = Math.round(Number(draft.employer_injury_rate || 0) * 1000) / 10
+  const submit = () => save.mutate(draft, { onSuccess: () => toast.success('Тохиргоо хадгалагдлаа'), onError: (error) => toast.error(requestError(error)) })
+  return <Card padding={5}>
+    <VStack gap={5}>
+      <SectionTitle title="Байгууллагын цалингийн тохиргоо" description="Эдгээр тохиргоо дараа нээх саруудад үйлчилнэ. Нээсэн сарын дүрэм, хуанли өөрчлөгдөхгүй." />
+
+      <VStack gap={3}>
+        <GroupTitle title="Ерөнхий" />
+        <Grid columns={{ minWidth: 240 }} gap={3}>
+          <TextInput label="Компанийн нэр" value={draft.legal_company_name || ''} onChange={(value) => update('legal_company_name', value || null)} />
+          <NumberInput label="Өдрийн норм цаг" value={Number(draft.daily_norm_hours)} onChange={numeric('daily_norm_hours')} min={1} max={24} step={0.25} units="цаг" />
+        </Grid>
+      </VStack>
+      <Divider />
+
+      <VStack gap={3}>
+        <GroupTitle title="Илүү цаг ба нийгмийн даатгал" description="Илүү цагийн үржүүлэгч нь Хөдөлмөрийн тухай хуулийн доод хэмжээнээс багагүй байна." />
+        <Grid columns={{ minWidth: 240 }} gap={3}>
+          <NumberInput label="Ажлын өдрийн илүү цаг" value={Number(draft.weekday_overtime_multiplier)} onChange={numeric('weekday_overtime_multiplier')} min={1.5} max={10} step={0.1} units="дахин" />
+          <NumberInput label="Амралтын өдрийн нэмэгдэл" value={Number(draft.rest_day_overtime_multiplier)} onChange={numeric('rest_day_overtime_multiplier')} min={1.5} max={10} step={0.1} units="дахин" />
+          <NumberInput label="Баярын өдрийн нэмэгдэл" value={Number(draft.public_holiday_overtime_multiplier)} onChange={numeric('public_holiday_overtime_multiplier')} min={2} max={10} step={0.1} units="дахин" />
+        </Grid>
+        <Grid columns={{ minWidth: 240 }} gap={3}>
+          <NumberInput label="ҮОМШӨ хувь" description={`Ажил олгогчийн БНДШ нийт ${(12 + injuryPercent).toFixed(1)}%`} value={injuryPercent} onChange={(value) => update('employer_injury_rate', String(Number(((value ?? 0) / 100).toFixed(6))))} min={0.5} max={2.5} step={0.1} units="%" />
+        </Grid>
+      </VStack>
+      <Divider />
+
+      <VStack gap={3}>
+        <GroupTitle title="Цалингийн урьдчилгаа" />
+        <Grid columns={{ minWidth: 240 }} gap={3}>
+          <Selector label="Урьдчилгааны үндсэн арга" value={draft.default_advance_basis} onChange={(value) => update('default_advance_basis', value ?? 'FIXED')} options={ADVANCE_BASES} />
+          <NumberInput label="Урьдчилгааны үндсэн хувь" value={Number(draft.default_advance_percent)} onChange={numeric('default_advance_percent')} min={1} max={100} step={1} units="%" />
+        </Grid>
+      </VStack>
+      <Divider />
+
+      <VStack gap={3}>
+        <GroupTitle title="Суутгал" />
+        <TextArea label="Бусад суутгалын төрлүүд" description="Мөр тус бүрд нэг төрөл бичнэ." rows={4}
+          value={draft.deduction_types.join('\n')} onChange={(value) => update('deduction_types', value.split('\n').map((line) => line.trim()).filter(Boolean))} />
+      </VStack>
+      <Divider />
+
+      <VStack gap={3}>
+        <GroupTitle title="Дансны холболт" description="Цалингийн бичилт аль дансанд орохыг тодорхойлно." />
+        <FormLayout>
+          <PayrollAccountSelect label="Цалингийн зардлын данс" hint="Зардал ангиллын данс (жишээ: 5100 Цалингийн зардал)" accounts={accounts.data} value={draft.salary_expense_account_id} classifications={['expense']} purposes={['salary_expense']} onChange={(value) => update('salary_expense_account_id', value)} />
+          <PayrollAccountSelect label="Ажил олгогчийн НДШ-ийн зардлын данс" hint="Зардал ангиллын данс (жишээ: 5110)" accounts={accounts.data} value={draft.employer_shi_account_id} classifications={['expense']} purposes={['employer_shi_expense']} onChange={(value) => update('employer_shi_account_id', value)} />
+          <PayrollAccountSelect label="Урьдчилгааны данс" hint="Хөрөнгө (жишээ: 2350 Цалингийн урьдчилгааны тооцоо) эсвэл Зардал (жишээ: 5100 Цалингийн зардал) ангиллын данс" accounts={accounts.data} value={draft.advance_clearing_account_id} classifications={['asset', 'expense']} purposes={['advance_clearing', 'salary_expense']} onChange={(value) => update('advance_clearing_account_id', value)} />
+        </FormLayout>
+        <Text type="supporting">Дансыг <Link as={RouterLink} href={CHART_OF_ACCOUNTS_PATH}>Дансны төлөвлөгөө</Link> хэсэгт нээж, нэрлэж, зориулалтыг нь тохируулна.</Text>
+      </VStack>
+      <Divider />
+
+      <HStack gap={3} hAlign="end" vAlign="center" wrap="wrap">
+        {dirty && <Token size="sm" color="orange" label="Хадгалаагүй өөрчлөлт байна" />}
+        <Button label="Болих" variant="ghost" isDisabled={!dirty || save.isPending} onClick={() => setDraft(saved)} />
+        <Button label="Тохиргоо хадгалах" variant="primary" isDisabled={!dirty} isLoading={save.isPending} onClick={submit} />
+      </HStack>
+    </VStack>
+  </Card>
 }
 
 /** Only accounts of the right classification, grouped as in the chart of accounts; the matching-purpose account is suggested first. */
@@ -57,12 +170,19 @@ function PayrollAccountSelect({ label, hint, accounts, value, classifications, p
 }) {
   const sections = accountSelectorOptions(accounts, { classifications, preferredPurposes: purposes, keepId: value })
   const current = accounts?.find((account) => account.id === value)
-  const mismatch = current && current.classification && !classifications.includes(current.classification)
-  return <label>{label}<select value={value || ''} onChange={(event) => onChange(Number(event.target.value) || null)}>
-    <option value="">Данс сонгох</option>
-    {sections.map((section) => <optgroup key={section.title} label={section.title}>{section.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup>)}
-  </select><small>{mismatch ? `⚠ Сонгосон данс тохирохгүй ангилалтай — ${hint.toLowerCase()} сонгоно уу.` : hint}</small></label>
+  const mismatch = Boolean(current && current.classification && !classifications.includes(current.classification))
+  const allowed = classifications.map((item) => CLASSIFICATION_LABELS[item]).join(' эсвэл ')
+  return <Selector label={label} description={hint} value={value ? String(value) : null} onChange={(next) => onChange(next ? Number(next) : null)}
+    options={sections} hasSearch hasClear placeholder="Данс сонгох" emptyText="Тохирох данс алга"
+    status={mismatch ? { type: 'warning', message: `Сонгосон данс тохирохгүй ангилалтай — ${allowed} ангиллын данс сонгоно уу.` } : undefined} />
 }
+
+const DAY_TYPES = [
+  { value: 'working', label: 'Ажлын өдөр' },
+  { value: 'weekly_rest', label: 'Амралтын өдөр' },
+  { value: 'public_holiday', label: 'Нийтийн амралт' },
+]
+const DAY_COLORS = { working: 'green', weekly_rest: 'gray', public_holiday: 'red' } as const
 
 function MonthlyCalendarEditor({ year, monthNumber }: { year: number; monthNumber: number }) {
   const days = useMonthlyPayrollCalendar(year, monthNumber)
@@ -72,14 +192,26 @@ function MonthlyCalendarEditor({ year, monthNumber }: { year: number; monthNumbe
   const [names, setNames] = useState<Record<string, string>>({})
   const change = (date: string, day_type: 'working' | 'weekly_rest' | 'public_holiday', holiday_name: string | null) => update.mutate({ date, day_type, holiday_name }, { onError: (error) => toast.error(requestError(error)) })
   const working = days.data?.filter((day) => day.day_type === 'working').length || 0
-  return <div className="monthly-calendar">
-    <p className="payroll-v2-muted">{locked ? 'Энэ сарын цалингийн бодолт нээгдсэн тул календарь хадгалагдсан хуулбараар түгжигдсэн.' : `Ажлын ${working} өдөр. Шилжүүлсэн бямба гарагийг «Ажлын өдөр», баярыг «Нийтийн амралт» болгоно.`}</p>
-    <div className="monthly-calendar-grid">{days.data?.map((day) => <div key={day.date} className={`mp-calendar-day ${day.day_type}`}>
-      <strong>{new Date(`${day.date}T12:00:00`).toLocaleDateString('mn-MN', { weekday: 'short', day: 'numeric' })}</strong>
-      <select aria-label={`${day.date} өдрийн төрөл`} value={day.day_type} disabled={locked || update.isPending} onChange={(event) => change(day.date, event.target.value as typeof day.day_type, event.target.value === 'public_holiday' ? (names[day.date] ?? day.holiday_name ?? null) : null)}><option value="working">Ажлын өдөр</option><option value="weekly_rest">Амралтын өдөр</option><option value="public_holiday">Нийтийн амралт</option></select>
-      {day.day_type === 'public_holiday' && <input aria-label={`${day.date} баярын нэр`} placeholder="Баярын нэр" disabled={locked} value={names[day.date] ?? day.holiday_name ?? ''} onChange={(event) => setNames((current) => ({ ...current, [day.date]: event.target.value }))} onBlur={() => names[day.date] !== undefined && names[day.date] !== (day.holiday_name || '') && change(day.date, 'public_holiday', names[day.date] || null)} />}
-    </div>)}</div>
-  </div>
+  return <VStack gap={3}>
+    {locked
+      ? <Banner status="info" collapsible={false} title="Энэ сарын календарь түгжигдсэн" description="Цалингийн бодолт нээгдсэн тул календарь хадгалагдсан хуулбараар түгжигдсэн." />
+      : <Text type="supporting">Ажлын {working} өдөр. Шилжүүлсэн бямба гарагийг «Ажлын өдөр», баярыг «Нийтийн амралт» болгоно.</Text>}
+    <Grid columns={{ minWidth: 168 }} gap={2}>
+      {days.data?.map((day) => <Card key={day.date} padding={2} variant={day.day_type === 'working' ? 'default' : 'muted'}>
+        <VStack gap={1.5}>
+          <HStack gap={1} hAlign="between" vAlign="center">
+            <Text weight="bold">{new Date(`${day.date}T12:00:00`).toLocaleDateString('mn-MN', { weekday: 'short', day: 'numeric' })}</Text>
+            <Token size="sm" color={DAY_COLORS[day.day_type]} label={DAY_TYPES.find((item) => item.value === day.day_type)?.label ?? day.day_type} />
+          </HStack>
+          <Selector label={`${day.date} өдрийн төрөл`} isLabelHidden size="sm" value={day.day_type} isDisabled={locked || update.isPending} options={DAY_TYPES}
+            onChange={(value) => change(day.date, (value ?? 'working') as typeof day.day_type, value === 'public_holiday' ? (names[day.date] ?? day.holiday_name ?? null) : null)} />
+          {day.day_type === 'public_holiday' && <TextInput label={`${day.date} баярын нэр`} isLabelHidden size="sm" placeholder="Баярын нэр" isDisabled={locked}
+            value={names[day.date] ?? day.holiday_name ?? ''} onChange={(value) => setNames((current) => ({ ...current, [day.date]: value }))}
+            onBlur={() => names[day.date] !== undefined && names[day.date] !== (day.holiday_name || '') && change(day.date, 'public_holiday', names[day.date] || null)} />}
+        </VStack>
+      </Card>)}
+    </Grid>
+  </VStack>
 }
 
 // Rates are stored as fractions; round away float noise (0.085 × 100 = 8.500000000000002).
@@ -120,28 +252,101 @@ function MonthlyRuleSetEditor() {
   const checkDraft = async () => { const saved = await saveDraft(); if (!saved) return; validate.mutate(saved.id, { onSuccess: (result) => { setDraft(ruleDraft(result)); toast.success(result.status === 'validated' ? 'Дүрэм шалгалтад тэнцлээ' : `Шалгах алдаа: ${(result.validation_issues || []).join(', ')}`) }, onError: (error) => toast.error(requestError(error)) }) }
   const publishDraft = () => { if (!draft?.id || draft.status !== 'validated') { toast.error('Нооргийг хадгалж шалгасны дараа нийтэлнэ үү.'); return }; publish.mutate(draft.id, { onSuccess: (result) => { setDraft(ruleDraft(result)); toast.success(`Хувилбар ${result.version} нийтлэгдлээ`) }, onError: (error) => toast.error(requestError(error)) }) }
   const busy = create.isPending || update.isPending || validate.isPending || publish.isPending
-  return <details className="payroll-v2-stage-card monthly-settings monthly-rules"><summary><strong>Хууль, татварын хүчинтэй дүрмийн хувилбар</strong></summary>
-    <p className="payroll-v2-muted">Шинэ дүрэм ноороглож, эх сурвалж тэмдэглэн шалгасны дараа нийтэлнэ. Нээсэн сарууд өөрийн дүрмийн хуулбарыг хадгална.</p>
-    <div className="monthly-rule-toolbar"><label>Хувилбар<select value={draft?.id || ''} onChange={(event) => { const selected = rules.data?.find((item) => item.id === Number(event.target.value)); setDraft(selected ? ruleDraft(selected) : null) }}><option value="">Ноорог сонгох</option>{rules.data?.map((item) => <option key={item.id} value={item.id}>v{item.version} · {item.status === 'published' ? 'Нийтэлсэн' : item.status === 'validated' ? 'Шалгасан' : 'Ноорог'} · {item.valid_from}</option>)}</select></label><button className="payroll-v2-button secondary" disabled={busy} onClick={() => startDraft()}>Одоогийн дүрмээс шинэ хувилбар</button></div>
-    {draft && <><div className="monthly-settings-grid">
-      <label>Хүчинтэй эхлэх өдөр<input type="date" disabled={draft.status === 'published'} value={draft.valid_from} onChange={(event) => set('valid_from', event.target.value)} /></label><label>Хүчинтэй дуусах өдөр<input type="date" disabled={draft.status === 'published'} value={draft.valid_to} onChange={(event) => set('valid_to', event.target.value)} /></label><label>Хөдөлмөрийн хөлсний доод хэмжээ<input type="number" disabled={draft.status === 'published'} min="1" value={draft.minimum_wage} onChange={(event) => set('minimum_wage', event.target.value)} /></label><label>НДШ дээд хязгаарын үржүүлэгч<input type="number" disabled={draft.status === 'published'} min="1" step="0.1" value={draft.shi_cap_multiplier} onChange={(event) => set('shi_cap_multiplier', event.target.value)} /></label>
-      <RateRowsEditor title="Ажилтны НДШ хувь" percent rows={draft.employee_rates} disabled={draft.status === 'published'} onChange={(rows) => setRates('employee_rates', rows)} /><RateRowsEditor title="Ажил олгогчийн НДШ хувь" percent rows={draft.employer_rates} disabled={draft.status === 'published'} onChange={(rows) => setRates('employer_rates', rows)} /><TierRowsEditor title="ХХОАТ шатлал" rows={draft.pit_brackets} disabled={draft.status === 'published'} onChange={setPIT} /><ReliefRowsEditor rows={draft.relief_tiers} disabled={draft.status === 'published'} onChange={setRelief} /><RateRowsEditor title="Илүү цагийн үржүүлэгч" rows={draft.overtime_multipliers} disabled={draft.status === 'published'} onChange={(rows) => setRates('overtime_multipliers', rows)} /><label>Хуулийн заалт, албан эх сурвалжийн холбоос · мөр тус бүрээр<textarea disabled={draft.status === 'published'} rows={5} value={draft.source_references} onChange={(event) => set('source_references', event.target.value)} placeholder="Хуулийн нэр, зүйл заалт, legalinfo.mn холбоос" /></label>
-    </div><div className="monthly-rule-actions"><button className="payroll-v2-button secondary" disabled={busy || draft.status === 'published'} onClick={saveDraft}>Ноорог хадгалах</button><button className="payroll-v2-button secondary" disabled={busy || draft.status === 'published'} onClick={checkDraft}>Шалгах</button><button className="payroll-v2-button primary" disabled={busy || draft.status !== 'validated'} onClick={publishDraft}>Нийтлэх</button></div>{draft.status && <p className="monthly-rule-status">Төлөв: {draft.status === 'published' ? 'Нийтэлсэн' : draft.status === 'validated' ? 'Шалгалт тэнцсэн' : 'Ноорог'} · v{draft.version}</p>}{draft.status === 'draft' && <small>Эх сурвалж болон шатлалын утгыг шалгаж байж нийтлэх боломж нээгдэнэ.</small>}</>}
-    {!draft && rules.isLoading && <p>Хувилбар ачаалж байна…</p>}{!draft && rules.error && <p role="alert">{requestError(rules.error)}</p>}
-  </details>
+  const locked = draft?.status === 'published'
+  const statusToken = draft?.status === 'published' ? { color: 'green', label: 'Нийтэлсэн' } : draft?.status === 'validated' ? { color: 'blue', label: 'Шалгалт тэнцсэн' } : { color: 'gray', label: 'Ноорог' }
+  return <Card padding={5}>
+    <Collapsible defaultIsOpen={false} trigger={<SectionTitle title="Хууль, татварын хүчинтэй дүрмийн хувилбар" description="Шинэ дүрэм ноороглож, эх сурвалж тэмдэглэн шалгасны дараа нийтэлнэ. Нээсэн сарууд өөрийн дүрмийн хуулбарыг хадгална." />}>
+      <VStack gap={4} paddingBlockStart={4}>
+        <HStack gap={2} vAlign="end" wrap="wrap">
+          <Selector label="Хувилбар" width={320} value={draft?.id ? String(draft.id) : undefined} placeholder="Ноорог сонгох"
+            onChange={(value) => { const selected = rules.data?.find((item) => item.id === Number(value)); setDraft(selected ? ruleDraft(selected) : null) }}
+            options={(rules.data ?? []).map((item) => ({ value: String(item.id), label: `v${item.version} · ${item.status === 'published' ? 'Нийтэлсэн' : item.status === 'validated' ? 'Шалгасан' : 'Ноорог'} · ${item.valid_from}` }))} />
+          <Button label="Одоогийн дүрмээс шинэ хувилбар" variant="secondary" isDisabled={busy} onClick={() => startDraft()} />
+        </HStack>
+        {draft && <>
+          <Divider />
+          <Grid columns={{ minWidth: 240 }} gap={3}>
+            <DateInput label="Хүчинтэй эхлэх өдөр" value={(draft.valid_from || undefined) as ISODateString | undefined} format="system_date" onChange={(value) => set('valid_from', value ?? '')} isDisabled={locked} />
+            <DateInput label="Хүчинтэй дуусах өдөр" value={(draft.valid_to || undefined) as ISODateString | undefined} format="system_date" onChange={(value) => set('valid_to', value ?? '')} isDisabled={locked} isOptional />
+          </Grid>
+          <Grid columns={{ minWidth: 240 }} gap={3}>
+            <NumberInput label="Хөдөлмөрийн хөлсний доод хэмжээ" value={Number(draft.minimum_wage)} onChange={(value) => set('minimum_wage', String(value ?? 0))} min={1} isDisabled={locked} units="₮" />
+            <NumberInput label="НДШ дээд хязгаарын үржүүлэгч" value={Number(draft.shi_cap_multiplier)} onChange={(value) => set('shi_cap_multiplier', String(value ?? 0))} min={1} step={0.1} isDisabled={locked} units="дахин" />
+          </Grid>
+          <Divider />
+          <RateRowsEditor title="Ажилтны НДШ хувь" percent rows={draft.employee_rates} disabled={locked} onChange={(rows) => setRates('employee_rates', rows)} />
+          <RateRowsEditor title="Ажил олгогчийн НДШ хувь" percent rows={draft.employer_rates} disabled={locked} onChange={(rows) => setRates('employer_rates', rows)} />
+          <TierRowsEditor title="ХХОАТ шатлал" rows={draft.pit_brackets} disabled={locked} onChange={setPIT} />
+          <ReliefRowsEditor rows={draft.relief_tiers} disabled={locked} onChange={setRelief} />
+          <RateRowsEditor title="Илүү цагийн үржүүлэгч" rows={draft.overtime_multipliers} disabled={locked} onChange={(rows) => setRates('overtime_multipliers', rows)} />
+          <TextArea label="Хуулийн заалт, албан эх сурвалжийн холбоос" description="Мөр тус бүрд нэг эх сурвалж бичнэ." rows={5} isDisabled={locked}
+            value={draft.source_references} onChange={(value) => set('source_references', value)} placeholder="Хуулийн нэр, зүйл заалт, legalinfo.mn холбоос" />
+          <Divider />
+          <HStack gap={3} hAlign="between" vAlign="center" wrap="wrap">
+            <HStack gap={2} vAlign="center">
+              {draft.status && <Token size="sm" color={statusToken.color as 'green' | 'blue' | 'gray'} label={`${statusToken.label} · v${draft.version}`} />}
+              {draft.status === 'draft' && <Text type="supporting">Эх сурвалж болон шатлалын утгыг шалгаж байж нийтлэх боломж нээгдэнэ.</Text>}
+            </HStack>
+            <HStack gap={2}>
+              <Button label="Ноорог хадгалах" variant="secondary" isDisabled={busy || locked} onClick={saveDraft} />
+              <Button label="Шалгах" variant="secondary" isDisabled={busy || locked} onClick={checkDraft} />
+              <Button label="Нийтлэх" variant="primary" isDisabled={busy || draft.status !== 'validated'} onClick={publishDraft} />
+            </HStack>
+          </HStack>
+        </>}
+        {!draft && rules.isLoading && <Text type="supporting">Хувилбар ачаалж байна…</Text>}
+        {!draft && rules.error && <Banner status="error" collapsible={false} title={requestError(rules.error)} />}
+      </VStack>
+    </Collapsible>
+  </Card>
 }
 
+function RowsSection({ title, children, onAdd, addLabel, disabled }: { title: string; children: React.ReactNode; onAdd: () => void; addLabel: string; disabled: boolean }) {
+  return <VStack gap={2}>
+    <Heading level={5}>{title}</Heading>
+    {children}
+    <HStack><Button label={addLabel} variant="ghost" size="sm" icon={<Plus size={14} />} isDisabled={disabled} onClick={onAdd} /></HStack>
+  </VStack>
+}
+
+const RemoveButton = ({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) => <IconButton label={label} icon={<Trash2 size={14} />} size="sm" variant="ghost" isDisabled={disabled} onClick={onClick} />
+const cell = (value: number | null | undefined) => (value == null ? '' : String(value))
+
 function RateRowsEditor({ title, rows, disabled, percent = false, onChange }: { title: string; rows: RuleRateRow[]; disabled: boolean; percent?: boolean; onChange: (rows: RuleRateRow[]) => void }) {
-  return <fieldset className="monthly-rule-editor-fieldset"><legend>{title}</legend>{rows.map((row, index) => <div className="monthly-rule-edit-row rate" key={`${title}-${index}`}><label>Код<input aria-label={`${title}: код`} disabled={disabled} value={row.code} onChange={(event) => onChange(rows.map((item, i) => i === index ? { ...item, code: event.target.value } : item))} /></label><label>{percent ? 'Хувь (%)' : 'Үржүүлэгч'}<input aria-label={`${title}: утга`} type="number" min="0" max={percent ? 100 : undefined} step={percent ? '0.01' : '0.0001'} disabled={disabled} value={percent ? asPercent(row.rate) : row.rate} onChange={(event) => onChange(rows.map((item, i) => i === index ? { ...item, rate: percent ? String(Number(event.target.value || 0) / 100) : event.target.value } : item))} /></label><button type="button" className="payroll-v2-button compact secondary" disabled={disabled} aria-label={`${title} мөр хасах`} onClick={() => onChange(rows.filter((_, i) => i !== index))}>Хасах</button></div>)}<button type="button" className="payroll-v2-button compact secondary" disabled={disabled} onClick={() => onChange([...rows, { code: '', rate: '0' }])}>+ Мөр нэмэх</button></fieldset>
+  const edit = (index: number, patch: Partial<RuleRateRow>) => onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+  return <RowsSection title={title} disabled={disabled} addLabel="Мөр нэмэх" onAdd={() => onChange([...rows, { code: '', rate: '0' }])}>
+    {rows.map((row, index) => <HStack key={`${title}-${index}`} gap={2} vAlign="end" wrap="wrap">
+      <TextInput label="Код" width={200} value={row.code} isDisabled={disabled} onChange={(value) => edit(index, { code: value })} />
+      <NumberInput label={percent ? 'Хувь' : 'Үржүүлэгч'} width={160} value={Number(percent ? asPercent(row.rate) : row.rate)} min={0} max={percent ? 100 : undefined} step={percent ? 0.01 : 0.0001} units={percent ? '%' : 'дахин'} isDisabled={disabled}
+        onChange={(value) => edit(index, { rate: percent ? String(Number(((value ?? 0) / 100).toFixed(6))) : String(value ?? 0) })} />
+      <RemoveButton label={`${title} мөр хасах`} disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))} />
+    </HStack>)}
+  </RowsSection>
 }
 
 function TierRowsEditor({ title, rows, disabled, onChange }: { title: string; rows: RulePitRow[]; disabled: boolean; onChange: (rows: RulePitRow[]) => void }) {
-  const edit = (index: number, key: keyof RulePitRow, value: string) => onChange(rows.map((row, i) => i === index ? { ...row, [key]: value } : row))
-  return <fieldset className="monthly-rule-editor-fieldset"><legend>{title}</legend>{rows.map((row, index) => <div className="monthly-rule-edit-row tier" key={`pit-${index}`}><label>Эхлэх орлого<input type="number" min="0" step="1" disabled={disabled} value={row.lower} onChange={(event) => edit(index, 'lower', event.target.value)} /></label><label>Дуусах орлого<input type="number" min="0" step="1" disabled={disabled} value={row.upper} placeholder="Дээд хязгааргүй" onChange={(event) => edit(index, 'upper', event.target.value)} /></label><label>Хувь (%)<input type="number" min="0" max="100" step="0.1" disabled={disabled} value={asPercent(row.rate)} onChange={(event) => edit(index, 'rate', String(Number(event.target.value || 0) / 100))} /></label><label>Суурь татвар<input type="number" min="0" step="1" disabled={disabled} value={row.base_tax} onChange={(event) => edit(index, 'base_tax', event.target.value)} /></label><button type="button" className="payroll-v2-button compact secondary" disabled={disabled} aria-label={`${title} мөр хасах`} onClick={() => onChange(rows.filter((_, i) => i !== index))}>Хасах</button></div>)}<button type="button" className="payroll-v2-button compact secondary" disabled={disabled} onClick={() => { const previous = rows[rows.length - 1]; onChange([...rows, { lower: previous?.upper || previous?.lower || '0', upper: '', rate: '0', base_tax: '0' }]) }}>+ Шатлал нэмэх</button></fieldset>
+  const edit = (index: number, key: keyof RulePitRow, value: string) => onChange(rows.map((row, i) => (i === index ? { ...row, [key]: value } : row)))
+  const add = () => { const previous = rows[rows.length - 1]; onChange([...rows, { lower: previous?.upper || previous?.lower || '0', upper: '', rate: '0', base_tax: '0' }]) }
+  return <RowsSection title={title} disabled={disabled} addLabel="Шатлал нэмэх" onAdd={add}>
+    {rows.map((row, index) => <HStack key={`pit-${index}`} gap={2} vAlign="end" wrap="wrap">
+      <NumberInput label="Эхлэх орлого" width={150} value={Number(row.lower)} min={0} isDisabled={disabled} onChange={(value) => edit(index, 'lower', String(value ?? 0))} />
+      <NumberInput label="Дуусах орлого" width={150} value={row.upper === '' ? null : Number(row.upper)} min={0} hasClear placeholder="Дээд хязгааргүй" isDisabled={disabled} onChange={(value) => edit(index, 'upper', cell(value as number | null))} />
+      <NumberInput label="Хувь" width={120} value={Number(asPercent(row.rate))} min={0} max={100} step={0.1} units="%" isDisabled={disabled} onChange={(value) => edit(index, 'rate', String(Number(((value ?? 0) / 100).toFixed(6))))} />
+      <NumberInput label="Суурь татвар" width={150} value={Number(row.base_tax)} min={0} isDisabled={disabled} onChange={(value) => edit(index, 'base_tax', String(value ?? 0))} />
+      <RemoveButton label={`${title} мөр хасах`} disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))} />
+    </HStack>)}
+  </RowsSection>
 }
 
 function ReliefRowsEditor({ rows, disabled, onChange }: { rows: RuleReliefRow[]; disabled: boolean; onChange: (rows: RuleReliefRow[]) => void }) {
-  const edit = (index: number, key: keyof RuleReliefRow, value: string) => onChange(rows.map((row, i) => i === index ? { ...row, [key]: value } : row))
-  return <fieldset className="monthly-rule-editor-fieldset"><legend>Татварын хөнгөлөлтийн шатлал</legend>{rows.map((row, index) => <div className="monthly-rule-edit-row tier" key={`relief-${index}`}><label>Эхлэх орлого<input type="number" min="0" step="1" disabled={disabled} value={row.lower} onChange={(event) => edit(index, 'lower', event.target.value)} /></label><label>Дуусах орлого<input type="number" min="0" step="1" disabled={disabled} value={row.upper} placeholder="Дээд хязгааргүй" onChange={(event) => edit(index, 'upper', event.target.value)} /></label><label>Хөнгөлөлтийн дүн<input type="number" min="0" step="1" disabled={disabled} value={row.amount} onChange={(event) => edit(index, 'amount', event.target.value)} /></label><button type="button" className="payroll-v2-button compact secondary" disabled={disabled} aria-label="Хөнгөлөлтийн мөр хасах" onClick={() => onChange(rows.filter((_, i) => i !== index))}>Хасах</button></div>)}<button type="button" className="payroll-v2-button compact secondary" disabled={disabled} onClick={() => { const previous = rows[rows.length - 1]; onChange([...rows, { lower: previous?.upper || previous?.lower || '0', upper: '', amount: '0' }]) }}>+ Шатлал нэмэх</button></fieldset>
+  const edit = (index: number, key: keyof RuleReliefRow, value: string) => onChange(rows.map((row, i) => (i === index ? { ...row, [key]: value } : row)))
+  const add = () => { const previous = rows[rows.length - 1]; onChange([...rows, { lower: previous?.upper || previous?.lower || '0', upper: '', amount: '0' }]) }
+  return <RowsSection title="Татварын хөнгөлөлтийн шатлал" disabled={disabled} addLabel="Шатлал нэмэх" onAdd={add}>
+    {rows.map((row, index) => <HStack key={`relief-${index}`} gap={2} vAlign="end" wrap="wrap">
+      <NumberInput label="Эхлэх орлого" width={150} value={Number(row.lower)} min={0} isDisabled={disabled} onChange={(value) => edit(index, 'lower', String(value ?? 0))} />
+      <NumberInput label="Дуусах орлого" width={150} value={row.upper === '' ? null : Number(row.upper)} min={0} hasClear placeholder="Дээд хязгааргүй" isDisabled={disabled} onChange={(value) => edit(index, 'upper', cell(value as number | null))} />
+      <NumberInput label="Хөнгөлөлтийн дүн" width={170} value={Number(row.amount)} min={0} isDisabled={disabled} onChange={(value) => edit(index, 'amount', String(value ?? 0))} />
+      <RemoveButton label="Хөнгөлөлтийн мөр хасах" disabled={disabled} onClick={() => onChange(rows.filter((_, i) => i !== index))} />
+    </HStack>)}
+  </RowsSection>
 }
-

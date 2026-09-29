@@ -62,7 +62,7 @@ describe('ChartOfAccountsPage', () => {
 
   it('shows the active chart as a tree with purpose, bank details and usage', () => {
     renderPage()
-    expect(screen.getByRole('heading', { name: 'Дансны төлөвлөгөө' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Дансны төлөвлөгөө' })).not.toBeInTheDocument()
     expect(screen.getByText('Хаан банк · 5012345678')).toBeInTheDocument()
     expect(within(rowOf('Цалингийн зардал')).getByText('Журнал бичилт')).toBeInTheDocument()
     expect(within(rowOf('Цалингийн зардал')).getByText('└ 5100')).toBeInTheDocument()

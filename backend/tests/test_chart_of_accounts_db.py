@@ -128,6 +128,12 @@ def test_chart_of_accounts_flows_keep_posting_and_payroll_consistent():
             assert refused.status_code == 422 and "Зардал" in refused.json()["detail"]
             saved = await client.put("/v1/erp/payroll/monthly/settings", json={**settings, "salary_expense_account_id": accounts["5100"]["id"], "advance_clearing_account_id": advance["id"]})
             assert saved.status_code == 200, saved.text
+            # The advance may also be settled through the salary expense account; other classes are refused.
+            as_expense = await client.put("/v1/erp/payroll/monthly/settings", json={**settings, "advance_clearing_account_id": accounts["5100"]["id"]})
+            assert as_expense.status_code == 200, as_expense.text
+            as_income = await client.put("/v1/erp/payroll/monthly/settings", json={**settings, "advance_clearing_account_id": accounts["4000"]["id"]})
+            assert as_income.status_code == 422
+            await client.put("/v1/erp/payroll/monthly/settings", json={**settings, "salary_expense_account_id": accounts["5100"]["id"], "advance_clearing_account_id": advance["id"]})
             usage = {row["account_id"]: row for row in (await client.get("/v1/erp/accounting/accounts/usage")).json()}
             assert usage[accounts["5100"]["id"]]["modules"] == {"payroll": 1}
             assert usage[top["id"]]["modules"] == {"children": 1}

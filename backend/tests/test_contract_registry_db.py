@@ -33,6 +33,7 @@ def _tables():
         m.Organization, m.UserAccount, m.Employee, m.RoleAssignment, m.ERPParty, m.ERPUnitOfMeasure, m.Project, m.Task,
         m.AuditLog, m.DomainEvent, crm.ERPPaymentTerm, crm.ERPPartyGroup,
         c.ContractGroup, c.ContractDocument, c.ContractRevision, c.ContractReview, c.ContractComment, c.ContractFile,
+        c.ContractArchiveFolder, c.ContractArchiveEntry, c.ContractArchiveAccess,
     ]
     tables = {model.__table__ for model in seeds}
     grown = True
@@ -94,7 +95,7 @@ async def _api():
         await db.commit()
         ids = {"org": org.id, "head": head.id, "party": party.id, "foreign": foreign.id, "term": term.id, "unit": unit.id}
 
-    current = {"actor": actors["author"]}
+    current = {"actor": actors["author"], "sessions": sessions}
     api = FastAPI()
     api.include_router(contracts.router, prefix="/v1")
 
@@ -198,5 +199,74 @@ def test_contract_registry_metadata_codes_groups_and_filters():
             options = (await client.get("/v1/contracts/registry-options")).json()
             assert options["can_manage_groups"] is True
             assert {row["code"]: row["contract_count"] for row in options["groups"]} == {"SALES": 0, "SVC": 1}
+
+    asyncio.run(run())
+
+
+def test_archived_contracts_can_be_completed_with_contract_data():
+    """Uploaded archive files and archived signed contracts both accept the registry data."""
+    from app.models import contracts as c
+
+    async def run():
+        async with _api() as (client, current, actors, ids):
+            sessions = current["sessions"]
+            org = ids["org"]
+            async with sessions() as db:
+                folder = c.ContractArchiveFolder(organization_id=org, name="2024 он")
+                db.add(folder)
+                await db.flush()
+                upload = c.ContractArchiveEntry(organization_id=org, folder_id=folder.id, source="manual_upload", storage_key="k/1", name="Хуучин гэрээ.pdf", content_type="application/pdf", size=10, checksum="a" * 64)
+                db.add(upload)
+                await db.commit()
+                upload_id = upload.id
+
+            # A signed contract goes through the normal flow into the archive.
+            created = (await client.post("/v1/contracts", json=_draft(code="CT-9"))).json()
+            async with sessions() as db:
+                doc = await db.scalar(__import__("sqlalchemy").select(c.ContractDocument).where(c.ContractDocument.code == "CT-9"))
+                file_row = c.ContractFile(contract_id=doc.id, purpose="signed_final", storage_key="k/2", filename="signed.pdf", content_type="application/pdf", size=5, checksum="b" * 64)
+                db.add(file_row)
+                await db.flush()
+                entry = c.ContractArchiveEntry(organization_id=org, source="signed_contract", contract_id=doc.id, contract_file_id=file_row.id, name="signed.pdf", content_type="application/pdf", size=5, checksum="b" * 64)
+                db.add(entry)
+                await db.commit()
+                signed_entry_id = entry.id
+
+            # Only archive managers edit archived contract data.
+            assert (await client.patch(f"/v1/contract-archive/entries/{upload_id}/registry", json={"amount": "1"})).status_code == 403
+            current["actor"] = actors["admin"]
+            group = (await client.post("/v1/contracts/groups", json={"code": "OLD", "name": "Хуучин гэрээ"})).json()
+            saved = await client.patch(f"/v1/contract-archive/entries/{upload_id}/registry", json={
+                "code": "ГЭ-2024/001", "contract_number": "ГД-1/2024", "group_id": group["id"], "party_id": ids["party"], "signed_on": "2024-03-01",
+                "quantity": "10", "unit_id": ids["unit"], "unit_price": "1000", "amount": "10000", "currency": "usd", "penalty_pct": "0.3",
+                "payment_term_id": ids["term"], "note": "Сканнердсан", "links": [{"kind": "shared", "url": "https://drive.example/a.pdf"}],
+                "custom_fields": [{"label": "Хариуцагч", "value": "Б. Сараа"}],
+            })
+            assert saved.status_code == 200, saved.text
+            registry = saved.json()["registry"]
+            assert registry["holder"] == "entry" and registry["code"] == "ГЭ-2024/001" and registry["currency"] == "USD"
+            assert registry["party"]["name"] == "Салбар Харилцагч ХХК" and registry["group"]["code"] == "OLD" and registry["amount"] == 10000
+            assert registry["links"][0]["kind"] == "shared" and registry["file_count"] == 0
+
+            detail = (await client.get(f"/v1/contract-archive/entries/{upload_id}")).json()
+            assert detail["registry"]["contract_number"] == "ГД-1/2024"
+            assert any(event["operation"] == "registry_updated" for event in detail["timeline"])
+
+            # Codes stay unique across contract documents and archived files; foreign references are refused.
+            clash = await client.patch(f"/v1/contract-archive/entries/{upload_id}/registry", json={"code": "CT-9"})
+            assert clash.status_code == 409 and clash.json()["detail"]["code"] == "contract_code_taken"
+            other = await client.post("/v1/contracts", json=_draft(code="ГЭ-2024/001"))
+            assert other.status_code == 409
+            foreign = await client.patch(f"/v1/contract-archive/entries/{upload_id}/registry", json={"party_id": ids["foreign"]})
+            assert foreign.status_code == 422 and foreign.json()["detail"]["code"] == "contract_party_not_found"
+
+            # A group holding archived contracts cannot be deleted.
+            assert (await client.delete(f"/v1/contracts/groups/{group['id']}")).status_code == 409
+
+            filled = await client.patch(f"/v1/contract-archive/entries/{signed_entry_id}/registry", json={"party_id": ids["party"], "amount": "500", "signed_on": "2025-01-05"})
+            assert filled.status_code == 200, filled.text
+            assert filled.json()["registry"]["holder"] == "contract" and filled.json()["registry"]["amount"] == 500
+            contract = (await client.get(f"/v1/contracts/{created['public_id']}")).json()
+            assert contract["party"]["code"] == "10002" and contract["signed_on"] == "2025-01-05"
 
     asyncio.run(run())

@@ -109,7 +109,7 @@ describe('enterprise sidebar', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/erp/payroll']}><Routes><Route element={<EnterpriseShell />}><Route path="erp/payroll" element={<div>Payroll</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
     expect(screen.queryByRole('link', { name: 'ERP' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Payroll' })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: 'Цалин' })).toHaveClass('active')
   })
 
   it('uses a full in-app chat action and an icon-only Telegram squircle for workers', () => {

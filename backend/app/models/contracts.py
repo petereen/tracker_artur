@@ -256,6 +256,9 @@ class ContractArchiveEntry(Base):
         ),
         Index("ix_contract_archive_entries_folder", "organization_id", "folder_id", "review_status", "deleted_at"),
         Index("ix_contract_archive_entries_search", "organization_id", "name", "category"),
+        CheckConstraint("(quantity IS NULL OR quantity >= 0) AND (unit_price IS NULL OR unit_price >= 0) AND (amount IS NULL OR amount >= 0)", name="ck_contract_archive_entries_amounts_non_negative"),
+        CheckConstraint("penalty_pct IS NULL OR (penalty_pct >= 0 AND penalty_pct <= 100)", name="ck_contract_archive_entries_penalty_pct"),
+        Index("uq_contract_archive_entries_org_code", "organization_id", "code", unique=True, postgresql_where=sa_text("code IS NOT NULL AND deleted_at IS NULL")),
         Index(
             "uq_contract_archive_entries_active_contract",
             "contract_id",
@@ -290,6 +293,23 @@ class ContractArchiveEntry(Base):
     review_reason = Column(Text)
     expiry_on = Column(Date)
     expiry_reminder_days = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    # Contract data («Гэрээний бүртгэл») for manually uploaded files; archived signed contracts keep it on the contract document.
+    code = Column(String(64))
+    contract_number = Column(String(120))
+    group_id = Column(Integer, ForeignKey("contract_groups.id", ondelete="SET NULL"))
+    party_id = Column(Integer, ForeignKey("erp_parties.id", ondelete="SET NULL"))
+    signed_on = Column(Date)
+    quantity = Column(Numeric(18, 4))
+    unit_id = Column(Integer, ForeignKey("erp_units_of_measure.id", ondelete="SET NULL"))
+    unit_price = Column(Numeric(18, 4))
+    amount = Column(Numeric(18, 2))
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    penalty_pct = Column(Numeric(7, 4))
+    payment_term_id = Column(Integer, ForeignKey("erp_payment_terms.id", ondelete="SET NULL"))
+    note = Column(Text)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    links = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    custom_fields = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     author_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     reviewed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
