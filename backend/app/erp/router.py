@@ -25,6 +25,7 @@ from app.erp.service import (
     DEFAULT_ACCOUNTS, DOCUMENT_MODULES, DOCUMENT_TYPES, ERP_MODULES, MASTER_OPERATION_MODULES, MASTER_OPERATIONS, MODULE_SETTINGS_KEY, VALID_ACTIONS, as_money, calculate_lines,
     approval_required, bootstrap_organization, cancel_document, capability_scopes, default_workflow, document_out, ensure_definition, module_settings, next_number, operation_catalog, post_document, published_definition, record_workflow_transition, require_capability, require_phase5_gate, phase5_gate_status, scope_allows, validate_custom_fields, validate_definition_fields, validate_form_values, validate_workflow,
 )
+from app.erp.chart import BANK_FIELDS, account_usage, catalog as account_catalog, classify_import, descendant_ids, posting_type, validate_purpose
 from app.payroll.router import router as payroll_router
 from app.crm.router import router as crm_router
 from app.budget.router import router as budget_router
@@ -34,23 +35,58 @@ from app.crm.service import ensure_crm_defaults, party_flags_for_type
 
 router = APIRouter()
 
-PAYROLL_ROLE_CLASSIFICATIONS = {
-    "salary_expense": "expense", "employer_shi_expense": "expense",
-    "employee_shi_payable": "liability", "employer_shi_payable": "liability",
-    "pit_payable": "liability", "net_pay_payable": "liability",
-    "bank": "asset", "advance_clearing": "asset",
-}
-
-
 def _account_out(row: ERPAccount) -> dict[str, Any]:
-    return {"id": row.id, "code": row.code, "name": row.name, "account_type": row.account_type, "classification": row.classification, "purpose": row.purpose, "currency": row.currency, "parent_id": row.parent_id, "is_group": row.is_group, "is_active": row.is_active}
+    return {
+        "id": row.id, "code": row.code, "name": row.name, "account_type": row.account_type, "classification": row.classification, "purpose": row.purpose,
+        "currency": row.currency, "parent_id": row.parent_id, "is_group": row.is_group, "is_active": row.is_active,
+        **{field: getattr(row, field) for field in BANK_FIELDS},
+    }
 
 
 def _normalize_account_values(values: dict[str, Any]) -> None:
+    for key in ("code", "name"):
+        if isinstance(values.get(key), str):
+            values[key] = values[key].strip()
     values["currency"] = values["currency"].upper()
-    expected = PAYROLL_ROLE_CLASSIFICATIONS.get(values["purpose"])
-    if expected and values["classification"] != expected:
-        raise HTTPException(status_code=422, detail={"code": "payroll_account_classification_invalid", "purpose": values["purpose"]})
+    validate_purpose(values)
+    values["account_type"] = posting_type(values["purpose"], values["classification"])
+    # Bank details only mean something on cash/bank accounts (d047 «Мөнгөн хөрөнгө»).
+    keeps_bank = values["purpose"] in {"bank", "cash"} and not values.get("is_group")
+    for field in BANK_FIELDS:
+        value = (values.get(field) or "").strip() if keeps_bank else ""
+        values[field] = value or None
+    if values["bank_iban"]:
+        values["bank_iban"] = values["bank_iban"].replace(" ", "").upper()
+
+
+def _account_values(data: "AccountInput") -> dict[str, Any]:
+    """Validated column values for every account write path (API, master request)."""
+    values = data.model_dump()
+    _, imported_classification, imported_purpose = classify_import(values.pop("account_type") or "")
+    if not values["classification"]:
+        values["classification"] = imported_classification
+        if values["purpose"] == "general":
+            values["purpose"] = imported_purpose
+    if not values["code"] or not values["name"]:
+        raise HTTPException(status_code=422, detail={"code": "erp_account_code_name_required"})
+    _normalize_account_values(values)
+    return values
+
+
+async def _validate_account_parent(db: AsyncSession, organization_id: int, values: dict[str, Any], account: ERPAccount | None = None) -> None:
+    if not values["parent_id"]:
+        return
+    parent = await db.scalar(select(ERPAccount).where(ERPAccount.id == values["parent_id"], ERPAccount.organization_id == organization_id))
+    if not parent:
+        raise HTTPException(status_code=422, detail={"code": "erp_account_parent_invalid"})
+    if not parent.is_group or not parent.is_active or (account and parent.id == account.id):
+        raise HTTPException(status_code=422, detail={"code": "erp_account_parent_must_be_group"})
+    if parent.classification != values["classification"]:
+        raise HTTPException(status_code=422, detail={"code": "erp_account_parent_classification_mismatch"})
+    if account:
+        parents = dict((await db.execute(select(ERPAccount.id, ERPAccount.parent_id).where(ERPAccount.organization_id == organization_id))).all())
+        if parent.id in descendant_ids(parents, account.id):
+            raise HTTPException(status_code=422, detail={"code": "erp_account_parent_cycle"})
 
 
 async def _account_is_referenced(db: AsyncSession, account: ERPAccount) -> bool:
@@ -171,13 +207,18 @@ class WarehouseInput(BaseModel):
 class AccountInput(BaseModel):
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=240)
-    account_type: Literal["asset", "liability", "equity", "income", "expense", "cash", "receivable", "payable", "tax_payable", "tax_receivable", "inventory", "fixed_asset", "wip", "payroll_expense", "payroll_payable"]
+    # Legacy/import hint only; the stored posting type is derived from purpose.
+    account_type: str | None = Field(default=None, max_length=32)
     classification: Literal["asset", "liability", "equity", "income", "expense"] | None = None
     purpose: str = Field(default="general", min_length=1, max_length=32)
     currency: str = Field(default="MNT", min_length=3, max_length=3)
     parent_id: int | None = None
     is_group: bool = False
     is_active: bool = True
+    bank_name: str | None = Field(default=None, max_length=120)
+    bank_account_number: str | None = Field(default=None, max_length=64)
+    bank_iban: str | None = Field(default=None, max_length=34)
+    bank_account_holder: str | None = Field(default=None, max_length=200)
 
 
 class AccountingSettingsInput(BaseModel):
@@ -648,10 +689,11 @@ async def _materialize_master_request(db: AsyncSession, actor: ActorContext, req
         if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
         entity = ERPWarehouse(organization_id=actor.organization_id, **data.model_dump())
     elif operation == "chart_account":
-        data = AccountInput.model_validate(payload)
-        exists = await db.scalar(select(ERPAccount.id).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.code == data.code))
+        values = _account_values(AccountInput.model_validate(payload))
+        exists = await db.scalar(select(ERPAccount.id).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.code == values["code"]))
         if exists: raise HTTPException(status_code=409, detail={"code": "erp_master_request_stale_duplicate", "field": "code"})
-        entity = ERPAccount(organization_id=actor.organization_id, **data.model_dump())
+        await _validate_account_parent(db, actor.organization_id, values)
+        entity = ERPAccount(organization_id=actor.organization_id, **values)
     elif operation == "uom":
         data = UomRequestInput.model_validate(payload)
         exists = await db.scalar(select(ERPUnitOfMeasure.id).where(ERPUnitOfMeasure.organization_id == actor.organization_id, ERPUnitOfMeasure.code == data.code))
@@ -1031,8 +1073,8 @@ async def commit_import_batch(batch_id: int, db: AsyncSession = Depends(get_db),
         elif batch.entity == "accounts":
             if await db.scalar(select(ERPAccount.id).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.code == str(row["code"]))):
                 raise HTTPException(status_code=409, detail={"code": "erp_import_duplicate_account", "code": row["code"]})
-            account_type = str(row["account_type"]).casefold().replace(" ", "_")
-            db.add(ERPAccount(organization_id=actor.organization_id, code=str(row["code"]), name=str(row["name"]), account_type=account_type))
+            account_type, classification, purpose = classify_import(str(row["account_type"]))
+            db.add(ERPAccount(organization_id=actor.organization_id, code=str(row["code"]).strip(), name=str(row["name"]).strip(), account_type=account_type, classification=classification, purpose=purpose))
         elif batch.entity == "opening_stock":
             item = await db.scalar(select(ERPItem).where(ERPItem.organization_id == actor.organization_id, ERPItem.code == str(row["item_code"])))
             warehouse = await db.scalar(select(ERPWarehouse).where(ERPWarehouse.organization_id == actor.organization_id, ERPWarehouse.code == str(row["warehouse_code"])))
@@ -1125,6 +1167,20 @@ async def list_accounts(db: AsyncSession = Depends(get_db), actor: ActorContext 
     return [_account_out(row) for row in rows]
 
 
+@router.get("/accounting/accounts/catalog")
+async def account_catalog_route(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "accounts", "view")
+    return account_catalog()
+
+
+@router.get("/accounting/accounts/usage")
+async def account_usage_route(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Where each account is used (ledger, payroll, budget, …) — drives delete vs archive in the UI."""
+    await require_capability(db, actor, "accounts", "view")
+    usage = await account_usage(db, actor.organization_id)
+    return [{"account_id": account_id, "modules": modules, "total": sum(modules.values())} for account_id, modules in sorted(usage.items())]
+
+
 @router.get("/accounting/accounts/permissions")
 async def account_permissions(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     permissions = {}
@@ -1142,19 +1198,13 @@ async def account_permissions(db: AsyncSession = Depends(get_db), actor: ActorCo
 @router.post("/accounting/accounts", status_code=status.HTTP_201_CREATED)
 async def create_account(data: AccountInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "accounts", "create")
-    values = data.model_dump()
-    values["classification"] = values["classification"] or (values["account_type"] if values["account_type"] in {"asset", "liability", "equity", "income", "expense"} else "asset")
-    values["account_type"] = values["classification"]
-    _normalize_account_values(values)
-    if values["parent_id"]:
-        parent = await db.scalar(select(ERPAccount).where(ERPAccount.id == values["parent_id"], ERPAccount.organization_id == actor.organization_id))
-        if not parent:
-            raise HTTPException(status_code=422, detail={"code": "erp_account_parent_invalid"})
-        if not parent.is_group or not parent.is_active:
-            raise HTTPException(status_code=422, detail={"code": "erp_account_parent_must_be_group"})
+    values = _account_values(data)
+    await _validate_account_parent(db, actor.organization_id, values)
     account = ERPAccount(organization_id=actor.organization_id, **values)
     db.add(account)
     try:
+        await db.flush()
+        await record_change(db, actor=actor, topic="erp", aggregate_type="erp_account", aggregate_id=account.id, operation="created", after=_account_out(account))
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -1169,23 +1219,22 @@ async def update_account(account_id: int, data: AccountInput, db: AsyncSession =
     account = await db.scalar(select(ERPAccount).where(ERPAccount.id == account_id, ERPAccount.organization_id == actor.organization_id).with_for_update())
     if not account:
         raise HTTPException(status_code=404, detail={"code": "erp_account_not_found"})
-    values = data.model_dump()
-    values["classification"] = values["classification"] or (values["account_type"] if values["account_type"] in {"asset", "liability", "equity", "income", "expense"} else "asset")
-    values["account_type"] = values["classification"]
-    _normalize_account_values(values)
-    if values["parent_id"]:
-        parent = await db.scalar(select(ERPAccount).where(ERPAccount.id == values["parent_id"], ERPAccount.organization_id == actor.organization_id))
-        if not parent:
-            raise HTTPException(status_code=422, detail={"code": "erp_account_parent_invalid"})
-        if not parent.is_group or not parent.is_active or parent.id == account.id:
-            raise HTTPException(status_code=422, detail={"code": "erp_account_parent_must_be_group"})
+    values = _account_values(data)
+    await _validate_account_parent(db, actor.organization_id, values, account)
+    if account.is_group and not values["is_group"] and await db.scalar(select(ERPAccount.id).where(ERPAccount.parent_id == account.id).limit(1)):
+        raise HTTPException(status_code=409, detail={"code": "erp_account_group_has_children"})
     referenced = await _account_is_referenced(db, account)
-    protected = ("code", "classification", "purpose", "currency", "parent_id", "is_group")
-    if referenced and any(getattr(account, key) != values[key] for key in protected):
-        raise HTTPException(status_code=409, detail={"code": "erp_account_referenced_fields_locked"})
+    # Regrouping under another summary account (parent_id) never changes postings, so it stays editable.
+    protected = ("code", "classification", "purpose", "currency", "is_group")
+    changed = [key for key in protected if getattr(account, key) != values[key]]
+    if referenced and changed:
+        raise HTTPException(status_code=409, detail={"code": "erp_account_referenced_fields_locked", "fields": changed})
+    before = _account_out(account)
     for key, value in values.items():
         setattr(account, key, value)
     try:
+        await db.flush()
+        await record_change(db, actor=actor, topic="erp", aggregate_type="erp_account", aggregate_id=account.id, operation="updated", before=before, after=_account_out(account))
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -1211,6 +1260,7 @@ async def delete_account(account_id: int, db: AsyncSession = Depends(get_db), ac
                 db.add(ERPDeletedSeedAccount(organization_id=account.organization_id, code=account.code))
         await db.delete(account)
         outcome = "deleted"
+    await record_change(db, actor=actor, topic="erp", aggregate_type="erp_account", aggregate_id=account_id, operation=outcome, before={"code": account.code, "name": account.name})
     await db.commit()
     return {"id": account_id, "outcome": outcome}
 

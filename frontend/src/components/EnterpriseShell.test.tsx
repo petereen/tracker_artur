@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   workers: [] as any[],
   profile: null as any,
   payrollVisible: false,
+  accountsVisible: false,
   roles: ['manager'] as string[],
   openDirect: vi.fn(async () => ({ public_id: 'direct-1' })),
 }))
@@ -17,6 +18,7 @@ vi.mock('../api/enterprise', () => ({
   useActor: () => ({ data: { name: 'Manager', email: 'manager@example.com', roles: mocks.roles, locale: 'mn', avatar_url: null } }),
   useBrandingSettings: () => ({ data: {} }),
   useERPMetadata: () => ({ data: { modules: { payroll: mocks.payrollVisible }, module_labels: {}, document_modules: {}, actions: [], currency: 'MNT', custom_fields: [], roles: [], module_visibility_is_not_authorization: true }, isLoading: false }),
+  useERPAccountPermissions: () => ({ data: { view: mocks.accountsVisible, create: false, edit: false, administer: false } }),
   useEnterpriseLogout: () => ({ mutate: vi.fn() }),
   useWorkerDirectory: () => ({ data: mocks.workers }),
   useWorkerPerformance: () => ({ data: {} }),
@@ -33,7 +35,7 @@ vi.mock('./OyunsAssistant', () => ({ OyunsAssistant: () => null }))
 vi.mock('./Loading', () => ({ WorkspaceRouteSkeleton: () => null }))
 
 describe('enterprise sidebar', () => {
-  beforeEach(() => { mocks.workers = []; mocks.profile = null; mocks.payrollVisible = false; mocks.roles = ['manager']; mocks.openDirect.mockClear() })
+  beforeEach(() => { mocks.workers = []; mocks.profile = null; mocks.payrollVisible = false; mocks.accountsVisible = false; mocks.roles = ['manager']; mocks.openDirect.mockClear() })
   it('places company files immediately above the profile and logout controls', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
@@ -90,6 +92,15 @@ describe('enterprise sidebar', () => {
     expect(links[8].parentElement).not.toHaveClass('nav-group-break')
     expect(links[9].parentElement).not.toHaveClass('nav-group-break')
     expect(links[10].parentElement).toHaveClass('nav-group-break')
+  })
+
+  it('links the chart of accounts when the actor may view accounts', () => {
+    mocks.accountsVisible = true
+    mocks.roles = ['admin']
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/erp/accounts']}><Routes><Route element={<EnterpriseShell />}><Route path="erp/accounts" element={<div>Accounts</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
+    expect(screen.getByRole('link', { name: 'Данс' })).toHaveAttribute('href', '/erp/accounts')
+    expect(screen.getByRole('link', { name: 'Данс' })).toHaveClass('active')
   })
 
   it('does not keep ERP active while Payroll is selected', () => {

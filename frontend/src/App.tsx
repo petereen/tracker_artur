@@ -22,6 +22,7 @@ const EnterpriseTasksPage = lazy(() => import('./pages/EnterpriseTasksPage').the
 const CalendarWorkspacePage = lazy(() => import('./pages/CalendarWorkspacePage').then((module) => ({ default: module.CalendarWorkspacePage })))
 const StatsWorkspacePage = lazy(() => import('./pages/StatsWorkspacePage').then((module) => ({ default: module.StatsWorkspacePage })))
 const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
+const ChartOfAccountsPage = lazy(() => import('./pages/ChartOfAccountsPage').then((module) => ({ default: module.ChartOfAccountsPage })))
 const CRMWorkspacePage = lazy(() => import('./pages/CRMWorkspacePage').then((module) => ({ default: module.CRMWorkspacePage })))
 const BudgetWorkspacePage = lazy(() => import('./pages/BudgetWorkspacePage').then((module) => ({ default: module.BudgetWorkspacePage })))
 const ERPWorkspacePage = lazy(() => import('./pages/ERPWorkspacePage').then((module) => ({ default: module.ERPWorkspacePage })))
@@ -136,6 +137,8 @@ function AuthenticatedApp() {
         <Route path="erp/crm/customers/:partyId" element={<CRMWorkspacePage />} />
         <Route path="erp/crm/settings" element={<CRMWorkspacePage />} />
         {/* Budget is authorized by ERP capabilities (budget / budget_settings), like CRM. */}
+        {/* Chart of accounts is authorized by the ERP `accounts` capability (Accountant, admin; manager/team_lead view). */}
+        <Route path="erp/accounts" element={<ChartOfAccountsPage />} />
         <Route path="erp/budget" element={<BudgetWorkspacePage />} />
         <Route path="erp/budget/analysis" element={<BudgetWorkspacePage />} />
         <Route path="erp/budget/accounts" element={<BudgetWorkspacePage />} />
