@@ -7,12 +7,14 @@ import {
   useDeleteCRMParty, useRefreshCRMTaxStatus, useSaveCRMBankAccount, useSaveCRMContact, useUploadCRMFile,
   type CRMActivity, type CRMBankAccount, type CRMCapabilities, type CRMContact, type CRMLookups, type CRMPartyDetail,
 } from '../../api/crm'
+import { useContractList } from '../../api/enterprise'
 import { Badge, Btn, Modal } from '../ui'
 import { ActivitiesPanel } from './ActivitiesPanel'
 import { CheckField, Field, TextInput, crmErrorText, formatDate, formatDateTime, formatMoney } from './shared'
 
-type Tab = 'overview' | 'contacts' | 'bank' | 'activities' | 'documents' | 'files' | 'history'
-const TAB_LABELS: Record<Tab, string> = { overview: 'Ерөнхий', contacts: 'Холбоо барих', bank: 'Банкны данс', activities: 'Харилцаа холбоо', documents: 'Баримтууд', files: 'Файл', history: 'Лог' }
+type Tab = 'overview' | 'contacts' | 'bank' | 'activities' | 'contracts' | 'documents' | 'files' | 'history'
+const TAB_LABELS: Record<Tab, string> = { overview: 'Ерөнхий', contacts: 'Холбоо барих', bank: 'Банкны данс', activities: 'Харилцаа холбоо', contracts: 'Гэрээ', documents: 'Баримтууд', files: 'Файл', history: 'Лог' }
+const CONTRACT_STATUS_LABELS: Record<string, string> = { DRAFT: 'Ноорог', PENDING_REVIEW: 'Хянагдаж байна', CHANGES_REQUESTED: 'Засвар шаардлагатай', APPROVED: 'Баталгаажсан', REJECTED: 'Буцаагдсан', SIGNED_AND_STAMPED: 'Гарын үсэг зурсан' }
 const FIELD_LABELS: Record<string, string> = {
   code: 'Код', name: 'Нэр', registry_no: 'РД', tax_id: 'ТТД', group_id: 'Бүлэг', price_list_id: 'Үнийн жагсаалт', sales_discount_pct: 'Борлуулалт %',
   customer_since: 'Харилцагч болсон', inactive_since: 'Идэвхгүй болсон', status: 'Төлөв', responsible_employee_id: 'Хариуцагч', parent_party_id: 'Толгой харилцагч',
@@ -84,6 +86,7 @@ export function CustomerDetail({ partyId, lookups, capabilities, isManager, onCl
         {tab === 'contacts' && <Contacts party={data} canEdit={canEdit} />}
         {tab === 'bank' && <BankAccounts party={data} canEdit={canEdit} />}
         {tab === 'activities' && <ActivitiesPanel compact lookups={lookups} capabilities={capabilities} isManager={isManager} partyId={data.id} onOpen={onOpenActivity} onCreate={() => onNewActivity(data)} />}
+        {tab === 'contracts' && <Contracts partyId={data.id} />}
         {tab === 'documents' && <Documents party={data} />}
         {tab === 'files' && <Files partyId={data.id} canEdit={canEdit} />}
         {tab === 'history' && <History partyId={data.id} lookups={lookups} />}
@@ -213,6 +216,26 @@ function BankModal({ partyId, account, onClose }: { partyId: number; account: CR
 }
 
 const DOCUMENT_LABELS: Record<string, string> = { quotation: 'Үнийн санал', sales_order: 'Борлуулалтын захиалга', delivery: 'Хүргэлт', sales_invoice: 'Нэхэмжлэх', sales_credit_note: 'Кредит нот', purchase_order: 'Худалдан авалтын захиалга', purchase_receipt: 'Бараа хүлээн авалт', purchase_invoice: 'Худалдан авалтын нэхэмжлэх', payment_entry: 'Төлбөр', lead: 'Lead', opportunity: 'Боломж' }
+
+/** Contracts registered with this counterparty (d028); lists only the ones the viewer may open. */
+function Contracts({ partyId }: { partyId: number }) {
+  const contracts = useContractList('registry', { party_id: partyId })
+  const rows = contracts.data?.items ?? []
+  return <div className="crm-list">
+    {rows.map((row) => <article key={row.public_id}>
+      <div>
+        <strong>{row.code ? `${row.code} · ` : ''}{row.title}</strong>
+        <small>{[row.contract_number && `№${row.contract_number}`, CONTRACT_STATUS_LABELS[row.status] || row.status, row.signed_on && formatDate(row.signed_on), row.effective_end_on && `дуусах ${formatDate(row.effective_end_on)}`, row.is_active === false && 'идэвхгүй'].filter(Boolean).join(' · ')}</small>
+      </div>
+      <div className="crm-row-actions">
+        {row.amount !== null && row.amount !== undefined && <strong>{formatMoney(row.amount, row.currency)}</strong>}
+        <a className="secondary-action" href={`/contracts/${row.public_id}`} aria-label="Гэрээ нээх"><ExternalLink size={13} /></a>
+      </div>
+    </article>)}
+    {!rows.length && <div className="hr-empty">{contracts.isLoading ? 'Ачаалж байна…' : 'Энэ харилцагчтай бүртгэлтэй гэрээ алга (эсвэл танд харах эрх байхгүй)'}</div>}
+    <a className="secondary-action" style={{ width: 'fit-content' }} href={`/contracts?party=${partyId}`}>Гэрээний жагсаалтаас харах</a>
+  </div>
+}
 
 function Documents({ party }: { party: CRMPartyDetail }) {
   const [includeChildren, setIncludeChildren] = useState(false)

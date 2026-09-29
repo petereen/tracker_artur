@@ -23,6 +23,7 @@ from app.models.contracts import ContractDocument
 from app.models.models import (
     Department,
     Employee,
+    ERPParty,
     MonthlyPayrollMonth,
     MonthlyPayrollRun,
     MonthlyPayrollRunRow,
@@ -358,20 +359,29 @@ async def contracts_search(db: AsyncSession, actor: ActorContext, data: schemas.
     today = datetime.now(await _zone(db, actor)).date()
     filters = [chat_share_service._contract_clause(actor)]
     if data.query:
-        filters.append(ContractDocument.title.ilike(f"%{data.query.strip()}%"))
+        pattern = f"%{data.query.strip()}%"
+        filters.append(or_(ContractDocument.title.ilike(pattern), ContractDocument.code.ilike(pattern), ContractDocument.contract_number.ilike(pattern), ERPParty.name.ilike(pattern)))
     if data.status:
         filters.append(ContractDocument.status == data.status)
     if data.expiring_within_days:
         filters.append(and_(ContractDocument.effective_end_on >= today, ContractDocument.effective_end_on <= today + timedelta(days=data.expiring_within_days)))
-    total = int(await db.scalar(select(func.count()).select_from(ContractDocument).where(*filters)) or 0)
+    total = int(await db.scalar(select(func.count()).select_from(ContractDocument).outerjoin(ERPParty, ERPParty.id == ContractDocument.party_id).where(*filters)) or 0)
     order = ContractDocument.effective_end_on.asc().nulls_last() if data.expiring_within_days else ContractDocument.updated_at.desc()
     rows = (await db.execute(
-        select(ContractDocument, Employee.name).outerjoin(Employee, Employee.id == ContractDocument.author_employee_id)
+        select(ContractDocument, Employee.name, ERPParty.name).outerjoin(Employee, Employee.id == ContractDocument.author_employee_id)
+        .outerjoin(ERPParty, ERPParty.id == ContractDocument.party_id)
         .where(*filters).order_by(order).limit(data.limit)
     )).all()
     items = [
         {
+            "code": contract.code,
+            "contract_number": contract.contract_number,
             "title": contract.title,
+            "counterparty": party_name,
+            "amount": float(contract.amount) if contract.amount is not None else None,
+            "currency": contract.currency if contract.amount is not None else None,
+            "signed_on": contract.signed_on,
+            "is_active": contract.is_active,
             "document_type": contract.document_type,
             "status": contract.status,
             "author": author,
@@ -382,7 +392,7 @@ async def contracts_search(db: AsyncSession, actor: ActorContext, data: schemas.
             "updated_at": contract.updated_at,
             "open_url": _app_link(f"/contracts/{contract.public_id}"),
         }
-        for contract, author in rows
+        for contract, author, party_name in rows
     ]
     return {"status": "ok" if items else "empty", "data": {"items": items, "total": total}}
 

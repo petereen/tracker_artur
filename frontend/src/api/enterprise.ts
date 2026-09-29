@@ -312,31 +312,80 @@ export interface SavedView { id: number; module: string; name: string; view_type
 
 export type ContractStatus = 'DRAFT' | 'PENDING_REVIEW' | 'CHANGES_REQUESTED' | 'APPROVED' | 'REJECTED' | 'SIGNED_AND_STAMPED'
 export type ContractDocumentType = 'contract' | 'agreement' | 'official_letter' | 'other'
-export interface ContractSummary {
+export type ContractSummary = {
   id: number; public_id: string; title: string; document_type: ContractDocumentType; status: ContractStatus
   author_account_id: number; author_name?: string | null; project_id: number | null; task_id: number | null
   effective_start_on?: string | null; effective_end_on?: string | null; expiry_reminder_days: number[]; submission_round: number; version: number
   current_revision_id: number | null; approved_revision_id: number | null; approved_at?: string | null; signed_at?: string | null
   excerpt?: string; created_at: string; updated_at: string
+} & Partial<ContractRegistry>
+export interface ContractRef { id: number; code: string; name: string }
+export interface ContractLink { kind: 'online' | 'shared' | 'path'; label: string; url: string }
+export interface ContractCustomField { label: string; value: string }
+/** Dayansoft d028 «Гэрээ бүртгэх» registry metadata carried by every contract. */
+export interface ContractRegistry {
+  code: string | null; contract_number: string | null
+  group_id: number | null; group: ContractRef | null
+  party_id: number | null; party: ContractRef | null; head_party: ContractRef | null
+  signed_on: string | null; quantity: number | null; unit_id: number | null; unit: (ContractRef & { symbol: string | null }) | null
+  unit_price: number | null; amount: number | null; currency: string; penalty_pct: number | null
+  payment_term_id: number | null; payment_term: ContractRef | null; note: string | null
+  is_active: boolean; links: ContractLink[]; custom_fields: ContractCustomField[]; overdue_days: number; file_count: number
 }
+export interface ContractRegistryInput {
+  code?: string | null; contract_number?: string | null; group_id?: number | null; party_id?: number | null; signed_on?: string | null
+  quantity?: string | null; unit_id?: number | null; unit_price?: string | null; amount?: string | null; currency?: string | null
+  penalty_pct?: string | null; payment_term_id?: number | null; note?: string | null; links?: ContractLink[]; custom_fields?: ContractCustomField[]
+}
+export interface ContractGroup { id: number; code: string; name: string; parent_id: number | null; is_active: boolean; contract_count: number }
+export interface ContractRegistryOptions {
+  next_code: string; groups: ContractGroup[]; can_manage_groups: boolean
+  units: Array<ContractRef & { symbol: string | null }>; payment_terms: Array<ContractRef & { days: number }>
+}
+export interface ContractPartyOption extends ContractRef { tax_id: string | null; is_customer: boolean; is_supplier: boolean; currency: string; payment_term_id: number | null; head_party: ContractRef | null }
+export interface ContractListFilters { search?: string; party_id?: number; group_id?: number; active?: boolean; date_from?: string; date_to?: string }
 export interface ContractReview { id: number; round_number: number; reviewer_account_id: number; reviewer_employee_id: number | null; reviewer_name: string; decision: 'pending' | 'approved' | 'changes_requested' | 'rejected'; remark: string | null; acted_at: string | null }
 export interface ContractRevision { id: number; revision_number: number; title: string; body_json: Record<string, unknown>; plain_text: string; checksum: string; created_at: string; author_account_id: number | null }
 export interface ContractComment { id: number; revision_id: number; parent_id: number | null; author_account_id: number | null; body: string; anchor: { from?: number; to?: number; quote?: string } | null; is_resolved: boolean; created_at: string }
 export interface ContractFile { id: number; purpose: 'supporting' | 'signed_final'; filename: string; content_type: string; size: number; checksum: string; scan_status: string; confirmed_at: string | null; created_at: string }
 export interface ContractDetail extends ContractSummary { body_json: Record<string, unknown> | null; approved_body_json: Record<string, unknown> | null; reviewer_account_ids: number[]; revisions: ContractRevision[]; reviews: ContractReview[]; comments: ContractComment[]; files: ContractFile[]; timeline: Array<{ id: number; operation: string; actor_account_id: number | null; before: Record<string, unknown> | null; after: Record<string, unknown> | null; created_at: string }> }
-export interface ContractListResponse { items: ContractSummary[]; counts: Record<'all' | 'drafts' | 'pending_my_approval' | 'submitted_by_me' | 'approved' | 'signed' | 'returned', number> }
+export interface ContractListResponse { items: ContractSummary[]; counts: Record<'all' | 'drafts' | 'pending_my_approval' | 'submitted_by_me' | 'approved' | 'signed' | 'returned', number> & { registry?: number } }
 export interface ContractReviewerCandidate { account_id: number; employee_id: number; name: string; job_title: string | null }
 
 const contractKeys = ['v1', 'contracts'] as const
-export function useContractList(view: string) { return useQuery<ContractListResponse>({ queryKey: [...contractKeys, view], queryFn: () => api.get('/v1/contracts', { params: { view } }).then((r) => r.data) }) }
+export function useContractList(view: string, filters: ContractListFilters = {}) { return useQuery<ContractListResponse>({ queryKey: [...contractKeys, view, filters], queryFn: () => api.get('/v1/contracts', { params: { view, ...filters } }).then((r) => r.data) }) }
+export function useContractRegistryOptions() { return useQuery<ContractRegistryOptions>({ queryKey: [...contractKeys, 'registry-options'], queryFn: () => api.get('/v1/contracts/registry-options').then((r) => r.data) }) }
+export function useContractPartyOptions(search: string, selectedId?: number | null) {
+  return useQuery<ContractPartyOption[]>({
+    queryKey: [...contractKeys, 'party-options', search, selectedId ?? null],
+    queryFn: async () => {
+      const rows: ContractPartyOption[] = (await api.get('/v1/contracts/party-options', { params: { q: search || undefined } })).data
+      if (selectedId && !rows.some((row) => row.id === selectedId)) {
+        const selected: ContractPartyOption[] = (await api.get('/v1/contracts/party-options', { params: { ids: selectedId } })).data
+        return [...selected, ...rows]
+      }
+      return rows
+    },
+  })
+}
+export function useUpdateContractRegistry() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ publicId, ...input }: { publicId: string; contract_number?: string | null; is_active?: boolean; note?: string | null; links?: ContractLink[]; custom_fields?: ContractCustomField[] }) => api.patch(`/v1/contracts/${publicId}/registry`, input).then((r) => r.data),
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) },
+  })
+}
+export function useCreateContractGroup() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { code: string; name: string; parent_id?: number | null }) => api.post('/v1/contracts/groups', input).then((r) => r.data as ContractGroup), onSuccess: () => qc.invalidateQueries({ queryKey: [...contractKeys, 'registry-options'] }) }) }
+export function useUpdateContractGroup() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...input }: { id: number; code?: string; name?: string; parent_id?: number | null; is_active?: boolean }) => api.patch(`/v1/contracts/groups/${id}`, input).then((r) => r.data as ContractGroup), onSuccess: () => qc.invalidateQueries({ queryKey: [...contractKeys, 'registry-options'] }) }) }
+export function useDeleteContractGroup() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/v1/contracts/groups/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: [...contractKeys, 'registry-options'] }) }) }
 export function useContractDetail(publicId?: string) { return useQuery<ContractDetail>({ queryKey: [...contractKeys, 'detail', publicId], queryFn: () => api.get(`/v1/contracts/${publicId}`).then((r) => r.data), enabled: Boolean(publicId) }) }
 export function useContractReviewerCandidates() { return useQuery<ContractReviewerCandidate[]>({ queryKey: [...contractKeys, 'reviewer-candidates'], queryFn: () => api.get('/v1/contracts/reviewer-candidates').then((r) => r.data) }) }
-export function useCreateContract() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { title: string; document_type: ContractDocumentType; body_json: Record<string, unknown>; reviewer_account_ids: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null; expiry_reminder_days: number[] }) => api.post('/v1/contracts', input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: contractKeys }) }) }
+export function useCreateContract() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: ContractRegistryInput & { title: string; document_type: ContractDocumentType; body_json: Record<string, unknown>; reviewer_account_ids: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null; expiry_reminder_days: number[] }) => api.post('/v1/contracts', input).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: contractKeys }) }) }
 export function useUpdateContract() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ publicId, version, ...input }: { publicId: string; version: number; title?: string; document_type?: ContractDocumentType; body_json?: Record<string, unknown>; reviewer_account_ids?: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null; expiry_reminder_days?: number[] }) => api.patch(`/v1/contracts/${publicId}`, input, { headers: { 'If-Match': String(version) } }).then((r) => r.data),
-    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }),
+    mutationFn: ({ publicId, version, ...input }: ContractRegistryInput & { publicId: string; version: number; title?: string; document_type?: ContractDocumentType; body_json?: Record<string, unknown>; reviewer_account_ids?: number[]; project_id?: number | null; task_id?: number | null; effective_start_on?: string | null; effective_end_on?: string | null; expiry_reminder_days?: number[] }) => api.patch(`/v1/contracts/${publicId}`, input, { headers: { 'If-Match': String(version) } }).then((r) => r.data),
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) },
   })
 }
 function contractAction(path: string) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, ...input }: { publicId: string; remark?: string; effective_end_on?: string; expiry_reminder_days?: number[] }) => api.post(`/v1/contracts/${publicId}/${path}`, input).then((r) => r.data), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Үйлдэл амжилтгүй боллоо') }) }
