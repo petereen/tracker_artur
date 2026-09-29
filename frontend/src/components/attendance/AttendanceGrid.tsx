@@ -3,7 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { createPortal } from 'react-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Check, ChevronLeft, ChevronRight, Clock3, Download, Laptop, RotateCcw, Thermometer, TreePalm, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Clock3, Download, FileSpreadsheet, Laptop, RotateCcw, Thermometer, TreePalm, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
@@ -20,6 +20,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { VStack } from '@astryxdesign/core/VStack'
 import { saveCompanyBlob, useBulkUpdateHRAttendance, useHRAttendance, useResetHRAttendance, useUpdateHRAttendance } from '../../api/enterprise'
 import type { HRAttendanceItem, HRAttendanceStatus } from '../../api/enterprise'
+import { WorktimeExportModal } from '../WorktimeExportModal'
 import {
   ALL_DEPARTMENTS, EDITABLE_STATUSES, NO_DEPARTMENT, STATUS_LABELS, WEEKDAYS,
   buildCsv, buildRows, cellKey, chunk, filterRows, periodDates, periodLabel, periodRange, rectKeys, rowSelection, shiftPeriod, toISODate, toggleKeys, weekdayIndex,
@@ -176,6 +177,7 @@ export function AttendanceGrid({ canEdit, onOpenLeave }: { canEdit: boolean; onO
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
   const [active, setActive] = useState<Point | null>(null)
   const [editor, setEditor] = useState<Point | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(600)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -408,6 +410,7 @@ export function AttendanceGrid({ canEdit, onOpenLeave }: { canEdit: boolean; onO
         <TextInput label="Ажилтан хайх" isLabelHidden size="sm" placeholder="Нэр эсвэл ID…" value={searchInput} onChange={setSearchInput} hasClear width={220} />
         <Selector label="Алба/нэгж" isLabelHidden size="sm" options={departments} value={department} onChange={(value) => setDepartment(value ?? ALL_DEPARTMENTS)} width={200} />
         <Button label="CSV" size="sm" icon={<Download size={14} />} isDisabled={!visibleRows.length} onClick={exportCsv} tooltip="Шүүсэн жагсаалтыг татах" />
+        {canEdit && <Button label="Тайлан татах" size="sm" icon={<FileSpreadsheet size={14} />} onClick={() => setExportOpen(true)} tooltip="Ажлын цагийн дэлгэрэнгүй тайлан (CSV/Excel)" />}
       </HStack>
     </HStack>
 
@@ -446,6 +449,7 @@ export function AttendanceGrid({ canEdit, onOpenLeave }: { canEdit: boolean; onO
 
     <Legend />
     {editor && editorCell && editorAnchor && <CellEditor cell={editorCell} rowName={visibleRows[editor.r].name} anchor={editorAnchor} canEdit={canEdit} onPick={pickStatus} onReset={resetCell} onClose={closeEditor} onOpenLeave={onOpenLeave} />}
+    {exportOpen && <WorktimeExportModal onClose={() => setExportOpen(false)} />}
   </VStack>
 }
 

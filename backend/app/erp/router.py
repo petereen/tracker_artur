@@ -27,6 +27,8 @@ from app.erp.service import (
 )
 from app.payroll.router import router as payroll_router
 from app.crm.router import router as crm_router
+from app.budget.router import router as budget_router
+from app.budget.service import ensure_budget_defaults
 from app.crm.service import ensure_crm_defaults, party_flags_for_type
 
 
@@ -764,6 +766,8 @@ async def update_modules(data: ModulesInput, db: AsyncSession = Depends(get_db),
     await bootstrap_organization(db, organization.id)
     if data.modules.get("crm"):
         await ensure_crm_defaults(db, organization.id)
+    if data.modules.get("budget"):
+        await ensure_budget_defaults(db, organization.id)
     await record_change(db, actor=actor, topic="erp", aggregate_type="erp_module_settings", aggregate_id=organization.id, operation="updated", after={MODULE_SETTINGS_KEY: settings[MODULE_SETTINGS_KEY]})
     await db.commit()
     return {"modules": module_settings(settings), "notice": "Visibility changes do not disable APIs, integrations, or existing automations."}
@@ -1900,3 +1904,4 @@ async def outstanding_invoices(kind: Literal["receivable", "payable"], db: Async
 # cannot create new payroll documents.
 router.include_router(payroll_router, prefix="/payroll")
 router.include_router(crm_router, prefix="/crm")
+router.include_router(budget_router, prefix="/budget")

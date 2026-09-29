@@ -23,6 +23,7 @@ const CalendarWorkspacePage = lazy(() => import('./pages/CalendarWorkspacePage')
 const StatsWorkspacePage = lazy(() => import('./pages/StatsWorkspacePage').then((module) => ({ default: module.StatsWorkspacePage })))
 const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage').then((module) => ({ default: module.EnterpriseReportsPage })))
 const CRMWorkspacePage = lazy(() => import('./pages/CRMWorkspacePage').then((module) => ({ default: module.CRMWorkspacePage })))
+const BudgetWorkspacePage = lazy(() => import('./pages/BudgetWorkspacePage').then((module) => ({ default: module.BudgetWorkspacePage })))
 const ERPWorkspacePage = lazy(() => import('./pages/ERPWorkspacePage').then((module) => ({ default: module.ERPWorkspacePage })))
 const PayrollWorkspacePage = lazy(() => import('./pages/PayrollWorkspacePage').then((module) => ({ default: module.PayrollWorkspacePage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
@@ -134,6 +135,11 @@ function AuthenticatedApp() {
         <Route path="erp/crm/customers" element={<CRMWorkspacePage />} />
         <Route path="erp/crm/customers/:partyId" element={<CRMWorkspacePage />} />
         <Route path="erp/crm/settings" element={<CRMWorkspacePage />} />
+        {/* Budget is authorized by ERP capabilities (budget / budget_settings), like CRM. */}
+        <Route path="erp/budget" element={<BudgetWorkspacePage />} />
+        <Route path="erp/budget/analysis" element={<BudgetWorkspacePage />} />
+        <Route path="erp/budget/accounts" element={<BudgetWorkspacePage />} />
+        <Route path="erp/budget/:budgetId" element={<BudgetWorkspacePage />} />
         <Route element={<RequireRoles allowedRoles={PAYROLL_ROLES} />}>
           <Route path="erp/payroll" element={<PayrollWorkspacePage />} />
           <Route path="erp/payroll/setup" element={<PayrollWorkspacePage />} />

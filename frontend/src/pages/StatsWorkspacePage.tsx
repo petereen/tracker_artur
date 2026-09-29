@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Download } from "lucide-react";
 import {
   AnalyticsMetric,
   useDailyAnalytics,
@@ -13,7 +12,6 @@ import { HeatmapCalendar } from "../components/HeatmapCalendar";
 import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
 import { QueryRegion, Skeleton, combineQueryRegionStates, toQueryRegionState } from "../components/Loading";
 import { DropdownSelect } from "../components/DropdownSelect";
-import { WorktimeExportModal } from "../components/WorktimeExportModal";
 
 const LazyWorkHourHierarchyChart = lazy(() => import('../components/WorkHourHierarchyChart').then((module) => ({ default: module.WorkHourHierarchyChart })))
 
@@ -54,9 +52,6 @@ export function StatsWorkspacePage() {
   const canReview = roles.some((role) =>
     ["admin", "manager", "team_lead", "hr"].includes(role),
   );
-  const canExportWorktime = roles.some((role) =>
-    ["admin", "manager", "team_lead", "hr"].includes(role),
-  );
   const isAdmin = roles.includes("admin");
   const { isManagerMode, isEligible } = useWorkspaceMode();
   const [employeeId, setEmployeeId] = useState<number | undefined>(() =>
@@ -69,7 +64,6 @@ export function StatsWorkspacePage() {
       setEmployeeId((current) => current ?? actor.employee_id ?? undefined);
     }
   }, [actor?.employee_id, isAdmin, isEligible, isManagerMode]);
-  const [exportOpen, setExportOpen] = useState(false);
   const canSeeFinancials = roles.some((role) => ["admin", "manager"].includes(role));
   const workers = useWorkerDirectory();
   const summary = useEnterpriseSummary(period, employeeId);
@@ -109,17 +103,6 @@ export function StatsWorkspacePage() {
                 ...(workers.data?.map((worker) => ({ value: String(worker.id), label: worker.name })) ?? []),
               ]}
             />
-          )}
-          {canExportWorktime && (
-            <button
-              type="button"
-              className="secondary-action stats-worktime-export-trigger"
-              aria-label="Export Worktime"
-              onClick={() => setExportOpen(true)}
-            >
-              <Download aria-hidden="true" size={16} strokeWidth={2.25} />
-              <span className="stats-worktime-export-label">Export</span>
-            </button>
           )}
           <TimePeriodFilter
             preset={preset}
@@ -220,7 +203,6 @@ export function StatsWorkspacePage() {
           />
         </>
       </QueryRegion>
-      {exportOpen && <WorktimeExportModal onClose={() => setExportOpen(false)} />}
     </div>
   );
 }

@@ -5,11 +5,12 @@ import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 import { api } from '../api/client'
 import {
-  BarChart3, BriefcaseBusiness, Calculator, Handshake, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine, UserRoundCog,
+  BarChart3, BriefcaseBusiness, Calculator, Handshake, PiggyBank, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine, UserRoundCog,
   FolderArchive, LayoutDashboard, LayoutGrid, LogOut, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { acknowledgeChatReceipt, useActor, useBrandingSettings, useChatUnreadCount, useEnterpriseLogout, useERPMetadata, useOpenDirectConversation, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { useCRMCapabilities } from '../api/crm'
+import { useBudgetCapabilities } from '../api/budget'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { periodFromPreset } from './TimePeriodFilter'
 import { WorkspaceModeProvider } from './WorkspaceModeProvider'
@@ -55,6 +56,9 @@ const TITLES: Record<string, string> = {
   '/erp/crm': 'CRM · Харилцаа холбоо',
   '/erp/crm/customers': 'CRM · Харилцагч',
   '/erp/crm/settings': 'CRM · Тохиргоо',
+  '/erp/budget': 'Төсөв, гүйцэтгэл',
+  '/erp/budget/analysis': 'Төсөв · Анализ',
+  '/erp/budget/accounts': 'Төсөв · Төсөвт данс',
   '/erp/payroll/tax-benefits': 'Татвар ба хангамж',
   '/administration/organization/profile': 'Байгууллагын профайл / Company Profile',
   '/administration/organization/modules': 'Модуль ба боломжууд / Modules & Features',
@@ -164,6 +168,8 @@ export function EnterpriseShell() {
   const erp = useERPMetadata(Boolean(token && canReadERPVisibility))
   const crm = useCRMCapabilities(Boolean(token && actorResolved))
   const showCRM = Boolean(crm.data?.module_enabled && (crm.data.activities.view || crm.data.parties.view))
+  const budget = useBudgetCapabilities(Boolean(token && actorResolved))
+  const showBudget = Boolean(budget.data?.module_enabled && budget.data.budgets.view)
   const unreadChat = useChatUnreadCount(Boolean(token))
   const openDirectChat = useOpenDirectConversation()
 
@@ -262,7 +268,9 @@ export function EnterpriseShell() {
     // CRM access comes from ERP capabilities, so sales staff without a
     // management role still see it; it sits just above Settings.
     const crmItem = { to: '/erp/crm', label: 'CRM', icon: Handshake, roles: [] }
-    const withCRM = (items: typeof withHr) => (showCRM ? [...items.slice(0, -1), crmItem, items[items.length - 1]] : items)
+    const budgetItem = { to: '/erp/budget', label: 'Төсөв', icon: PiggyBank, roles: [] }
+    const capabilityItems = [...(showCRM ? [crmItem] : []), ...(showBudget ? [budgetItem] : [])]
+    const withCRM = (items: typeof withHr) => (capabilityItems.length ? [...items.slice(0, -1), ...capabilityItems, items[items.length - 1]] : items)
     if (!canAccessERP) {
       return withCRM(showPayroll ? [...withHr.slice(0, -1), payrollItem, withHr[withHr.length - 1]] : withHr)
     }
@@ -271,7 +279,7 @@ export function EnterpriseShell() {
       ? [...withErp.slice(0, -1), payrollItem, withErp[withErp.length - 1]]
       : withErp
     return withCRM(withPayroll)
-  }, [canAccessERP, erp.data, roles, showCRM])
+  }, [canAccessERP, erp.data, roles, showBudget, showCRM])
   const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const workerPerformance = useWorkerPerformance(selectedWorker, periodFromPreset('week'), canReviewWorkers)
   const workerProfile = useWorkerProfile(selectedWorker)

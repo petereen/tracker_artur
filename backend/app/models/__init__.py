@@ -101,3 +101,10 @@ from app.models.crm import (  # noqa: F401
     ERPPaymentTerm,
     ERPStatus,
 )
+from app.models.budget import (  # noqa: F401
+    Budget,
+    BudgetAccount,
+    BudgetAccountGroup,
+    BudgetAccountLink,
+    BudgetEntry,
+)

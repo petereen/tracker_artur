@@ -1557,7 +1557,7 @@ export function useWorkerPerformance(employeeId?: number, period?: DateRange, en
   return useQuery<any>({ queryKey: ['v1', 'workers', employeeId, 'performance', period], queryFn: () => api.get(`/v1/workers/${employeeId}/performance`, { params: period }).then((response) => response.data), enabled: Boolean(employeeId) && enabled })
 }
 
-export type ERPModule = 'accounting' | 'selling' | 'buying' | 'stock' | 'crm' | 'support' | 'payroll' | 'manufacturing' | 'assets_maintenance'
+export type ERPModule = 'accounting' | 'selling' | 'buying' | 'stock' | 'crm' | 'budget' | 'support' | 'payroll' | 'manufacturing' | 'assets_maintenance'
 export interface ERPMetadata {
   modules: Record<ERPModule, boolean>
   module_labels: Record<ERPModule, string>

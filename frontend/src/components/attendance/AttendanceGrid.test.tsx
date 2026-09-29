@@ -30,6 +30,8 @@ vi.mock('../../api/enterprise', () => ({
   saveCompanyBlob: mocks.save,
 }))
 
+vi.mock('../WorktimeExportModal', () => ({ WorktimeExportModal: () => <div role="dialog">Worktime export modal</div> }))
+
 vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() }))
 
 const renderGrid = (canEdit = true) => render(<QueryClientProvider client={new QueryClient()}><AttendanceGrid canEdit={canEdit} /></QueryClientProvider>)
@@ -135,5 +137,14 @@ describe('AttendanceGrid', () => {
     expect(screen.queryByRole('button', { name: /Сонгосныг/ })).not.toBeInTheDocument()
     fireEvent.click(cell('Бат', '2026-09-28'))
     expect(screen.queryByRole('menuitemradio')).not.toBeInTheDocument()
+  })
+
+  it('offers the detailed worktime report export only to managers', () => {
+    renderGrid(false)
+    expect(screen.queryByRole('button', { name: /Тайлан татах/ })).not.toBeInTheDocument()
+
+    renderGrid(true)
+    fireEvent.click(screen.getAllByRole('button', { name: /Тайлан татах/ })[0])
+    expect(screen.getByText('Worktime export modal')).toBeInTheDocument()
   })
 })
