@@ -8,6 +8,7 @@ import {
   BarChart3, BriefcaseBusiness, Calculator, BookText, Handshake, PiggyBank, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, ScanLine, UserRoundCog,
   FolderArchive, LayoutDashboard, LayoutGrid, LogOut, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
+import { isFeatureEnabled, useTenantContext } from '../api/tenancy'
 import { acknowledgeChatReceipt, useActor, useBrandingSettings, useChatUnreadCount, useEnterpriseLogout, useERPAccountPermissions, useERPMetadata, useOpenDirectConversation, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { useCRMCapabilities } from '../api/crm'
 import { useBudgetCapabilities } from '../api/budget'
@@ -169,6 +170,11 @@ export function EnterpriseShell() {
   const showBudget = Boolean(budget.data?.module_enabled && budget.data.budgets.view)
   const accountPermissions = useERPAccountPermissions(Boolean(token && actorResolved))
   const showAccounts = Boolean(accountPermissions.data?.view)
+  // Modules outside the tenant's license disappear from navigation (the API
+  // answers 403 feature_not_licensed for them anyway).
+  const tenant = useTenantContext(Boolean(token && actorResolved))
+  const contractsLicensed = isFeatureEnabled(tenant.data, 'contracts')
+  const assistantLicensed = isFeatureEnabled(tenant.data, 'ai_assistant')
   const unreadChat = useChatUnreadCount(Boolean(token))
   const openDirectChat = useOpenDirectConversation()
 
@@ -261,7 +267,7 @@ export function EnterpriseShell() {
   const nav = useMemo(() => {
     const hrItem = NAV.find((item) => item.to === '/hr')
     const payrollItem = { to: '/erp/payroll', label: 'Цалин', icon: Calculator, roles: [] }
-    const base = NAV.filter((item) => item.to !== '/hr' && (!item.roles.length || item.roles.some((role) => roles.includes(role))))
+    const base = NAV.filter((item) => item.to !== '/hr' && (item.to !== '/contracts' || contractsLicensed) && (!item.roles.length || item.roles.some((role) => roles.includes(role))))
     const showPayroll = Boolean(erp.data?.modules.payroll && roles.some((role) => PAYROLL_ROLES.includes(role)))
     const withHr = base.flatMap((item) => item.to === '/chat' && hrItem ? [hrItem, item] : [item])
     // CRM access comes from ERP capabilities, so sales staff without a
@@ -275,7 +281,7 @@ export function EnterpriseShell() {
     // ERP modules have no hub page of their own: each enabled module gets its
     // own entry, and module switches live in Settings → Modules.
     return withCRM(showPayroll ? [...withHr.slice(0, -1), payrollItem, withHr[withHr.length - 1]] : withHr)
-  }, [erp.data, roles, showAccounts, showBudget, showCRM])
+  }, [contractsLicensed, erp.data, roles, showAccounts, showBudget, showCRM])
   const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const workerPerformance = useWorkerPerformance(selectedWorker, periodFromPreset('week'), canReviewWorkers)
   const workerProfile = useWorkerProfile(selectedWorker)
@@ -382,7 +388,7 @@ export function EnterpriseShell() {
               <Suspense fallback={null}><LazyNotificationCenter /></Suspense>
               <button className="theme-toggle" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={theme === 'light' ? 'Dark mode идэвхжүүлэх' : 'Light mode идэвхжүүлэх'} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
               <button className="search-trigger" onClick={() => setCommandOpen(true)}><Search size={16} /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
-              <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>
+              {assistantLicensed && <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>}
             </div>
           </header>
           <PullToRefresh enabled={!isChatRoute} />

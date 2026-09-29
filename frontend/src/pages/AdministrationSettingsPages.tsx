@@ -18,6 +18,10 @@ import { ERPModuleSettings } from '../components/ERPModuleSettings'
 import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
 import { WorktimeMethodsSettings } from '../components/WorktimeMethodsSettings'
 import { ReportPolicySettings } from '../components/ReportPolicySettings'
+import { SeatMeter, TenantLicenseSettings } from '../components/TenantLicenseSettings'
+import { TenantBrandingSettings } from '../components/TenantBrandingSettings'
+import { Banner } from '@astryxdesign/core/Banner'
+import { tenancyErrorMessage, useTenantSeats } from '../api/tenancy'
 
 type SettingsTab = { to: string; label: string; roles?: string[] }
 type SettingsCategory = { id: string; to: string; label: string; icon: typeof Settings2; roles: string[]; tabs: SettingsTab[] }
@@ -54,7 +58,10 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
   },
   {
     id: 'security', to: '/administration/security/authentication', label: 'Систем ба аюулгүй байдал', icon: KeyRound, roles: ['admin'],
-    tabs: [{ to: '/administration/security/authentication', label: 'Нэвтрэлт ба админ' }],
+    tabs: [
+      { to: '/administration/security/authentication', label: 'Нэвтрэлт ба админ' },
+      { to: '/administration/security/license', label: 'Лиценз ба идэвхжүүлэлт' },
+    ],
   },
 ]
 
@@ -127,7 +134,26 @@ export function AdministrationHubPage() {
 }
 
 export function WorkspaceIdentitySettingsPage() {
-  return <SettingsPage categoryId="organization" activeTab="/administration/organization/profile" title="Байгууллагын профайл"><BrandingSettingsPanel /></SettingsPage>
+  return <SettingsPage categoryId="organization" activeTab="/administration/organization/profile" title="Байгууллагын профайл"><TenantBrandingSettings /><BrandingSettingsPanel /></SettingsPage>
+}
+
+export function LicenseSettingsPage() {
+  return <SettingsPage categoryId="security" activeTab="/administration/security/license" title="Лиценз ба идэвхжүүлэлт"><TenantLicenseSettings /></SettingsPage>
+}
+
+/** Active users vs the license's seat ceiling, above user management. */
+function SeatUsagePanel() {
+  const seats = useTenantSeats()
+  if (!seats.data) return null
+  const full = seats.data.limit !== null && seats.data.used >= seats.data.limit
+  return <SettingsSection title={seats.data.limit === null ? `Хэрэглэгчийн эрх · ${seats.data.used}` : `Хэрэглэгчийн эрх · ${seats.data.used} / ${seats.data.limit}`} icon={ShieldCheck} className="settings-embedded" defaultOpen={full}>
+    <div className="settings-form-stack">
+      <SeatMeter seats={seats.data} />
+      {full && <Banner status="warning" collapsible={false} title="Лицензийн бүх хэрэглэгчийн эрх ашиглагдсан"
+        description="Шинэ хэрэглэгч нэмэх, идэвхгүй хэрэглэгчийг сэргээхийн тулд багцаа өргөтгөх эсвэл ашиглахгүй хэрэглэгчийг идэвхгүй болгоно уу."
+        endContent={<Link to="/administration/security/license">Багц өргөтгөх</Link>} />}
+    </div>
+  </SettingsSection>
 }
 
 export function ERPSettingsPage() {
@@ -289,7 +315,7 @@ function UnlinkedAccountsPanel() {
     try {
       await createAccount.mutateAsync({ email: username, password, roles: [role], locale: 'mn' })
       setUsername(''); setPassword(''); toast.success('Хэрэглэгч үүслээ')
-    } catch (error: any) { toast.error(error.response?.data?.detail || 'Хэрэглэгч үүссэнгүй') }
+    } catch (error: any) { toast.error(tenancyErrorMessage(error, 'Хэрэглэгч үүссэнгүй')) }
   }
   const toggleRole = (account: { id: number; roles: string[] }, roleName: string) => {
     const roles = account.roles.includes(roleName) ? account.roles.filter((item) => item !== roleName) : [...account.roles, roleName]
@@ -309,7 +335,7 @@ function UnlinkedAccountsPanel() {
 }
 
 export function AccessControlSettingsPage() {
-  return <SettingsPage categoryId="people" activeTab="/administration/people/users" title="Ажилтан ба хэрэглэгч"><SettingsSection title="Ажилтан ба эрхүүд" icon={Users2} className="settings-embedded access-settings"><EmployeesPage /></SettingsSection><UnlinkedAccountsPanel /><SettingsSection title="Онбординг" icon={UserRoundCog} className="settings-embedded"><OnboardingPage /></SettingsSection></SettingsPage>
+  return <SettingsPage categoryId="people" activeTab="/administration/people/users" title="Ажилтан ба хэрэглэгч"><SeatUsagePanel /><SettingsSection title="Ажилтан ба эрхүүд" icon={Users2} className="settings-embedded access-settings"><EmployeesPage /></SettingsSection><UnlinkedAccountsPanel /><SettingsSection title="Онбординг" icon={UserRoundCog} className="settings-embedded"><OnboardingPage /></SettingsSection></SettingsPage>
 }
 
 export function AutomationSettingsPage() {

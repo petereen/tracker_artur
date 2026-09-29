@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowRight, LockKeyhole, Mail, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthCapabilities, useEnterpriseLogin } from '../api/enterprise'
+import { tenancyErrorMessage, useTenantBranding } from '../api/tenancy'
 import { isNativePlatform } from '../platform/runtime'
 import { startNativeTelegramLogin, subscribeToNativeTelegramAuth, type NativeTelegramAuthState } from '../platform/telegram-auth'
 import Grainient from '../components/Grainient'
@@ -12,6 +13,9 @@ export function LoginPage() {
   const login = useEnterpriseLogin()
   const native = isNativePlatform()
   const capabilities = useAuthCapabilities()
+  const branding = useTenantBranding()
+  // Tenant workspaces (other than OYUNS itself) show their own name.
+  const workspaceName = branding.data?.name && !/^oyuns( erp)?$/i.test(branding.data.name.trim()) ? branding.data.name : null
   const [telegramState, setTelegramState] = useState<NativeTelegramAuthState>({ status: 'idle' })
   const [webTelegramError, setWebTelegramError] = useState<string | null>(null)
 
@@ -45,7 +49,7 @@ export function LoginPage() {
     try {
       await login.mutateAsync({ email: username, password })
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'И-мэйл эсвэл нууц үг буруу байна')
+      toast.error(tenancyErrorMessage(error, 'И-мэйл эсвэл нууц үг буруу байна'))
     }
   }
 
@@ -56,6 +60,7 @@ export function LoginPage() {
           <img src={capabilities.data?.light_logo || '/oyuns-aio-logo.png'} alt="OYUNS All-in-One" className="login-logo" />
           <div className="auth-form-heading">
             <h1 id="login-title">Тавтай морил</h1>
+            {workspaceName && <p className="login-inline-hint">{workspaceName}</p>}
           </div>
           {!native && <div className="telegram-login telegram-login-primary">
             <button className="primary-action native-telegram-action telegram-brand-button" type="button" onClick={() => { window.location.assign('/api/v1/auth/telegram') }}>
