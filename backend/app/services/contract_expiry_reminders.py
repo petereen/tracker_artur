@@ -18,6 +18,7 @@ async def reconcile_contract_expiry_reminders() -> None:
         contracts = (await db.execute(
             select(ContractDocument).where(
                 ContractDocument.status.in_({"APPROVED", "SIGNED_AND_STAMPED"}),
+                ContractDocument.is_active.is_(True),
                 ContractDocument.effective_end_on.is_not(None),
                 ContractDocument.effective_end_on >= today,
                 ContractDocument.effective_end_on <= today + timedelta(days=365),

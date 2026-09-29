@@ -16,7 +16,7 @@ the cash account for payments. Accounts still on purpose ``general`` whose
 matching purpose/classification, so purpose is the single source of truth.
 
 Revision ID: f7a8b9c0d1e2
-Revises: a1c2e3g4i5k6
+Revises: c2d3e4f5a6b7
 Create Date: 2026-09-29 15:00:00.000000
 
 """
@@ -27,7 +27,7 @@ import sqlalchemy as sa
 
 
 revision: str = "f7a8b9c0d1e2"
-down_revision: Union[str, Sequence[str], None] = "a1c2e3g4i5k6"
+down_revision: Union[str, Sequence[str], None] = "c2d3e4f5a6b7"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

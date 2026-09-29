@@ -85,6 +85,7 @@ from app.models.contracts import (  # noqa: F401
     ARCHIVE_SOURCES,
     ContractComment,
     ContractDocument,
+    ContractGroup,
     ContractFile,
     ContractReview,
     ContractRevision,
