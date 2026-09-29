@@ -7,6 +7,7 @@ import {
   ContractDetail,
   ContractGroup,
   ContractLink,
+  ContractRegistry,
   ContractRegistryInput,
   ContractRegistryOptions,
   useContractPartyOptions,
@@ -46,7 +47,7 @@ const text = (value: unknown) =>
   value === null || value === undefined ? "" : String(value);
 
 export function registryDraftFrom(
-  initial?: Partial<ContractDetail>,
+  initial?: Partial<ContractRegistry>,
 ): ContractRegistryDraft {
   return {
     code: text(initial?.code),
@@ -562,7 +563,7 @@ export function ContractRegistryForm({
   );
 }
 
-function LinkItem({ link }: { link: ContractLink }) {
+export function LinkItem({ link }: { link: ContractLink }) {
   const safe = link.kind !== "path" && /^https?:\/\//i.test(link.url);
   const label = link.label || LINK_KINDS[link.kind];
   return (

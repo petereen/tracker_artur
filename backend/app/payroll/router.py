@@ -75,7 +75,7 @@ PAYROLL_ACCOUNT_ROLE_REQUIREMENTS = {
     "salary_expense": ("salary_expense", "expense"), "employer_shi_expense": ("employer_shi_expense", "expense"),
     "employee_shi_payable": ("employee_shi_payable", "liability"), "employer_shi_payable": ("employer_shi_payable", "liability"),
     "pit_payable": ("pit_payable", "liability"), "net_pay_payable": ("net_pay_payable", "liability"),
-    "bank": ("bank", "asset"), "advance_clearing": ("advance_clearing", "asset"),
+    "bank": ("bank", "asset"), "advance_clearing": ("advance_clearing", ("asset", "expense")),
     "other_deductions_payable": ("other_deductions_payable", "liability"),
 }
 
@@ -85,7 +85,8 @@ def payroll_role_account_is_valid(role: str, account: ERPAccount | None) -> bool
     if not requirement or not account:
         return False
     _purpose, classification = requirement
-    return bool(account.is_active and not account.is_group and account.currency == "MNT" and account.classification == classification)
+    allowed = (classification,) if isinstance(classification, str) else classification
+    return bool(account.is_active and not account.is_group and account.currency == "MNT" and account.classification in allowed)
 
 
 @router.get("/capabilities")

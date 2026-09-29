@@ -55,7 +55,7 @@ ERP_MODULES = {
     "crm": "CRM",
     "budget": "Budget",
     "support": "Support",
-    "payroll": "Payroll",
+    "payroll": "Цалин",
     "manufacturing": "Manufacturing",
     "assets_maintenance": "Assets & maintenance",
 }

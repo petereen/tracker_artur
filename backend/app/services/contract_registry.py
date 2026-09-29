@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.contracts import ContractDocument, ContractFile, ContractGroup
+from app.models.contracts import ContractArchiveEntry, ContractDocument, ContractFile, ContractGroup
 from app.models.crm import ERPPaymentTerm
 from app.models.models import ERPParty, ERPUnitOfMeasure
 
@@ -110,19 +110,13 @@ class ContractRegistryInput(BaseModel):
         return value.upper()
 
 
-class ContractRegistryPatch(BaseModel):
-    """Fields that stay editable after approval (official number, active flag, links, meta, note)."""
+class ContractRegistryPatch(ContractRegistryInput):
+    """Registry data editable in every status, so contracts registered before the registry (or archived ones) can be completed.
 
-    contract_number: str | None = Field(default=None, max_length=120)
+    Only the keys present in the request are applied; ``code`` is re-validated when it changes.
+    """
+
     is_active: bool | None = None
-    note: str | None = Field(default=None, max_length=5000)
-    links: list[ContractLink] | None = Field(default=None, max_length=20)
-    custom_fields: list[ContractCustomField] | None = Field(default=None, max_length=30)
-
-    @field_validator("contract_number", "note")
-    @classmethod
-    def clean_text(cls, value: str | None) -> str | None:
-        return _clean_text(value)
 
 
 class ContractGroupInput(BaseModel):
@@ -178,11 +172,17 @@ async def _lock_codes(db: AsyncSession, organization_id: int) -> None:
         await db.execute(select(func.pg_advisory_xact_lock(CODE_LOCK_NAMESPACE, organization_id)))
 
 
-async def _code_taken(db: AsyncSession, organization_id: int, code: str, exclude_id: int | None = None) -> bool:
+async def _code_taken(db: AsyncSession, organization_id: int, code: str, exclude_id: int | None = None, *, exclude_archive_id: int | None = None) -> bool:
+    """Codes are unique across contract documents and manually archived contracts."""
     query = select(ContractDocument.id).where(ContractDocument.organization_id == organization_id, ContractDocument.code == code)
     if exclude_id is not None:
         query = query.where(ContractDocument.id != exclude_id)
-    return bool(await db.scalar(query.limit(1)))
+    if await db.scalar(query.limit(1)):
+        return True
+    archived = select(ContractArchiveEntry.id).where(ContractArchiveEntry.organization_id == organization_id, ContractArchiveEntry.code == code, ContractArchiveEntry.deleted_at.is_(None))
+    if exclude_archive_id is not None:
+        archived = archived.where(ContractArchiveEntry.id != exclude_archive_id)
+    return bool(await db.scalar(archived.limit(1)))
 
 
 async def suggest_next_code(db: AsyncSession, organization_id: int) -> str:
@@ -201,17 +201,17 @@ async def suggest_next_code(db: AsyncSession, organization_id: int) -> str:
     raise registry_error(409, "contract_code_exhausted", "Гэрээний дараагийн код олдсонгүй, кодыг гараар оруулна уу")
 
 
-async def assign_code(db: AsyncSession, organization_id: int, requested: str | None, *, exclude_id: int | None = None) -> str:
+async def assign_code(db: AsyncSession, organization_id: int, requested: str | None, *, exclude_id: int | None = None, exclude_archive_id: int | None = None) -> str:
     """Validate a manual code or allocate the next one. Serialized per organization."""
     await _lock_codes(db, organization_id)
     if requested:
-        if await _code_taken(db, organization_id, requested, exclude_id):
+        if await _code_taken(db, organization_id, requested, exclude_id, exclude_archive_id=exclude_archive_id):
             raise registry_error(409, "contract_code_taken", f"“{requested}” код өөр гэрээнд олгогдсон байна")
         return requested
     return await suggest_next_code(db, organization_id)
 
 
-async def assert_references(db: AsyncSession, organization_id: int, values: dict[str, Any], *, current: ContractDocument | None = None) -> None:
+async def assert_references(db: AsyncSession, organization_id: int, values: dict[str, Any], *, current: ContractDocument | ContractArchiveEntry | None = None) -> None:
     """Every referenced group / party / unit / payment term must belong to the organization.
 
     Inactive groups can stay on contracts that already use them but cannot be newly selected.
@@ -250,7 +250,7 @@ def custom_fields_payload(value: Iterable[ContractCustomField | dict] | None) ->
     return output
 
 
-def apply_registry(contract: ContractDocument, values: dict[str, Any]) -> None:
+def apply_registry(contract: ContractDocument | ContractArchiveEntry, values: dict[str, Any]) -> None:
     """Copy validated registry values onto ``contract`` (only keys present in ``values``)."""
     for field in REGISTRY_FIELDS:
         if field not in values or field == "code":
@@ -265,7 +265,7 @@ def apply_registry(contract: ContractDocument, values: dict[str, Any]) -> None:
         setattr(contract, field, value)
 
 
-def registry_snapshot(contract: ContractDocument) -> dict[str, Any]:
+def registry_snapshot(contract: ContractDocument | ContractArchiveEntry) -> dict[str, Any]:
     """Audit-friendly JSON view of the registry fields."""
     output: dict[str, Any] = {}
     for field in (*REGISTRY_FIELDS, "is_active"):
@@ -282,14 +282,15 @@ def _number(value: Decimal | None) -> float | None:
     return float(value) if value is not None else None
 
 
-def overdue_days(contract: ContractDocument, today: date) -> int:
-    """Хэтэрсэн хоног — days past the end date for active, not-rejected contracts."""
-    if not contract.effective_end_on or not contract.is_active or contract.status == "REJECTED":
+def overdue_days(contract: ContractDocument | ContractArchiveEntry, today: date) -> int:
+    """Хэтэрсэн хоног — days past the end date for active, not-rejected contracts (archive files have no term)."""
+    end_on = getattr(contract, "effective_end_on", None)
+    if not end_on or not contract.is_active or getattr(contract, "status", None) == "REJECTED":
         return 0
-    return max((today - contract.effective_end_on).days, 0)
+    return max((today - end_on).days, 0)
 
 
-async def load_registry_context(db: AsyncSession, contracts: list[ContractDocument]) -> dict[str, Any]:
+async def load_registry_context(db: AsyncSession, contracts: list[ContractDocument] | list[ContractArchiveEntry]) -> dict[str, Any]:
     """Batch-resolve names for the referenced registry rows plus file counts."""
     def ids(field: str) -> set[int]:
         return {getattr(row, field) for row in contracts if getattr(row, field)}
@@ -313,14 +314,14 @@ async def load_registry_context(db: AsyncSession, contracts: list[ContractDocume
     if term_ids := ids("payment_term_id"):
         rows = (await db.execute(select(ERPPaymentTerm.id, ERPPaymentTerm.code, ERPPaymentTerm.name).where(ERPPaymentTerm.id.in_(term_ids)))).all()
         ctx["payment_terms"] = {row.id: {"id": row.id, "code": row.code, "name": row.name} for row in rows}
-    contract_ids = [row.id for row in contracts if row.id]
+    contract_ids = [row.id for row in contracts if row.id] if all(isinstance(row, ContractDocument) for row in contracts) else []
     if contract_ids:
         rows = (await db.execute(select(ContractFile.contract_id, func.count()).where(ContractFile.contract_id.in_(contract_ids)).group_by(ContractFile.contract_id))).all()
         ctx["file_counts"] = {contract_id: count for contract_id, count in rows}
     return ctx
 
 
-def registry_out(contract: ContractDocument, ctx: dict[str, Any], today: date) -> dict[str, Any]:
+def registry_out(contract: ContractDocument | ContractArchiveEntry, ctx: dict[str, Any], today: date) -> dict[str, Any]:
     party = ctx["parties"].get(contract.party_id)
     return {
         "code": contract.code,
