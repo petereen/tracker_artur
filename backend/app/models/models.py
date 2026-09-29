@@ -2632,8 +2632,8 @@ class ERPAccount(Base):
     code = Column(String(64), nullable=False)
     name = Column(Text, nullable=False)
     account_type = Column(String(32), nullable=False)
-    # `account_type` is retained for historical compatibility.  New writes
-    # use the explicit accounting classification/purpose contract.
+    # `account_type` is the posting lookup key (``service.default_account``);
+    # it is always derived from `purpose` (app.erp.chart.posting_type).
     classification = Column(String(24), nullable=False, server_default="asset", default="asset")
     purpose = Column(String(32), nullable=False, server_default="general", default="general")
     currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
@@ -2641,8 +2641,8 @@ class ERPAccount(Base):
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
     # Cash/bank accounts (Dayansoft d047 «Мөнгөн хөрөнгө» тохиргоо).
     bank_name = Column(String(120))
-    bank_iban = Column(String(34))
     bank_account_number = Column(String(64))
+    bank_iban = Column(String(34))
     bank_account_holder = Column(String(200))
 
 

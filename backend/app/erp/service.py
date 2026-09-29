@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enterprise_deps import ActorContext
+from app.erp.chart import posting_type
 from app.models.models import (
     ERPAccessRole,
     ERPAccount,
@@ -91,17 +92,17 @@ MONEY_QUANTUM = Decimal("0.0001")
 DEFAULT_ACCOUNTS = (
     ("1000", "Касс дахь мөнгө", "cash"), ("1010", "Харилцах данс (цалин)", "cash"),
     ("1100", "Дансны авлага", "receivable"), ("1200", "Бараа материал", "inventory"),
-    ("1300", "Үндсэн хөрөнгө", "fixed_asset"), ("1301", "Дуусаагүй үйлдвэрлэл", "wip"), ("1310", "Хуримтлагдсан элэгдэл", "fixed_asset"),
+    ("1300", "Үндсэн хөрөнгө", "fixed_asset"), ("1301", "Дуусаагүй үйлдвэрлэл", "wip"), ("1310", "Хуримтлагдсан элэгдэл", "accumulated_depreciation"),
     ("2000", "Дансны өглөг", "payable"), ("2100", "НӨАТ-ын өглөг", "tax_payable"),
     ("2200", "НӨАТ-ын авлага", "tax_receivable"), ("2300", "Цалингийн өглөг (нийт)", "payroll_payable"),
     ("2310", "Олгох цалингийн өглөг", "payroll_payable"), ("2320", "Ажилтны НДШ-ийн өглөг", "payroll_payable"),
     ("2330", "Ажил олгогчийн НДШ-ийн өглөг", "payroll_payable"), ("2340", "ХХОАТ-ын өглөг", "tax_payable"),
-    ("2350", "Цалингийн урьдчилгааны тооцоо", "receivable"), ("4000", "Борлуулалтын орлого", "income"),
-    ("5000", "Үйл ажиллагааны зардал", "expense"), ("5100", "Цалингийн зардал", "payroll_expense"), ("5200", "Элэгдлийн зардал", "expense"),
+    ("2350", "Цалингийн урьдчилгааны тооцоо", "advance_clearing"), ("4000", "Борлуулалтын орлого", "income"),
+    ("5000", "Үйл ажиллагааны зардал", "expense"), ("5100", "Цалингийн зардал", "payroll_expense"), ("5200", "Элэгдлийн зардал", "depreciation_expense"),
     ("5110", "Ажил олгогчийн НДШ-ийн зардал", "payroll_expense"),
 )
-# English names the chart was seeded with before 2026-09-29; migration
-# a1c2e3g4i5k6 renames rows that still carry them.
+# English names the chart was seeded with before 2026-09-29; bootstrap and
+# migrations a1c2e3g4i5k6 and f7a8b9c0d1e2 rename rows that still carry them.
 LEGACY_DEFAULT_ACCOUNT_NAMES = {
     "1000": ("Cash",), "1010": ("Payroll bank",), "1100": ("Accounts receivable",), "1200": ("Inventory",),
     "1300": ("Fixed assets",), "1301": ("Work in progress",), "1310": ("Accumulated depreciation",),
@@ -463,8 +464,9 @@ async def bootstrap_organization(db: AsyncSession, organization_id: int) -> None
     This is idempotent and intentionally does not assign payroll or accounting
     authority to existing users; admins choose those roles explicitly.
     """
-    for code, name, account_type in DEFAULT_ACCOUNTS:
+    for code, name, _seed_type in DEFAULT_ACCOUNTS:
         classification, purpose = ACCOUNT_METADATA.get(code, ("asset", "general"))
+        account_type = posting_type(purpose, classification)
         exists = await db.scalar(select(ERPAccount.id).where(ERPAccount.organization_id == organization_id, ERPAccount.code == code))
         if not exists:
             deleted_seed = await db.scalar(select(ERPDeletedSeedAccount.id).where(ERPDeletedSeedAccount.organization_id == organization_id, ERPDeletedSeedAccount.code == code))
@@ -474,6 +476,7 @@ async def bootstrap_organization(db: AsyncSession, organization_id: int) -> None
             account = await db.get(ERPAccount, exists)
             if account and account.purpose == "general":
                 account.classification, account.purpose, account.currency = classification, purpose, "MNT"
+                account.account_type = account_type
             if account and account.name in LEGACY_DEFAULT_ACCOUNT_NAMES.get(code, ()):
                 account.name = name
     await db.flush()

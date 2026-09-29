@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
   useCreateMonthlyPayrollRuleDraft, useERPAccountOptions, useMonthlyPayrollCalendar, useMonthlyPayrollMonths, useMonthlyPayrollRuleSets,
   useMonthlyPayrollRuleTemplate, useMonthlyPayrollSettings, usePayrollCapabilities, usePublishMonthlyPayrollRuleDraft,
   useSaveMonthlyPayrollSettings, useSetMonthlyPayrollCalendarDay, useUpdateMonthlyPayrollRuleDraft, useValidateMonthlyPayrollRuleDraft,
 } from '../../api/enterprise'
-import type { MonthlyPayrollCompanySettings, MonthlyPayrollRuleSet } from '../../api/enterprise'
+import type { ERPAccountClassification, ERPAccountOption, MonthlyPayrollCompanySettings, MonthlyPayrollRuleSet } from '../../api/enterprise'
+import { CHART_OF_ACCOUNTS_PATH, accountSelectorOptions } from '../../components/accounts/accountShared'
 import { MonthStepper, MonthlyShell, monthKey, parseMonthKey, requestError } from './shared'
 import { plainNumber } from '../../utils/numbers'
 
@@ -41,10 +43,25 @@ function MonthlySettingsPanel() {
     <label>Урьдчилгааны үндсэн арга<select value={draft.default_advance_basis} onChange={(event) => update('default_advance_basis', event.target.value)}><option value="FIXED">Тогтмол дүн</option><option value="PERCENT">Үндсэн цалингийн хувь</option><option value="WORKED-TO-DATE">Ажилласан цагаар</option></select></label>
     <label>Урьдчилгааны үндсэн хувь<input type="number" min="1" max="100" value={draft.default_advance_percent} onChange={(event) => update('default_advance_percent', event.target.value)} /></label>
     <label>Бусад суутгалын төрлүүд (мөр тус бүрээр)<textarea rows={4} value={draft.deduction_types.join('\n')} onChange={(event) => update('deduction_types', event.target.value.split('\n').map((value: string) => value.trim()).filter(Boolean))} /></label>
-    <label>Цалингийн зардлын данс<select value={draft.salary_expense_account_id || ''} onChange={(event) => update('salary_expense_account_id', Number(event.target.value) || null)}><option value="">Данс сонгох</option>{accounts.data?.filter((account) => account.is_active && !account.is_group).map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>
-    <label>Ажил олгогчийн НДШ данс<select value={draft.employer_shi_account_id || ''} onChange={(event) => update('employer_shi_account_id', Number(event.target.value) || null)}><option value="">Данс сонгох</option>{accounts.data?.filter((account) => account.is_active && !account.is_group).map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>
-    <label>Урьдчилгаа тооцооны данс<select value={draft.advance_clearing_account_id || ''} onChange={(event) => update('advance_clearing_account_id', Number(event.target.value) || null)}><option value="">Данс сонгох</option>{accounts.data?.filter((account) => account.is_active && !account.is_group).map((account) => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>
+    <PayrollAccountSelect label="Цалингийн зардлын данс" hint="Зардал ангиллын данс (жишээ: 5100 Цалингийн зардал)" accounts={accounts.data} value={draft.salary_expense_account_id} classifications={['expense']} purposes={['salary_expense']} onChange={(value) => update('salary_expense_account_id', value)} />
+    <PayrollAccountSelect label="Ажил олгогчийн НДШ-ийн зардлын данс" hint="Зардал ангиллын данс (жишээ: 5110)" accounts={accounts.data} value={draft.employer_shi_account_id} classifications={['expense']} purposes={['employer_shi_expense']} onChange={(value) => update('employer_shi_account_id', value)} />
+    <PayrollAccountSelect label="Урьдчилгааны тооцооны данс" hint="Хөрөнгө ангиллын данс (жишээ: 2350 Цалингийн урьдчилгааны тооцоо)" accounts={accounts.data} value={draft.advance_clearing_account_id} classifications={['asset']} purposes={['advance_clearing']} onChange={(value) => update('advance_clearing_account_id', value)} />
+    <p className="monthly-settings-note">Дансыг <Link to={CHART_OF_ACCOUNTS_PATH}>Дансны төлөвлөгөө</Link> хэсэгт нээж, нэрлэж, зориулалтыг нь тохируулна.</p>
   </div><button className="payroll-v2-button secondary" disabled={save.isPending} onClick={() => save.mutate(draft, { onSuccess: () => toast.success('Тохиргоо хадгалагдлаа'), onError: (error) => toast.error(requestError(error)) })}>Тохиргоо хадгалах</button><small>Эдгээр тохиргоо дараа нээх саруудад үйлчилнэ. Нээсэн сарын дүрэм, хуанли өөрчлөгдөхгүй.</small></details>
+}
+
+/** Only accounts of the right classification, grouped as in the chart of accounts; the matching-purpose account is suggested first. */
+function PayrollAccountSelect({ label, hint, accounts, value, classifications, purposes, onChange }: {
+  label: string; hint: string; accounts: ERPAccountOption[] | undefined; value: number | null | undefined
+  classifications: ERPAccountClassification[]; purposes: string[]; onChange: (value: number | null) => void
+}) {
+  const sections = accountSelectorOptions(accounts, { classifications, preferredPurposes: purposes, keepId: value })
+  const current = accounts?.find((account) => account.id === value)
+  const mismatch = current && current.classification && !classifications.includes(current.classification)
+  return <label>{label}<select value={value || ''} onChange={(event) => onChange(Number(event.target.value) || null)}>
+    <option value="">Данс сонгох</option>
+    {sections.map((section) => <optgroup key={section.title} label={section.title}>{section.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup>)}
+  </select><small>{mismatch ? `⚠ Сонгосон данс тохирохгүй ангилалтай — ${hint.toLowerCase()} сонгоно уу.` : hint}</small></label>
 }
 
 function MonthlyCalendarEditor({ year, monthNumber }: { year: number; monthNumber: number }) {

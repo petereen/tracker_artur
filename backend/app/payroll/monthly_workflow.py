@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor
+from app.erp.chart import CLASSIFICATION_LABELS
 from app.erp.service import require_capability
 from app.models.models import (
     AttendanceLog, Department, Employee, EmployeeBankAccount, EmployeeDetails, HolidayRecord, MonthlyPayrollArchive, MonthlyPayrollCalendarDay, MonthlyPayrollCompanySettings,
@@ -133,6 +134,14 @@ APPROVED_RUN_STATUSES = ("approved", "paid", "closed")
 
 def _money(value: Any) -> Decimal:
     return Decimal(str(value or 0))
+
+
+# Monthly payroll settings account → required chart-of-accounts classification.
+SETTINGS_ACCOUNT_CLASSIFICATIONS = {
+    "salary_expense_account_id": ("expense", "Цалингийн зардлын данс"),
+    "employer_shi_account_id": ("expense", "Ажил олгогчийн НДШ-ийн зардлын данс"),
+    "advance_clearing_account_id": ("asset", "Урьдчилгааны тооцооны данс"),
+}
 
 
 async def _account_label(db: AsyncSession, organization_id: int, account_id: int | None) -> dict[str, Any] | None:
@@ -641,9 +650,13 @@ async def save_monthly_settings(data: CompanyMonthlySettingsInput, db: AsyncSess
         db.add(row)
     account_ids = {value for value in (data.salary_expense_account_id, data.employer_shi_account_id, data.advance_clearing_account_id) if value is not None}
     if account_ids:
-        valid_ids = set((await db.execute(select(ERPAccount.id).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.id.in_(account_ids), ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False)))).scalars().all())
-        if valid_ids != account_ids:
+        accounts = {account.id: account for account in (await db.execute(select(ERPAccount).where(ERPAccount.organization_id == actor.organization_id, ERPAccount.id.in_(account_ids), ERPAccount.is_active.is_(True), ERPAccount.is_group.is_(False)))).scalars().all()}
+        if set(accounts) != account_ids:
             raise HTTPException(status_code=422, detail="Сонгосон данс танай байгууллагын идэвхтэй данс биш байна.")
+        for field, (classification, label) in SETTINGS_ACCOUNT_CLASSIFICATIONS.items():
+            account = accounts.get(getattr(data, field))
+            if account and account.classification != classification:
+                raise HTTPException(status_code=422, detail=f"{label}: {account.code} · {account.name} данс «{CLASSIFICATION_LABELS[classification]}» ангиллынх байх ёстой.")
     before = {key: getattr(row, key) for key in ("legal_company_name", "daily_norm_hours", "employer_injury_rate", "weekday_overtime_multiplier", "rest_day_overtime_multiplier", "public_holiday_overtime_multiplier", "default_advance_basis", "default_advance_percent", "deduction_types", "salary_expense_account_id", "employer_shi_account_id", "advance_clearing_account_id")}
     for key, value in data.model_dump().items():
         setattr(row, key, _json_value(value))

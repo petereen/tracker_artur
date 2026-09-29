@@ -1,88 +1,54 @@
 """Chart of accounts («Данс код», Dayansoft d047) rules shared by every module.
 
-Payroll, budget, assets and settlements all pick accounts from the same
-``erp_accounts`` table, so the purpose ↔ classification contract and the
-"where is this account used" answer live here instead of in each module.
+Payroll, budget, assets, settlements and document posting all pick accounts
+from the same ``erp_accounts`` table.  The purpose catalog, the posting
+``account_type`` derivation and the "where is this account used" answer live
+here so each module agrees on what an account is for.
 """
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Base, ERPAccount, PayrollPostingProfile
-
 CLASSIFICATIONS = ("asset", "liability", "equity", "income", "expense")
-
-# Purpose → classifications it may carry. ``general`` fits any classification.
-# ``tax`` covers both VAT payable (liability) and VAT receivable (asset).
-PURPOSE_CLASSIFICATIONS: dict[str, frozenset[str]] = {
-    "general": frozenset(CLASSIFICATIONS),
-    "cash": frozenset({"asset"}), "bank": frozenset({"asset"}), "receivable": frozenset({"asset"}),
-    "inventory": frozenset({"asset"}), "fixed_asset": frozenset({"asset"}), "wip": frozenset({"asset"}),
-    "accumulated_depreciation": frozenset({"asset"}), "advance_clearing": frozenset({"asset"}),
-    "tax": frozenset({"asset", "liability"}),
-    "payable": frozenset({"liability"}), "payroll_payable": frozenset({"liability"}),
-    "net_pay_payable": frozenset({"liability"}), "employee_shi_payable": frozenset({"liability"}),
-    "employer_shi_payable": frozenset({"liability"}), "pit_payable": frozenset({"liability"}),
-    "other_deductions_payable": frozenset({"liability"}),
-    "revenue": frozenset({"income"}),
-    "expense": frozenset({"expense"}), "salary_expense": frozenset({"expense"}),
-    "employer_shi_expense": frozenset({"expense"}), "depreciation_expense": frozenset({"expense"}),
-}
-PAYROLL_PURPOSES = frozenset({
-    "salary_expense", "employer_shi_expense", "employee_shi_payable", "employer_shi_payable",
-    "pit_payable", "net_pay_payable", "bank", "advance_clearing", "other_deductions_payable",
-})
-BANK_FIELDS = ("bank_name", "bank_iban", "bank_account_number", "bank_account_holder")
-
-# Monthly payroll «Дүн» sheet accounts: field → required classification.
-MONTHLY_PAYROLL_ACCOUNT_CLASSIFICATIONS = {
-    "salary_expense_account_id": ("expense", "Цалингийн зардлын данс"),
-    "employer_shi_account_id": ("expense", "Ажил олгогчийн НДШ-ийн зардлын данс"),
-    "advance_clearing_account_id": ("asset", "Урьдчилгааны тооцооны данс"),
-}
 CLASSIFICATION_LABELS = {"asset": "Хөрөнгө", "liability": "Өр төлбөр", "equity": "Эздийн өмч", "income": "Орлого", "expense": "Зардал"}
+# Normal balance side (d047 «Дебет/Кредит шинж»).
+NORMAL_SIDES = {"asset": "debit", "expense": "debit", "liability": "credit", "equity": "credit", "income": "credit"}
 
-# Where an account is referenced, in the words of the page that references it.
-USAGE_LABELS: dict[tuple[str, str], tuple[str, str]] = {
-    ("erp_general_ledger_entries", "account_id"): ("accounting", "Ерөнхий дэвтрийн гүйлгээ"),
-    ("erp_document_lines", "account_id"): ("accounting", "Баримтын мөр"),
-    ("erp_accounts", "parent_id"): ("accounting", "Дэд данс"),
-    ("erp_accounting_settings", "default_bank_account_id"): ("accounting", "Үндсэн харилцах данс"),
-    ("erp_tax_template_rates", "account_id"): ("accounting", "Татварын загвар"),
-    ("erp_parties", "settlement_account_id"): ("crm", "Харилцагчийн тооцооны данс"),
-    ("erp_party_groups", "default_settlement_account_id"): ("crm", "Харилцагчийн бүлгийн тооцооны данс"),
-    ("budget_account_links", "erp_account_id"): ("budget", "Төсөвт данс"),
-    ("monthly_payroll_company_settings", "salary_expense_account_id"): ("payroll", "Цалингийн зардлын данс"),
-    ("monthly_payroll_company_settings", "employer_shi_account_id"): ("payroll", "Ажил олгогчийн НДШ-ийн данс"),
-    ("monthly_payroll_company_settings", "advance_clearing_account_id"): ("payroll", "Урьдчилгааны тооцооны данс"),
-    ("payroll_account_tags", "account_id"): ("payroll", "Цалингийн дансны тэмдэглэгээ"),
-    ("payroll_runs", "payment_account_id"): ("payroll", "Цалингийн төлбөрийн данс"),
-    ("payroll_payment_batches", "payment_account_id"): ("payroll", "Цалингийн төлбөрийн багц"),
-    ("payroll_payment_batches", "payable_account_id"): ("payroll", "Цалингийн өглөгийн багц"),
-    ("payroll_bank_entries", "payment_account_id"): ("payroll", "Цалингийн банкны гүйлгээ"),
-    ("payroll_statement_imports", "payment_account_id"): ("payroll", "Банкны хуулгын импорт"),
-    ("salary_components", "account_id"): ("payroll", "Цалингийн бүрэлдэхүүн"),
-    ("payroll_salary_component_masters", "account_id"): ("payroll", "Цалингийн бүрэлдэхүүн"),
-    ("payslip_line_items", "account_id"): ("payroll", "Цалингийн хуудасны мөр"),
+# purpose → (label, allowed classifications, module that relies on it, posting account_type)
+# ``posting account_type`` is what document posting looks accounts up by
+# (``service.default_account``).  It is derived from the purpose and never
+# edited directly, otherwise renaming «Касс» would break payment posting.
+PURPOSES: dict[str, tuple[str, tuple[str, ...], str, str | None]] = {
+    "general": ("Ерөнхий", CLASSIFICATIONS, "general", None),
+    "cash": ("Касс", ("asset",), "cash", "cash"),
+    "bank": ("Харилцах данс (банк)", ("asset",), "cash", "cash"),
+    "receivable": ("Авлага", ("asset",), "settlement", "receivable"),
+    "advance_clearing": ("Цалингийн урьдчилгааны тооцоо", ("asset",), "payroll", "advance_clearing"),
+    "inventory": ("Бараа материал", ("asset",), "stock", "inventory"),
+    "fixed_asset": ("Үндсэн хөрөнгө", ("asset",), "assets", "fixed_asset"),
+    "accumulated_depreciation": ("Хуримтлагдсан элэгдэл", ("asset",), "assets", "accumulated_depreciation"),
+    "wip": ("Дуусаагүй үйлдвэрлэл", ("asset",), "stock", "wip"),
+    "tax": ("НӨАТ / татвар", ("asset", "liability"), "tax", None),
+    "payable": ("Өглөг", ("liability",), "settlement", "payable"),
+    "payroll_payable": ("Цалингийн өглөг (нийт)", ("liability",), "payroll", "payroll_payable"),
+    "net_pay_payable": ("Олгох цалингийн өглөг", ("liability",), "payroll", "payroll_payable"),
+    "employee_shi_payable": ("Ажилтны НДШ-ийн өглөг", ("liability",), "payroll", "payroll_payable"),
+    "employer_shi_payable": ("Ажил олгогчийн НДШ-ийн өглөг", ("liability",), "payroll", "payroll_payable"),
+    "pit_payable": ("ХХОАТ-ын өглөг", ("liability",), "payroll", "tax_payable"),
+    "other_deductions_payable": ("Бусад суутгалын өглөг", ("liability",), "payroll", "payroll_payable"),
+    "revenue": ("Борлуулалтын орлого", ("income",), "sales", "income"),
+    "expense": ("Үйл ажиллагааны зардал", ("expense",), "general", "expense"),
+    "salary_expense": ("Цалингийн зардал", ("expense",), "payroll", "payroll_expense"),
+    "employer_shi_expense": ("Ажил олгогчийн НДШ-ийн зардал", ("expense",), "payroll", "payroll_expense"),
+    "depreciation_expense": ("Элэгдлийн зардал", ("expense",), "assets", "depreciation_expense"),
 }
+PURPOSE_POSTING_TYPES = {purpose: spec[3] for purpose, spec in PURPOSES.items() if spec[3]}
+BANK_FIELDS = ("bank_name", "bank_account_number", "bank_iban", "bank_account_holder")
 
-
-# ``account_type`` is what document posting looks accounts up by
-# (``service.default_account``), so it is derived from the purpose and never
-# edited directly — otherwise renaming «Касс» would break payment posting.
-PURPOSE_POSTING_TYPES = {
-    "cash": "cash", "bank": "cash", "receivable": "receivable", "advance_clearing": "receivable",
-    "inventory": "inventory", "fixed_asset": "fixed_asset", "accumulated_depreciation": "fixed_asset", "wip": "wip",
-    "payable": "payable", "payroll_payable": "payroll_payable", "net_pay_payable": "payroll_payable",
-    "employee_shi_payable": "payroll_payable", "employer_shi_payable": "payroll_payable", "other_deductions_payable": "payroll_payable",
-    "pit_payable": "tax_payable", "revenue": "income", "expense": "expense", "depreciation_expense": "expense",
-    "salary_expense": "payroll_expense", "employer_shi_expense": "payroll_expense",
-}
 # Imported ``account_type`` (generic CSV or ERPNext root/account type) → (classification, purpose).
 IMPORT_TYPES = {
     "asset": ("asset", "general"), "cash": ("asset", "cash"), "bank": ("asset", "bank"), "receivable": ("asset", "receivable"),
@@ -93,6 +59,17 @@ IMPORT_TYPES = {
     "income": ("income", "revenue"), "income_account": ("income", "revenue"),
     "expense": ("expense", "expense"), "expense_account": ("expense", "expense"), "payroll_expense": ("expense", "salary_expense"),
     "depreciation": ("expense", "depreciation_expense"), "cost_of_goods_sold": ("expense", "expense"),
+}
+
+# Table → module whose data references the account (for the usage view).
+USAGE_MODULES = {
+    "erp_general_ledger_entries": "ledger", "erp_document_lines": "documents",
+    "erp_parties": "parties", "erp_party_groups": "parties", "erp_tax_template_rates": "tax",
+    "erp_accounting_settings": "settings", "budget_account_links": "budget", "erp_accounts": "children",
+}
+USAGE_LABELS = {
+    "ledger": "Журнал бичилт", "documents": "Баримт", "parties": "Харилцагч", "tax": "Татварын загвар",
+    "settings": "Санхүүгийн тохиргоо", "budget": "Төсөв", "payroll": "Цалин", "children": "Дэд данс",
 }
 
 
@@ -111,47 +88,59 @@ def classify_import(raw_type: str) -> tuple[str, str, str]:
 
 def validate_purpose(values: dict[str, Any]) -> None:
     purpose, classification = values["purpose"], values["classification"]
-    allowed = PURPOSE_CLASSIFICATIONS.get(purpose)
-    if allowed is None:
-        raise HTTPException(status_code=422, detail={"code": "erp_account_purpose_unknown", "purpose": purpose})
-    if classification not in allowed:
-        code = "payroll_account_classification_invalid" if purpose in PAYROLL_PURPOSES else "erp_account_purpose_classification_invalid"
-        raise HTTPException(status_code=422, detail={"code": code, "purpose": purpose, "allowed": sorted(allowed)})
+    spec = PURPOSES.get(purpose)
+    if spec is None:
+        raise HTTPException(status_code=422, detail={"code": "erp_account_purpose_invalid", "purpose": purpose})
+    if classification not in spec[1]:
+        # Payroll keeps its historical error code; the UI maps both to one message.
+        code = "payroll_account_classification_invalid" if spec[2] == "payroll" else "erp_account_classification_invalid"
+        raise HTTPException(status_code=422, detail={"code": code, "purpose": purpose, "allowed": list(spec[1])})
 
 
-def _account_fk_columns() -> list[tuple[Any, Any]]:
-    return [(table, column) for table in Base.metadata.tables.values() for column in table.columns
-            if any(foreign_key.column.table.name == "erp_accounts" for foreign_key in column.foreign_keys)]
+def catalog() -> dict[str, Any]:
+    return {
+        "classifications": [{"key": key, "label": CLASSIFICATION_LABELS[key], "normal_side": NORMAL_SIDES[key]} for key in CLASSIFICATIONS],
+        "purposes": [{"key": key, "label": label, "classifications": list(allowed), "module": module, "has_bank_details": key in {"bank", "cash"}}
+                     for key, (label, allowed, module, _type) in PURPOSES.items()],
+        "usage_modules": USAGE_LABELS,
+    }
 
 
-async def account_usage(db: AsyncSession, organization_id: int) -> dict[int, list[dict[str, Any]]]:
-    """Per account: every place it is referenced, with a reference count."""
-    org_accounts = select(ERPAccount.id).where(ERPAccount.organization_id == organization_id)
-    usage: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for table, column in _account_fk_columns():
-        rows = (await db.execute(select(column, func.count()).where(column.in_(org_accounts)).group_by(column))).all()
-        module, label = USAGE_LABELS.get((table.name, column.name), ("other", table.name.replace("_", " ")))
-        for account_id, count in rows:
-            usage[account_id].append({"module": module, "label": label, "count": int(count)})
-    profiles = (await db.execute(select(PayrollPostingProfile).where(PayrollPostingProfile.organization_id == organization_id))).scalars().all()
-    for profile in profiles:
-        for role, value in (profile.account_roles or {}).items():
-            if str(value).isdigit():
-                usage[int(value)].append({"module": "payroll", "label": f"Цалингийн бичилтийн үүрэг · {role}", "count": 1})
-    return dict(usage)
-
-
-async def descendant_ids(db: AsyncSession, organization_id: int, account_id: int) -> set[int]:
-    rows = (await db.execute(select(ERPAccount.id, ERPAccount.parent_id).where(ERPAccount.organization_id == organization_id))).all()
-    children: dict[int, list[int]] = defaultdict(list)
-    for child_id, parent_id in rows:
-        if parent_id:
-            children[parent_id].append(child_id)
+def descendant_ids(parents: dict[int, int | None], root_id: int) -> set[int]:
+    """Ids below ``root_id`` in the parent tree (used to reject parent cycles)."""
+    children: dict[int, list[int]] = {}
+    for child, parent in parents.items():
+        if parent is not None:
+            children.setdefault(parent, []).append(child)
     found: set[int] = set()
-    stack = [account_id]
+    stack = [root_id]
     while stack:
         for child in children.get(stack.pop(), []):
             if child not in found:
                 found.add(child)
                 stack.append(child)
     return found
+
+
+async def account_usage(db: AsyncSession, organization_id: int) -> dict[int, dict[str, int]]:
+    """Per account: module → number of rows referencing it, across every module."""
+    from app.models.models import Base, ERPAccount, PayrollPostingProfile
+
+    org_accounts = select(ERPAccount.id).where(ERPAccount.organization_id == organization_id).scalar_subquery()
+    usage: dict[int, dict[str, int]] = {}
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            if not any(foreign_key.column.table.name == "erp_accounts" for foreign_key in column.foreign_keys):
+                continue
+            module = USAGE_MODULES.get(table.name, "payroll" if table.name.startswith(("payroll_", "monthly_payroll", "salary_", "payslip_")) else "documents")
+            rows = await db.execute(select(column, func.count()).where(column.in_(org_accounts)).group_by(column))
+            for account_id, count in rows.all():
+                bucket = usage.setdefault(int(account_id), {})
+                bucket[module] = bucket.get(module, 0) + int(count)
+    profiles = (await db.execute(select(PayrollPostingProfile.account_roles).where(PayrollPostingProfile.organization_id == organization_id))).scalars().all()
+    for roles in profiles:
+        for value in (roles or {}).values():
+            if str(value).isdigit():
+                bucket = usage.setdefault(int(value), {})
+                bucket["payroll"] = bucket.get("payroll", 0) + 1
+    return usage

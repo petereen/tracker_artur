@@ -11,6 +11,7 @@ import { FormLayout } from '@astryxdesign/core/FormLayout'
 import { Heading } from '@astryxdesign/core/Heading'
 import { HStack } from '@astryxdesign/core/HStack'
 import { IconButton } from '@astryxdesign/core/IconButton'
+import { Link } from '@astryxdesign/core/Link'
 import { MultiSelector } from '@astryxdesign/core/MultiSelector'
 import { NumberInput } from '@astryxdesign/core/NumberInput'
 import { Selector } from '@astryxdesign/core/Selector'
@@ -24,8 +25,11 @@ import {
   type BudgetAccount, type BudgetCapabilities, type BudgetGroup, type BudgetKind, type BudgetLookups,
   useDeleteBudgetAccount, useDeleteBudgetGroup, useGenerateBudgetAccounts, useSaveBudgetAccount, useSaveBudgetGroup,
 } from '../../api/budget'
-import { KIND_HINTS, KIND_LABELS, KindToken, budgetErrorText } from './shared'
+import type { ERPAccountClassification } from '../../api/enterprise'
+import { CHART_OF_ACCOUNTS_PATH, CLASSIFICATION_LABELS } from '../accounts/accountShared'
+import { KIND_HINTS, KIND_LABELS, KindToken, RouterLink, budgetErrorText } from './shared'
 
+const LEDGER_CLASSES: Record<BudgetKind, string[] | null> = { income: ['income'], cogs: ['expense'], expense: ['expense'], other: null }
 const kindOptions = (Object.keys(KIND_LABELS) as BudgetKind[]).map((kind) => ({ value: kind, label: `${KIND_LABELS[kind]} — ${KIND_HINTS[kind]}` }))
 interface GroupRow extends Record<string, unknown> { id: number; group: BudgetGroup; count: number }
 interface AccountRow extends Record<string, unknown> { id: number; account: BudgetAccount }
@@ -58,10 +62,14 @@ function AccountDialog({ account, lookups, onClose }: { account: BudgetAccount |
   })
   const save = useSaveBudgetAccount()
   const owners = useMemo(() => new Map(lookups.accounts.map((row) => [row.id, row.code])), [lookups.accounts])
-  const ledgerOptions = lookups.erp_accounts.map((row) => {
-    const takenBy = row.budget_account_id && row.budget_account_id !== account?.id ? owners.get(row.budget_account_id) : undefined
-    return { value: String(row.id), label: `${row.code} · ${row.name}${takenBy ? ` (→ ${takenBy})` : ''}`, disabled: Boolean(takenBy) }
-  })
+  // Actuals are credit − debit on the linked ledger accounts, so only the matching P&L class makes sense.
+  const ledgerClasses = LEDGER_CLASSES[draft.kind]
+  const ledgerOptions = lookups.erp_accounts
+    .filter((row) => draft.erp_account_ids.includes(String(row.id)) || (row.is_active && (!ledgerClasses || ledgerClasses.includes(row.classification))))
+    .map((row) => {
+      const takenBy = row.budget_account_id && row.budget_account_id !== account?.id ? owners.get(row.budget_account_id) : undefined
+      return { value: String(row.id), label: `${row.code} · ${row.name}${takenBy ? ` (→ ${takenBy})` : ''}`, description: CLASSIFICATION_LABELS[row.classification as ERPAccountClassification], disabled: Boolean(takenBy) }
+    })
   const pickGroup = (value: string | null) => {
     const group = lookups.groups.find((row) => String(row.id) === value)
     setDraft((current) => ({ ...current, group_id: group?.id ?? null, kind: !account?.in_use && group ? group.kind : current.kind }))
@@ -84,7 +92,7 @@ function AccountDialog({ account, lookups, onClose }: { account: BudgetAccount |
           isDisabled={account?.in_use} disabledMessage="Төсөвт ашиглагдсан дансны төрлийг өөрчлөхгүй" description="Орлогыг эерэг, ББӨ ба зардлыг сөрөг утгаар төсөвлөнө." />
         <MultiSelector label="Санхүүгийн данс" options={ledgerOptions} value={draft.erp_account_ids} onChange={(ids) => setDraft({ ...draft, erp_account_ids: ids })}
           hasSearch triggerDisplay="badges" maxBadges={4} placeholder="Бодит гүйцэтгэл авах данс…" searchPlaceholder="Код эсвэл нэр…"
-          emptyText="Дансны төлөвлөгөө хоосон байна" />
+          emptyText="Тохирох санхүүгийн данс алга — Дансны төлөвлөгөөнд нээнэ үү" />
         <TextArea label="Тайлбар" value={draft.note} onChange={(note) => setDraft({ ...draft, note })} rows={2} isOptional />
         <NumberInput label="Эрэмбэ" value={draft.sort} onChange={(sort) => setDraft({ ...draft, sort })} min={0} isIntegerOnly />
         <CheckboxInput label="Идэвхтэй" value={draft.is_active} onChange={(is_active) => setDraft({ ...draft, is_active })} />
@@ -126,7 +134,10 @@ export function AccountsPanel({ capabilities, lookups }: { capabilities: BudgetC
     <Banner status={unlinked.length || !lookups.accounts.length ? 'warning' : 'success'} collapsible={false}
       title={!lookups.accounts.length ? 'Төсөвт данс үүсгээгүй байна' : unlinked.length ? `${unlinked.length} орлого/зардлын данс төсөвт дансанд холбогдоогүй` : 'Орлого, зардлын бүх данс төсөвт дансанд холбогдсон'}
       description="Зөв төсөв = зөв дансны бүтэц + зөв төлөвлөгөө + зөв бүртгэл. Дансны төлөвлөгөө → төсөвт дансны бүлэг → төсөвт данс → төсөв гэсэн дарааллаар тохируулна."
-      endContent={caps.create && unlinked.length > 0 ? <Button label="Дансны төлөвлөгөөнөөс үүсгэх" size="sm" icon={<Wand2 size={14} />} clickAction={runGenerate} /> : undefined} />
+      endContent={<HStack gap={2} vAlign="center">
+        <Link as={RouterLink} href={CHART_OF_ACCOUNTS_PATH}>Дансны төлөвлөгөө</Link>
+        {caps.create && unlinked.length > 0 && <Button label="Дансны төлөвлөгөөнөөс үүсгэх" size="sm" icon={<Wand2 size={14} />} clickAction={runGenerate} />}
+      </HStack>} />
 
     <VStack gap={2}>
       <HStack gap={2} hAlign="between" vAlign="center">
