@@ -175,22 +175,17 @@ export function ChartOfAccountsPage() {
   }
 
   return <VStack gap={4}>
-    <HStack gap={2} hAlign="between" vAlign="end" wrap="wrap">
-      <VStack gap={0.5}>
-        <Heading level={2}>Дансны төлөвлөгөө</Heading>
-        <Text type="supporting">Нэг дансны төлөвлөгөө бүх модульд үйлчилнэ: цалингийн бичилт, төсвийн гүйцэтгэл, төлбөр тооцоо, үндсэн хөрөнгө эндээс данс сонгоно.</Text>
-      </VStack>
+    <HStack gap={2} vAlign="end" hAlign="between" wrap="wrap">
+      <HStack gap={2} vAlign="end" wrap="wrap">
+        <SegmentedControl label="Ангилал" size="sm" value={classification} onChange={(value) => setClassification(value as 'all' | ERPAccountClassification)}>
+          <SegmentedControlItem value="all" label={`Бүгд (${all.length - inactive})`} />
+          {CLASSIFICATION_ORDER.map((key) => <SegmentedControlItem key={key} value={key} label={`${CLASSIFICATION_LABELS[key]} (${counts[key]})`} />)}
+        </SegmentedControl>
+        <Selector label="Төлөв" isLabelHidden width={160} value={status} onChange={(value) => setStatus((value ?? 'active') as StatusFilter)}
+          options={[{ value: 'active', label: 'Идэвхтэй' }, { value: 'inactive', label: `Идэвхгүй (${inactive})` }, { value: 'all', label: 'Бүгд' }]} />
+        <TextInput label="Хайх" isLabelHidden value={search} onChange={setSearch} placeholder="Код, нэр, банк…" hasClear width={240} />
+      </HStack>
       {perms.create && <Button label="Данс нэмэх" variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')} />}
-    </HStack>
-
-    <HStack gap={2} vAlign="end" wrap="wrap">
-      <SegmentedControl label="Ангилал" size="sm" value={classification} onChange={(value) => setClassification(value as 'all' | ERPAccountClassification)}>
-        <SegmentedControlItem value="all" label={`Бүгд (${all.length - inactive})`} />
-        {CLASSIFICATION_ORDER.map((key) => <SegmentedControlItem key={key} value={key} label={`${CLASSIFICATION_LABELS[key]} (${counts[key]})`} />)}
-      </SegmentedControl>
-      <Selector label="Төлөв" isLabelHidden width={160} value={status} onChange={(value) => setStatus((value ?? 'active') as StatusFilter)}
-        options={[{ value: 'active', label: 'Идэвхтэй' }, { value: 'inactive', label: `Идэвхгүй (${inactive})` }, { value: 'all', label: 'Бүгд' }]} />
-      <TextInput label="Хайх" isLabelHidden value={search} onChange={setSearch} placeholder="Код, нэр, банк…" hasClear width={240} />
     </HStack>
 
     <Card padding={0}>
