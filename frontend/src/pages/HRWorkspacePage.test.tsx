@@ -48,7 +48,8 @@ vi.mock('../api/enterprise', () => ({
   useSetHRLeaveBalance: () => idle,
   useUpdateHRAttendance: () => idle,
   useBulkUpdateHRAttendance: () => idle,
-  downloadHRAttendanceCsv: vi.fn(),
+  useResetHRAttendance: () => idle,
+  saveCompanyBlob: vi.fn(),
 }))
 vi.mock('../components/MonthlyPayrollProfileDrawer', () => ({ MonthlyPayrollProfileDrawer: () => null }))
 

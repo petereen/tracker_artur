@@ -20,14 +20,24 @@ import {
   type AiAgentSettingsInput,
   type AiConnectionTest,
   type ReasoningEffort,
+  type VoiceCallProvider,
   useAiAgentSettings,
   useAiModels,
   useTestAiConnection,
   useUpdateAiAgentSettings,
 } from '../api/aiSettings'
+import { ChimegeSettings } from './ChimegeSettings'
+import { ElevenLabsSettings } from './ElevenLabsSettings'
 
 const CUSTOM = '__custom__'
 const NO_FALLBACK = '__none__'
+
+const VOICE_PROVIDERS: Record<VoiceCallProvider, { label: string; description: string }> = {
+  auto: { label: 'Автомат', description: 'Монгол хэлэнд Chimege (тохируулсан бол), бусад хэлэнд OpenAI Realtime.' },
+  openai: { label: 'OpenAI Realtime', description: 'Шууд яриа, хамгийн бага хоцролт; монгол хэл сул.' },
+  chimege: { label: 'Chimege', description: 'Зөвхөн монгол хэл; ээлжээр хариулна.' },
+  elevenlabs: { label: 'ElevenLabs', description: 'Урсгал дуу (streaming TTS) + Scribe таних; англи, орос хэлэнд хамгийн байгалийн.' },
+}
 
 const SOURCE_LABEL: Record<Settings['key_source'], { label: string; color: 'green' | 'blue' | 'red' }> = {
   organization: { label: 'Байгууллагын түлхүүр', color: 'green' },
@@ -88,7 +98,7 @@ export function AiAgentSettings() {
   const update = useUpdateAiAgentSettings()
   const testConnection = useTestAiConnection()
   const [apiKey, setApiKey] = useState('')
-  const [draft, setDraft] = useState<Required<Pick<AiAgentSettingsInput, 'primary_model' | 'reasoning_effort' | 'max_output_tokens' | 'web_search_enabled'>> & { fallback_model: string | null; realtime_model?: string; realtime_voice?: string; realtime_enabled?: boolean } | null>(null)
+  const [draft, setDraft] = useState<Required<Pick<AiAgentSettingsInput, 'primary_model' | 'reasoning_effort' | 'max_output_tokens' | 'web_search_enabled'>> & { fallback_model: string | null; realtime_model?: string; realtime_voice?: string; realtime_enabled?: boolean; voice_call_provider?: VoiceCallProvider } | null>(null)
   const [testResult, setTestResult] = useState<AiConnectionTest | null>(null)
 
   useEffect(() => {
@@ -102,6 +112,7 @@ export function AiAgentSettings() {
       realtime_model: settings.data.realtime_model,
       realtime_voice: settings.data.realtime_voice,
       realtime_enabled: settings.data.realtime_enabled,
+      voice_call_provider: settings.data.voice_call_provider,
     })
   }, [settings.data])
 
@@ -120,6 +131,7 @@ export function AiAgentSettings() {
     || draft.realtime_model !== data.realtime_model
     || draft.realtime_voice !== data.realtime_voice
     || draft.realtime_enabled !== data.realtime_enabled
+    || draft.voice_call_provider !== data.voice_call_provider
   const realtimeListed = models.data?.realtime_models ?? []
 
   const save = async () => {
@@ -134,6 +146,7 @@ export function AiAgentSettings() {
         ...(draft.realtime_model !== undefined ? { realtime_model: draft.realtime_model } : {}),
         ...(draft.realtime_voice !== undefined ? { realtime_voice: draft.realtime_voice } : {}),
         ...(draft.realtime_enabled !== undefined ? { realtime_enabled: draft.realtime_enabled } : {}),
+        ...(draft.voice_call_provider !== undefined ? { voice_call_provider: draft.voice_call_provider } : {}),
       })
       setApiKey('')
     } catch { /* the mutation's onError shows the toast */ }
@@ -220,13 +233,24 @@ export function AiAgentSettings() {
         {draft.realtime_enabled !== undefined && <>
           <Divider />
           <Heading level={3}>Дуут дуудлага (Realtime)</Heading>
-          <Text type="supporting">Чат дахь OYUNS Agent руу залгахад OpenAI Realtime модель шууд ярьж, компанийн мэдлэг ба өгөгдлийг хэрэглэгчийн эрхийн хүрээнд уншина.</Text>
+          <Text type="supporting">Чат дахь OYUNS Agent руу залгахад OYUNS шууд ярьж, компанийн мэдлэг ба өгөгдлийг хэрэглэгчийн эрхийн хүрээнд уншина. Хөдөлгүүр: OpenAI Realtime, Chimege эсвэл ElevenLabs.</Text>
           <Switch
             label="Дуут дуудлага"
             description="Идэвхгүй бол чат дахь OYUNS Agent-ийн дуудлагын товч ажиллахгүй."
             value={draft.realtime_enabled}
             onChange={(value) => setDraft({ ...draft, realtime_enabled: value })}
           />
+          {draft.voice_call_provider !== undefined && <Selector
+            label="Дуудлагын хөдөлгүүр"
+            description="Дуудлага аль үйлчилгээгээр явагдахыг сонгоно. Хэрэглэгч дуудлагын цонхноос тохируулсан бусад хөдөлгүүр рүү шилжиж болно; бэлэн бус хөдөлгүүр сонгосон бол автомат горимд шилжинэ."
+            options={(data.voice_call_providers ?? ['auto', 'openai', 'chimege', 'elevenlabs']).map((value) => ({
+              value,
+              label: VOICE_PROVIDERS[value].label,
+              description: `${VOICE_PROVIDERS[value].description}${(value === 'chimege' && data.chimege && !data.chimege.voice_call_ready) || (value === 'elevenlabs' && data.elevenlabs && !data.elevenlabs.ready) ? ' · Тохируулаагүй' : ''}`,
+            }))}
+            value={draft.voice_call_provider}
+            onChange={(value) => setDraft({ ...draft, voice_call_provider: value as VoiceCallProvider })}
+          />}
           <FormLayout>
             <ModelField
               label="Realtime модель"
@@ -256,5 +280,8 @@ export function AiAgentSettings() {
         </HStack>
       </VStack>
     </Card>
+
+    {data.chimege && <ChimegeSettings settings={data.chimege} />}
+    {data.elevenlabs && <ElevenLabsSettings settings={data.elevenlabs} />}
   </VStack>
 }

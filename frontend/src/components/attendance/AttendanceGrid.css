@@ -1,0 +1,219 @@
+/* Attendance grid: employee × day matrix. Colours come from the app palette
+   (index.css), so light/dark themes follow automatically. */
+
+.att-scroll {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 12px;
+  max-height: max(360px, calc(100dvh - 330px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  position: relative;
+  scroll-padding-left: var(--att-name-width);
+  --att-name-width: 248px;
+}
+.att-scroll.is-fetching { cursor: progress; }
+.att-scroll.is-fetching tbody { opacity: .72; transition: opacity .15s ease; }
+
+.att-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--color-text);
+  font: 400 12px var(--font-brand);
+  table-layout: fixed;
+  user-select: none;
+}
+.att-grid--week { min-width: calc(var(--att-name-width) + 7 * 96px); width: 100%; }
+.att-grid--month { width: max-content; }
+.att-col-name { width: var(--att-name-width); }
+.att-grid--month .att-col-day { width: 42px; }
+
+.att-grid th, .att-grid td {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-soft);
+  border-right: 1px solid var(--color-border-soft);
+  padding: 0;
+}
+.att-grid td:last-child, .att-grid th:last-child { border-right: 0; }
+.att-grid tbody tr:last-child > * { border-bottom: 0; }
+
+/* Header */
+.att-grid thead th {
+  background: var(--color-surface-2);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.att-day-head { color: var(--color-muted); height: 48px; text-align: center; }
+.att-day-head span { display: block; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.att-day-head strong { color: var(--color-text); display: block; font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 700; }
+.att-day-head.is-weekend { background: var(--color-surface-3); }
+.att-day-head.is-weekend strong { color: var(--color-muted); }
+.att-day-head.is-today { box-shadow: inset 0 -2px 0 var(--color-accent); }
+.att-day-head.is-today span, .att-day-head.is-today strong { color: var(--color-accent); }
+
+/* Pinned # / checkbox / name column */
+.att-sticky {
+  box-shadow: 1px 0 0 var(--color-border);
+  left: 0;
+  position: sticky;
+  z-index: 1;
+}
+.att-grid thead .att-corner { z-index: 3; }
+.att-name-cell, .att-corner { padding: 0 10px 0 8px; text-align: left; }
+.att-grid--week .att-name-cell { height: 52px; }
+.att-grid--month .att-name-cell { height: 44px; }
+.att-corner { height: 48px; }
+.att-name-inner {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 22px auto minmax(0, 1fr);
+}
+.att-row-index { color: var(--color-muted-2); font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
+.att-row-check { display: inline-flex; }
+.att-person { display: grid; min-width: 0; }
+.att-person strong, .att-person small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-person strong { font-size: 12px; font-weight: 600; }
+.att-person small { color: var(--color-muted); font-size: 10px; }
+.att-corner .att-person strong { color: var(--color-muted); font-size: 11px; }
+.att-grid tbody tr.is-row-selected .att-name-cell { background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface)); }
+
+/* Cells */
+.att-cell {
+  cursor: pointer;
+  height: 52px;
+  padding: 0 6px;
+  position: relative;
+  text-align: center;
+  vertical-align: middle;
+}
+.att-grid--month .att-cell { height: 44px; padding: 0 4px; }
+.att-cell.is-readonly { cursor: default; }
+.att-cell.is-weekend { background: var(--color-surface-2); }
+.att-cell.is-today { background: color-mix(in srgb, var(--color-accent) 4%, var(--color-surface)); }
+.att-cell.is-off {
+  background: repeating-linear-gradient(-45deg, var(--color-surface-2) 0 6px, var(--color-surface-3) 6px 7px);
+}
+.att-cell:hover:not(.is-readonly) { background-color: color-mix(in srgb, var(--color-accent) 5%, var(--color-surface)); }
+.att-cell.is-selected { background: color-mix(in srgb, var(--color-accent) 13%, var(--color-surface)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-accent) 60%, transparent); }
+.att-cell:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; z-index: 0; }
+.att-spacer td, .att-spacer { background: transparent; border: 0; }
+
+/* Status badges */
+.att-badge {
+  --att-hue: var(--color-muted);
+  align-items: center;
+  background: color-mix(in srgb, var(--att-hue) 12%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--att-hue) 26%, transparent);
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--att-hue) 62%, var(--color-text));
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+  height: 28px;
+  justify-content: center;
+  max-width: 100%;
+  padding: 0 8px;
+  position: relative;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.att-grid--week .att-cell .att-badge { width: 100%; }
+.att-grid--month .att-cell .att-badge, .att-legend-item .att-badge, .att-editor-option .att-badge { height: 26px; padding: 0; width: 26px; }
+.att-badge svg { flex: 0 0 auto; }
+.att-badge-label { overflow: hidden; text-overflow: ellipsis; }
+
+.att-badge--present { --att-hue: var(--color-green); background: var(--color-green-soft); }
+.att-badge--remote { --att-hue: var(--color-accent); background: var(--color-accent-soft); }
+.att-badge--late { --att-hue: var(--color-amber); background: var(--color-surface); border-color: color-mix(in srgb, var(--color-amber) 55%, transparent); }
+.att-badge--absent { --att-hue: var(--color-red); background: var(--color-red-soft); }
+.att-badge--leave { --att-hue: var(--color-purple); }
+.att-badge--sick { --att-hue: var(--color-amber); background: var(--color-amber-soft); }
+.att-badge--pending { background: transparent; border: 1px dashed var(--color-border); height: 26px; min-width: 26px; }
+.att-grid--week .att-cell .att-badge--pending { width: 26px; }
+
+/* Suggested (not yet confirmed by a manager): same hue, dashed and lighter. */
+.att-badge.is-suggested { background: color-mix(in srgb, var(--att-hue) 6%, var(--color-surface)); border-style: dashed; border-color: color-mix(in srgb, var(--att-hue) 45%, transparent); }
+/* Worked on a weekend or public holiday. */
+.att-badge.is-overtime { border: 1.5px solid color-mix(in srgb, var(--att-hue) 80%, var(--color-text)); }
+.att-badge-ot {
+  background: color-mix(in srgb, var(--att-hue) 80%, var(--color-text));
+  border-radius: 999px;
+  color: var(--color-surface);
+  font-size: 9px;
+  font-weight: 800;
+  height: 13px;
+  line-height: 13px;
+  position: absolute;
+  right: -5px;
+  top: -6px;
+  width: 13px;
+}
+
+/* Legend */
+.att-legend-item { align-items: center; display: inline-flex; gap: 6px; }
+.att-legend-off {
+  background: repeating-linear-gradient(-45deg, var(--color-surface-2) 0 4px, var(--color-surface-3) 4px 5px);
+  border: 1px solid var(--color-border-soft);
+  border-radius: 7px;
+  display: inline-block;
+  height: 22px;
+  width: 22px;
+}
+
+/* Cell editor (portalled to <body>) */
+.att-editor {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px color-mix(in srgb, #0b172a 18%, transparent), var(--shadow-sm);
+  color: var(--color-text);
+  display: grid;
+  font: 400 12px var(--font-brand);
+  gap: 8px;
+  max-width: calc(100vw - 16px);
+  outline: 0;
+  padding: 10px;
+  position: fixed;
+  width: 248px;
+  z-index: 1000;
+}
+.att-editor header { display: grid; gap: 2px; padding: 2px 4px; }
+.att-editor header strong { font-size: 13px; }
+.att-editor header span { color: var(--color-muted); font-size: 11px; }
+.att-editor header small { color: var(--color-muted-2); font-size: 10px; }
+.att-editor-note { color: var(--color-muted); display: grid; font-size: 11px; gap: 8px; margin: 0; padding: 0 4px; }
+.att-editor-note p { margin: 0; }
+.att-editor-options { border-top: 1px solid var(--color-border-soft); display: grid; gap: 2px; padding-top: 6px; }
+.att-editor-option, .att-editor-link {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--color-text);
+  cursor: pointer;
+  display: flex;
+  font: 500 12px var(--font-brand);
+  gap: 9px;
+  min-height: 34px;
+  padding: 3px 6px;
+  text-align: left;
+  width: 100%;
+}
+.att-editor-option:hover, .att-editor-option:focus-visible, .att-editor-link:hover, .att-editor-link:focus-visible { background: var(--color-surface-2); outline: 0; }
+.att-editor-option:focus-visible, .att-editor-link:focus-visible { box-shadow: inset 0 0 0 2px var(--color-accent); }
+.att-editor-option[aria-checked="true"] { background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface)); }
+.att-editor-current { color: var(--color-accent); margin-left: auto; }
+.att-editor-reset { border-top: 1px solid var(--color-border-soft); border-radius: 0 0 8px 8px; color: var(--color-muted); margin-top: 4px; padding-top: 7px; }
+.att-editor-reset svg { margin: 0 6px; }
+.att-editor-link { color: var(--color-accent); font-weight: 600; justify-content: center; border: 1px solid var(--color-border-soft); }
+
+@media (max-width: 800px) {
+  .att-scroll { --att-name-width: 164px; max-height: max(360px, calc(100dvh - 260px)); }
+  .att-grid--week { min-width: calc(var(--att-name-width) + 7 * 64px); }
+  .att-grid--week .att-cell .att-badge-label { display: none; }
+  .att-grid--week .att-cell .att-badge { width: 30px; padding: 0; }
+  .att-name-cell, .att-corner { padding: 0 6px 0 4px; }
+  .att-name-inner { gap: 4px; grid-template-columns: 16px auto minmax(0, 1fr); }
+}

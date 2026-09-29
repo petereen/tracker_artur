@@ -36,6 +36,21 @@ KeySource = Literal["organization", "environment", "none"]
 DEFAULT_REALTIME_MODEL = "gpt-realtime"
 DEFAULT_REALTIME_VOICE = "marin"
 REALTIME_VOICES = ("marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse")
+# Chimege (Mongolian STT/TTS) tokens: stored encrypted like the OpenAI key,
+# with the historical environment variables as the fallback.
+CHIMEGE_TOKENS = {"stt": ("chimege_stt_token_enc", "CHIMEGE_API_TOKEN"), "tts": ("chimege_tts_token_enc", "CHIMEGE_TTS_API_TOKEN")}
+# ElevenLabs (streaming TTS + Scribe STT) for voice calls: the key is stored
+# encrypted like the others, `ELEVENLABS_API_KEY` is the fallback.
+ELEVENLABS_KEY_FIELD = "elevenlabs_api_key_enc"
+ELEVENLABS_ENV = "ELEVENLABS_API_KEY"
+# Only these models stream over the `stream-input` WebSocket (v3 does not).
+ELEVENLABS_MODELS = ("eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_multilingual_v2")
+DEFAULT_ELEVENLABS_MODEL = "eleven_flash_v2_5"
+# "Sarah", a premade multilingual voice every ElevenLabs account has.
+DEFAULT_ELEVENLABS_VOICE = "EXAVITQu4vr4xnSDxMaL"
+# Voice call engine: `auto` keeps Chimege for Mongolian and OpenAI Realtime
+# for other languages; the others pin one engine (falling back when not ready).
+VOICE_CALL_PROVIDERS = ("auto", "openai", "chimege", "elevenlabs")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +66,39 @@ class AIRuntime:
     realtime_voice: str = DEFAULT_REALTIME_VOICE
     realtime_enabled: bool = True
     access: AccessPolicy = FULL_ACCESS
+    chimege_stt_token: str = ""
+    chimege_tts_token: str = ""
+    chimege_stt_source: KeySource = "none"
+    chimege_tts_source: KeySource = "none"
+    chimege_stt_enabled: bool = True
+    chimege_tts_enabled: bool = True
+    # Mongolian voice calls: Chimege STT → OYUNS agent → Chimege TTS instead
+    # of the OpenAI Realtime model, which handles Mongolian poorly.
+    chimege_voice_call_enabled: bool = True
+    voice_call_provider: str = "auto"
+    elevenlabs_api_key: str = ""
+    elevenlabs_source: KeySource = "none"
+    elevenlabs_enabled: bool = True
+    elevenlabs_voice_id: str = DEFAULT_ELEVENLABS_VOICE
+    elevenlabs_model: str = DEFAULT_ELEVENLABS_MODEL
+
+    @property
+    def elevenlabs_ready(self) -> bool:
+        return bool(self.elevenlabs_enabled and self.elevenlabs_api_key)
+
+    @property
+    def stt_token(self) -> str:
+        """The Chimege STT token when Chimege recognition is switched on."""
+        return self.chimege_stt_token if self.chimege_stt_enabled else ""
+
+    @property
+    def tts_token(self) -> str:
+        """The Chimege TTS token when Chimege speech is switched on."""
+        return self.chimege_tts_token if self.chimege_tts_enabled else ""
+
+    @property
+    def chimege_voice_call_ready(self) -> bool:
+        return bool(self.chimege_voice_call_enabled and self.stt_token and self.tts_token)
 
     @property
     def models(self) -> list[str]:
@@ -83,6 +131,31 @@ def stored_config(organization_settings: dict | None) -> dict:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _chimege_token(stored: dict, kind: str) -> tuple[str, KeySource]:
+    field, env_name = CHIMEGE_TOKENS[kind]
+    if stored.get(field):
+        try:
+            token = decrypt_secret(str(stored[field])).strip()
+            if token:
+                return token, "organization"
+        except ValueError:
+            log.warning("ai_runtime.chimege_%s_token_undecryptable", kind)
+    token = os.getenv(env_name, "").strip()
+    return token, "environment" if token else "none"
+
+
+def _elevenlabs_key(stored: dict) -> tuple[str, KeySource]:
+    if stored.get(ELEVENLABS_KEY_FIELD):
+        try:
+            key = decrypt_secret(str(stored[ELEVENLABS_KEY_FIELD])).strip()
+            if key:
+                return key, "organization"
+        except ValueError:
+            log.warning("ai_runtime.elevenlabs_key_undecryptable")
+    key = os.getenv(ELEVENLABS_ENV, "").strip()
+    return key, "environment" if key else "none"
+
+
 def build_runtime(organization_settings: dict | None) -> AIRuntime:
     """Merge organization settings over environment defaults."""
     stored = stored_config(organization_settings)
@@ -100,7 +173,25 @@ def build_runtime(organization_settings: dict | None) -> AIRuntime:
     primary, fallback = default_models()
     effort = str(stored.get("reasoning_effort") or "low")
     voice = str(stored.get("realtime_voice") or DEFAULT_REALTIME_VOICE)
+    stt_token, stt_source = _chimege_token(stored, "stt")
+    tts_token, tts_source = _chimege_token(stored, "tts")
+    elevenlabs_key, elevenlabs_source = _elevenlabs_key(stored)
+    provider = str(stored.get("voice_call_provider") or "auto")
+    elevenlabs_model = str(stored.get("elevenlabs_model") or "")
     return AIRuntime(
+        voice_call_provider=provider if provider in VOICE_CALL_PROVIDERS else "auto",
+        elevenlabs_api_key=elevenlabs_key,
+        elevenlabs_source=elevenlabs_source,
+        elevenlabs_enabled=bool(stored.get("elevenlabs_enabled", True)),
+        elevenlabs_voice_id=str(stored.get("elevenlabs_voice_id") or "").strip() or DEFAULT_ELEVENLABS_VOICE,
+        elevenlabs_model=elevenlabs_model if elevenlabs_model in ELEVENLABS_MODELS else DEFAULT_ELEVENLABS_MODEL,
+        chimege_stt_token=stt_token,
+        chimege_tts_token=tts_token,
+        chimege_stt_source=stt_source,
+        chimege_tts_source=tts_source,
+        chimege_stt_enabled=bool(stored.get("chimege_stt_enabled", True)),
+        chimege_tts_enabled=bool(stored.get("chimege_tts_enabled", True)),
+        chimege_voice_call_enabled=bool(stored.get("chimege_voice_call_enabled", True)),
         realtime_model=str(stored.get("realtime_model") or "").strip() or DEFAULT_REALTIME_MODEL,
         realtime_voice=voice if voice in REALTIME_VOICES else DEFAULT_REALTIME_VOICE,
         realtime_enabled=bool(stored.get("realtime_enabled", True)),
@@ -141,7 +232,8 @@ async def resolve_ai_runtime(db: Any, organization_id: int | None) -> AIRuntime:
             organization = await db.get(Organization, organization_id)
             return getattr(organization, "settings", None) if organization else None
         rows = (await db.execute(select(Organization.settings).order_by(Organization.id))).scalars().all()
-        return next((row for row in rows if stored_config(row).get("api_key_enc")), rows[0] if rows else None)
+        configured = ("api_key_enc", ELEVENLABS_KEY_FIELD, *(field for field, _ in CHIMEGE_TOKENS.values()))
+        return next((row for row in rows if any(stored_config(row).get(key) for key in configured)), rows[0] if rows else None)
 
     try:
         # A savepoint keeps a failed lookup from aborting the caller's
@@ -171,6 +263,22 @@ async def openai_api_key(organization_id: int | None = None) -> str:
     except Exception:
         log.warning("ai_runtime.key_lookup_failed", exc_info=True)
         return _env_key()
+
+
+async def chimege_tokens(organization_id: int | None = None) -> tuple[str, str]:
+    """Active (switched-on) Chimege STT and TTS tokens for service code."""
+    cached = _cache.get(organization_id)
+    if cached and cached[0] > time.monotonic():
+        return cached[1].stt_token, cached[1].tts_token
+    try:
+        from app.core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            runtime = await resolve_ai_runtime(db, organization_id)
+            return runtime.stt_token, runtime.tts_token
+    except Exception:
+        log.warning("ai_runtime.chimege_lookup_failed", exc_info=True)
+        return os.getenv("CHIMEGE_API_TOKEN", "").strip(), os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip()
 
 
 def has_api_key_hint() -> bool:

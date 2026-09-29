@@ -109,6 +109,14 @@ class GatewaySession:
         return None
 
 
+async def _available(*_args, **_kwargs):
+    return True
+
+
+async def _stt_token(_organization_id=None):
+    return "token", ""
+
+
 async def _linked_actor(_tg_id, _db):
     return build_actor_context(account_id=11, organization_id=1, employee_id=7, email="tester@example.com", locale="en", roles=frozenset({"member"}))
 
@@ -211,7 +219,7 @@ def test_voice_turn_is_flagged_and_answered_with_chimege_audio(monkeypatch):
     monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", GatewaySession)
     monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", _linked_actor)
     monkeypatch.setattr(assistant_handlers.ai_gateway, "execute_turn", execute_turn)
-    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_available", _available)
     monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
     message = FakeMessage("миний даалгавар")
     asyncio.run(assistant_handlers._enterprise_route(message, FakeState(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77", voice_mode=True))
@@ -231,7 +239,7 @@ def test_voice_task_preview_is_not_read_aloud(monkeypatch):
     monkeypatch.setattr(assistant_handlers, "AsyncSessionLocal", GatewaySession)
     monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", _linked_actor)
     monkeypatch.setattr(assistant_handlers.ai_gateway, "execute_turn", execute_turn)
-    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_enabled", lambda: True)
+    monkeypatch.setattr(assistant_handlers.voice_service, "synthesis_available", _available)
     monkeypatch.setattr(assistant_handlers.voice_service, "synthesize", synthesize)
     message = FakeMessage("маргааш хурал")
     asyncio.run(assistant_handlers._enterprise_route(message, FakeState(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77", voice_mode=True))
@@ -628,14 +636,14 @@ def test_transcription_uses_chimege_first_then_openai(monkeypatch):
         calls.append("chimege")
         return None, "Chimege down"
 
-    async def openai(_audio, key, _filename):
+    async def openai(_audio, key, _filename, **_kwargs):
         calls.append(("openai", key))
         return "Сайн байна уу", None
 
     async def key(_organization_id=None):
         return "sk-org-key"
 
-    monkeypatch.setenv("CHIMEGE_API_TOKEN", "token")
+    monkeypatch.setattr(runtime, "chimege_tokens", _stt_token)
     monkeypatch.setattr(voice_service, "_transcribe_chimege", chimege)
     monkeypatch.setattr(voice_service, "_transcribe_openai", openai)
     monkeypatch.setattr(runtime, "openai_api_key", key)
@@ -644,13 +652,15 @@ def test_transcription_uses_chimege_first_then_openai(monkeypatch):
 
 
 def test_chimege_success_skips_openai(monkeypatch):
+    from app.services.ai_gateway import runtime
+
     async def chimege(_audio, _token):
         return "Маргааш хурал", None
 
     async def openai(*_args):
         raise AssertionError("OpenAI must not be called when Chimege succeeds")
 
-    monkeypatch.setenv("CHIMEGE_API_TOKEN", "token")
+    monkeypatch.setattr(runtime, "chimege_tokens", _stt_token)
     monkeypatch.setattr(voice_service, "_transcribe_chimege", chimege)
     monkeypatch.setattr(voice_service, "_transcribe_openai", openai)
     assert asyncio.run(voice_service.transcribe(b"audio")) == ("Маргааш хурал", None)

@@ -260,28 +260,60 @@ async def leave_balance(db: AsyncSession, organization_id: int, employee_id: int
     return {"id": row.id, "employee_id": employee_id, "year": year, "leave_type": leave_type, "entitled_days": str(row.entitled_days), "carried_days": str(row.carried_days), "adjustment_days": str(row.adjustment_days), "used_days": str(Decimal(str(used))), "pending_days": str(Decimal(str(pending))), "available_days": str(max(Decimal("0"), total - Decimal(str(used)) - Decimal(str(pending))))}
 
 
-async def worktime_summary(db: AsyncSession, employee_id: int, local_day: date) -> dict[str, Any]:
-    rows = (await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.employee_id == employee_id, WorkTimeEntry.local_work_date == local_day, WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status == "approved").order_by(WorkTimeEntry.started_at))).scalars().all()
+def derive_attendance(employee: Employee, local_day: date, entries: list[WorkTimeEntry], leave: TimeOff | None, schedule: Schedule | None, *, today: date | None = None) -> dict[str, Any]:
+    """Suggested attendance for one worker-day from approved work entries, approved leave and the schedule."""
+    rows = sorted((row for row in entries if row.entry_type == "work" and row.approval_status == "approved"), key=lambda row: row.started_at)
     minutes = sum(round((row.ended_at - row.started_at).total_seconds() / 60) for row in rows if row.ended_at)
     first = rows[0].started_at if rows else None
     last = next((row.ended_at for row in reversed(rows) if row.ended_at), None)
     modes = {row.mode for row in rows if row.mode}
-    return {"worked_minutes": minutes, "first_started_at": first, "last_ended_at": last, "suggested_status": "remote" if modes and modes == {"remote"} else "present" if rows else None}
+    summary: dict[str, Any] = {"worked_minutes": minutes, "first_started_at": first, "last_ended_at": last, "suggested_status": "remote" if modes and modes == {"remote"} else "present" if rows else None}
+    summary["on_leave"] = leave is not None
+    summary["leave_type"] = leave.time_off_type if leave is not None else None
+    morning_time = schedule.morning_time if schedule else None
+    if summary["suggested_status"] or leave is not None:
+        if summary["suggested_status"] and first and morning_time:
+            local_started = first.astimezone(ZoneInfo(employee.timezone or "Asia/Ulaanbaatar")).replace(tzinfo=None)
+            threshold = datetime.combine(local_day, morning_time) + timedelta(minutes=settings.HR_ATTENDANCE_LATE_MINUTES)
+            if local_started > threshold:
+                summary["suggested_status"] = "late"
+        return summary
+    if local_day >= (today or date.today()):
+        summary["suggested_status"] = None
+        return summary
+    if morning_time:
+        summary["suggested_status"] = "absent"
+    return summary
+
+
+async def suggested_attendance_range(db: AsyncSession, employees: list[Employee], start: date, end: date) -> dict[tuple[int, date], dict[str, Any]]:
+    """Suggestions for every worker-day in the range with three queries instead of three per cell."""
+    if not employees:
+        return {}
+    ids = [employee.id for employee in employees]
+    entries = (await db.execute(select(WorkTimeEntry).where(WorkTimeEntry.employee_id.in_(ids), WorkTimeEntry.local_work_date >= start, WorkTimeEntry.local_work_date <= end, WorkTimeEntry.entry_type == "work", WorkTimeEntry.approval_status == "approved"))).scalars().all()
+    by_day: dict[tuple[int, date], list[WorkTimeEntry]] = {}
+    for row in entries:
+        by_day.setdefault((row.employee_id, row.local_work_date), []).append(row)
+    organization_id = employees[0].organization_id
+    leaves = (await db.execute(select(TimeOff).where(TimeOff.organization_id == organization_id, TimeOff.employee_id.in_(ids), TimeOff.status == "approved", TimeOff.starts_on <= end, TimeOff.ends_on >= start).order_by(TimeOff.starts_on, TimeOff.id))).scalars().all()
+    schedules: dict[int, Schedule] = {}
+    for row in (await db.execute(select(Schedule).where(Schedule.employee_id.in_(ids)).order_by(Schedule.id))).scalars().all():
+        schedules.setdefault(row.employee_id, row)
+    today = date.today()
+    output: dict[tuple[int, date], dict[str, Any]] = {}
+    for employee in employees:
+        own_leaves = [leave for leave in leaves if leave.employee_id == employee.id]
+        current = start
+        while current <= end:
+            leave = next((item for item in own_leaves if item.starts_on <= current <= item.ends_on), None)
+            output[(employee.id, current)] = derive_attendance(employee, current, by_day.get((employee.id, current), []), leave, schedules.get(employee.id), today=today)
+            current += timedelta(days=1)
+    return output
 
 
 async def suggested_attendance(db: AsyncSession, employee: Employee, local_day: date) -> dict[str, Any]:
-    summary = await worktime_summary(db, employee.id, local_day)
-    approved_leave = await db.scalar(select(TimeOff.id).where(TimeOff.organization_id == employee.organization_id, TimeOff.employee_id == employee.id, TimeOff.status == "approved", TimeOff.starts_on <= local_day, TimeOff.ends_on >= local_day))
-    summary["on_leave"] = bool(approved_leave)
-    if summary["suggested_status"] or approved_leave:
-        if summary["suggested_status"] and summary.get("first_started_at"):
-            schedule = await db.scalar(select(Schedule).where(Schedule.employee_id == employee.id))
-            if schedule and schedule.morning_time:
-                local_started = summary["first_started_at"].astimezone(ZoneInfo(employee.timezone or "Asia/Ulaanbaatar")).replace(tzinfo=None)
-                threshold = datetime.combine(local_day, schedule.morning_time) + timedelta(minutes=settings.HR_ATTENDANCE_LATE_MINUTES)
-                if local_started > threshold:
-                    summary["suggested_status"] = "late"
-        return summary
+    return (await suggested_attendance_range(db, [employee], local_day, local_day))[(employee.id, local_day)]
     if local_day >= date.today():
         summary["suggested_status"] = None
         return summary

@@ -36,6 +36,7 @@ from app.models.models import (
     UserAccount,
     WorkerInvite,
 )
+from app.services.attendance_service import sync_worktime_attendance
 from app.services.enterprise_events import record_change
 from app.services.user_notifications import create_notifications
 from .schemas import (
@@ -71,7 +72,7 @@ from .service import (
     leave_balance,
     leave_days,
     set_worker_active,
-    suggested_attendance,
+    suggested_attendance_range,
     worker_history,
 )
 from app.payroll.monthly_engine import (
@@ -710,20 +711,24 @@ async def set_leave_balance(employee_id: int, data: LeaveBalancePatch, db: Async
 
 
 async def _attendance_items(db: AsyncSession, actor: ActorContext, start: date, end: date, employee_id: int | None = None) -> list[dict]:
-    query = select(Employee).outerjoin(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).where(Employee.organization_id == actor.organization_id, Employee.is_active.is_(True), *_employee_scope_clause(actor))
+    query = select(Employee, Department.id, Department.name).outerjoin(EmployeeDetails, EmployeeDetails.employee_id == Employee.id).outerjoin(Department, Department.id == EmployeeDetails.department_id).where(Employee.organization_id == actor.organization_id, Employee.is_active.is_(True), *_employee_scope_clause(actor))
     if employee_id: query = query.where(Employee.id == employee_id)
-    employees = (await db.execute(query.order_by(Employee.name))).scalars().all()
+    rows = (await db.execute(query.order_by(Employee.name))).all()
+    employees = [row[0] for row in rows]
+    departments = {row[0].id: (row[1], row[2]) for row in rows}
     logs = (await db.execute(select(AttendanceLog).where(AttendanceLog.organization_id == actor.organization_id, AttendanceLog.attendance_date >= start, AttendanceLog.attendance_date <= end))).scalars().all()
     by_key = {(row.employee_id, row.attendance_date): row for row in logs}
     holiday_rows = (await db.execute(select(HolidayRecord.holiday_date, HolidayRecord.name).where(HolidayRecord.organization_id == actor.organization_id, HolidayRecord.is_active.is_(True), HolidayRecord.holiday_date >= start, HolidayRecord.holiday_date <= end))).all()
     holidays = {holiday_date: name for holiday_date, name in holiday_rows}
+    suggestions = await suggested_attendance_range(db, employees, start, end)
     output = []
     current = start
     while current <= end:
         for employee in employees:
-            log = by_key.get((employee.id, current)); suggestion = await suggested_attendance(db, employee, current)
+            log = by_key.get((employee.id, current)); suggestion = suggestions[(employee.id, current)]
             non_working_day = current.weekday() >= 5 or current in holidays
-            output.append({"id": log.id if log else None, "employee_id": employee.id, "employee_name": employee.name, "attendance_date": current.isoformat(), "status": log.status if log else suggestion.get("suggested_status"), "suggested_status": suggestion.get("suggested_status"), "on_leave": suggestion.get("on_leave", False), "source": log.source if log else "derived", "worked_minutes": log.worked_minutes if log else suggestion.get("worked_minutes", 0), "first_started_at": log.first_started_at if log else suggestion.get("first_started_at"), "last_ended_at": log.last_ended_at if log else suggestion.get("last_ended_at"), "confirmed": bool(log and log.confirmed_at), "version": log.version if log else None, "is_non_working_day": non_working_day, "non_working_day_name": holidays.get(current) or ("Амралтын өдөр" if current.weekday() >= 5 else None)})
+            department_id, department_name = departments[employee.id]
+            output.append({"id": log.id if log else None, "employee_id": employee.id, "employee_name": employee.name, "department_id": department_id, "department_name": department_name, "attendance_date": current.isoformat(), "status": log.status if log else suggestion.get("suggested_status"), "suggested_status": suggestion.get("suggested_status"), "on_leave": suggestion.get("on_leave", False), "leave_type": suggestion.get("leave_type"), "source": log.source if log else "derived", "worked_minutes": log.worked_minutes if log else suggestion.get("worked_minutes", 0), "first_started_at": log.first_started_at if log else suggestion.get("first_started_at"), "last_ended_at": log.last_ended_at if log else suggestion.get("last_ended_at"), "confirmed": bool(log and log.confirmed_at), "version": log.version if log else None, "is_non_working_day": non_working_day, "non_working_day_name": holidays.get(current) or ("Амралтын өдөр" if current.weekday() >= 5 else None)})
         current += timedelta(days=1)
     return output
 
@@ -765,6 +770,22 @@ async def update_attendance_bulk(data: AttendanceBulkUpdate, db: AsyncSession = 
     for item in data.items:
         result.append(await update_attendance(item, db, actor))
     return {"updated": result}
+
+
+@router.delete("/attendance")
+async def reset_attendance(employee_id: int, attendance_date: date, version: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*MANAGER_ROLES))):
+    """Drop a manager's confirmation so the day falls back to worktime/leave-derived status."""
+    employee = await employee_in_scope(db, actor, employee_id, write=True)
+    row = await db.scalar(select(AttendanceLog).where(AttendanceLog.organization_id == actor.organization_id, AttendanceLog.employee_id == employee.id, AttendanceLog.attendance_date == attendance_date).with_for_update())
+    if not row: return {"employee_id": employee.id, "attendance_date": attendance_date, "reset": False}
+    if version is not None and row.version != version: raise HTTPException(status_code=409, detail="Attendance changed")
+    if not row.worked_minutes and not row.first_started_at:
+        await db.delete(row)
+    else:
+        row.confirmed_at = None; row.confirmed_by_account_id = None; row.note = None; row.source = "worktime"; row.version += 1
+        await sync_worktime_attendance(db, employee, attendance_date)
+    await db.commit()
+    return {"employee_id": employee.id, "attendance_date": attendance_date, "reset": True}
 
 
 @router.get("/attendance/export.csv")

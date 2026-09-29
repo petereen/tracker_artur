@@ -1,4 +1,5 @@
-"""Live voice calls with OYUNS over the OpenAI Realtime API.
+"""Live voice calls with OYUNS over the OpenAI Realtime API or a turn-based
+STT → OYUNS agent → TTS pipeline on Chimege (Mongolian) or ElevenLabs.
 
 The browser talks to OpenAI directly over WebRTC with a short-lived client
 secret minted here; the organization API key never leaves the server. The
@@ -17,6 +18,8 @@ import json
 import logging
 import time
 from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from uuid import uuid4
 from typing import Any
 
 import aiohttp
@@ -46,9 +49,16 @@ MAX_TOOL_OUTPUT_CHARS = 12_000
 SESSION_RATE_LIMIT = 10
 SESSION_RATE_WINDOW_SECONDS = 600
 
+VOICE_LANGUAGES = {
+    "mn": ("Mongolian", "Khalkha Mongolian (монгол хэл)", "Сайн байна уу! Танд юугаар туслах вэ?"),
+    "ru": ("Russian", "Russian (русский язык)", "Здравствуйте! Чем могу помочь?"),
+    "en": ("English", "English", "Hi! How can I help you?"),
+}
+
 VOICE_SYSTEM = """You are OYUNS, the AI assistant of the company's OYUNS ERP workspace, in a live voice call with an employee.
 
 # Language (strict)
+- The call language is {call_language}: the caller chose it as their interface language. Open the call in {call_language_name} and keep speaking it; switch only when the caller clearly speaks one of the other two allowed languages.
 - The caller speaks only Mongolian (Khalkha, Mongolian Cyrillic), Russian or English. Treat every utterance as one of these three, and speak only these three languages.
 - Speech that sounds like Korean, Kazakh, Kyrgyz, Buryat, Turkish, Japanese, Chinese or any other language is Mongolian: understand it as Mongolian and answer in Mongolian. Never reply in any other language, and never mix languages within a sentence.
 - Speak Mongolian as a native Khalkha speaker with standard pronunciation.
@@ -64,12 +74,107 @@ VOICE_SYSTEM = """You are OYUNS, the AI assistant of the company's OYUNS ERP wor
 - This call can only read data. To create or change a task, tell the caller to ask in the OYUNS chat, where they can confirm the preview.
 
 # Speaking style
-- Answer in the language the caller speaks (Mongolian, Russian or English only); start in reply_language, and when unsure, use Mongolian.
+- Answer in the language the caller speaks (Mongolian, Russian or English only); start in {call_language_name}, and when unsure, use {call_language_name}.
 - Speak naturally and briefly: lead with the answer, then at most a few key details. No markdown, tables, links, IDs, references or codes. Say dates, times and numbers the way people say them.
 - Before a lookup that may take a moment, say in a few words that you are checking.
 - Speech recognition can mishear names and numbers: silently correct obvious errors against company data, and ask one short question when a key name or number is unclear."""
 
 _session_starts: dict[int, deque[float]] = defaultdict(deque)
+
+# Turn-based calls (Chimege, ElevenLabs): the browser detects each utterance,
+# the server transcribes it and runs the text agent, and the answer is spoken
+# by the engine's TTS. The OpenAI Realtime model understands and speaks
+# Mongolian poorly, which is why Mongolian calls default to Chimege. Call
+# state lives in this (single) API process and expires when idle.
+CHIMEGE_GREETING = "Сайн байна уу! Би OYUNS туслах байна. Танд юугаар туслах вэ?"
+TURN_GREETINGS = {
+    "mn": CHIMEGE_GREETING,
+    "ru": "Здравствуйте! Я ассистент OYUNS. Чем могу помочь?",
+    "en": "Hi! I'm the OYUNS assistant. How can I help you?",
+}
+TURN_CALL_IDLE_SECONDS = 1800
+TURN_CALL_HISTORY = 12
+TURN_MAX_AUDIO_BYTES = 5 * 1024 * 1024
+TURN_MAX_SPEECH_CHARS = 1500
+# Kept for the Chimege code paths and tests.
+CHIMEGE_CALL_IDLE_SECONDS = TURN_CALL_IDLE_SECONDS
+CHIMEGE_MAX_AUDIO_BYTES = TURN_MAX_AUDIO_BYTES
+CHIMEGE_MAX_SPEECH_CHARS = TURN_MAX_SPEECH_CHARS
+# ElevenLabs single-use speech tokens per call, so a leaked session id
+# cannot spend unbounded TTS credits.
+MAX_SPEECH_TOKENS_PER_CALL = 200
+
+
+@dataclass(slots=True)
+class TurnCall:
+    account_id: int
+    expires_at: float
+    provider: str = "chimege"
+    language: str = "mn"
+    history: list[dict] = field(default_factory=list)
+    memory: list[dict] = field(default_factory=list)
+    speech_tokens: int = 0
+
+    def remember(self, question: str, answer: str, memory: list[dict]) -> None:
+        self.history = [*self.history, {"role": "user", "content": question}, {"role": "assistant", "content": answer}][-TURN_CALL_HISTORY:]
+        self.memory = list(memory or [])
+
+
+ChimegeCall = TurnCall
+_turn_calls: dict[str, TurnCall] = {}
+
+
+def open_turn_call(account_id: int, *, provider: str = "chimege", language: str = "mn", now: float | None = None) -> str:
+    current = time.monotonic() if now is None else now
+    for session_id in [key for key, call in _turn_calls.items() if call.expires_at <= current]:
+        _turn_calls.pop(session_id, None)
+    session_id = uuid4().hex
+    _turn_calls[session_id] = TurnCall(account_id=account_id, expires_at=current + TURN_CALL_IDLE_SECONDS, provider=provider, language=language)
+    return session_id
+
+
+def turn_call(session_id: str, account_id: int, *, now: float | None = None) -> TurnCall | None:
+    """The caller's live turn-based call, refreshed on use; None when unknown or expired."""
+    current = time.monotonic() if now is None else now
+    call = _turn_calls.get(session_id)
+    if call is None or call.account_id != account_id:
+        return None
+    if call.expires_at <= current:
+        _turn_calls.pop(session_id, None)
+        return None
+    call.expires_at = current + TURN_CALL_IDLE_SECONDS
+    return call
+
+
+def open_chimege_call(account_id: int, *, now: float | None = None) -> str:
+    return open_turn_call(account_id, provider="chimege", language="mn", now=now)
+
+
+chimege_call = turn_call
+
+
+def available_providers(runtime: AIRuntime) -> list[str]:
+    """Engines a call can run on now. Turn-based engines still need the
+    OpenAI key for the agent itself, but they start without it."""
+    providers = ["openai"] if runtime.api_key else []
+    if runtime.chimege_voice_call_ready:
+        providers.append("chimege")
+    if getattr(runtime, "elevenlabs_ready", False):
+        providers.append("elevenlabs")
+    return providers
+
+
+def resolve_provider(runtime: AIRuntime, language: str, requested: str | None = None) -> str:
+    """The engine for a call: the caller's pick, else the admin's, when ready.
+
+    ``auto`` (and any engine that is not ready) keeps the default: Chimege for
+    Mongolian when configured, else OpenAI Realtime.
+    """
+    ready = set(available_providers(runtime))
+    for choice in (requested, getattr(runtime, "voice_call_provider", "auto")):
+        if choice in ready:
+            return choice
+    return "chimege" if language == "mn" and "chimege" in ready else "openai"
 
 
 class VoiceCallError(RuntimeError):
@@ -103,8 +208,30 @@ def realtime_tools(definitions: list[ToolDefinition]) -> list[dict]:
     ]
 
 
-def build_instructions(context: dict) -> str:
-    return f"{VOICE_SYSTEM}\n\n# CONTEXT\n{json.dumps(context, ensure_ascii=False, default=str)}"
+def call_language(requested: str | None, locale: str | None) -> str:
+    """The interface language the call starts in: the client's choice, else the account locale."""
+    for candidate in (requested, locale):
+        code = (candidate or "").strip().lower()[:2]
+        if code in VOICE_LANGUAGES:
+            return code
+    return "mn"
+
+
+def build_instructions(context: dict, language: str = "mn") -> str:
+    name, description, _ = VOICE_LANGUAGES[language]
+    system = VOICE_SYSTEM.replace("{call_language}", description).replace("{call_language_name}", name)
+    return f"{system}\n\n# CONTEXT\n{json.dumps(context, ensure_ascii=False, default=str)}"
+
+
+def greeting_instruction(language: str) -> str:
+    """The opening turn. The client sends it as a system item, not as
+    ``response.instructions``, which would replace the session instructions
+    (language rules and context) for that response."""
+    name, description, sample = VOICE_LANGUAGES[language]
+    return (
+        f"The call has just connected. In {description}, greet the caller by their given name from current_employee "
+        f"and ask how you can help, in one short sentence, like: \"{sample}\". Speak {name} only."
+    )
 
 
 def session_config(runtime: AIRuntime, instructions: str, tools: list[dict], *, minimal: bool = False) -> dict:

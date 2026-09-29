@@ -19,24 +19,20 @@ CHIMEGE_NORMALIZE_TEXT_URL = "https://api.chimege.com/v1.2/normalize-text"
 CHIMEGE_SYNTHESIZE_URL = "https://api.chimege.com/v1.2/synthesize"
 
 
-def transcription_enabled() -> bool:
-    from app.services.ai_gateway.runtime import has_api_key_hint
+async def transcription_available(organization_id: int | None = None) -> bool:
+    """Whether Chimege STT (platform settings or env) or an OpenAI key is available."""
+    from app.services.ai_gateway.runtime import chimege_tokens, openai_api_key
 
-    return bool(os.getenv("CHIMEGE_API_TOKEN", "").strip() or has_api_key_hint())
-
-
-async def transcription_available() -> bool:
-    """Async variant that also resolves a key saved in platform settings."""
-    if os.getenv("CHIMEGE_API_TOKEN", "").strip():
-        return True
-    from app.services.ai_gateway.runtime import openai_api_key
-
-    return bool(await openai_api_key())
+    stt_token, _ = await chimege_tokens(organization_id)
+    return bool(stt_token or await openai_api_key(organization_id))
 
 
-def synthesis_enabled() -> bool:
-    """Whether outgoing Chimege text-to-speech is configured."""
-    return bool(os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip())
+async def synthesis_available(organization_id: int | None = None) -> bool:
+    """Whether outgoing Chimege text-to-speech is configured and switched on."""
+    from app.services.ai_gateway.runtime import chimege_tokens
+
+    _, tts_token = await chimege_tokens(organization_id)
+    return bool(tts_token)
 
 
 def tts_answers_enabled() -> bool:
@@ -142,9 +138,13 @@ async def _synthesize_chunk(
         return None, "Chimege дуу үүсгэх үйлчилгээ түр алдаатай байна."
 
 
-async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
+async def synthesize(text: str, *, organization_id: int | None = None, token: str | None = None) -> tuple[Optional[bytes], Optional[str]]:
     """Convert text to Mongolian speech through Chimege's synchronous TTS API."""
-    token = os.getenv("CHIMEGE_TTS_API_TOKEN", "").strip()
+    if token is None:
+        from app.services.ai_gateway.runtime import chimege_tokens
+
+        _, token = await chimege_tokens(organization_id)
+    token = (token or "").strip()
     if not token:
         return None, "Chimege TTS token тохируулагдаагүй байна."
     normalize_headers = {
@@ -190,8 +190,12 @@ async def synthesize(text: str) -> tuple[Optional[bytes], Optional[str]]:
         return None, "Chimege дуу үүсгэх үйлчилгээтэй холбогдож чадсангүй."
 
 
-async def _transcribe_chimege(audio: bytes, token: str) -> tuple[Optional[str], Optional[str]]:
+async def transcribe_chimege(audio: bytes, token: str) -> tuple[Optional[str], Optional[str]]:
     """Transcribe Mongolian speech through Chimege's synchronous STT endpoint."""
+    return await _transcribe_chimege(audio, token)
+
+
+async def _transcribe_chimege(audio: bytes, token: str) -> tuple[Optional[str], Optional[str]]:
     headers = {
         "Content-Type": "application/octet-stream",
         "Punctuate": os.getenv("CHIMEGE_PUNCTUATE", "true"),
@@ -224,29 +228,29 @@ def _api_error_message(body: str) -> str:
     return " ".join(message.split())[:240]
 
 
-async def transcribe(audio: bytes, filename: str = "voice.ogg") -> tuple[Optional[str], Optional[str]]:
+async def transcribe(audio: bytes, filename: str = "voice.ogg", *, organization_id: int | None = None, content_type: str = "audio/ogg") -> tuple[Optional[str], Optional[str]]:
     """Return recognized text and a user-safe error description.
 
     Chimege (Mongolian STT) is primary. If it fails and an OpenAI key is
     configured (platform settings or env), OpenAI transcription is the fallback.
     """
-    from app.services.ai_gateway.runtime import openai_api_key
+    from app.services.ai_gateway.runtime import chimege_tokens, openai_api_key
 
     chimege_error: Optional[str] = None
-    chimege_token = os.getenv("CHIMEGE_API_TOKEN", "").strip()
+    chimege_token, _ = await chimege_tokens(organization_id)
     if chimege_token:
         text, chimege_error = await _transcribe_chimege(audio, chimege_token)
         if text:
             return text, None
-    api_key = await openai_api_key()
+    api_key = await openai_api_key(organization_id)
     if not api_key:
         return None, chimege_error or "OpenAI API түлхүүр тохируулагдаагүй байна."
     if chimege_error:
         log.info("Chimege STT failed; falling back to OpenAI transcription")
-    return await _transcribe_openai(audio, api_key, filename)
+    return await _transcribe_openai(audio, api_key, filename, content_type=content_type)
 
 
-async def _transcribe_openai(audio: bytes, api_key: str, filename: str) -> tuple[Optional[str], Optional[str]]:
+async def _transcribe_openai(audio: bytes, api_key: str, filename: str, *, content_type: str = "audio/ogg") -> tuple[Optional[str], Optional[str]]:
     model = os.getenv("OPENAI_WHISPER_MODEL", "gpt-4o-mini-transcribe")
     try:
         # Do not force Russian: Whisper can auto-detect Mongolian, English,
@@ -280,7 +284,7 @@ async def _transcribe_openai(audio: bytes, api_key: str, filename: str) -> tuple
             )
         if language:
             form.add_field("language", language)
-        form.add_field("file", audio, filename=filename, content_type="audio/ogg")
+        form.add_field("file", audio, filename=filename, content_type=content_type)
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(

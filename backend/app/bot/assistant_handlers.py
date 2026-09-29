@@ -146,7 +146,7 @@ async def _answer(message: Message, text: str, *, reply_markup=None, parse_mode=
 
 async def _send_voice_answer(message: Message, text: str) -> None:
     """Add a Chimege TTS audio reply after the text answer when enabled."""
-    if not voice_service.synthesis_enabled() or not voice_service.tts_answers_enabled():
+    if not voice_service.tts_answers_enabled() or not await voice_service.synthesis_available():
         return
     audio, error = await voice_service.synthesize(text)
     if not audio:

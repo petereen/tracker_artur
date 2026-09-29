@@ -120,6 +120,7 @@ from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_
 from app.services import enterprise_tools
 from app.services.file_search_service import FileSearchPrincipal, FileSearchServiceError, search_files
 from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
+from app.services.ai_gateway.runtime import resolve_ai_runtime
 
 log = logging.getLogger(__name__)
 
@@ -3718,7 +3719,7 @@ async def transcribe_voice(file: UploadFile = File(...), actor: ActorContext = D
     audio = await file.read(12 * 1024 * 1024 + 1)
     if len(audio) > 12 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio file exceeds 12 MB")
-    text, error = await voice_service.transcribe(audio, filename=file.filename or "voice.ogg")
+    text, error = await voice_service.transcribe(audio, filename=file.filename or "voice.ogg", organization_id=actor.organization_id, content_type=file.content_type)
     if error:
         raise HTTPException(status_code=502, detail=error)
     return {"transcript": text, "retained": False, "requires_review": True}
@@ -3730,9 +3731,10 @@ async def assistant_speech(data: AssistantChatInput, db: AsyncSession = Depends(
     settings_row = (await db.execute(select(ManagerSettings).limit(1))).scalar_one_or_none()
     if settings_row is not None and settings_row.tts_answers_enabled is False:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    if not voice_service.synthesis_enabled():
+    tts_token = (await resolve_ai_runtime(db, actor.organization_id)).tts_token
+    if not tts_token:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    audio, error = await voice_service.synthesize(data.text)
+    audio, error = await voice_service.synthesize(data.text, token=tts_token)
     if error or not audio:
         raise HTTPException(status_code=502, detail=error or "Chimege audio could not be generated")
     return Response(content=audio, media_type="audio/wav", headers={"Content-Disposition": "inline; filename=oyuns-answer.wav"})

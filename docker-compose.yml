@@ -84,6 +84,7 @@ services:
       CHIMEGE_API_TOKEN: ${CHIMEGE_API_TOKEN:-}
       CHIMEGE_TTS_API_TOKEN: ${CHIMEGE_TTS_API_TOKEN:-}
       CHIMEGE_PUNCTUATE: ${CHIMEGE_PUNCTUATE:-true}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://erp.oyuns.mn}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://erp.oyuns.mn}
       NATIVE_APP_ORIGINS: ${NATIVE_APP_ORIGINS:-capacitor://localhost,https://localhost}

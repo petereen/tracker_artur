@@ -136,3 +136,102 @@ def test_model_list_is_filtered_to_chat_models(monkeypatch):
     monkeypatch.setattr(ai_settings.aiohttp, "ClientSession", Session)
     models, status, _ = asyncio.run(ai_settings._list_models(KEY))
     assert status == 200 and models == ["gpt-5-mini", "o4-mini"]
+
+
+STT_TOKEN = "chimege-stt-token-0123456789"
+TTS_TOKEN = "chimege-tts-token-9876543210"
+
+
+def test_chimege_tokens_are_encrypted_switchable_and_fall_back_to_env(monkeypatch):
+    monkeypatch.setenv("CHIMEGE_API_TOKEN", "env-stt-token-123")
+    monkeypatch.delenv("CHIMEGE_TTS_API_TOKEN", raising=False)
+    organization = SimpleNamespace(id=5, settings={})
+    http, _ = client("admin", organization)
+    before = http.get("/v1/settings/ai-agent").json()["chimege"]
+    assert before["stt"]["source"] == "environment" and before["tts"]["source"] == "none" and not before["voice_call_ready"]
+
+    body = http.put("/v1/settings/ai-agent", json={"chimege_stt_token": STT_TOKEN, "chimege_tts_token": TTS_TOKEN}).json()
+    assert STT_TOKEN not in json.dumps(body) and TTS_TOKEN not in json.dumps(body)
+    assert STT_TOKEN not in json.dumps(organization.settings) and TTS_TOKEN not in json.dumps(organization.settings)
+    chimege = body["chimege"]
+    assert chimege["stt"] == {"has_token": True, "token_last4": STT_TOKEN[-4:], "source": "organization", "enabled": True}
+    assert chimege["voice_call_enabled"] and chimege["voice_call_ready"]
+    runtime = ai_runtime.build_runtime(organization.settings)
+    assert runtime.stt_token == STT_TOKEN and runtime.tts_token == TTS_TOKEN
+
+    body = http.put("/v1/settings/ai-agent", json={"chimege_tts_enabled": False}).json()
+    runtime = ai_runtime.build_runtime(organization.settings)
+    assert runtime.tts_token == "" and runtime.chimege_tts_token == TTS_TOKEN
+    assert not body["chimege"]["voice_call_ready"]
+
+    http.put("/v1/settings/ai-agent", json={"clear_chimege_stt_token": True})
+    assert ai_runtime.build_runtime(organization.settings).stt_token == "env-stt-token-123"
+    assert http.put("/v1/settings/ai-agent", json={"chimege_stt_token": "bad token"}).status_code == 422
+
+
+def test_chimege_test_synthesizes_then_recognizes(monkeypatch):
+    calls = []
+
+    async def synthesize(text, *, token=None, **_kwargs):
+        calls.append(("tts", token))
+        return b"RIFFwav", None
+
+    async def recognize(audio, token):
+        calls.append(("stt", token, audio))
+        return "сайн байна уу", None
+
+    monkeypatch.setattr(ai_settings.voice_service, "synthesize", synthesize)
+    monkeypatch.setattr(ai_settings.voice_service, "transcribe_chimege", recognize)
+    monkeypatch.delenv("CHIMEGE_API_TOKEN", raising=False)
+    monkeypatch.delenv("CHIMEGE_TTS_API_TOKEN", raising=False)
+    http, _ = client("admin", SimpleNamespace(id=5, settings={}))
+    assert http.post("/v1/settings/ai-agent/chimege/test", json={}).json() == {"tts": {"ok": False, "error": "not_configured"}, "stt": {"ok": False, "error": "not_configured"}}
+    body = http.post("/v1/settings/ai-agent/chimege/test", json={"stt_token": STT_TOKEN, "tts_token": TTS_TOKEN}).json()
+    assert body["tts"]["ok"] and body["stt"]["ok"] and body["stt"]["transcript"] == "сайн байна уу"
+    assert calls == [("tts", TTS_TOKEN), ("stt", STT_TOKEN, b"RIFFwav")]
+
+
+ELEVEN_KEY = "sk_elevenlabs0123456789abcdef"
+
+
+def test_elevenlabs_key_and_voice_call_engine_are_stored_and_switchable(monkeypatch):
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    organization = SimpleNamespace(id=5, settings={})
+    http, _ = client("admin", organization)
+    before = http.get("/v1/settings/ai-agent").json()
+    assert before["voice_call_provider"] == "auto" and before["elevenlabs"]["source"] == "none" and not before["elevenlabs"]["ready"]
+
+    body = http.put("/v1/settings/ai-agent", json={"elevenlabs_api_key": ELEVEN_KEY, "voice_call_provider": "elevenlabs", "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb", "elevenlabs_model": "eleven_turbo_v2_5"}).json()
+    assert ELEVEN_KEY not in json.dumps(body) and ELEVEN_KEY not in json.dumps(organization.settings)
+    assert body["voice_call_provider"] == "elevenlabs"
+    assert body["elevenlabs"]["source"] == "organization" and body["elevenlabs"]["key_last4"] == ELEVEN_KEY[-4:] and body["elevenlabs"]["ready"]
+    runtime = ai_runtime.build_runtime(organization.settings)
+    assert runtime.elevenlabs_api_key == ELEVEN_KEY and runtime.elevenlabs_voice_id == "JBFqnCBsd6RMkjVDRZzb" and runtime.elevenlabs_model == "eleven_turbo_v2_5"
+
+    assert not http.put("/v1/settings/ai-agent", json={"elevenlabs_enabled": False}).json()["elevenlabs"]["ready"]
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "env-eleven-key-123456")
+    http.put("/v1/settings/ai-agent", json={"clear_elevenlabs_api_key": True})
+    assert ai_runtime.build_runtime(organization.settings).elevenlabs_api_key == "env-eleven-key-123456"
+    for bad in ({"voice_call_provider": "siri"}, {"elevenlabs_model": "eleven_v3"}, {"elevenlabs_voice_id": "../x"}, {"elevenlabs_api_key": "short"}):
+        assert http.put("/v1/settings/ai-agent", json=bad).status_code == 422
+
+
+def test_elevenlabs_test_checks_voices_and_streaming_token(monkeypatch):
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    calls = []
+
+    async def voices(key):
+        calls.append(("voices", key))
+        return [{"voice_id": "a", "name": "Sarah"}]
+
+    async def token(key):
+        calls.append(("token", key))
+        return "sutkn_1"
+
+    monkeypatch.setattr(ai_settings.elevenlabs_service, "list_voices", voices)
+    monkeypatch.setattr(ai_settings.elevenlabs_service, "create_tts_token", token)
+    http, _ = client("admin", SimpleNamespace(id=5, settings={}))
+    assert http.post("/v1/settings/ai-agent/elevenlabs/test", json={}).json()["error"] == "not_configured"
+    body = http.post("/v1/settings/ai-agent/elevenlabs/test", json={"api_key": ELEVEN_KEY}).json()
+    assert body["ok"] and body["voices"] == 1 and calls == [("voices", ELEVEN_KEY), ("token", ELEVEN_KEY)]
+    assert http.get("/v1/settings/ai-agent/elevenlabs/voices").json() == {"voices": [], "error": "not_configured"}

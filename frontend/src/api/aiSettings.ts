@@ -20,9 +20,53 @@ export interface AiAgentSettings {
   realtime_voice?: string
   realtime_enabled?: boolean
   realtime_voices?: string[]
+  /** Chimege Mongolian STT/TTS: tokens are write-only, like the OpenAI key. */
+  chimege?: ChimegeSettings
+  /** Voice call engine: `auto` = Chimege for Mongolian, OpenAI Realtime otherwise. */
+  voice_call_provider?: VoiceCallProvider
+  voice_call_providers?: VoiceCallProvider[]
+  /** ElevenLabs streaming TTS + Scribe STT; the key is write-only. */
+  elevenlabs?: ElevenLabsSettings
   defaults: { primary_model: string; fallback_model: string | null; reasoning_effort: ReasoningEffort; max_output_tokens: number; realtime_model?: string; realtime_voice?: string }
   limits: { min_output_tokens: number; max_output_tokens: number }
   updated_at: string | null
+}
+
+export type VoiceCallProvider = 'auto' | 'openai' | 'chimege' | 'elevenlabs'
+
+export interface ElevenLabsSettings {
+  has_key: boolean
+  key_last4: string | null
+  source: AiKeySource
+  enabled: boolean
+  ready: boolean
+  voice_id: string
+  model: string
+  models: string[]
+  default_voice_id: string
+}
+
+export interface ElevenLabsVoice { voice_id: string; name: string; category?: string | null; description?: string | null }
+
+export interface ElevenLabsTestResult { ok: boolean; error: string | null; latency_ms: number | null; voices: number }
+
+export interface ChimegeTokenState {
+  has_token: boolean
+  token_last4: string | null
+  source: AiKeySource
+  enabled: boolean
+}
+
+export interface ChimegeSettings {
+  stt: ChimegeTokenState
+  tts: ChimegeTokenState
+  voice_call_enabled: boolean
+  voice_call_ready: boolean
+}
+
+export interface ChimegeTestResult {
+  tts: { ok: boolean | null; error: string | null; latency_ms?: number }
+  stt: { ok: boolean | null; error: string | null; transcript?: string | null; latency_ms?: number }
 }
 
 export interface AiAgentSettingsInput {
@@ -36,6 +80,19 @@ export interface AiAgentSettingsInput {
   realtime_model?: string
   realtime_voice?: string
   realtime_enabled?: boolean
+  chimege_stt_token?: string | null
+  chimege_tts_token?: string | null
+  clear_chimege_stt_token?: boolean
+  clear_chimege_tts_token?: boolean
+  chimege_stt_enabled?: boolean
+  chimege_tts_enabled?: boolean
+  chimege_voice_call_enabled?: boolean
+  voice_call_provider?: VoiceCallProvider
+  elevenlabs_api_key?: string | null
+  clear_elevenlabs_api_key?: boolean
+  elevenlabs_enabled?: boolean
+  elevenlabs_voice_id?: string
+  elevenlabs_model?: string
 }
 
 export interface AiConnectionTest {
@@ -69,6 +126,7 @@ export function useUpdateAiAgentSettings() {
     onSuccess: (data) => {
       queryClient.setQueryData(SETTINGS_KEY, data)
       queryClient.invalidateQueries({ queryKey: [...SETTINGS_KEY, 'models'] })
+      queryClient.invalidateQueries({ queryKey: [...SETTINGS_KEY, 'elevenlabs-voices'] })
       toast.success('AI тохиргоо хадгалагдлаа')
     },
     onError: (error: any) => toast.error(typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'AI тохиргоо хадгалагдсангүй'),
@@ -78,6 +136,27 @@ export function useUpdateAiAgentSettings() {
 export function useTestAiConnection() {
   return useMutation({
     mutationFn: (input: { api_key?: string | null; model?: string | null }) => api.post('/v1/settings/ai-agent/test', input).then((response) => response.data as AiConnectionTest),
+  })
+}
+
+export function useTestChimege() {
+  return useMutation({
+    mutationFn: (input: { stt_token?: string | null; tts_token?: string | null }) => api.post('/v1/settings/ai-agent/chimege/test', input, { timeout: 90_000 }).then((response) => response.data as ChimegeTestResult),
+  })
+}
+
+export function useElevenLabsVoices(enabled = true) {
+  return useQuery<{ voices: ElevenLabsVoice[]; error: string | null }>({
+    queryKey: [...SETTINGS_KEY, 'elevenlabs-voices'],
+    queryFn: () => api.get('/v1/settings/ai-agent/elevenlabs/voices').then((response) => response.data),
+    enabled,
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useTestElevenLabs() {
+  return useMutation({
+    mutationFn: (input: { api_key?: string | null }) => api.post('/v1/settings/ai-agent/elevenlabs/test', input, { timeout: 60_000 }).then((response) => response.data as ElevenLabsTestResult),
   })
 }
 

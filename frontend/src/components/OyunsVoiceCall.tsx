@@ -1,17 +1,48 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Mic, MicOff, PhoneOff, X } from 'lucide-react'
+import { Hand, Mic, MicOff, PhoneOff, X } from 'lucide-react'
 import { api } from '../api/client'
+import i18n from '../i18n'
+import { ChimegeCall } from './chimegeCall'
+import { ElevenLabsCall } from './elevenlabsCall'
 
 type CallPhase = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'ended' | 'error'
 type TranscriptLine = { id: number; role: 'user' | 'assistant' | 'tool'; text: string }
+type VoiceProvider = 'openai' | 'chimege' | 'elevenlabs'
 
 interface VoiceSession {
+  /**
+   * `realtime`: OpenAI Realtime over WebRTC. `chimege` / `elevenlabs`: turn
+   * by turn (server STT + agent), spoken by Chimege or streamed by ElevenLabs.
+   */
+  mode?: 'realtime' | 'chimege' | 'elevenlabs'
+  provider?: VoiceProvider
+  /** Engines this call could switch to. */
+  providers?: VoiceProvider[]
   session_id: string
   client_secret: string
   calls_url: string
   model: string
   voice: string
+  language?: string
+  greeting?: string
+  greeting_text?: string
+  speech_url?: string | null
+  sample_rate?: number
+  /** Why the picked engine was not used (e.g. `elevenlabs_invalid_key`). */
+  notice?: string | null
+}
+
+const PROVIDER_LABELS: Record<VoiceProvider, string> = { openai: 'OpenAI', chimege: 'Chimege', elevenlabs: 'ElevenLabs' }
+const PROVIDER_KEY = 'oyuns.voiceProvider'
+
+function storedProvider(): VoiceProvider | undefined {
+  try {
+    const value = window.localStorage.getItem(PROVIDER_KEY)
+    return value && value in PROVIDER_LABELS ? value as VoiceProvider : undefined
+  } catch {
+    return undefined
+  }
 }
 
 interface FunctionCallItem { type: string; name?: string; arguments?: string; call_id?: string }
@@ -34,6 +65,12 @@ const ERROR_LABELS: Record<string, string> = {
   network: 'OpenAI-тай холбогдож чадсангүй.',
   microphone: 'Микрофон ашиглах зөвшөөрөл олгоно уу.',
   unsupported: 'Энэ төхөөрөмж дуут дуудлагыг дэмжихгүй байна.',
+  call_ended: 'Дуудлагын хугацаа дууссан. Дахин залгана уу.',
+  elevenlabs_invalid_key: 'ElevenLabs API түлхүүр буруу байна.',
+  elevenlabs_rate_limited: 'ElevenLabs-ийн лимит хүрсэн байна. Хэдэн минутын дараа дахин оролдоно уу.',
+  elevenlabs_forbidden: 'ElevenLabs түлхүүрт дуу үүсгэх эрх алга.',
+  elevenlabs_network: 'ElevenLabs-тай холбогдож чадсангүй.',
+  elevenlabs_not_configured: 'ElevenLabs тохируулаагүй байна.',
 }
 
 // Short spoken-lookup labels for the tool trace in the transcript.
@@ -52,11 +89,13 @@ function formatDuration(seconds: number) {
 }
 
 /**
- * Live voice call with the OYUNS agent (OpenAI Realtime over WebRTC).
+ * Live voice call with the OYUNS agent.
  *
- * The server mints a short-lived client secret with OYUNS' instructions and
- * the caller's read-only tools; tool calls come back over the data channel
- * and are executed by the server with the caller's permissions.
+ * OpenAI Realtime (WebRTC): the server mints a short-lived client secret with
+ * OYUNS' instructions and the caller's read-only tools; tool calls come back
+ * over the data channel and are executed by the server with the caller's
+ * permissions. Chimege and ElevenLabs calls run turn by turn instead. The
+ * caller can switch engines; the call restarts on the chosen one.
  */
 export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
   const [phase, setPhase] = useState<CallPhase>('connecting')
@@ -64,6 +103,11 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
   const [muted, setMuted] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [lines, setLines] = useState<TranscriptLine[]>([])
+  const [requested, setRequested] = useState<VoiceProvider | undefined>(storedProvider)
+  const [provider, setProvider] = useState<VoiceProvider>()
+  const [providers, setProviders] = useState<VoiceProvider[]>([])
+  const turnBased = provider === 'chimege' || provider === 'elevenlabs'
+  const chimegeRef = useRef<ChimegeCall | null>(null)
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const channelRef = useRef<RTCDataChannel | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -90,6 +134,8 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
 
   const cleanup = useCallback(() => {
     closedRef.current = true
+    chimegeRef.current?.stop()
+    chimegeRef.current = null
     if (frameRef.current) cancelAnimationFrame(frameRef.current)
     channelRef.current?.close()
     pcRef.current?.getSenders().forEach((sender) => sender.track?.stop())
@@ -192,8 +238,26 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
       }
       if (cancelled) { stream.getTracks().forEach((track) => track.stop()); return }
       streamRef.current = stream
-      const { data: session } = await api.post<VoiceSession>('/v1/assistant/voice/session')
+      const { data: session } = await api.post<VoiceSession>('/v1/assistant/voice/session', { language: i18n.language, provider: requested })
       if (cancelled) { stream.getTracks().forEach((track) => track.stop()); return }
+      setProviders(session.providers ?? [])
+      setProvider(session.provider ?? (session.mode === 'chimege' ? 'chimege' : 'openai'))
+      if (session.notice) addLine('tool', `${ERROR_LABELS[session.notice] ?? 'Сонгосон хөдөлгүүр ажиллахгүй байна.'} ${PROVIDER_LABELS[session.provider ?? 'openai']} ашиглав.`)
+      if (session.mode === 'chimege' || session.mode === 'elevenlabs') {
+        const callbacks = {
+          onPhase: setPhase,
+          onLine: addLine,
+          onError: (code: string) => { setError(code); setPhase('error'); cleanup() },
+          onLevel: (level: number) => orbRef.current?.style.setProperty('--voice-level', String(1 + Math.min(0.35, level * 3))),
+        }
+        const call = session.mode === 'elevenlabs'
+          ? new ElevenLabsCall(session.session_id, stream, callbacks, { language: session.language || 'mn', sampleRate: session.sample_rate, speechUrl: session.speech_url })
+          : new ChimegeCall(session.session_id, stream, callbacks)
+        chimegeRef.current = call
+        setPhase('listening')
+        await call.start(session.greeting_text || 'Сайн байна уу! Танд юугаар туслах вэ?')
+        return
+      }
       const pc = new RTCPeerConnection()
       pcRef.current = pc
       const audio = document.createElement('audio')
@@ -217,8 +281,11 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
       }
       channel.onopen = () => {
         setPhase('listening')
-        // Open the call with a short greeting in the caller's language.
-        send({ type: 'response.create', response: { instructions: 'Greet the caller briefly by first name in reply_language and ask how you can help. One short sentence.' } })
+        // Open the call in the interface language. The greeting goes in as a
+        // system item: `response.instructions` would replace the session
+        // instructions (language rules and context) for this response.
+        send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: session.greeting || 'Greet the caller briefly and ask how you can help. One short sentence.' }] } })
+        send({ type: 'response.create' })
       }
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
@@ -243,7 +310,18 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
       cancelled = true
       cleanup()
     }
-  }, [cleanup, onServerEvent, send, watchLevel])
+  }, [cleanup, onServerEvent, send, watchLevel, requested])
+
+  const switchProvider = (next: VoiceProvider) => {
+    if (next === provider) return
+    try { window.localStorage.setItem(PROVIDER_KEY, next) } catch { /* the pick just is not remembered */ }
+    // Changing `requested` restarts the call effect on the new engine.
+    setLines([])
+    setElapsed(0)
+    setError(undefined)
+    setPhase('connecting')
+    setRequested(next)
+  }
 
   const running = phase === 'listening' || phase === 'thinking' || phase === 'speaking'
   useEffect(() => {
@@ -275,15 +353,19 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
   return createPortal(<div className="oyuns-voice-overlay" role="dialog" aria-modal="true" aria-label="OYUNS Agent дуудлага">
     <section className="oyuns-voice-card">
       <header>
-        <div><strong>OYUNS Agent</strong><small>{phase === 'error' ? PHASE_LABELS.error : `Дуут дуудлага · ${formatDuration(elapsed)}`}</small></div>
+        <div><strong>OYUNS Agent</strong><small>{phase === 'error' ? PHASE_LABELS.error : `Дуут дуудлага${provider ? ` · ${PROVIDER_LABELS[provider]}` : ''}${provider === 'chimege' ? ' · Монгол горим' : ''} · ${formatDuration(elapsed)}`}</small></div>
         <button type="button" className="chat-icon-button" onClick={hangUp} aria-label="Хаах"><X /></button>
       </header>
+      {providers.length > 1 && <div className="oyuns-voice-engines" role="radiogroup" aria-label="Дуудлагын хөдөлгүүр">
+        {providers.map((item) => <button key={item} type="button" role="radio" aria-checked={item === provider} disabled={phase === 'connecting'} onClick={() => switchProvider(item)}>{PROVIDER_LABELS[item]}</button>)}
+      </div>}
       <div ref={orbRef} className={`oyuns-voice-orb ${phase}`} aria-hidden="true" />
       <p className="oyuns-voice-status" aria-live="polite">{muted && phase !== 'error' ? 'Микрофон хаалттай' : PHASE_LABELS[phase]}</p>
       {error && <p className="oyuns-voice-error" role="alert">{ERROR_LABELS[error] ?? 'Дуудлага холбогдсонгүй. Дахин оролдоно уу.'}</p>}
       {lines.length > 0 && <div ref={transcriptRef} className="oyuns-voice-transcript" aria-label="Ярианы бичвэр">{lines.map((line) => <p key={line.id} className={line.role}>{line.role === 'user' ? 'Та: ' : line.role === 'assistant' ? 'OYUNS: ' : ''}{line.text}</p>)}</div>}
       <div className="oyuns-voice-controls">
         <button type="button" className={`mute ${muted ? 'active' : ''}`} onClick={() => setMuted((value) => !value)} disabled={phase === 'error'} aria-pressed={muted} aria-label={muted ? 'Микрофон нээх' : 'Микрофон хаах'}>{muted ? <MicOff /> : <Mic />}</button>
+        {turnBased && phase === 'speaking' && <button type="button" className="mute" onClick={() => chimegeRef.current?.interrupt()} aria-label="Яриаг таслах" title="Яриаг таслах"><Hand /></button>}
         <button type="button" className="hangup" onClick={hangUp} aria-label="Дуудлага дуусгах"><PhoneOff /></button>
       </div>
     </section>

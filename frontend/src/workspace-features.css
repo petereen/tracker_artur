@@ -46,3 +46,7 @@
 .oyuns-voice-controls .mute.active { background: #F59E0B; color: #fff; }
 .oyuns-voice-controls .hangup { background: #D93025; color: #fff; }
 .oyuns-voice-error { color: var(--color-red, #D93025); font-size: 12px; text-align: center; }
+.oyuns-voice-engines { background: var(--color-surface-2); border-radius: 999px; display: flex; gap: 2px; justify-self: center; max-width: 100%; padding: 3px; }
+.oyuns-voice-engines button { background: transparent; border: 0; border-radius: 999px; color: var(--color-muted); cursor: pointer; font-size: 11px; padding: 5px 12px; white-space: nowrap; }
+.oyuns-voice-engines button[aria-checked="true"] { background: var(--color-surface); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); color: var(--color-text); font-weight: 600; }
+.oyuns-voice-engines button:disabled { cursor: default; opacity: .6; }
