@@ -179,7 +179,7 @@ class CRMSearchInput(StrictInput):
 
 
 class ContractsSearchInput(StrictInput):
-    query: str | None = Field(default=None, max_length=200)
+    query: str | None = Field(default=None, max_length=200, description="Matches contract title, code, official number or counterparty name.")
     status: Literal["DRAFT", "PENDING_REVIEW", "CHANGES_REQUESTED", "APPROVED", "REJECTED", "SIGNED_AND_STAMPED"] | None = None
     expiring_within_days: int | None = Field(default=None, ge=1, le=366, description="Only contracts whose end date falls within this many days from today.")
     limit: int = Field(default=10, ge=1, le=30)

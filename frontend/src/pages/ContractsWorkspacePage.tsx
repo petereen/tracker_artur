@@ -41,8 +41,19 @@ import {
   useEnterpriseTasks,
   useProjects,
   useResolveContractComment,
+  useContractRegistryOptions,
 } from "../api/enterprise";
 import { api } from "../api/client";
+import {
+  ContractGroupManager,
+  ContractGroupSelect,
+  ContractRegistryForm,
+  ContractRegistryPanel,
+  contractErrorMessage,
+  formatContractMoney,
+  registryDraftFrom,
+  registryPayload,
+} from "../components/ContractRegistryFields";
 const LazyRichContractEditor = lazy(() => import('../components/RichContractEditor').then((module) => ({ default: module.RichContractEditor })))
 const LazyQRCodeSVG = lazy(() => import('qrcode.react').then((module) => ({ default: module.QRCodeSVG })))
 
@@ -131,6 +142,9 @@ function ContractComposer({
   const [end, setEnd] = useState(initial?.effective_end_on ?? "");
   const [expiryReminderDays, setExpiryReminderDays] = useState<number[]>(initial?.expiry_reminder_days ?? []);
   const [supportingFiles, setSupportingFiles] = useState<File[]>([]);
+  const registryOptions = useContractRegistryOptions();
+  const [registry, setRegistry] = useState(() => registryDraftFrom(initial));
+  const [groupManagerOpen, setGroupManagerOpen] = useState(false);
   const editable =
     !initial ||
     initial.status === "DRAFT" ||
@@ -156,6 +170,7 @@ function ContractComposer({
             effective_start_on: start || null,
             effective_end_on: end || null,
             expiry_reminder_days: expiryReminderDays,
+            ...registryPayload(registry),
           })
         : await create.mutateAsync({
             title,
@@ -167,6 +182,7 @@ function ContractComposer({
             effective_start_on: start || null,
             effective_end_on: end || null,
             expiry_reminder_days: expiryReminderDays,
+            ...registryPayload(registry),
           });
       if (!initial && supportingFiles.length) {
         let failedUploads = 0;
@@ -187,7 +203,7 @@ function ContractComposer({
       toast.success("Ноорог хадгалагдлаа");
       onDone(result.public_id);
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Ноорог хадгалсангүй");
+      toast.error(contractErrorMessage(error, "Ноорог хадгалсангүй"));
     }
   };
   const addSupportingFiles = (fileList: FileList | null) => {
@@ -321,6 +337,20 @@ function ContractComposer({
           ))}
         </fieldset>
       </div>
+      <ContractRegistryForm
+        draft={registry}
+        onChange={setRegistry}
+        options={registryOptions.data}
+        disabled={!editable}
+        partyLabel={initial?.party ? `${initial.party.code} · ${initial.party.name}` : undefined}
+        onManageGroups={registryOptions.data?.can_manage_groups ? () => setGroupManagerOpen(true) : undefined}
+      />
+      {groupManagerOpen && (
+        <ContractGroupManager
+          groups={registryOptions.data?.groups ?? []}
+          onClose={() => setGroupManagerOpen(false)}
+        />
+      )}
       <label className="contract-editor-label">Агуулга / нөхцөл</label>
       <RichContractEditor value={body} editable={editable} onChange={setBody} />
       <div className="contract-form-section">
@@ -531,13 +561,15 @@ function ContractDetailView({
           <header className="contract-document-header">
             <div>
               <span className="eyebrow">
-                {typeLabels[detail.document_type]} · ID{" "}
-                {detail.public_id.slice(0, 8).toUpperCase()}
+                {typeLabels[detail.document_type]} ·{" "}
+                {detail.code || `ID ${detail.public_id.slice(0, 8).toUpperCase()}`}
+                {detail.contract_number ? ` · №${detail.contract_number}` : ""}
               </span>
               <h2>{detail.title}</h2>
               <p>
                 Хүчинтэй хугацаа: {formatDate(detail.effective_start_on)} —{" "}
                 {formatDate(detail.effective_end_on)}
+                {detail.party ? ` · ${detail.party.name}` : ""}
               </p>
             </div>
             {editable && (
@@ -578,6 +610,14 @@ function ContractDetailView({
           </div>
         </article>
         <aside className="contract-detail-rail">
+          <ContractRegistryPanel
+            key={`${detail.public_id}-${detail.version}`}
+            detail={detail}
+            canManage={
+              detail.author_account_id === actor.data?.id ||
+              Boolean(actor.data?.roles?.some((role) => role === "admin" || role === "legal_counsel"))
+            }
+          />
           <div className="contract-rail-card">
             <div className="section-label">Үйлдэл</div>
             {detail.status === "DRAFT" && editable && (
@@ -908,8 +948,34 @@ export function ContractsWorkspacePage() {
     (params.get("view") as ContractView) || "all",
   );
   const [createMode, setCreateMode] = useState(params.get("create") === "1");
-  const list = useContractList(view);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState("");
+  const [activeFilter, setActiveFilter] = useState<"" | "true" | "false">("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+  const partyFilter = Number(params.get("party")) || undefined;
+  const filters = useMemo(
+    () => ({
+      ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      ...(partyFilter ? { party_id: partyFilter } : {}),
+      ...(groupFilter ? { group_id: Number(groupFilter) } : {}),
+      ...(activeFilter ? { active: activeFilter === "true" } : {}),
+      ...(dateFrom ? { date_from: dateFrom } : {}),
+      ...(dateTo ? { date_to: dateTo } : {}),
+    }),
+    [debouncedSearch, partyFilter, groupFilter, activeFilter, dateFrom, dateTo],
+  );
+  // A CRM deep link (?party=) should show the counterparty's contracts in every status.
+  const effectiveView: ContractView | "registry" = partyFilter && view === "all" ? "registry" : view;
+  const list = useContractList(effectiveView, filters);
+  const registryOptions = useContractRegistryOptions();
   const detail = useContractDetail(publicId);
+  const partyName = list.data?.items.find((item) => item.party_id === partyFilter)?.party?.name;
   useEffect(() => {
     setCreateMode(params.get("create") === "1");
   }, [params]);
@@ -967,13 +1033,59 @@ export function ContractsWorkspacePage() {
         />
       )}
       {!createMode && (
+        <div className="contract-filters" role="search">
+          <input
+            type="search"
+            aria-label="Гэрээ хайх"
+            placeholder="Хайх: нэр, код, дугаар, харилцагч"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <ContractGroupSelect
+            aria-label="Бүлгээр шүүх"
+            value={groupFilter}
+            onChange={setGroupFilter}
+            groups={registryOptions.data?.groups ?? []}
+            emptyLabel="Бүх бүлэг"
+            includeInactive
+          />
+          <select
+            aria-label="Идэвхээр шүүх"
+            value={activeFilter}
+            onChange={(event) => setActiveFilter(event.target.value as "" | "true" | "false")}
+          >
+            <option value="">Идэвхтэй ба идэвхгүй</option>
+            <option value="true">Идэвхтэй</option>
+            <option value="false">Идэвхгүй</option>
+          </select>
+          <input type="date" aria-label="Хугацаа эхлэх" title="Хугацаа (эхлэх)" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          <input type="date" aria-label="Хугацаа дуусах" title="Хугацаа (дуусах)" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+        </div>
+      )}
+      {!createMode && partyFilter && (
+        <span className="contract-filter-chip">
+          Харилцагч: {partyName || `#${partyFilter}`}
+          <button
+            type="button"
+            aria-label="Харилцагчийн шүүлтүүр арилгах"
+            onClick={() => {
+              const next = new URLSearchParams(params);
+              next.delete("party");
+              setParams(next);
+            }}
+          >
+            <X size={13} />
+          </button>
+        </span>
+      )}
+      {!createMode && (
         <div className="contract-list-card">
           {list.isLoading ? (
             <div className="contract-empty">Гэрээнүүдийг ачаалж байна…</div>
           ) : list.data?.items.length ? (
             list.data.items.map((item) => (
               <button
-                className="contract-list-row"
+                className={`contract-list-row${item.is_active === false ? " is-inactive" : ""}`}
                 key={item.public_id}
                 onClick={() => navigate(`/contracts/${item.public_id}`)}
               >
@@ -981,10 +1093,23 @@ export function ContractsWorkspacePage() {
                   <FileSignature size={18} />
                 </div>
                 <div className="contract-list-main">
-                  <strong>{item.title}</strong>
+                  <strong>
+                    {item.code ? `${item.code} · ` : ""}
+                    {item.title}
+                  </strong>
                   <span>
-                    {typeLabels[item.document_type]} ·{" "}
-                    {item.excerpt || "Агуулгагүй"}
+                    {[
+                      typeLabels[item.document_type],
+                      item.party?.name,
+                      item.amount !== null && item.amount !== undefined
+                        ? formatContractMoney(item.amount, item.currency)
+                        : null,
+                      item.overdue_days ? `${item.overdue_days} хоног хэтэрсэн` : null,
+                      item.is_active === false ? "Идэвхгүй" : null,
+                      item.excerpt || "Агуулгагүй",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </span>
                 </div>
                 <span className={statusClass(item.status)}>
@@ -1033,7 +1158,14 @@ export function ContractPrintPage() {
           <span className="eyebrow">OYUNS / ГЭРЭЭ</span>
           <h1>{detail.data.title}</h1>
           <p>
-            {typeLabels[detail.data.document_type]} · {detail.data.public_id}
+            {[
+              typeLabels[detail.data.document_type],
+              detail.data.code,
+              detail.data.contract_number ? `№${detail.data.contract_number}` : null,
+              detail.data.party?.name,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
         <ContractQrCode value={`${window.location.origin}/contracts/${detail.data.public_id}`} />

@@ -79,3 +79,35 @@ def test_contract_migration_has_tenant_and_round_constraints():
     assert "uq_contract_reviews_round_reviewer" in source
     assert "ck_contract_documents_effective_range" in source
     assert "ck_contract_files_purpose" in source
+
+
+def test_contract_registry_code_continuation_and_validation():
+    import pytest
+    from pydantic import ValidationError
+
+    from app.services.contract_registry import ContractLink, ContractRegistryInput, increment_code
+
+    assert increment_code(None) == "CT-0001"
+    assert increment_code("CT-0009") == "CT-0010"
+    assert increment_code("ГЭ-2026/015") == "ГЭ-2026/016"
+    assert increment_code("A99-B") == "A100-B"
+    assert increment_code("ГЭРЭЭ") == "CT-0001"
+    assert ContractLink(kind="path", url=r"\\srv\share\a.pdf").url == r"\\srv\share\a.pdf"
+    with pytest.raises(ValidationError):
+        ContractLink(kind="online", url="javascript:alert(1)")
+    data = ContractRegistryInput(code="  ", currency="usd", penalty_pct="1.5")
+    assert data.code is None and data.currency == "USD"
+    with pytest.raises(ValidationError):
+        ContractRegistryInput(penalty_pct="120")
+
+
+def test_contract_registry_migration_and_routes():
+    source = _router_source()
+    migration = (ROOT / "alembic" / "versions" / "c2d3e4f5a6b7_contract_registry_metadata.py").read_text()
+    for route in ("/contracts/registry-options", "/contracts/party-options", "/contracts/groups", "/contracts/groups/{group_id}", "/contracts/{public_id}/registry"):
+        assert f'"{route}"' in source
+    # Static routes must be declared before the UUID catch-all or they 422.
+    assert source.index('"/contracts/registry-options"') < source.index('@router.get("/contracts/{public_id}")')
+    assert source.index('"/contracts/groups"') < source.index('@router.get("/contracts/{public_id}")')
+    for token in ("contract_groups", "uq_contract_documents_org_code", "party_id", "payment_term_id", "custom_fields", "'CT-' || lpad"):
+        assert token in migration

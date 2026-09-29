@@ -18,6 +18,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -45,6 +46,22 @@ ARCHIVE_REVIEW_STATUSES = ("pending", "approved", "rejected")
 ARCHIVE_PERMISSIONS = ("view", "edit")
 
 
+class ContractGroup(Base):
+    """Гэрээ бүлэг — hierarchical contract classification (Dayansoft d028 §8)."""
+
+    __tablename__ = "contract_groups"
+    __table_args__ = (UniqueConstraint("organization_id", "code", name="uq_contract_groups_org_code"),)
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    code = Column(String(40), nullable=False)
+    name = Column(Text, nullable=False)
+    parent_id = Column(Integer, ForeignKey("contract_groups.id", ondelete="SET NULL"))
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class ContractDocument(Base):
     __tablename__ = "contract_documents"
     __table_args__ = (
@@ -53,6 +70,11 @@ class ContractDocument(Base):
         CheckConstraint("effective_end_on IS NULL OR effective_start_on IS NULL OR effective_end_on >= effective_start_on", name="ck_contract_documents_effective_range"),
         Index("ix_contract_documents_org_status", "organization_id", "status", "updated_at"),
         Index("ix_contract_documents_author_status", "author_account_id", "status", "updated_at"),
+        CheckConstraint("(quantity IS NULL OR quantity >= 0) AND (unit_price IS NULL OR unit_price >= 0) AND (amount IS NULL OR amount >= 0)", name="ck_contract_documents_amounts_non_negative"),
+        CheckConstraint("penalty_pct IS NULL OR (penalty_pct >= 0 AND penalty_pct <= 100)", name="ck_contract_documents_penalty_pct"),
+        Index("uq_contract_documents_org_code", "organization_id", "code", unique=True, postgresql_where=sa_text("code IS NOT NULL")),
+        Index("ix_contract_documents_org_party", "organization_id", "party_id"),
+        Index("ix_contract_documents_org_group", "organization_id", "group_id"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -78,6 +100,24 @@ class ContractDocument(Base):
     printed_at = Column(DateTime(timezone=True))
     printed_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     signed_at = Column(DateTime(timezone=True))
+    # Registry metadata (Dayansoft d028 «Гэрээ бүртгэх»). ``code`` is the internal
+    # ERP code (auto-continued), ``contract_number`` the official document number.
+    code = Column(String(64))
+    contract_number = Column(String(120))
+    group_id = Column(Integer, ForeignKey("contract_groups.id", ondelete="SET NULL"))
+    party_id = Column(Integer, ForeignKey("erp_parties.id", ondelete="SET NULL"))
+    signed_on = Column(Date)
+    quantity = Column(Numeric(18, 4))
+    unit_id = Column(Integer, ForeignKey("erp_units_of_measure.id", ondelete="SET NULL"))
+    unit_price = Column(Numeric(18, 4))
+    amount = Column(Numeric(18, 2))
+    currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
+    penalty_pct = Column(Numeric(7, 4))
+    payment_term_id = Column(Integer, ForeignKey("erp_payment_terms.id", ondelete="SET NULL"))
+    note = Column(Text)
+    is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    links = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    custom_fields = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

@@ -19,8 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
-from app.models.contracts import ContractArchiveAccess, ContractArchiveEntry, ContractArchiveFolder, ContractComment, ContractDocument, ContractFile, ContractReview, ContractRevision
-from app.models.models import AuditLog, Employee, Project, RoleAssignment, Task, UserAccount, UserNotification
+from app.models.contracts import ContractArchiveAccess, ContractArchiveEntry, ContractArchiveFolder, ContractComment, ContractDocument, ContractFile, ContractGroup, ContractReview, ContractRevision
+from app.models.crm import ERPPaymentTerm
+from app.models.models import AuditLog, Employee, ERPParty, ERPUnitOfMeasure, Project, RoleAssignment, Task, UserAccount, UserNotification
+from app.services import contract_registry as registry
 from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
 from app.services.enterprise_events import record_change
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
@@ -41,7 +43,7 @@ class ContractBody(BaseModel):
     content: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class ContractCreate(BaseModel):
+class ContractCreate(registry.ContractRegistryInput):
     title: str = Field(min_length=1, max_length=500)
     document_type: Literal["contract", "agreement", "official_letter", "other"]
     body_json: dict[str, Any]
@@ -68,7 +70,7 @@ class ContractCreate(BaseModel):
         return value
 
 
-class ContractPatch(BaseModel):
+class ContractPatch(registry.ContractRegistryInput):
     title: str | None = Field(default=None, max_length=500)
     document_type: Literal["contract", "agreement", "official_letter", "other"] | None = None
     body_json: dict[str, Any] | None = None
@@ -279,7 +281,8 @@ async def _new_revision(db: AsyncSession, contract: ContractDocument, *, title: 
     return revision
 
 
-def _contract_summary(contract: ContractDocument, revision: ContractRevision | None, *, author_name: str | None = None) -> dict[str, Any]:
+def _contract_summary(contract: ContractDocument, revision: ContractRevision | None, *, author_name: str | None = None, registry_ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    extra = registry.registry_out(contract, registry_ctx, date.today()) if registry_ctx is not None else {}
     return {
         "id": contract.id,
         "public_id": str(contract.public_id),
@@ -302,7 +305,14 @@ def _contract_summary(contract: ContractDocument, revision: ContractRevision | N
         "updated_at": contract.updated_at,
         "created_at": contract.created_at,
         "excerpt": (revision.plain_text[:220] if revision else ""),
+        **extra,
     }
+
+
+async def _summary(db: AsyncSession, contract: ContractDocument, revision: ContractRevision | None, *, author_name: str | None = None) -> dict[str, Any]:
+    # ``updated_at`` is refreshed server-side on every UPDATE; load it before the sync serializer touches it.
+    await db.refresh(contract)
+    return _contract_summary(contract, revision, author_name=author_name, registry_ctx=await registry.load_registry_context(db, [contract]))
 
 
 async def _notify_submit(db: AsyncSession, actor: ActorContext, contract: ContractDocument, event_id: int, reviewer_ids: list[int], author_name: str) -> None:
@@ -320,14 +330,153 @@ async def reviewer_candidates(db: AsyncSession = Depends(get_db), actor: ActorCo
     return [{"account_id": account.id, "employee_id": employee.id, "name": employee.name, "job_title": employee.job_title} for account, employee in rows]
 
 
+@router.get("/contracts/registry-options")
+async def contract_registry_options(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Reference lists for the d028 registry fields plus the next auto code."""
+    org = actor.organization_id
+    groups = (await db.execute(select(ContractGroup).where(ContractGroup.organization_id == org).order_by(ContractGroup.code))).scalars().all()
+    counts = dict((await db.execute(select(ContractDocument.group_id, func.count()).where(ContractDocument.organization_id == org, ContractDocument.group_id.is_not(None)).group_by(ContractDocument.group_id))).all())
+    units = (await db.execute(select(ERPUnitOfMeasure).where(ERPUnitOfMeasure.organization_id == org, ERPUnitOfMeasure.is_active.is_(True)).order_by(ERPUnitOfMeasure.code))).scalars().all()
+    terms = (await db.execute(select(ERPPaymentTerm).where(ERPPaymentTerm.organization_id == org, ERPPaymentTerm.is_active.is_(True)).order_by(ERPPaymentTerm.code))).scalars().all()
+    return {
+        "next_code": await registry.suggest_next_code(db, org),
+        "groups": [registry.group_out(row, counts.get(row.id, 0)) for row in groups],
+        "units": [{"id": row.id, "code": row.code, "name": row.name, "symbol": row.symbol} for row in units],
+        "payment_terms": [{"id": row.id, "code": row.code, "name": row.name, "days": row.days} for row in terms],
+        "can_manage_groups": actor.has_any_role(*ARCHIVE_MANAGER_ROLES),
+    }
+
+
+@router.get("/contracts/party-options")
+async def contract_party_options(q: str | None = Query(default=None, max_length=120), ids: list[int] = Query(default_factory=list), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Minimal CRM counterparty lookup (code, name, head party) for the contract form."""
+    query = select(ERPParty).where(ERPParty.organization_id == actor.organization_id)
+    if ids:
+        query = query.where(ERPParty.id.in_(ids[:50]))
+    else:
+        query = query.where(ERPParty.status != "inactive")
+        if q and q.strip():
+            pattern = f"%{q.strip()}%"
+            query = query.where(or_(ERPParty.name.ilike(pattern), ERPParty.code.ilike(pattern), ERPParty.tax_id.ilike(pattern), ERPParty.registry_no.ilike(pattern)))
+    rows = (await db.execute(query.order_by(ERPParty.name).limit(30))).scalars().all()
+    parent_ids = {row.parent_party_id for row in rows if row.parent_party_id}
+    parents = {row.id: row for row in (await db.execute(select(ERPParty).where(ERPParty.id.in_(parent_ids)))).scalars().all()} if parent_ids else {}
+    return [
+        {
+            "id": row.id, "code": row.code, "name": row.name, "tax_id": row.tax_id,
+            "is_customer": row.is_customer, "is_supplier": row.is_supplier, "currency": row.currency, "payment_term_id": row.payment_term_id,
+            "head_party": ({"id": parent.id, "code": parent.code, "name": parent.name} if (parent := parents.get(row.parent_party_id)) else None),
+        }
+        for row in rows
+    ]
+
+
+def _require_group_manager(actor: ActorContext) -> None:
+    if not actor.has_any_role(*ARCHIVE_MANAGER_ROLES):
+        raise HTTPException(status_code=403, detail="Only admins or legal counsel can manage contract groups")
+
+
+async def _group_for_actor(db: AsyncSession, actor: ActorContext, group_id: int) -> ContractGroup:
+    group = await db.get(ContractGroup, group_id)
+    if not group or group.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Contract group not found")
+    return group
+
+
+async def _assert_group_code_free(db: AsyncSession, organization_id: int, code: str, exclude_id: int | None = None) -> None:
+    query = select(ContractGroup.id).where(ContractGroup.organization_id == organization_id, func.lower(ContractGroup.code) == code.lower())
+    if exclude_id is not None:
+        query = query.where(ContractGroup.id != exclude_id)
+    if await db.scalar(query.limit(1)):
+        raise registry.registry_error(409, "contract_group_code_taken", f"“{code}” код өөр бүлэгт олгогдсон байна")
+
+
+@router.post("/contracts/groups", status_code=status.HTTP_201_CREATED)
+async def create_contract_group(data: registry.ContractGroupInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    _require_group_manager(actor)
+    await _assert_group_code_free(db, actor.organization_id, data.code)
+    await registry.assert_group_parent(db, actor.organization_id, None, data.parent_id)
+    group = ContractGroup(organization_id=actor.organization_id, code=data.code, name=data.name, parent_id=data.parent_id)
+    db.add(group)
+    await db.flush()
+    await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_group", aggregate_id=group.id, operation="group_created", version=1, after=registry.group_out(group))
+    await db.commit()
+    return registry.group_out(group)
+
+
+@router.patch("/contracts/groups/{group_id}")
+async def update_contract_group(group_id: int, data: registry.ContractGroupPatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    _require_group_manager(actor)
+    group = await _group_for_actor(db, actor, group_id)
+    values = data.model_dump(exclude_unset=True)
+    before = registry.group_out(group)
+    if values.get("code"):
+        await _assert_group_code_free(db, actor.organization_id, values["code"], group.id)
+        group.code = values["code"]
+    if values.get("name"):
+        group.name = values["name"]
+    if "parent_id" in values:
+        await registry.assert_group_parent(db, actor.organization_id, group.id, values["parent_id"])
+        group.parent_id = values["parent_id"]
+    if values.get("is_active") is not None:
+        group.is_active = values["is_active"]
+    await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_group", aggregate_id=group.id, operation="group_updated", version=1, before=before, after=registry.group_out(group))
+    await db.commit()
+    return registry.group_out(group)
+
+
+@router.delete("/contracts/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_contract_group(group_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    _require_group_manager(actor)
+    group = await _group_for_actor(db, actor, group_id)
+    in_use = await db.scalar(select(ContractDocument.id).where(ContractDocument.group_id == group.id).limit(1))
+    has_children = await db.scalar(select(ContractGroup.id).where(ContractGroup.parent_id == group.id).limit(1))
+    if in_use or has_children:
+        raise registry.registry_error(409, "contract_group_in_use", "Гэрээ эсвэл дэд бүлэгтэй бүлгийг устгах боломжгүй — идэвхгүй болгоно уу")
+    await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_group", aggregate_id=group.id, operation="group_deleted", version=1, before=registry.group_out(group))
+    await db.delete(group)
+    await db.commit()
+
+
 @router.get("/contracts")
-async def list_contracts(view: Literal["all", "drafts", "pending_my_approval", "submitted_by_me", "approved", "signed", "returned"] = "all", search: str | None = None, document_type: str | None = None, project_id: int | None = None, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def list_contracts(
+    view: Literal["all", "drafts", "pending_my_approval", "submitted_by_me", "approved", "signed", "returned", "registry"] = "all",
+    search: str | None = None,
+    document_type: str | None = None,
+    project_id: int | None = None,
+    party_id: int | None = None,
+    group_id: int | None = None,
+    active: bool | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
     participant = exists(select(ContractReview.id).where(ContractReview.contract_id == ContractDocument.id, ContractReview.reviewer_account_id == actor.account_id))
     query = select(ContractDocument, ContractRevision, Employee.name).outerjoin(ContractRevision, ContractRevision.id == ContractDocument.current_revision_id).outerjoin(Employee, Employee.id == ContractDocument.author_employee_id).where(ContractDocument.organization_id == actor.organization_id)
     if not actor.has_any_role("admin"):
         query = query.where(or_(ContractDocument.author_account_id == actor.account_id, participant))
-    if search:
-        query = query.where(ContractDocument.title.ilike(f"%{search.strip()}%"))
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        party_match = exists(select(ERPParty.id).where(ERPParty.id == ContractDocument.party_id, or_(ERPParty.name.ilike(pattern), ERPParty.code.ilike(pattern))))
+        query = query.where(or_(ContractDocument.title.ilike(pattern), ContractDocument.code.ilike(pattern), ContractDocument.contract_number.ilike(pattern), party_match))
+    if party_id:
+        query = query.where(ContractDocument.party_id == party_id)
+    if group_id:
+        # A group filter includes its sub-groups (d028 §8 hierarchical groups).
+        group_rows = (await db.execute(select(ContractGroup.id, ContractGroup.parent_id).where(ContractGroup.organization_id == actor.organization_id))).all()
+        wanted, frontier = {group_id}, {group_id}
+        while frontier:
+            frontier = {row.id for row in group_rows if row.parent_id in frontier and row.id not in wanted}
+            wanted |= frontier
+        query = query.where(ContractDocument.group_id.in_(wanted))
+    if active is not None:
+        query = query.where(ContractDocument.is_active.is_(active))
+    # «Хугацаа» filter: the contract term overlaps [date_from, date_to].
+    if date_to:
+        query = query.where(func.coalesce(ContractDocument.effective_start_on, ContractDocument.signed_on, func.date(ContractDocument.created_at)) <= date_to)
+    if date_from:
+        query = query.where(or_(ContractDocument.effective_end_on.is_(None), ContractDocument.effective_end_on >= date_from))
     if document_type:
         query = query.where(ContractDocument.document_type == document_type)
     if project_id:
@@ -335,10 +484,11 @@ async def list_contracts(view: Literal["all", "drafts", "pending_my_approval", "
     rows = (await db.execute(query.order_by(ContractDocument.updated_at.desc(), ContractDocument.id.desc()).limit(500))).all()
     pending_ids = set((await db.execute(select(ContractReview.contract_id).where(ContractReview.reviewer_account_id == actor.account_id, ContractReview.decision == "pending", ContractReview.round_number == ContractDocument.submission_round).join(ContractDocument, ContractDocument.id == ContractReview.contract_id, isouter=False))).scalars().all())
     def matches(key: str, contract: ContractDocument) -> bool:
-        return (key == "all" and contract.status != "SIGNED_AND_STAMPED") or (key == "drafts" and contract.author_account_id == actor.account_id and contract.status == "DRAFT") or (key == "pending_my_approval" and contract.status == "PENDING_REVIEW" and contract.id in pending_ids) or (key == "submitted_by_me" and contract.author_account_id == actor.account_id and contract.status == "PENDING_REVIEW") or (key == "approved" and contract.status == "APPROVED") or (key == "signed" and contract.status == "SIGNED_AND_STAMPED") or (key == "returned" and contract.status in ("CHANGES_REQUESTED", "REJECTED"))
-    counts = {key: sum(1 for contract, _, _ in rows if matches(key, contract)) for key in ("all", "drafts", "pending_my_approval", "submitted_by_me", "approved", "signed", "returned")}
+        return key == "registry" or (key == "all" and contract.status != "SIGNED_AND_STAMPED") or (key == "drafts" and contract.author_account_id == actor.account_id and contract.status == "DRAFT") or (key == "pending_my_approval" and contract.status == "PENDING_REVIEW" and contract.id in pending_ids) or (key == "submitted_by_me" and contract.author_account_id == actor.account_id and contract.status == "PENDING_REVIEW") or (key == "approved" and contract.status == "APPROVED") or (key == "signed" and contract.status == "SIGNED_AND_STAMPED") or (key == "returned" and contract.status in ("CHANGES_REQUESTED", "REJECTED"))
+    counts = {key: sum(1 for contract, _, _ in rows if matches(key, contract)) for key in ("all", "drafts", "pending_my_approval", "submitted_by_me", "approved", "signed", "returned", "registry")}
     visible = [row for row in rows if matches(view, row[0])]
-    return {"items": [_contract_summary(contract, revision, author_name) for contract, revision, author_name in visible], "counts": counts}
+    ctx = await registry.load_registry_context(db, [contract for contract, _, _ in visible])
+    return {"items": [_contract_summary(contract, revision, author_name=author_name, registry_ctx=ctx) for contract, revision, author_name in visible], "counts": counts}
 
 
 @router.post("/contracts", status_code=status.HTTP_201_CREATED)
@@ -352,13 +502,17 @@ async def create_contract(data: ContractCreate, db: AsyncSession = Depends(get_d
     if actor.account_id in {account.id for account, _ in reviewers}:
         raise HTTPException(status_code=422, detail="The author cannot be their own reviewer")
     _validate_dates(data.effective_start_on, data.effective_end_on)
-    contract = ContractDocument(organization_id=actor.organization_id, author_account_id=actor.account_id, author_employee_id=actor.employee_id, title=data.title.strip(), document_type=data.document_type, project_id=data.project_id, task_id=data.task_id, effective_start_on=data.effective_start_on, effective_end_on=data.effective_end_on, expiry_reminder_days=data.expiry_reminder_days, reviewer_account_ids=[account.id for account, _ in reviewers])
+    registry_values = data.model_dump(include=set(registry.REGISTRY_FIELDS))
+    await registry.assert_references(db, actor.organization_id, registry_values)
+    code = await registry.assign_code(db, actor.organization_id, data.code)
+    contract = ContractDocument(organization_id=actor.organization_id, author_account_id=actor.account_id, author_employee_id=actor.employee_id, title=data.title.strip(), document_type=data.document_type, project_id=data.project_id, task_id=data.task_id, effective_start_on=data.effective_start_on, effective_end_on=data.effective_end_on, expiry_reminder_days=data.expiry_reminder_days, reviewer_account_ids=[account.id for account, _ in reviewers], code=code)
+    registry.apply_registry(contract, registry_values)
     db.add(contract)
     await db.flush()
     revision = await _new_revision(db, contract, title=data.title, document_type=data.document_type, body_json=data.body_json, project_id=data.project_id, task_id=data.task_id, effective_start_on=data.effective_start_on, effective_end_on=data.effective_end_on, actor=actor)
-    event = await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="draft_created", version=contract.version, after={"status": contract.status, "revision_id": revision.id})
+    await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="draft_created", version=contract.version, after={"status": contract.status, "revision_id": revision.id, "registry": registry.registry_snapshot(contract)})
     await db.commit()
-    return _contract_summary(contract, revision)
+    return await _summary(db, contract, revision)
 
 
 @router.get("/contracts/{public_id}")
@@ -371,7 +525,7 @@ async def get_contract(public_id: UUID, db: AsyncSession = Depends(get_db), acto
     comments = (await db.execute(select(ContractComment).where(ContractComment.contract_id == contract.id).order_by(ContractComment.created_at))).scalars().all()
     files = (await db.execute(select(ContractFile).where(ContractFile.contract_id == contract.id).order_by(ContractFile.created_at))).scalars().all()
     events = (await db.execute(select(AuditLog).where(AuditLog.organization_id == actor.organization_id, AuditLog.entity_id == contract.id, AuditLog.entity_type == "contract_document").order_by(AuditLog.created_at))).scalars().all()
-    return {**_contract_summary(contract, revision), "body_json": revision.body_json if revision else None, "approved_body_json": approved_revision.body_json if approved_revision else None, "reviewer_account_ids": contract.reviewer_account_ids or [], "revisions": [{"id": row.id, "revision_number": row.revision_number, "title": row.title, "body_json": row.body_json, "plain_text": row.plain_text, "checksum": row.checksum, "created_at": row.created_at, "author_account_id": row.author_account_id} for row in revisions], "reviews": [{"id": row.id, "round_number": row.round_number, "reviewer_account_id": row.reviewer_account_id, "reviewer_employee_id": row.reviewer_employee_id, "reviewer_name": row.reviewer_name_snapshot, "decision": row.decision, "remark": row.remark, "acted_at": row.acted_at} for row in reviews], "comments": [{"id": row.id, "revision_id": row.revision_id, "parent_id": row.parent_id, "author_account_id": row.author_account_id, "body": row.body, "anchor": row.anchor, "is_resolved": row.is_resolved, "created_at": row.created_at} for row in comments], "files": [{"id": row.id, "purpose": row.purpose, "filename": row.filename, "content_type": row.content_type, "size": row.size, "checksum": row.checksum, "scan_status": row.scan_status, "confirmed_at": row.confirmed_at, "created_at": row.created_at} for row in files], "timeline": [{"id": row.id, "operation": row.action, "actor_account_id": row.actor_account_id, "before": row.before_data, "after": row.after_data, "created_at": row.created_at} for row in events]}
+    return {**(await _summary(db, contract, revision)), "body_json": revision.body_json if revision else None, "approved_body_json": approved_revision.body_json if approved_revision else None, "reviewer_account_ids": contract.reviewer_account_ids or [], "revisions": [{"id": row.id, "revision_number": row.revision_number, "title": row.title, "body_json": row.body_json, "plain_text": row.plain_text, "checksum": row.checksum, "created_at": row.created_at, "author_account_id": row.author_account_id} for row in revisions], "reviews": [{"id": row.id, "round_number": row.round_number, "reviewer_account_id": row.reviewer_account_id, "reviewer_employee_id": row.reviewer_employee_id, "reviewer_name": row.reviewer_name_snapshot, "decision": row.decision, "remark": row.remark, "acted_at": row.acted_at} for row in reviews], "comments": [{"id": row.id, "revision_id": row.revision_id, "parent_id": row.parent_id, "author_account_id": row.author_account_id, "body": row.body, "anchor": row.anchor, "is_resolved": row.is_resolved, "created_at": row.created_at} for row in comments], "files": [{"id": row.id, "purpose": row.purpose, "filename": row.filename, "content_type": row.content_type, "size": row.size, "checksum": row.checksum, "scan_status": row.scan_status, "confirmed_at": row.confirmed_at, "created_at": row.created_at} for row in files], "timeline": [{"id": row.id, "operation": row.action, "actor_account_id": row.actor_account_id, "before": row.before_data, "after": row.after_data, "created_at": row.created_at} for row in events]}
 
 
 @router.patch("/contracts/{public_id}")
@@ -396,13 +550,42 @@ async def update_contract(public_id: UUID, data: ContractPatch, if_match: str | 
     task_id = values.get("task_id", current.task_id)
     start = values.get("effective_start_on", current.effective_start_on)
     end = values.get("effective_end_on", current.effective_end_on)
+    registry_values = {key: value for key, value in values.items() if key in registry.REGISTRY_FIELDS}
+    await registry.assert_references(db, actor.organization_id, registry_values, current=contract)
+    registry_before = registry.registry_snapshot(contract)
+    if "code" in values and values["code"] != contract.code:
+        # A cleared code keeps the current one; contracts without a code get the next one.
+        if values["code"] or not contract.code:
+            contract.code = await registry.assign_code(db, actor.organization_id, values["code"], exclude_id=contract.id)
+    registry.apply_registry(contract, registry_values)
     contract.reviewer_account_ids = [account.id for account, _ in reviewers]
     if "expiry_reminder_days" in values:
         contract.expiry_reminder_days = values["expiry_reminder_days"] or []
     revision = await _new_revision(db, contract, title=title, document_type=document_type, body_json=body, project_id=project_id, task_id=task_id, effective_start_on=start, effective_end_on=end, actor=actor)
-    await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="draft_saved", version=contract.version, after={"revision_id": revision.id, "status": contract.status})
+    registry_after = registry.registry_snapshot(contract)
+    registry_change = {"registry_before": registry_before, "registry": registry_after} if registry_after != registry_before else {}
+    await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="draft_saved", version=contract.version, after={"revision_id": revision.id, "status": contract.status, **registry_change})
     await db.commit()
-    return _contract_summary(contract, revision)
+    return await _summary(db, contract, revision)
+
+
+@router.patch("/contracts/{public_id}/registry")
+async def update_contract_registry(public_id: UUID, data: registry.ContractRegistryPatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Registry fields that stay editable in every status: official number, active flag, links, meta, note."""
+    contract = await _get_contract(db, public_id, actor, lock=True)
+    if contract.author_account_id != actor.account_id and not actor.has_any_role(*ARCHIVE_MANAGER_ROLES):
+        raise HTTPException(status_code=403, detail="Only the author, an admin or legal counsel can update the contract registry")
+    values = data.model_dump(exclude_unset=True)
+    before = registry.registry_snapshot(contract)
+    if "is_active" in values and values["is_active"] is not None:
+        contract.is_active = values.pop("is_active")
+    values.pop("is_active", None)
+    registry.apply_registry(contract, values)
+    contract.version += 1
+    await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=contract.id, operation="registry_updated", version=contract.version, before=before, after=registry.registry_snapshot(contract))
+    await db.commit()
+    revision = await db.get(ContractRevision, contract.current_revision_id) if contract.current_revision_id else None
+    return await _summary(db, contract, revision)
 
 
 @router.delete("/contracts/{public_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -427,12 +610,15 @@ async def duplicate_contract(public_id: UUID, db: AsyncSession = Depends(get_db)
     if not source_revision:
         raise HTTPException(status_code=409, detail="Rejected contract has no revision")
     duplicate = ContractDocument(organization_id=actor.organization_id, author_account_id=actor.account_id, author_employee_id=actor.employee_id, title=f"{source.title} (Хуулбар)", document_type=source.document_type, project_id=source.project_id, task_id=source.task_id, effective_start_on=source.effective_start_on, effective_end_on=source.effective_end_on, expiry_reminder_days=source.expiry_reminder_days or [], reviewer_account_ids=source.reviewer_account_ids or [])
+    # The copy keeps the registry metadata but gets its own code and no official number.
+    registry.apply_registry(duplicate, {field: getattr(source, field) for field in registry.REGISTRY_FIELDS if field not in {"code", "contract_number"}})
+    duplicate.code = await registry.assign_code(db, actor.organization_id, None)
     db.add(duplicate)
     await db.flush()
     revision = await _new_revision(db, duplicate, title=duplicate.title, document_type=duplicate.document_type, body_json=source_revision.body_json, project_id=duplicate.project_id, task_id=duplicate.task_id, effective_start_on=duplicate.effective_start_on, effective_end_on=duplicate.effective_end_on, actor=actor)
     await record_change(db, actor=actor, topic="contracts", aggregate_type="contract_document", aggregate_id=duplicate.id, operation="duplicated", version=duplicate.version, after={"source_id": source.id, "revision_id": revision.id})
     await db.commit()
-    return _contract_summary(duplicate, revision)
+    return await _summary(db, duplicate, revision)
 
 
 async def _submit(public_id: UUID, db: AsyncSession, actor: ActorContext, *, resubmit: bool):
