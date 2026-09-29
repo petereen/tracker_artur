@@ -89,17 +89,28 @@ REFERENCE_TARGETS = frozenset({"party", "item", "warehouse", "account", "project
 SCOPE_DIMENSIONS = frozenset({"warehouse_ids", "project_ids", "branch_codes"})
 MONEY_QUANTUM = Decimal("0.0001")
 DEFAULT_ACCOUNTS = (
-    ("1000", "Cash", "cash"), ("1010", "Payroll bank", "cash"),
-    ("1100", "Accounts receivable", "receivable"), ("1200", "Inventory", "inventory"),
-    ("1300", "Fixed assets", "fixed_asset"), ("1301", "Work in progress", "wip"), ("1310", "Accumulated depreciation", "fixed_asset"),
-    ("2000", "Accounts payable", "payable"), ("2100", "Sales tax payable", "tax_payable"),
-    ("2200", "Purchase tax receivable", "tax_receivable"), ("2300", "Payroll payable", "payroll_payable"),
-    ("2310", "Net salary payable", "payroll_payable"), ("2320", "Employee social insurance payable", "payroll_payable"),
-    ("2330", "Employer social insurance payable", "payroll_payable"), ("2340", "PIT payable", "tax_payable"),
-    ("2350", "Employee advance clearing", "receivable"), ("4000", "Sales income", "income"),
-    ("5000", "Operating expenses", "expense"), ("5100", "Salary expense", "payroll_expense"), ("5200", "Depreciation expense", "expense"),
-    ("5110", "Employer social insurance expense", "payroll_expense"),
+    ("1000", "Касс дахь мөнгө", "cash"), ("1010", "Харилцах данс (цалин)", "cash"),
+    ("1100", "Дансны авлага", "receivable"), ("1200", "Бараа материал", "inventory"),
+    ("1300", "Үндсэн хөрөнгө", "fixed_asset"), ("1301", "Дуусаагүй үйлдвэрлэл", "wip"), ("1310", "Хуримтлагдсан элэгдэл", "fixed_asset"),
+    ("2000", "Дансны өглөг", "payable"), ("2100", "НӨАТ-ын өглөг", "tax_payable"),
+    ("2200", "НӨАТ-ын авлага", "tax_receivable"), ("2300", "Цалингийн өглөг (нийт)", "payroll_payable"),
+    ("2310", "Олгох цалингийн өглөг", "payroll_payable"), ("2320", "Ажилтны НДШ-ийн өглөг", "payroll_payable"),
+    ("2330", "Ажил олгогчийн НДШ-ийн өглөг", "payroll_payable"), ("2340", "ХХОАТ-ын өглөг", "tax_payable"),
+    ("2350", "Цалингийн урьдчилгааны тооцоо", "receivable"), ("4000", "Борлуулалтын орлого", "income"),
+    ("5000", "Үйл ажиллагааны зардал", "expense"), ("5100", "Цалингийн зардал", "payroll_expense"), ("5200", "Элэгдлийн зардал", "expense"),
+    ("5110", "Ажил олгогчийн НДШ-ийн зардал", "payroll_expense"),
 )
+# English names the chart was seeded with before 2026-09-29; migration
+# a1c2e3g4i5k6 renames rows that still carry them.
+LEGACY_DEFAULT_ACCOUNT_NAMES = {
+    "1000": ("Cash",), "1010": ("Payroll bank",), "1100": ("Accounts receivable",), "1200": ("Inventory",),
+    "1300": ("Fixed assets",), "1301": ("Work in progress",), "1310": ("Accumulated depreciation",),
+    "2000": ("Accounts payable",), "2100": ("Sales tax payable",), "2200": ("Purchase tax receivable",),
+    "2300": ("Payroll payable",), "2310": ("Net salary payable",), "2320": ("Employee social insurance payable",),
+    "2330": ("Employer social insurance payable",), "2340": ("PIT payable",), "2350": ("Employee advance clearing",),
+    "4000": ("Sales income",), "5000": ("Operating expenses",), "5100": ("Salary expense", "Payroll expense"),
+    "5110": ("Employer social insurance expense",), "5200": ("Depreciation expense",),
+}
 ACCOUNT_METADATA = {
     "1000": ("asset", "cash"), "1010": ("asset", "bank"), "1100": ("asset", "receivable"), "1200": ("asset", "inventory"),
     "1300": ("asset", "fixed_asset"), "1301": ("asset", "wip"), "1310": ("asset", "accumulated_depreciation"), "2000": ("liability", "payable"), "2100": ("liability", "tax"),
@@ -463,6 +474,8 @@ async def bootstrap_organization(db: AsyncSession, organization_id: int) -> None
             account = await db.get(ERPAccount, exists)
             if account and account.purpose == "general":
                 account.classification, account.purpose, account.currency = classification, purpose, "MNT"
+            if account and account.name in LEGACY_DEFAULT_ACCOUNT_NAMES.get(code, ()):
+                account.name = name
     await db.flush()
     default_center = await db.scalar(select(ERPCostCenter).where(ERPCostCenter.organization_id == organization_id, ERPCostCenter.code == "DEFAULT"))
     if default_center is None:

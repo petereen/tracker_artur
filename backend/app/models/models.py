@@ -2639,6 +2639,11 @@ class ERPAccount(Base):
     currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
     is_group = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    # Cash/bank accounts (Dayansoft d047 «Мөнгөн хөрөнгө» тохиргоо).
+    bank_name = Column(String(120))
+    bank_iban = Column(String(34))
+    bank_account_number = Column(String(64))
+    bank_account_holder = Column(String(200))
 
 
 class ERPDeletedSeedAccount(Base):
