@@ -30,7 +30,16 @@ log = logging.getLogger(__name__)
 
 CLIENT_SECRETS_URL = "https://api.openai.com/v1/realtime/client_secrets"
 REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls"
-TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
+# The full transcribe model is markedly better than the mini one on Mongolian.
+TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
+# No `language` hint: it takes a single language (and `mn` is not reliably
+# accepted), so the three allowed languages are pinned through the prompt.
+TRANSCRIPTION_PROMPT = (
+    "The speaker is an employee of a Mongolian company talking to the OYUNS assistant. "
+    "The speech is only ever in Mongolian (Khalkha, written in Mongolian Cyrillic), Russian or English, "
+    "never Korean, Kazakh, Kyrgyz, Turkish, Japanese or Chinese. "
+    "Transcribe Mongolian in Mongolian Cyrillic with correct spelling."
+)
 # The secret only has to live until the WebRTC handshake completes.
 CLIENT_SECRET_TTL_SECONDS = 120
 MAX_TOOL_OUTPUT_CHARS = 12_000
@@ -38,6 +47,12 @@ SESSION_RATE_LIMIT = 10
 SESSION_RATE_WINDOW_SECONDS = 600
 
 VOICE_SYSTEM = """You are OYUNS, the AI assistant of the company's OYUNS ERP workspace, in a live voice call with an employee.
+
+# Language (strict)
+- The caller speaks only Mongolian (Khalkha, Mongolian Cyrillic), Russian or English. Treat every utterance as one of these three, and speak only these three languages.
+- Speech that sounds like Korean, Kazakh, Kyrgyz, Buryat, Turkish, Japanese, Chinese or any other language is Mongolian: understand it as Mongolian and answer in Mongolian. Never reply in any other language, and never mix languages within a sentence.
+- Speak Mongolian as a native Khalkha speaker with standard pronunciation.
+- If you could not understand the caller, ask them in Mongolian to repeat instead of guessing.
 
 # How to work
 - CONTEXT below tells you who is calling (current_employee, roles), current_time and timezone, their personal snapshot, and AVAILABLE_DATA (what you may look up).
@@ -49,7 +64,7 @@ VOICE_SYSTEM = """You are OYUNS, the AI assistant of the company's OYUNS ERP wor
 - This call can only read data. To create or change a task, tell the caller to ask in the OYUNS chat, where they can confirm the preview.
 
 # Speaking style
-- Answer in the language the caller speaks (Mongolian, Russian or English); start in reply_language.
+- Answer in the language the caller speaks (Mongolian, Russian or English only); start in reply_language, and when unsure, use Mongolian.
 - Speak naturally and briefly: lead with the answer, then at most a few key details. No markdown, tables, links, IDs, references or codes. Say dates, times and numbers the way people say them.
 - Before a lookup that may take a moment, say in a few words that you are checking.
 - Speech recognition can mishear names and numbers: silently correct obvious errors against company data, and ask one short question when a key name or number is unclear."""
@@ -104,7 +119,8 @@ def session_config(runtime: AIRuntime, instructions: str, tools: list[dict], *, 
     }
     if not minimal:
         session["audio"]["input"] = {
-            "transcription": {"model": TRANSCRIPTION_MODEL},
+            "transcription": {"model": TRANSCRIPTION_MODEL, "prompt": TRANSCRIPTION_PROMPT},
+            "noise_reduction": {"type": "near_field"},
             "turn_detection": {"type": "semantic_vad"},
         }
     return {"expires_after": {"anchor": "created_at", "seconds": CLIENT_SECRET_TTL_SECONDS}, "session": session}

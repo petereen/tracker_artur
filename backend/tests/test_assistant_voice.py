@@ -66,6 +66,9 @@ def test_session_config_uses_latest_realtime_model_and_read_only_tools():
     assert config["session"]["model"] == "gpt-realtime"
     assert config["session"]["audio"]["output"]["voice"] == "marin"
     assert config["expires_after"]["seconds"] <= 600
+    transcription = config["session"]["audio"]["input"]["transcription"]
+    assert transcription["model"] == voice_call.TRANSCRIPTION_MODEL and "Mongolian" in transcription["prompt"]
+    assert "Language (strict)" in voice_call.VOICE_SYSTEM
     minimal = voice_call.session_config(runtime_with(realtime_model="gpt-realtime-mini", realtime_voice="cedar"), "x", [], minimal=True)
     assert minimal["session"]["model"] == "gpt-realtime-mini" and "input" not in minimal["session"]["audio"]
 

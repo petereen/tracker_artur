@@ -270,6 +270,14 @@ async def _transcribe_openai(audio: bytes, api_key: str, filename: str) -> tuple
                 "prompt",
                 "The audio is spoken in Mongolian. Transcribe it in Mongolian Cyrillic.",
             )
+        elif not language:
+            # Auto-detection mistakes Mongolian for Korean/Kazakh; pin the
+            # languages the company actually speaks.
+            form.add_field(
+                "prompt",
+                "The audio is in Mongolian (Mongolian Cyrillic), Russian or English, "
+                "never Korean or Kazakh. Transcribe Mongolian in Mongolian Cyrillic.",
+            )
         if language:
             form.add_field("language", language)
         form.add_field("file", audio, filename=filename, content_type="audio/ogg")
