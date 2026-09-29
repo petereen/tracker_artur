@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.enterprise_deps import tenant_is_operational
 from app.core.telegram_auth import verify_init_data
+from app.core.tenancy import bind_tenant, current_tenant_id, tenant_directory
 from app.models.models import DEFAULT_REMINDER_INTERVALS_MIN, Employee, ManagerSettings, NotificationOutbox, Task, TaskComment
 from app.services.notification_policy import load_policy, next_allowed
 from app.services.manager_recipients import manager_telegram_ids
@@ -179,7 +181,8 @@ async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), _=De
     task = Task(
         title=data.title, description=data.description, assignee_id=data.assignee_id,
         deadline_at=data.deadline_at, priority=data.priority, status="open",
-        workflow_status="to_do", organization_id=1,
+        # Legacy admin panel (primary tenant): the request's bound tenant.
+        workflow_status="to_do", organization_id=current_tenant_id(),
         reminder_intervals_min=list(DEFAULT_REMINDER_INTERVALS_MIN),
     )
     db.add(task)
@@ -250,6 +253,12 @@ async def _miniapp_actor(db: AsyncSession, init_data: Optional[str]) -> tuple[Em
         is_manager = tg_id in manager_telegram_ids(ms)
     if not emp and not is_manager:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not registered")
+    # initData carries no tenant: pin the request to the worker's tenant (the
+    # legacy MANAGER_TG_ID manager without a worker row is the primary one).
+    organization_id = emp.organization_id if emp else await tenant_directory.primary_id()
+    if not organization_id or not await tenant_is_operational(organization_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace unavailable")
+    await bind_tenant(db, organization_id)
     return emp, is_manager
 
 
@@ -300,11 +309,15 @@ async def miniapp_create(
         raise HTTPException(status_code=403, detail="your role cannot assign to others")
     if not assignee_id:
         assignee_id = emp.id if emp else None
+    if assignee_id and assignee_id != (emp.id if emp else None):
+        assignee = await db.get(Employee, assignee_id)
+        if assignee is None or assignee.organization_id != current_tenant_id():
+            raise HTTPException(status_code=404, detail="assignee not found")
     task = Task(
         title=data.title, description=data.description, assignee_id=assignee_id,
         created_by_id=emp.id if emp else None,
         deadline_at=data.deadline_at, priority=data.priority, status="open",
-        workflow_status="to_do", organization_id=1,
+        workflow_status="to_do", organization_id=current_tenant_id(),
         reminder_intervals_min=list(DEFAULT_REMINDER_INTERVALS_MIN),
     )
     db.add(task)

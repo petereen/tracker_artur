@@ -109,3 +109,10 @@ from app.models.budget import (  # noqa: F401
     BudgetAccountLink,
     BudgetEntry,
 )
+from app.models.platform import (  # noqa: F401
+    PlatformAuditLog,
+    PlatformOperator,
+    SubscriptionPlan,
+    TenantDomain,
+    TenantLicense,
+)

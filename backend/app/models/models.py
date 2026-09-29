@@ -289,7 +289,8 @@ class Task(Base):
 
     id = Column(Integer, primary_key=True)
     public_id = Column(UUID(as_uuid=True), nullable=False, unique=True, default=uuid.uuid4, server_default=sa_text("gen_random_uuid()"))
-    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"))
+    # NOT NULL since b3c4d5e6f7a8; a DB trigger fills it from the assignee.
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"))
     parent_task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"))
     title = Column(Text, nullable=False)
@@ -645,8 +646,25 @@ class PlanIdea(Base):
 # ─── Enterprise PM / PSA foundation ─────────────────────────────────────────
 
 
+def _default_tenant_slug() -> str:
+    return f"org-{uuid.uuid4().hex[:10]}"
+
+
 class Organization(Base):
+    """A company workspace — the SaaS tenant (see docs/multi-tenancy.md).
+
+    Every tenant-owned row carries ``organization_id``; PostgreSQL row-level
+    security and the ORM guard in ``app.core.tenancy`` keep tenants apart.
+    """
+
     __tablename__ = "organizations"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending_activation','active','suspended','terminated')", name="ck_organizations_status"),
+        CheckConstraint("billing_cycle IN ('monthly','quarterly','yearly','custom')", name="ck_organizations_billing_cycle"),
+        CheckConstraint("seat_limit IS NULL OR seat_limit >= 0", name="ck_organizations_seat_limit"),
+        CheckConstraint("slug ~ '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'", name="ck_organizations_slug"),
+        Index("uq_organizations_primary", "is_primary", unique=True, postgresql_where=sa_text("is_primary")),
+    )
 
     id = Column(Integer, primary_key=True)
     public_id = Column(UUID(as_uuid=True), nullable=False, unique=True, default=uuid.uuid4, server_default=sa_text("gen_random_uuid()"))
@@ -654,6 +672,25 @@ class Organization(Base):
     timezone = Column(Text, nullable=False, server_default="Asia/Ulaanbaatar", default="Asia/Ulaanbaatar")
     base_currency = Column(String(3), nullable=False, server_default="MNT", default="MNT")
     settings = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    # Tenant lifecycle and subscription. ``seat_limit``/``features``/
+    # ``license_expires_at`` mirror the active license (NULL seat_limit means
+    # unlimited) so request gating and the seat trigger read one row.
+    slug = Column(Text, nullable=False, unique=True, default=_default_tenant_slug)
+    status = Column(Text, nullable=False, server_default="active", default="active")
+    is_primary = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
+    plan_code = Column(Text, ForeignKey("subscription_plans.code", ondelete="SET NULL", onupdate="CASCADE", name="fk_organizations_plan_code"))
+    billing_cycle = Column(Text, nullable=False, server_default="monthly", default="monthly")
+    seat_limit = Column(Integer)
+    features = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    license_required = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    license_expires_at = Column(DateTime(timezone=True))
+    # Public branding: display_name, logo_url, favicon_url, primary_color,
+    # secondary_color. Uploaded light/dark logos stay in settings["branding"].
+    branding = Column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"), default=dict)
+    contact_email = Column(Text)
+    status_reason = Column(Text)
+    suspended_at = Column(DateTime(timezone=True))
+    terminated_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -1143,7 +1180,7 @@ class TimeOff(Base):
 
     id = Column(Integer, primary_key=True)
     employee_id = Column(Integer, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
-    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     time_off_type = Column(Text, nullable=False)
     starts_on = Column(Date, nullable=False)
     ends_on = Column(Date, nullable=False)

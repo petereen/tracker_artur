@@ -16,6 +16,7 @@ from app.core.enterprise_deps import ActorContext
 from app.core.security import hash_account_password
 from app.core.telegram_auth import verify_init_data
 from app.hr.identity import WORKING_STATUSES
+from app.services.tenant_service import SEAT_STATUSES, ensure_seat_available, identity_in_use
 from app.models.models import (
     AttendanceLog,
     Department,
@@ -199,7 +200,7 @@ async def bind_invite_user(db: AsyncSession, raw_token: str, user: dict[str, Any
         raise HTTPException(status_code=409, detail="Invite has already been used")
     if invite.revoked_at or invite.expires_at <= now:
         raise HTTPException(status_code=410, detail="Invite has expired")
-    duplicate = await db.scalar(select(Employee.id).where(Employee.telegram_id == telegram_id, Employee.id != invite.employee_id))
+    duplicate = await identity_in_use(db, "employee_telegram", telegram_id, exclude_id=invite.employee_id)
     if duplicate:
         raise HTTPException(status_code=409, detail="This Telegram account is already connected")
     employee = await db.scalar(select(Employee).where(Employee.id == invite.employee_id, Employee.organization_id == invite.organization_id).with_for_update())
@@ -214,6 +215,9 @@ async def bind_invite_user(db: AsyncSession, raw_token: str, user: dict[str, Any
     invite.used_at = now
     invite.bound_telegram_id = telegram_id
     account = await db.scalar(select(UserAccount).where(UserAccount.employee_id == employee.id).with_for_update())
+    if not account or account.status not in SEAT_STATUSES:
+        # Accepting an invite creates (or re-enables) a login: one seat.
+        await ensure_seat_available(db, invite.organization_id)
     if not account:
         account = UserAccount(
             organization_id=invite.organization_id,
