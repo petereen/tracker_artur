@@ -84,7 +84,7 @@ describe('enterprise sidebar', () => {
     const sidebarNav = container.querySelector('.workspace-sidebar nav')
     const links = Array.from(sidebarNav?.querySelectorAll<HTMLAnchorElement>('.nav-item') ?? [])
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
-      '/', '/worktime', '/hr', '/chat', '/calendar', '/tasks', '/reports', '/projects', '/plans', '/contracts', '/analytics', '/erp', '/administration',
+      '/', '/worktime', '/hr', '/chat', '/calendar', '/tasks', '/reports', '/projects', '/plans', '/contracts', '/analytics', '/administration',
     ])
     expect(links[3].parentElement).not.toHaveClass('nav-group-break')
     expect(links[6].parentElement).toHaveClass('nav-group-break')
@@ -103,12 +103,12 @@ describe('enterprise sidebar', () => {
     expect(screen.getByRole('link', { name: 'Данс' })).toHaveClass('active')
   })
 
-  it('does not keep ERP active while Payroll is selected', () => {
+  it('never lists an ERP hub entry; Payroll stays a direct link', () => {
     mocks.payrollVisible = true
     mocks.roles = ['admin']
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/erp/payroll']}><Routes><Route element={<EnterpriseShell />}><Route path="erp/payroll" element={<div>Payroll</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
-    expect(screen.getByRole('link', { name: 'ERP' })).not.toHaveClass('active')
+    expect(screen.queryByRole('link', { name: 'ERP' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Цалин' })).toHaveClass('active')
   })
 

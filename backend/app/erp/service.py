@@ -24,7 +24,6 @@ from app.models.models import (
     ERPGeneralLedgerEntry,
     ERPApprovalRule,
     ERPFormDefinition,
-    ERPMasterRequest,
     ERPTeamRole,
     ERPWorkflowTransition,
     ERPPaymentAllocation,
@@ -36,10 +35,6 @@ from app.models.models import (
     ERPSourceLineAllocation,
     ERPStockValuationLayer,
     ERPBOMSnapshot,
-    ERPAssetBook,
-    ERPAssetDepreciationSchedule,
-    ERPAssetMaintenanceRecord,
-    ERPAssetDisposal,
     ERPItem,
     Organization,
     TeamMember,
@@ -47,17 +42,13 @@ from app.models.models import (
 )
 
 
+# Switchable modules: only those with their own workspace. Accounting (chart of
+# accounts, ledger) is always on; the generic Selling/Buying/Stock/Manufacturing/
+# Assets/Support workbenches were retired on 2026-09-29.
 ERP_MODULES = {
-    "accounting": "Accounting",
-    "selling": "Selling",
-    "buying": "Buying",
-    "stock": "Stock",
     "crm": "CRM",
-    "budget": "Budget",
-    "support": "Support",
+    "budget": "Төсөв, гүйцэтгэл",
     "payroll": "Цалин",
-    "manufacturing": "Manufacturing",
-    "assets_maintenance": "Assets & maintenance",
 }
 MODULE_SETTINGS_KEY = "erp_modules"
 VALID_ACTIONS = frozenset({"view", "view_salary", "edit_setup", "edit_formula", "create", "edit", "calculate", "review", "approve", "approve_payroll_manager", "approve_hr_director", "approve_finance", "post", "pay", "release_slips", "submit", "cancel", "archive", "export", "administer"})
@@ -73,19 +64,9 @@ DOCUMENT_MODULES = {
     "asset": "assets_maintenance", "maintenance_schedule": "assets_maintenance", "maintenance_visit": "assets_maintenance",
 }
 DOCUMENT_TYPES = frozenset(DOCUMENT_MODULES)
-MASTER_OPERATIONS = frozenset({
-    "party", "item", "supplier", "purchase_item", "supplier_price_list", "customer", "sales_catalog_item",
-    "customer_discount_tier", "warehouse", "item_sku", "uom", "reorder_rule", "chart_account", "cost_center", "tax_template",
-})
-MASTER_OPERATION_MODULES = {
-    "party": None, "item": None, "supplier": "buying", "purchase_item": "buying", "supplier_price_list": "buying",
-    "customer": "selling", "sales_catalog_item": "selling", "customer_discount_tier": "selling", "warehouse": "stock",
-    "item_sku": "stock", "uom": "stock", "reorder_rule": "stock", "chart_account": "accounting", "cost_center": "accounting",
-    "tax_template": "accounting",
-}
-OPERATION_TYPES = DOCUMENT_TYPES | MASTER_OPERATIONS
+OPERATION_TYPES = DOCUMENT_TYPES
 FORM_FIELD_TYPES = frozenset({"text", "long_text", "number", "money", "date", "datetime", "boolean", "select", "multi_select", "reference"})
-FORM_SECTIONS = frozenset({"header", "line", "master"})
+FORM_SECTIONS = frozenset({"header", "line"})
 REFERENCE_TARGETS = frozenset({"party", "item", "warehouse", "account", "project"})
 SCOPE_DIMENSIONS = frozenset({"warehouse_ids", "project_ids", "branch_codes"})
 MONEY_QUANTUM = Decimal("0.0001")
@@ -156,16 +137,6 @@ def operation_catalog() -> dict[str, Any]:
     operations: dict[str, Any] = {}
     for key, module in DOCUMENT_MODULES.items():
         operations[key] = {"key": key, "kind": "document", "module": module, "label": key.replace("_", " ").title(), "sections": ["header", "line"], "posting_capable": key in {"journal_entry", "payment_entry", "sales_invoice", "sales_credit_note", "purchase_invoice", "purchase_debit_note", "delivery", "purchase_receipt", "stock_entry", "stock_reconciliation", "payroll_run", "salary_slip", "asset"}}
-    labels = {
-        "party": (None, "Party request"), "item": (None, "Item request"), "supplier": ("buying", "Create supplier / vendor"),
-        "purchase_item": ("buying", "Create purchase item"), "supplier_price_list": ("buying", "Create supplier price list"),
-        "customer": ("selling", "Create customer"), "sales_catalog_item": ("selling", "Create sales catalog item"),
-        "customer_discount_tier": ("selling", "Create customer discount tier"), "warehouse": ("stock", "Create warehouse"),
-        "item_sku": ("stock", "Create item / SKU"), "uom": ("stock", "Create unit of measure"), "reorder_rule": ("stock", "Create reorder rule"),
-        "chart_account": ("accounting", "Create chart of accounts entry"), "cost_center": ("accounting", "Create cost center"),
-        "tax_template": ("accounting", "Create tax template"),
-    }
-    operations.update({key: {"key": key, "kind": "master_request", "module": module, "label": label, "sections": ["master"], "posting_capable": False} for key, (module, label) in labels.items()})
     return {"operations": operations, "actions": sorted(VALID_ACTIONS), "field_types": sorted(FORM_FIELD_TYPES), "sections": sorted(FORM_SECTIONS), "reference_targets": sorted(REFERENCE_TARGETS), "scope_dimensions": sorted(SCOPE_DIMENSIONS)}
 
 
@@ -178,7 +149,7 @@ def validate_definition_fields(operation: str, fields: list[dict[str, Any]]) -> 
         raise _field_error("erp_unknown_operation", operation=operation)
     seen: set[str] = set()
     normalised: list[dict[str, Any]] = []
-    allowed_sections = {"master"} if operation in MASTER_OPERATIONS else {"header", "line"}
+    allowed_sections = {"header", "line"}
     for position, raw in enumerate(fields):
         key, field_type, section = raw.get("key"), raw.get("field_type"), raw.get("section")
         if not isinstance(key, str) or not key or not key.replace("_", "").isalnum() or key[0].isdigit() or key in seen:
@@ -241,34 +212,10 @@ def module_settings(organization_settings: dict[str, Any] | None) -> dict[str, b
     return {name: bool(configured.get(name, False)) for name in ERP_MODULES}
 
 
-PHASE5_MODULES = {"selling", "buying", "stock", "manufacturing", "assets_maintenance"}
-
-
-async def phase5_gate_status(db: AsyncSession, organization_id: int) -> dict[str, Any]:
-    organization = await db.get(Organization, organization_id)
-    settings = (organization.settings or {}) if organization else {}
-    acceptance = settings.get("phase5_payroll_acceptance") or {}
-    return {"accepted": bool(acceptance.get("reconciled_period_id")), **acceptance}
-
-
-async def require_phase5_gate(db: AsyncSession, organization_id: int, module: str) -> None:
-    """Require the reconciled payroll acceptance gate for enabled Phase 5 modules."""
-    if module not in PHASE5_MODULES:
-        return
-    organization = await db.get(Organization, organization_id)
-    configured = (organization.settings or {}) if organization else {}
-    if not bool((configured.get(MODULE_SETTINGS_KEY) or {}).get(module, False)):
-        return
-    acceptance = configured.get("phase5_payroll_acceptance") or {}
-    if not acceptance.get("reconciled_period_id"):
-        raise HTTPException(status_code=409, detail={"code": "erp_phase5_payroll_acceptance_required", "module": module})
-
-
-async def validate_phase5_chain(db: AsyncSession, document: ERPDocument, lines: list[ERPDocumentLine]) -> None:
+async def validate_source_chain(db: AsyncSession, document: ERPDocument, lines: list[ERPDocumentLine]) -> None:
     """Validate source-document chains and freeze source-line quantities."""
     module = DOCUMENT_MODULES.get(document.document_type)
-    await require_phase5_gate(db, document.organization_id, module or "")
-    if module not in PHASE5_MODULES:
+    if module not in {"selling", "buying", "stock", "manufacturing", "assets_maintenance"}:
         return
     expected_sources = {
         "sales_order": {"quotation"}, "delivery": {"sales_order"}, "sales_invoice": {"delivery"}, "sales_credit_note": {"sales_invoice"},
@@ -402,12 +349,12 @@ async def ensure_definition(db: AsyncSession, organization_id: int, operation: s
     existing = await published_definition(db, organization_id, operation)
     if existing:
         return existing
-    resource = operation if operation in MASTER_OPERATIONS else f"document:{operation}"
+    resource = f"document:{operation}"
     legacy_fields = (await db.execute(select(ERPCustomField).where(
         ERPCustomField.organization_id == organization_id, ERPCustomField.resource == resource, ERPCustomField.is_active.is_(True)
     ))).scalars().all()
     fields = [{"key": field.key, "label": field.label, "field_type": "long_text" if field.field_type == "text" else field.field_type,
-               "section": "master" if operation in MASTER_OPERATIONS else "header", "required": field.required,
+               "section": "header", "required": field.required,
                "default": None, "options": field.options or {}, "validation": {}, "position": index}
               for index, field in enumerate(legacy_fields)]
     definition = ERPFormDefinition(organization_id=organization_id, operation=operation, version=1, status="published", fields=fields,
@@ -724,7 +671,7 @@ async def post_document(db: AsyncSession, document: ERPDocument, actor: ActorCon
         document.status = "submitted"
         return
     lines = (await db.execute(select(ERPDocumentLine).where(ERPDocumentLine.document_id == document.id))).scalars().all()
-    await validate_phase5_chain(db, document, lines)
+    await validate_source_chain(db, document, lines)
     await assert_stock_policy(db, document, lines)
     gl: list[tuple[int, Decimal, Decimal, str | None]] = []
     if document.document_type == "journal_entry":

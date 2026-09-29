@@ -36,9 +36,14 @@ def test_erp_workflow_columns_live_on_documents_like_the_migration():
 
 def test_erp_module_visibility_defaults_off_and_ignores_unknown_keys():
     assert module_settings({}) == {module: False for module in ERP_MODULES}
-    settings = module_settings({"erp_modules": {"stock": True, "unknown": True}})
-    assert settings["stock"] is True
-    assert "unknown" not in settings
+    settings = module_settings({"erp_modules": {"crm": True, "stock": True, "unknown": True}})
+    assert settings["crm"] is True
+    # Retired generic modules are no longer switchable.
+    assert "stock" not in settings and "unknown" not in settings
+
+
+def test_only_modules_with_a_workspace_are_switchable():
+    assert set(ERP_MODULES) == {"crm", "budget", "payroll"}
 
 
 def test_erp_document_line_totals_are_decimal_and_tax_exclusive():
@@ -68,12 +73,24 @@ def test_erp_routes_are_versioned_and_cover_meta_masters_documents_and_reports()
     assert {
         "/v1/erp/meta", "/v1/erp/admin/modules", "/v1/erp/masters/parties", "/v1/erp/masters/items",
         "/v1/erp/accounting/accounts", "/v1/erp/documents/{document_type}", "/v1/erp/documents/by-id/{document_id}/submit",
-        "/v1/erp/reports/dashboard", "/v1/erp/reports/stock-balance", "/v1/erp/reports/general-ledger", "/v1/erp/reports/trial-balance",
-        "/v1/erp/accounting/posting-periods", "/v1/erp/admin/approval-rules", "/v1/erp/stock/policy",
-        "/v1/erp/imports/preview", "/v1/erp/imports/csv", "/v1/erp/imports/{batch_id}/commit", "/v1/erp/manufacturing/boms/{document_id}/costing",
-        "/v1/erp/catalog", "/v1/erp/admin/forms/{operation}", "/v1/erp/admin/forms/{operation}/publish", "/v1/erp/master-requests/{operation}", "/v1/erp/documents/by-id/{document_id}/transition",
+        "/v1/erp/reports/general-ledger", "/v1/erp/reports/trial-balance",
+        "/v1/erp/accounting/posting-periods", "/v1/erp/admin/approval-rules",
+        "/v1/erp/imports/preview", "/v1/erp/imports/csv", "/v1/erp/imports/{batch_id}/commit",
+        "/v1/erp/catalog", "/v1/erp/admin/forms/{operation}", "/v1/erp/admin/forms/{operation}/publish", "/v1/erp/documents/by-id/{document_id}/transition",
         "/v1/erp/documents/by-id/{document_id}/archive", "/v1/erp/documents/by-id/{document_id}/restore",
     }.issubset(paths)
+
+
+def test_retired_erp_workbench_routes_are_gone():
+    paths = {route.path for route in app.routes}
+    retired = {
+        "/v1/erp/reports/dashboard", "/v1/erp/reports/stock-balance", "/v1/erp/stock/policy", "/v1/erp/stock/valuation-layers",
+        "/v1/erp/master-requests/{operation}", "/v1/erp/master-requests/by-id/{request_id}/transition",
+        "/v1/erp/admin/phase5/acceptance", "/v1/erp/manufacturing/boms/{document_id}/costing",
+        "/v1/erp/manufacturing/work-orders/{document_id}/complete", "/v1/erp/assets/books", "/v1/erp/assets/depreciation-schedules",
+        "/v1/erp/assets/maintenance", "/v1/erp/assets/disposals",
+    }
+    assert not retired & paths
 
 
 def test_payroll_account_routes_cover_permissions_and_lifecycle_actions():
@@ -126,14 +143,16 @@ def test_every_broad_mvp_document_domain_has_an_explicit_module():
     assert expected.issubset(DOCUMENT_MODULES)
 
 
-def test_erp_builder_catalog_is_server_owned_and_covers_documents_and_master_requests():
+def test_erp_builder_catalog_is_server_owned_and_covers_documents_only():
     catalog = operation_catalog()
-    assert {"sales_order", "purchase_order", "stock_entry", "party", "item", "supplier", "customer", "uom", "tax_template"}.issubset(catalog["operations"])
+    assert {"journal_entry", "payroll_run", "sales_order"}.issubset(catalog["operations"])
+    assert {entry["kind"] for entry in catalog["operations"].values()} == {"document"}
+    assert "master" not in catalog["sections"]
     assert {"reference", "multi_select", "money"}.issubset(catalog["field_types"])
     assert {"warehouse_ids", "project_ids", "branch_codes"}.issubset(catalog["scope_dimensions"])
 
 
-def test_form_field_validation_separates_document_lines_from_master_requests():
+def test_form_field_validation_separates_document_headers_from_lines():
     fields = validate_definition_fields("sales_order", [
         {"key": "customer_note", "label": "Customer note", "field_type": "long_text", "section": "header"},
         {"key": "batch", "label": "Batch", "field_type": "text", "section": "line", "required": True},
@@ -143,8 +162,11 @@ def test_form_field_validation_separates_document_lines_from_master_requests():
         validate_form_values(fields, {"other": "x"}, "line")
     assert error.value.detail["code"] == "erp_unknown_form_field"
     with pytest.raises(HTTPException) as error:
-        validate_definition_fields("item", [{"key": "bad", "label": "Bad", "field_type": "text", "section": "line"}])
+        validate_definition_fields("sales_order", [{"key": "bad", "label": "Bad", "field_type": "text", "section": "master"}])
     assert error.value.detail["code"] == "erp_invalid_form_field"
+    with pytest.raises(HTTPException) as error:
+        validate_definition_fields("item", [{"key": "note", "label": "Note", "field_type": "text", "section": "header"}])
+    assert error.value.detail["code"] == "erp_unknown_operation"
 
 
 def test_workflow_validation_requires_safe_terminal_states_and_role_references():

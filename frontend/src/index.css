@@ -4307,20 +4307,17 @@ body:has(.drag-overlay) {
 }
 
 .settings-page .account-admin,
-.settings-page .branding-settings,
-.settings-page .erp-admin-panel {
+.settings-page .branding-settings {
   padding: var(--settings-card-padding);
 }
 
 .settings-page .branding-grid,
 .settings-page .integration-grid,
-.settings-page .erp-module-grid,
 .settings-page .account-create-form {
   gap: var(--settings-control-gap);
 }
 
-.settings-page .branding-grid,
-.settings-page .erp-module-grid {
+.settings-page .branding-grid {
   margin-top: 0;
 }
 
@@ -10802,43 +10799,18 @@ html.capacitor-native .native-boot-error {
   }
 }
 
-/* Configurable ERP workspace */
+/* ERP shared list styles (tax benefits) */
 .erp-workspace { display: grid; gap: 18px; }
-.erp-module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
-.erp-module-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 15px; opacity: .64; }
-.erp-module-card.enabled { opacity: 1; border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border)); }
-.erp-module-card strong, .erp-module-card small { display: block; }
-.erp-module-card small { color: var(--color-muted); font-size: 12px; margin-top: 3px; }
-.erp-toggle { width: 40px; height: 23px; padding: 2px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-surface3); cursor: pointer; }
-.erp-toggle span { display: block; width: 17px; height: 17px; border-radius: 50%; background: var(--color-muted); transition: transform .18s ease, background .18s ease; }
-.erp-module-card.enabled .erp-toggle { background: var(--color-accent); border-color: var(--color-accent); }
-.erp-module-card.enabled .erp-toggle span { transform: translateX(17px); background: white; }
 .erp-settings-notice { display: flex; align-items: flex-start; gap: 8px; color: var(--color-muted); font-size: 13px; margin: -5px 0 0; }
 .erp-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
 .erp-kpis article { padding: 16px; min-height: 94px; display: grid; align-content: space-between; }
 .erp-kpis small { color: var(--color-muted); font-size: 12px; }
 .erp-kpis strong { font-size: 17px; letter-spacing: -.02em; overflow-wrap: anywhere; }
-.erp-document-panel { padding: 20px; }
-.erp-document-panel .view-toolbar { margin-bottom: 14px; }
-.erp-document-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
-.erp-document-tabs button { border: 1px solid var(--color-border); color: var(--color-muted); border-radius: 999px; background: transparent; padding: 7px 11px; cursor: pointer; font-size: 12px; }
-.erp-document-tabs button.active { background: var(--color-accent-dim); color: var(--color-accent); border-color: var(--color-accent); }
 .erp-document-list { display: grid; gap: 8px; }
 .erp-document-list > article { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; background: var(--color-surface2); border: 1px solid var(--color-border); border-radius: 10px; }
 .erp-document-list article > div { display: grid; gap: 3px; }
 .erp-document-list span { color: var(--color-muted); font-size: 12px; }
 .erp-document-list article > div:last-child { justify-items: end; }
-.erp-empty { display: grid; justify-items: center; align-content: center; gap: 8px; text-align: center; min-height: 150px; color: var(--color-muted); }
-.erp-empty h3, .erp-empty p { margin: 0; }
-.erp-create-form { display: grid; gap: 14px; margin: 0 0 16px; padding: 15px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface2); }
-.erp-create-form h4 { margin: 0 0 10px; font-size: 13px; }
-.erp-create-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
-.erp-create-field { display: grid; gap: 5px; font-size: 12px; color: var(--color-muted); }
-.erp-create-field input, .erp-create-field select, .erp-create-field textarea { min-width: 0; width: 100%; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px; background: var(--color-surface); color: var(--color-text); }
-.erp-create-field textarea { min-height: 76px; resize: vertical; }
-.erp-create-field small { color: var(--color-muted); }
-.erp-create-field.checkbox { display: flex; align-items: center; gap: 7px; }
-.erp-create-field.checkbox input { width: auto; }
 
 /* Mongolia payroll workspace */
 .payroll-workspace {
@@ -10889,12 +10861,10 @@ html.capacitor-native .native-boot-error {
 .payroll-card .erp-row-actions { align-items: center; flex-wrap: wrap; margin-top: 0; }
 .payroll-card .erp-row-actions > strong { font-size: 13px; margin-right: 3px; white-space: nowrap; }
 .payroll-date-fields { gap: 14px; }
-.payroll-date-fields .erp-create-field { color: var(--color-text); font-size: 11px; font-weight: 600; gap: 8px; }
 .payroll-date-fields input, .payroll-export-row input { border-color: var(--color-border); border-radius: 10px; min-height: 42px; padding: 10px 12px; }
 .payroll-form-footer { align-items: center; border-top: 1px solid var(--color-border-soft); display: flex; gap: 16px; justify-content: space-between; padding-top: 16px; }
 .payroll-helper { align-items: center; color: var(--color-muted); display: flex; font-size: 11px; gap: 6px; line-height: 1.4; margin: 0; }
 .payroll-export-row { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; }
-.payroll-export-row .erp-create-field { flex: 1 1 180px; max-width: 260px; }
 .payroll-inline-error { align-items: center; background: var(--color-red-soft); border: 1px solid color-mix(in srgb, var(--color-red) 22%, var(--color-border)); border-radius: 10px; color: var(--color-red); display: flex; font-size: 12px; gap: 8px; padding: 12px 14px; }
 .payroll-item-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
 .payroll-locked { align-items: center; color: var(--color-muted-2); display: inline-flex; font-size: 11px; gap: 5px; white-space: nowrap; }
@@ -11023,7 +10993,6 @@ html.capacitor-native .native-boot-error {
   .payroll-card .erp-row-actions { justify-content: flex-start; }
   .payroll-form-footer { align-items: stretch; flex-direction: column; }
   .payroll-form-footer .primary-action { width: 100%; }
-  .payroll-export-row .erp-create-field { max-width: none; width: 100%; }
   .payroll-export-row > button { flex: 1 1 calc(50% - 10px); }
   .payroll-export-row > button.primary-action { flex-basis: 100%; }
   .payroll-employee-form { align-items: stretch; grid-template-columns: 1fr; }
@@ -11038,14 +11007,8 @@ html.capacitor-native .native-boot-error {
 }
 @media (max-width: 1100px) { .erp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 620px) { .erp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .erp-document-list > article { align-items: flex-start; } }
-.erp-workbench-filters { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-.erp-workbench-filters input { min-width: 210px; flex: 1; max-width: 320px; }
 .erp-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; margin-top: 7px; }
-.erp-line-editor { display: grid; grid-template-columns: minmax(180px, 2fr) repeat(4, minmax(84px, 1fr)) auto auto; align-items: center; gap: 8px; margin: 8px 0; }
-.erp-line-editor input { min-width: 0; }
-.erp-form-total { display: flex; justify-content: flex-end; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid var(--color-border); margin-top: 12px; }
-@media (max-width: 900px) { .erp-line-editor { grid-template-columns: minmax(150px, 2fr) repeat(2, minmax(84px, 1fr)); } .erp-line-editor strong { justify-self: end; } }
-@media (max-width: 620px) { .erp-workbench-filters { align-items: stretch; } .erp-workbench-filters input { max-width: none; width: 100%; } .erp-line-editor { grid-template-columns: 1fr 1fr; } .erp-line-editor input:first-child { grid-column: 1 / -1; } .erp-row-actions { flex-wrap: wrap; } }
+@media (max-width: 620px) { .erp-row-actions { flex-wrap: wrap; } }
 
 /* ERP access role and operation builders */
 .erp-builder-panel { padding: 20px; }

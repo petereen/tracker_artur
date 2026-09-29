@@ -25,7 +25,6 @@ const EnterpriseReportsPage = lazy(() => import('./pages/EnterpriseReportsPage')
 const ChartOfAccountsPage = lazy(() => import('./pages/ChartOfAccountsPage').then((module) => ({ default: module.ChartOfAccountsPage })))
 const CRMWorkspacePage = lazy(() => import('./pages/CRMWorkspacePage').then((module) => ({ default: module.CRMWorkspacePage })))
 const BudgetWorkspacePage = lazy(() => import('./pages/BudgetWorkspacePage').then((module) => ({ default: module.BudgetWorkspacePage })))
-const ERPWorkspacePage = lazy(() => import('./pages/ERPWorkspacePage').then((module) => ({ default: module.ERPWorkspacePage })))
 const PayrollWorkspacePage = lazy(() => import('./pages/PayrollWorkspacePage').then((module) => ({ default: module.PayrollWorkspacePage })))
 const CapacityWorkspacePage = lazy(() => import('./pages/CapacityWorkspacePage').then((module) => ({ default: module.CapacityWorkspacePage })))
 const PlansPage = lazy(() => import('./pages/PlansPage').then((module) => ({ default: module.PlansPage })))
@@ -50,7 +49,6 @@ const PrivacyPage = lazy(() => import('./pages/LegalPages').then((module) => ({ 
 const TermsPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.TermsPage })))
 
 const MANAGEMENT_ROLES = ['admin', 'manager', 'team_lead']
-const ERP_ROLES = ['admin', 'manager', 'team_lead']
 const PAYROLL_ROLES = ['admin', 'hr']
 
 function RequireRoles({ allowedRoles }: { allowedRoles: string[] }) {
@@ -128,9 +126,8 @@ function AuthenticatedApp() {
         <Route path="contracts/:publicId" element={<ContractsWorkspacePage />} />
         <Route path="okrs" element={<Navigate to="/plans" replace />} />
         <Route path="analytics" element={<StatsWorkspacePage />} />
-        <Route element={<RequireRoles allowedRoles={ERP_ROLES} />}>
-          <Route path="erp" element={<ERPWorkspacePage />} />
-        </Route>
+        {/* ERP modules are switched on in Settings → Modules; there is no ERP hub page. */}
+        <Route path="erp" element={<Navigate to="/administration/organization/modules" replace />} />
         {/* CRM is authorized by ERP capabilities (e.g. the Sales role), not system roles. */}
         <Route path="erp/crm" element={<CRMWorkspacePage />} />
         <Route path="erp/crm/customers" element={<CRMWorkspacePage />} />
