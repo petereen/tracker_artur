@@ -94,7 +94,7 @@ export function MobileMoreSheet({ open, onClose, items, unreadChat, actor, role,
           </button>
           <nav className="mobile-more-grid" aria-label="Бүх цэс">
             {items.map(({ to, label, icon: Icon }) => (
-              <NavLink key={to} to={to} end={to === '/' || to === '/erp'} onClick={onClose} onTouchStart={() => preloadRoute(to)} className={({ isActive }) => isActive ? 'active' : ''}>
+              <NavLink key={to} to={to} end={to === '/'} onClick={onClose} onTouchStart={() => preloadRoute(to)} className={({ isActive }) => isActive ? 'active' : ''}>
                 <span className="mobile-more-tile"><Icon size={22} strokeWidth={1.8} aria-hidden />{to === '/chat' && unreadChat > 0 && <b className="nav-unread-badge">{unreadChat > 99 ? '99+' : unreadChat}</b>}</span>
                 <span className="mobile-more-label">{label.startsWith('nav.') ? t(label) : label}</span>
               </NavLink>

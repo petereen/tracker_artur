@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, BookOpen, Boxes, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, FileCheck2, KeyRound, Landmark, LocateFixed, MapPin, MonitorUp, ScanLine, Settings2, ShieldAlert, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, Wifi, X } from 'lucide-react'
+import { ArrowLeft, Bot, BookOpen, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, FileCheck2, KeyRound, LocateFixed, MapPin, MonitorUp, ScanLine, Settings2, ShieldAlert, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, Wifi, X } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { type ERPModule, useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useDeleteManagedAccount, useDeleteWorktimeQrKiosk, useERPMetadata, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useHolidaySettings, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useSetHolidayCountry, useUpdateBrandingSettings, useUpdateERPModules, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
+import { useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useDeleteManagedAccount, useDeleteWorktimeQrKiosk, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useHolidaySettings, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useSetHolidayCountry, useUpdateBrandingSettings, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { EmployeesPage } from './EmployeesPage'
 import { QuestionsPage } from './QuestionsPage'
@@ -14,6 +14,7 @@ import { AiAgentSettings } from '../components/AiAgentSettings'
 import { OnboardingPage } from './OnboardingPage'
 import { DeveloperPage } from './DeveloperPage'
 import { ERPBuilderPanels } from '../components/ERPBuilderPanels'
+import { ERPModuleSettings } from '../components/ERPModuleSettings'
 import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
 import { WorktimeMethodsSettings } from '../components/WorktimeMethodsSettings'
 import { ReportPolicySettings } from '../components/ReportPolicySettings'
@@ -119,35 +120,6 @@ function BrandingSettingsPanel() {
   })}</div></SettingsSection>
 }
 
-function ERPModuleSettingsPanel() {
-  const metadata = useERPMetadata()
-  const updateModules = useUpdateERPModules()
-  const modules = metadata.data ? (Object.keys(metadata.data.modules) as ERPModule[]) : []
-
-  const toggleModule = (module: ERPModule) => {
-    if (!metadata.data) return
-    updateModules.mutate({ ...metadata.data.modules, [module]: !metadata.data.modules[module] }, {
-      onSuccess: () => toast.success('ERP module visibility updated'),
-      onError: (error: any) => toast.error(error.response?.data?.detail || 'Module settings could not be updated'),
-    })
-  }
-
-  if (metadata.isLoading) return <SettingsSection title="ERP модулиуд" icon={Boxes} className="account-admin panel"><p>ERP тохиргоог уншиж байна…</p></SettingsSection>
-  if (metadata.isError || !metadata.data) return <SettingsSection title="ERP үйлчилгээ холбогдсонгүй" icon={Landmark} className="account-admin panel"><p>ERP тохиргоог ачаалж чадсангүй.</p></SettingsSection>
-
-  return <SettingsSection title="ERP модулиуд" icon={Boxes} className="account-admin panel erp-admin-panel">
-    <div className="erp-module-grid" aria-label="ERP module visibility">
-      {modules.map((module) => {
-        const enabled = metadata.data.modules[module]
-        const label = metadata.data.module_labels[module] || module
-        return <article key={module} className={`panel erp-module-card ${enabled ? 'enabled' : ''}`}><Landmark size={21} /><div><strong>{label}</strong><small>{enabled ? 'Workspace-д харагдана' : 'Workspace-ээс нуусан'}</small></div><button className="erp-toggle" onClick={() => toggleModule(module)} disabled={updateModules.isPending} aria-label={`${label} ${enabled ? 'disable' : 'enable'}`}><span /></button></article>
-      })}
-    </div>
-    <p className="erp-settings-notice"><ShieldCheck size={15} /> API, posting, audit болон integrations нь capability-ээр хамгаалагдсан хэвээр.</p>
-    <Link className="secondary-action compact erp-admin-open" to="/erp">ERP workspace нээх</Link>
-  </SettingsSection>
-}
-
 export function AdministrationHubPage() {
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const settings = SETTINGS.filter((item) => item.roles.some((role) => roles.includes(role)))
@@ -159,7 +131,7 @@ export function WorkspaceIdentitySettingsPage() {
 }
 
 export function ERPSettingsPage() {
-  return <SettingsPage categoryId="organization" activeTab="/administration/organization/modules" title="Модуль ба боломжууд"><ERPModuleSettingsPanel /></SettingsPage>
+  return <SettingsPage categoryId="organization" activeTab="/administration/organization/modules" title="Модуль ба боломжууд"><ERPModuleSettings /></SettingsPage>
 }
 
 function TaskAssignmentPermissionsPanel() {

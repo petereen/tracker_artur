@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 import { api } from '../api/client'
 import {
-  BarChart3, BriefcaseBusiness, Calculator, BookText, Handshake, PiggyBank, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, Landmark, ScanLine, UserRoundCog,
+  BarChart3, BriefcaseBusiness, Calculator, BookText, Handshake, PiggyBank, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, ScanLine, UserRoundCog,
   FolderArchive, LayoutDashboard, LayoutGrid, LogOut, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { acknowledgeChatReceipt, useActor, useBrandingSettings, useChatUnreadCount, useEnterpriseLogout, useERPAccountPermissions, useERPMetadata, useOpenDirectConversation, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
@@ -40,7 +40,6 @@ const NAV = [
 ]
 
 const NAV_GROUP_BREAKS = new Set(['/calendar', '/reports', '/analytics', '/administration'])
-const ERP_ROLES = ['admin', 'manager', 'team_lead']
 const PAYROLL_ROLES = ['admin', 'hr']
 const LazyOyunsAssistant = lazy(() => import('./OyunsAssistant').then((module) => ({ default: module.OyunsAssistant })))
 const LazyGlobalCommandBar = lazy(() => import('./GlobalCommandBar').then((module) => ({ default: module.GlobalCommandBar })))
@@ -51,7 +50,6 @@ const TITLES: Record<string, string> = {
   '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө', '/contracts': 'Гэрээ',
   '/chat': 'Чат',
   '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо', '/contracts/archive': 'Гэрээний архив',
-  '/erp': 'ERP үйл ажиллагаа',
   '/erp/payroll': 'Цалингийн тооцоо',
   '/erp/crm': 'CRM · Харилцаа холбоо',
   '/erp/crm/customers': 'CRM · Харилцагч',
@@ -164,9 +162,7 @@ export function EnterpriseShell() {
   const branding = useBrandingSettings()
   const actorResolved = Boolean(actorQuery.data)
   const roles = actorResolved ? actorQuery.data?.roles ?? EMPTY_ROLES : EMPTY_ROLES
-  const canAccessERP = roles.some((role) => ERP_ROLES.includes(role))
-  const canReadERPVisibility = canAccessERP || roles.some((role) => PAYROLL_ROLES.includes(role))
-  const erp = useERPMetadata(Boolean(token && canReadERPVisibility))
+  const erp = useERPMetadata(Boolean(token && roles.some((role) => PAYROLL_ROLES.includes(role))))
   const crm = useCRMCapabilities(Boolean(token && actorResolved))
   const showCRM = Boolean(crm.data?.module_enabled && (crm.data.activities.view || crm.data.parties.view))
   const budget = useBudgetCapabilities(Boolean(token && actorResolved))
@@ -276,15 +272,10 @@ export function EnterpriseShell() {
     const accountsItem = { to: '/erp/accounts', label: 'Данс', icon: BookText, roles: [] }
     const capabilityItems = [...(showCRM ? [crmItem] : []), ...(showAccounts ? [accountsItem] : []), ...(showBudget ? [budgetItem] : [])]
     const withCRM = (items: typeof withHr) => (capabilityItems.length ? [...items.slice(0, -1), ...capabilityItems, items[items.length - 1]] : items)
-    if (!canAccessERP) {
-      return withCRM(showPayroll ? [...withHr.slice(0, -1), payrollItem, withHr[withHr.length - 1]] : withHr)
-    }
-    const withErp = [...withHr.slice(0, -1), { to: '/erp', label: 'ERP', icon: Landmark, roles: [] }, withHr[withHr.length - 1]]
-    const withPayroll = showPayroll
-      ? [...withErp.slice(0, -1), payrollItem, withErp[withErp.length - 1]]
-      : withErp
-    return withCRM(withPayroll)
-  }, [canAccessERP, erp.data, roles, showAccounts, showBudget, showCRM])
+    // ERP modules have no hub page of their own: each enabled module gets its
+    // own entry, and module switches live in Settings → Modules.
+    return withCRM(showPayroll ? [...withHr.slice(0, -1), payrollItem, withHr[withHr.length - 1]] : withHr)
+  }, [erp.data, roles, showAccounts, showBudget, showCRM])
   const canReviewWorkers = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const workerPerformance = useWorkerPerformance(selectedWorker, periodFromPreset('week'), canReviewWorkers)
   const workerProfile = useWorkerProfile(selectedWorker)
@@ -367,7 +358,7 @@ export function EnterpriseShell() {
           <nav aria-label="Үндсэн цэс">
             {nav.map(({ to, label, icon: Icon }) => (
               <div className={NAV_GROUP_BREAKS.has(to) ? 'nav-group nav-group-break' : 'nav-group'} key={to}>
-                <NavLink to={to} end={to === '/' || to === '/erp'} onMouseEnter={() => preloadRoute(to)} onFocus={() => preloadRoute(to)} className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <NavLink to={to} end={to === '/'} onMouseEnter={() => preloadRoute(to)} onFocus={() => preloadRoute(to)} className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                   <Icon size={18} strokeWidth={1.8} aria-hidden /><span>{t(label)}</span>{to === '/chat' && Boolean(unreadChat.data?.unread_count) && <b className="nav-unread-badge" aria-label={`${unreadChat.data?.unread_count} уншаагүй чат`}>{(unreadChat.data?.unread_count ?? 0) > 99 ? '99+' : unreadChat.data?.unread_count}</b>}
                 </NavLink>
               </div>
