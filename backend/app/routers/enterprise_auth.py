@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 import hmac
 from datetime import date, datetime, timedelta, timezone
@@ -33,6 +34,8 @@ from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable
 from app.services import telegram_oidc
 from app.services.enterprise_events import record_change
 from app.hr.service import can_manage_hr, ensure_details
+from app.core.tenancy import TenantBoundaryViolation, current_tenant_id, tenant_directory
+from app.services.tenant_service import SEAT_STATUSES, ensure_seat_available, identity_in_use
 
 
 router = APIRouter()
@@ -325,6 +328,26 @@ async def _issue_action_token(db: AsyncSession, account: UserAccount, purpose: s
     return raw_token
 
 
+async def _ensure_workspace_usable(account: UserAccount) -> None:
+    """A session is only issued for the account's own, non-suspended tenant.
+
+    A missing/expired license still allows sign-in: the request middleware
+    then limits the session to the license activation screens.
+    """
+    host_tenant = current_tenant_id()
+    if host_tenant is not None and host_tenant != account.organization_id:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    try:
+        state = await tenant_directory.state(account.organization_id)
+    except Exception:  # lookup outage: the request middleware re-checks every call
+        logging.getLogger(__name__).warning("auth.tenant_state_unavailable organization_id=%s", account.organization_id, exc_info=True)
+        return
+    if state is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if state.status in {"suspended", "terminated"}:
+        raise HTTPException(status_code=403, detail={"code": f"tenant_{state.status}", "message": "Байгууллагын эрх идэвхгүй байна. Үйлчилгээ үзүүлэгчтэй холбогдоно уу."})
+
+
 @router.post("/login", response_model=AccessTokenOut, response_model_exclude_none=True)
 async def login(
     data: LoginInput,
@@ -332,9 +355,12 @@ async def login(
     origin: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    account = (
-        await db.execute(select(UserAccount).where(func.lower(UserAccount.email) == data.email))
-    ).scalar_one_or_none()
+    query = select(UserAccount).where(func.lower(UserAccount.email) == data.email)
+    host_tenant = current_tenant_id()
+    if host_tenant is not None:
+        # On a tenant's own domain only that tenant's accounts can sign in.
+        query = query.where(UserAccount.organization_id == host_tenant)
+    account = (await db.execute(query)).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if not account or account.status not in {"active", "locked"}:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -347,6 +373,7 @@ async def login(
             account.locked_until = now + timedelta(minutes=15)
         await db.commit()
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    await _ensure_workspace_usable(account)
     if needs_rehash:
         account.password_hash = hash_account_password(data.password)
     account.status = "active"
@@ -423,6 +450,7 @@ async def _telegram_session(
         organization = await db.get(Organization, employee.organization_id)
         if not organization:
             raise HTTPException(status_code=503, detail="Organization setup is incomplete")
+        await ensure_seat_available(db, organization.id)
         account = UserAccount(
             organization_id=organization.id,
             employee_id=employee.id,
@@ -442,6 +470,7 @@ async def _telegram_session(
 
     if account.status == "disabled":
         raise HTTPException(status_code=403, detail="Account is disabled")
+    await _ensure_workspace_usable(account)
     account.status = "active"
     account.failed_login_count = 0
     account.locked_until = None
@@ -467,7 +496,10 @@ async def _telegram_session(
 @router.get("/capabilities", response_model=AuthCapabilities)
 async def auth_capabilities(db: AsyncSession = Depends(get_db)):
     """Expose non-secret authentication capabilities for login surfaces."""
-    organization = (await db.execute(select(Organization).order_by(Organization.id).limit(1))).scalar_one_or_none()
+    # The login page shows the branding of the tenant this host resolves to;
+    # shared hosts show the primary tenant's.
+    tenant_id = current_tenant_id() or await tenant_directory.primary_id()
+    organization = await db.get(Organization, tenant_id) if tenant_id else None
     branding = (organization.settings or {}).get("branding", {}) if organization else {}
     logo = branding.get("light", "/oyuns-aio-logo.png")
     if logo == "default":
@@ -727,9 +759,13 @@ async def refresh(
     ).scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=401, detail="Refresh session expired")
-    account = await db.get(UserAccount, session.account_id)
+    try:
+        account = await db.get(UserAccount, session.account_id)
+    except TenantBoundaryViolation:
+        account = None
     if not account or account.status != "active":
         raise HTTPException(status_code=401, detail="Account unavailable")
+    await _ensure_workspace_usable(account)
     session.revoked_at = now
     session.last_used_at = now
     token, token_hash = new_refresh_token()
@@ -1010,7 +1046,7 @@ async def complete_telegram_link(init_data: str, db: AsyncSession = Depends(get_
     telegram_id = str((telegram_user or {}).get("id") or "")
     if not telegram_id.isdigit():
         raise HTTPException(status_code=400, detail="Telegram account is missing")
-    duplicate = await db.scalar(select(Employee.id).where(Employee.telegram_id == telegram_id, Employee.id != actor.employee_id))
+    duplicate = await identity_in_use(db, "employee_telegram", telegram_id, exclude_id=actor.employee_id)
     if duplicate:
         raise HTTPException(status_code=409, detail="This Telegram account is already connected")
     employee = await db.get(Employee, actor.employee_id, with_for_update=True)
@@ -1039,9 +1075,10 @@ async def create_account(
         linked_account = await db.scalar(select(UserAccount.id).where(UserAccount.employee_id == data.employee_id))
         if linked_account:
             raise HTTPException(status_code=409, detail="Employee already has an account")
-    existing = await db.scalar(select(UserAccount.id).where(func.lower(UserAccount.email) == data.email))
-    if existing:
+    if await identity_in_use(db, "account_email", data.email):
         raise HTTPException(status_code=409, detail="Email already has an account")
+    # Seat ceiling of the active license (locks the tenant row).
+    await ensure_seat_available(db, actor.organization_id)
     account = UserAccount(
         organization_id=actor.organization_id,
         employee_id=data.employee_id,
@@ -1089,8 +1126,7 @@ async def update_account(
     password = patch.pop("password", None)
     roles = patch.pop("roles", None)
     if username and username != account.email:
-        duplicate = await db.scalar(select(UserAccount.id).where(func.lower(UserAccount.email) == username, UserAccount.id != account.id))
-        if duplicate:
+        if await identity_in_use(db, "account_email", username, exclude_id=account.id):
             raise HTTPException(status_code=409, detail="Username already exists")
         account.email = username
     if password:
@@ -1099,6 +1135,9 @@ async def update_account(
         # A password set by an administrator is an explicit recovery action.
         _clear_login_lock(account)
         await db.execute(RefreshSession.__table__.update().where(RefreshSession.account_id == account.id, RefreshSession.revoked_at.is_(None)).values(revoked_at=datetime.now(timezone.utc)))
+    if patch.get("status") == "active" and account.status not in SEAT_STATUSES:
+        # Re-enabling a disabled account takes a seat again.
+        await ensure_seat_available(db, actor.organization_id)
     for field, value in patch.items():
         setattr(account, field, value)
     if patch.get("status") == "active" and account.employee_id:
@@ -1179,9 +1218,10 @@ async def invite_account(
     roles = sorted(set(data.roles))
     if not roles or not set(roles).issubset(allowed):
         raise HTTPException(status_code=400, detail="Invalid roles")
-    existing = await db.scalar(select(UserAccount.id).where(func.lower(UserAccount.email) == data.email))
-    if existing:
+    if await identity_in_use(db, "account_email", data.email):
         raise HTTPException(status_code=409, detail="Email already has an account")
+    # An invitation reserves a seat until it is accepted or the account is disabled.
+    await ensure_seat_available(db, actor.organization_id)
     account = UserAccount(
         organization_id=actor.organization_id,
         employee_id=data.employee_id,

@@ -97,6 +97,41 @@ def create_mcp_access_token(
     )
 
 
+PLATFORM_TOKEN_AUDIENCE = "oyuns-platform"
+
+
+def _platform_token_secret() -> str:
+    """Operator tokens never share the tenant signing key."""
+    if settings.PLATFORM_TOKEN_SECRET:
+        return settings.PLATFORM_TOKEN_SECRET
+    return hmac.new(settings.SECRET_KEY.encode(), b"oyuns-platform-operator-token", hashlib.sha256).hexdigest()
+
+
+def create_platform_access_token(operator_id: int, role: str) -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "sub": str(operator_id),
+            "kind": "platform",
+            "role": role,
+            "aud": PLATFORM_TOKEN_AUDIENCE,
+            "jti": secrets.token_urlsafe(12),
+            "iat": now,
+            "exp": now + settings.PLATFORM_ACCESS_TOKEN_MINUTES * 60,
+        },
+        _platform_token_secret(),
+        algorithm=ALGORITHM,
+    )
+
+
+def decode_platform_access_token(token: str) -> dict | None:
+    try:
+        payload = jwt.decode(token, _platform_token_secret(), algorithms=[ALGORITHM], audience=PLATFORM_TOKEN_AUDIENCE)
+    except JWTError:
+        return None
+    return payload if payload.get("kind") == "platform" and payload.get("sub") else None
+
+
 def new_refresh_token() -> tuple[str, str]:
     token = secrets.token_urlsafe(48)
     return token, hashlib.sha256(token.encode()).hexdigest()

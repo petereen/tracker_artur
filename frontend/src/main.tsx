@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState, type ReactNode } from 'react'
+import { StrictMode, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
@@ -7,6 +7,8 @@ import '@astryxdesign/core/reset.css'
 import '@astryxdesign/core/astryx.css'
 import App from './App'
 import { oyunsTheme } from './theme/oyunsTheme'
+import { applyDocumentBranding, tenantTheme } from './theme/tenantBranding'
+import { useTenantBranding } from './api/tenancy'
 import { useColorThemeStore } from './store/colorTheme'
 import { initializeRuntimeClass } from './platform/runtime'
 import { NativeBootBoundary } from './platform/updater'
@@ -24,13 +26,23 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 })
 
+const DEFAULT_TITLE = typeof document !== 'undefined' ? document.title : 'OYUNS ERP'
+
 function ThemedRoot({ children }: { children: ReactNode }) {
   const mode = useColorThemeStore((state) => state.theme)
+  // Tenant branding (name, favicon, brand colours) resolved from the host or
+  // the signed-in session; the OYUNS theme is the fallback.
+  const branding = useTenantBranding()
+  const primary = branding.data?.primary_color
+  const theme = useMemo(() => (primary ? tenantTheme(primary) : oyunsTheme), [primary])
   useEffect(() => {
     // Browser chrome (Android address bar, installed-app status bar) follows the app theme.
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', mode === 'dark' ? '#0b172a' : '#f4f6fa')
   }, [mode])
-  return <Theme theme={oyunsTheme} mode={mode}>{children}</Theme>
+  useEffect(() => {
+    if (branding.data) applyDocumentBranding(branding.data, DEFAULT_TITLE)
+  }, [branding.data])
+  return <Theme theme={theme} mode={mode}>{children}</Theme>
 }
 
 const PHONE_QUERY = '(max-width: 800px)'
@@ -52,11 +64,11 @@ function AppToaster() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ThemedRoot>
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
+      <ThemedRoot>
         <NativeBootBoundary><App /></NativeBootBoundary>
         <AppToaster />
-      </QueryClientProvider>
-    </ThemedRoot>
+      </ThemedRoot>
+    </QueryClientProvider>
   </StrictMode>,
 )

@@ -39,6 +39,7 @@ from app.models.models import (
 from app.services.attendance_service import sync_worktime_attendance
 from app.services.enterprise_events import record_change
 from app.services.user_notifications import create_notifications
+from app.services.tenant_service import identity_in_use
 from .schemas import (
     AttendanceBulkUpdate,
     AttendanceUpdate,
@@ -296,9 +297,10 @@ async def list_hr_employees(search: str | None = Query(default=None, max_length=
 async def _ensure_identity_unique(db: AsyncSession, actor: ActorContext, *, registration_number: str | None = None, email: str | None = None, telegram_id: str | None = None, employee_id: int | None = None) -> None:
     if registration_number and await db.scalar(select(EmployeeDetails.employee_id).where(EmployeeDetails.organization_id == actor.organization_id, EmployeeDetails.registration_number == registration_number, EmployeeDetails.employee_id != (employee_id or -1))):
         raise HTTPException(status_code=409, detail={"code": "registration_number_exists", "message": "Энэ регистрын дугаартай ажилтан бүртгэлтэй байна."})
-    if email and await db.scalar(select(Employee.id).where(func.lower(Employee.email) == email.lower(), Employee.id != (employee_id or -1))):
+    # E-mail and Telegram ids are unique across all tenants (RLS-safe probe).
+    if email and await identity_in_use(db, "employee_email", email, exclude_id=employee_id):
         raise HTTPException(status_code=409, detail={"code": "email_exists", "message": "Энэ имэйл өөр ажилтанд бүртгэлтэй байна."})
-    if telegram_id and await db.scalar(select(Employee.id).where(Employee.telegram_id == telegram_id, Employee.id != (employee_id or -1))):
+    if telegram_id and await identity_in_use(db, "employee_telegram", telegram_id, exclude_id=employee_id):
         raise HTTPException(status_code=409, detail={"code": "telegram_id_exists", "message": "Энэ Telegram ID өөр ажилтанд холбогдсон байна."})
 
 

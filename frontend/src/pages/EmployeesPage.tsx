@@ -5,6 +5,7 @@ import { KeyRound, MoreVertical, Pencil, Trash2, UserCheck, UserRoundX } from 'l
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 import { useEmployees, useCreateEmployee, useDeleteEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
 import { useCreateManagedAccount, useDeleteManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
+import { tenancyErrorMessage } from '../api/tenancy'
 import { ReportDetailModal } from '../components/ReportDetailModal'
 import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
 
@@ -135,7 +136,7 @@ export function EmployeesPage() {
       await updateAccount.mutateAsync({ id: account.id, roles })
       toast.success('Хандалтын эрх шинэчлэгдлээ')
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Эрх шинэчлэгдсэнгүй')
+      toast.error(tenancyErrorMessage(error, 'Эрх шинэчлэгдсэнгүй'))
     }
   }
   const linkAccess = async (emp: any) => {
@@ -146,7 +147,7 @@ export function EmployeesPage() {
       await createAccount.mutateAsync({ email: `telegram-${emp.telegram_id}`, password, employee_id: emp.id, roles: ['member'], locale: 'mn' })
       toast.success('Ажилтны хандалт холбогдлоо')
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Хандалт холбогдсонгүй')
+      toast.error(tenancyErrorMessage(error, 'Хандалт холбогдсонгүй'))
     }
   }
   const changeAccessPassword = async (emp: any) => {
@@ -158,7 +159,7 @@ export function EmployeesPage() {
     try {
       await updateAccount.mutateAsync({ id: account.id, password })
       toast.success('Нууц үг шинэчлэгдлээ')
-    } catch (error: any) { toast.error(error.response?.data?.detail || 'Нууц үг шинэчлэгдсэнгүй') }
+    } catch (error: any) { toast.error(tenancyErrorMessage(error, 'Нууц үг шинэчлэгдсэнгүй')) }
   }
   const toggleAccountStatus = (emp: any) => {
     const account = accountFor(emp)

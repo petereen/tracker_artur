@@ -1,0 +1,95 @@
+import { useState } from 'react'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import toast from 'react-hot-toast'
+import { Building2, Layers, LogOut, ScrollText, Server, ShieldCheck, Users } from 'lucide-react'
+import { AppShell } from '@astryxdesign/core/AppShell'
+import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
+import { Center } from '@astryxdesign/core/Center'
+import { FormLayout } from '@astryxdesign/core/FormLayout'
+import { Heading } from '@astryxdesign/core/Heading'
+import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
+import { Text } from '@astryxdesign/core/Text'
+import { TextInput } from '@astryxdesign/core/TextInput'
+import { VStack } from '@astryxdesign/core/VStack'
+import { RouterLink } from '../components/budget/shared'
+import { consoleError, useConsoleSession, useOperatorLogin } from './consoleApi'
+import { TenantDetailPage, TenantsPage } from './ConsoleTenants'
+import { AuditPage, OperatorsPage, PlansPage, SystemPage } from './ConsoleCatalog'
+
+function ConsoleLogin() {
+  const login = useOperatorLogin()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const submit = async () => {
+    try {
+      await login.mutateAsync({ email, password })
+    } catch (error) {
+      toast.error(consoleError(error, 'Нэвтэрч чадсангүй'))
+    }
+  }
+  return <Center minHeight="100dvh" padding={6}>
+    <Card padding={6} width="100%" maxWidth={420}>
+      <form onSubmit={(event) => { event.preventDefault(); void submit() }}>
+        <VStack gap={4}>
+          <VStack gap={1}>
+            <Heading level={1}>OYUNS ERP · Операторын консол</Heading>
+            <Text type="supporting">Зөвхөн платформын операторуудад. Байгууллагын хэрэглэгчийн бүртгэл энд ажиллахгүй.</Text>
+          </VStack>
+          <FormLayout>
+            <TextInput label="И-мэйл" value={email} onChange={setEmail} type="email" isRequired hasAutoFocus />
+            <TextInput label="Нууц үг" value={password} onChange={setPassword} type="password" isRequired />
+          </FormLayout>
+          <Button label="Нэвтрэх" variant="primary" type="submit" isDisabled={!email || !password || login.isPending} />
+        </VStack>
+      </form>
+    </Card>
+  </Center>
+}
+
+function ConsoleShell() {
+  const operator = useConsoleSession((state) => state.operator)
+  const logout = useConsoleSession((state) => state.logout)
+  const queryClient = useQueryClient()
+  const { pathname } = useLocation()
+  const items = [
+    { to: '/platform', label: 'Байгууллагууд', icon: Building2, selected: pathname === '/platform' || pathname.startsWith('/platform/tenants') },
+    { to: '/platform/plans', label: 'Багцууд', icon: Layers, selected: pathname.startsWith('/platform/plans') },
+    { to: '/platform/audit', label: 'Аудит', icon: ScrollText, selected: pathname.startsWith('/platform/audit') },
+    { to: '/platform/system', label: 'Систем ба аюулгүй байдал', icon: Server, selected: pathname.startsWith('/platform/system') },
+    ...(operator?.role === 'superadmin' ? [{ to: '/platform/operators', label: 'Операторууд', icon: Users, selected: pathname.startsWith('/platform/operators') }] : []),
+  ]
+  const signOut = () => {
+    queryClient.removeQueries({ queryKey: ['console'] })
+    logout()
+  }
+  return <AppShell contentPadding={6} sideNav={
+    <SideNav
+      header={<SideNavHeading icon={<ShieldCheck size={16} aria-hidden />} heading="OYUNS ERP" subheading="Операторын консол" />}
+      footer={<VStack gap={2}>
+        <Text type="supporting" maxLines={1}>{`${operator?.email ?? ''} · ${operator?.role === 'superadmin' ? 'Superadmin' : 'Support (унших)'}`}</Text>
+        <Button label="Гарах" variant="ghost" size="sm" icon={<LogOut size={14} />} onClick={signOut} />
+      </VStack>}>
+      <SideNavSection title="Удирдлага" isHeaderHidden>
+        {items.map((item) => <SideNavItem key={item.to} label={item.label} icon={<item.icon size={16} aria-hidden />} href={item.to} as={RouterLink} isSelected={item.selected} />)}
+      </SideNavSection>
+    </SideNav>
+  }>
+    <Routes>
+      <Route index element={<TenantsPage />} />
+      <Route path="tenants/:tenantId" element={<TenantDetailPage />} />
+      <Route path="plans" element={<PlansPage />} />
+      <Route path="audit" element={<AuditPage />} />
+      <Route path="system" element={<SystemPage />} />
+      <Route path="operators" element={operator?.role === 'superadmin' ? <OperatorsPage /> : <Navigate to="/platform" replace />} />
+      <Route path="*" element={<Navigate to="/platform" replace />} />
+    </Routes>
+  </AppShell>
+}
+
+/** `/platform/*` — the isolated superadmin console (separate login and token). */
+export default function ConsoleApp() {
+  const token = useConsoleSession((state) => state.token)
+  return token ? <ConsoleShell /> : <ConsoleLogin />
+}

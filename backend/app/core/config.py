@@ -4,6 +4,10 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     DATABASE_URL: str
     SYNC_DATABASE_URL: str
+    # Schema-owner URL for Alembic (psycopg2). Lets DATABASE_URL and
+    # SYNC_DATABASE_URL use the least-privilege ``oyuns_app`` role so
+    # row-level security applies; empty falls back to SYNC_DATABASE_URL.
+    MIGRATION_DATABASE_URL: str = ""
     SECRET_KEY: str
     BOT_TOKEN: str = ""
     # Retained only so old deployments can start; browser login no longer
@@ -139,6 +143,36 @@ class Settings(BaseSettings):
     AI_GATEWAY_MAX_TOOL_CALLS: int = 8
     AI_GATEWAY_READ_CONCURRENCY: int = 4
     AI_GATEWAY_TOOL_TIMEOUT_SECONDS: float = 20.0
+
+    # ── OYUNS ERP multi-tenant SaaS (docs/multi-tenancy.md) ──────────────────
+    # Hosts serving the shared entry point: the tenant comes from the session
+    # token there. Everything else is a tenant subdomain or custom domain.
+    PLATFORM_ROOT_HOSTS: str = "erp.oyuns.mn,localhost,127.0.0.1,backend,testserver,test"
+    # ``<slug>.<TENANT_BASE_DOMAIN>`` routes to a tenant; empty disables it.
+    TENANT_BASE_DOMAIN: str = ""
+    # Subdomain labels that never name a tenant.
+    TENANT_RESERVED_SUBDOMAINS: str = "www,app,api,console,admin,platform,static,assets,mail"
+    # Unknown hosts: "shared" treats them as a root host, "reject" answers 404.
+    TENANT_UNKNOWN_HOST_POLICY: str = "shared"
+    TENANT_CACHE_TTL_SECONDS: int = 30
+    # Operator console. Empty host/CIDR lists mean "no extra restriction".
+    PLATFORM_CONSOLE_HOSTS: str = ""
+    PLATFORM_ALLOWED_CIDRS: str = ""
+    PLATFORM_ACCESS_TOKEN_MINUTES: int = 30
+    # Separate HMAC key for operator tokens. Empty derives one from SECRET_KEY
+    # so a tenant token can never validate as an operator token.
+    PLATFORM_TOKEN_SECRET: str = ""
+    # Seeds the first superadmin at startup when no operator exists yet.
+    PLATFORM_BOOTSTRAP_EMAIL: str = ""
+    PLATFORM_BOOTSTRAP_PASSWORD: str = ""
+    # Ed25519 license signing. Only the issuing process needs the private key;
+    # verifiers need LICENSE_PUBLIC_KEYS ({"kid": "<PEM or base64 raw key>"}).
+    LICENSE_SIGNING_PRIVATE_KEY: str = ""
+    LICENSE_SIGNING_KEY_ID: str = "oyuns-license-1"
+    LICENSE_PUBLIC_KEYS: str = ""
+    LICENSE_ISSUER: str = "oyuns-erp-licensing"
+    LICENSE_AUDIENCE: str = "oyuns-erp"
+    LICENSE_GRACE_DAYS: int = 7
 
     class Config:
         env_file = ".env"

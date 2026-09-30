@@ -76,9 +76,31 @@ def _add_columns(table: str, columns: list[sa.Column]) -> None:
         op.add_column(table, column)
 
 
+def _create_organizations() -> None:
+    """``organizations`` exactly as it was at this revision.
+
+    The live model has since become the SaaS tenant table (b3c4d5e6f7a8 adds
+    slug, status, plan FK, …); building it from the model here would reference
+    tables that do not exist yet on a fresh install.
+    """
+    if "organizations" in sa.inspect(op.get_bind()).get_table_names():
+        return
+    op.create_table(
+        "organizations",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("public_id", sa.dialects.postgresql.UUID(as_uuid=True), nullable=False, unique=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("timezone", sa.Text(), nullable=False, server_default="Asia/Ulaanbaatar"),
+        sa.Column("base_currency", sa.String(3), nullable=False, server_default="MNT"),
+        sa.Column("settings", sa.dialects.postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+    )
+
+
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
-    _create("organizations")
+    _create_organizations()
     op.execute(
         "INSERT INTO organizations (id,name,timezone,base_currency,settings) "
         "VALUES (1,'OYUNS','Asia/Ulaanbaatar','MNT','{}'::jsonb) ON CONFLICT (id) DO NOTHING"

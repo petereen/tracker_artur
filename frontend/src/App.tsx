@@ -12,6 +12,8 @@ import { InitialWorkspaceSkeleton, lazyWithPreload as lazy, RouteLoadErrorBounda
 import { notificationService } from './platform/notifications'
 import { isNativePlatform } from './platform/runtime'
 import { CallProvider } from './components/CallProvider'
+import { tenancyError, useTenantContext } from './api/tenancy'
+import { LicenseRequiredScreen, WorkspaceUnavailableScreen, isWorkspaceUnavailable, useLicenseGraceNotice } from './components/TenantGate'
 
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
 const WorktimePage = lazy(() => import('./pages/WorktimePage').then((module) => ({ default: module.WorktimePage })))
@@ -40,6 +42,7 @@ const AccessControlSettingsPage = lazy(() => import('./pages/AdministrationSetti
 const AutomationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AutomationSettingsPage })))
 const ERPSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.ERPSettingsPage })))
 const AdminAccessSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdminAccessSettingsPage })))
+const LicenseSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.LicenseSettingsPage })))
 const OyunsAssistantSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.OyunsAssistantSettingsPage })))
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })))
 const CompanyFilesPage = lazy(() => import('./pages/CompanyFilesPage').then((module) => ({ default: module.CompanyFilesPage })))
@@ -47,6 +50,8 @@ const ChatWorkspacePage = lazy(() => import('./pages/ChatWorkspacePage').then((m
 const TgMiniAppPage = lazy(() => import('./pages/TgMiniAppPage').then((module) => ({ default: module.TgMiniAppPage })))
 const PrivacyPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.PrivacyPage })))
 const TermsPage = lazy(() => import('./pages/LegalPages').then((module) => ({ default: module.TermsPage })))
+// Operator (superadmin) console: separate login, token and shell.
+const ConsoleApp = lazy(() => import('./console/ConsoleApp'))
 
 const MANAGEMENT_ROLES = ['admin', 'manager', 'team_lead']
 const PAYROLL_ROLES = ['admin', 'hr']
@@ -88,6 +93,9 @@ function AuthenticatedApp() {
   const initialized = useAuthStore((state) => state.initialized)
   const queryClient = useQueryClient()
   const actor = useActor(Boolean(initialized && token))
+  const tenant = useTenantContext(Boolean(token && actor.data))
+  const isAdmin = Boolean(actor.data?.account_roles?.includes('admin') ?? actor.data?.roles.includes('admin'))
+  useLicenseGraceNotice(tenant.data, isAdmin)
   const previousToken = useRef<string | null>(null)
 
   useEffect(() => {
@@ -104,8 +112,14 @@ function AuthenticatedApp() {
 
   if (!initialized) return <InitialWorkspaceSkeleton />
   if (!token) return <LoginPage />
+  const unavailable = tenancyError(actor.error)?.code
+  if (actor.isError && !actor.data && isWorkspaceUnavailable(unavailable)) return <WorkspaceUnavailableScreen code={unavailable} />
   if (actor.isError && !actor.data) return <SessionBootstrapError onRetry={() => void actor.refetch()} />
   if (actor.isLoading || !actor.data) return <InitialWorkspaceSkeleton />
+  // Without a valid license the API only answers the activation endpoints.
+  if (tenant.data && (tenant.data.license.state === 'missing' || tenant.data.license.state === 'expired')) {
+    return <LicenseRequiredScreen context={tenant.data} isAdmin={isAdmin} />
+  }
 
   return (
     <CallProvider>
@@ -178,6 +192,7 @@ function AuthenticatedApp() {
           <Route path="administration/people/users" element={<AccessControlSettingsPage />} />
           <Route path="administration/organization/modules" element={<ERPSettingsPage />} />
           <Route path="administration/security/authentication" element={<AdminAccessSettingsPage />} />
+          <Route path="administration/security/license" element={<LicenseSettingsPage />} />
         </Route>
         <Route element={<RequireRoles allowedRoles={['admin', 'manager']} />}>
           <Route path="administration/people/permissions" element={<PermissionsSettingsPage />} />
@@ -223,6 +238,7 @@ export default function App() {
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/platform/*" element={<ConsoleApp />} />
             <Route path="/*" element={<AuthenticatedApp />} />
           </Routes>
         </Suspense>

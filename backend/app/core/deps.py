@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.security import decode_token
+from app.core.tenancy import TenantBoundaryViolation, bind_tenant
 from app.models.models import AdminUser, RoleAssignment, UserAccount
 
 bearer = HTTPBearer()
@@ -31,6 +32,10 @@ async def get_current_user(
         )
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required")
+        try:
+            await bind_tenant(db, account.organization_id)
+        except TenantBoundaryViolation:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found") from None
         if account.legacy_admin_id:
             user = await db.get(AdminUser, account.legacy_admin_id)
             if user:

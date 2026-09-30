@@ -3,11 +3,13 @@ from datetime import date, datetime, timezone
 import hashlib
 import secrets
 
+from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_account_password
+from app.services.tenant_service import SEAT_STATUSES, ensure_seat_available_sync
 from app.models.models import (
     Answer, Checkin, CheckinAnswer, CheckinQuestion, CheckinTemplate, Employee, EmployeeQuestion,
     ManagerSettings, Question, Schedule, Streak, SurveySession, UserAccount, WorkerInvite, EmployeeDetails, RoleAssignment,
@@ -62,6 +64,13 @@ def bind_employee_invite(raw_token: str, user) -> tuple[Employee | None, str | N
         invite.used_at = now
         invite.bound_telegram_id = telegram_id
         account = s.execute(select(UserAccount).where(UserAccount.employee_id == employee.id).with_for_update()).scalar_one_or_none()
+        if not account or account.status not in SEAT_STATUSES:
+            # A new or re-enabled login takes one seat of the tenant's license.
+            try:
+                ensure_seat_available_sync(s, invite.organization_id)
+            except HTTPException:
+                s.rollback()
+                return None, "seat_limit"
         if not account:
             account = UserAccount(organization_id=invite.organization_id, employee_id=employee.id, email=f"telegram-{telegram_id}", password_hash=hash_account_password(secrets.token_urlsafe(48)), status="active", locale=employee.primary_language or "mn", must_change_password=True)
             s.add(account); s.flush()

@@ -7,22 +7,30 @@ init_from_env(server_name="tracker-artur-api")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 from starlette.requests import Request
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
+from app.core.tenancy import TENANT_FEATURES, TenantBoundaryViolation, install_tenant_guards
+from app.core.tenant_middleware import TenantContextMiddleware
 from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssignment, UserAccount
-from app.routers import ai_settings, assistant_learning, assistant_voice, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, questions, realtime, report_insights, schedules, tasks, work_reports, worktime_qr, worktime_reports
+from app.routers import ai_settings, assistant_learning, assistant_voice, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, onboarding, platform, questions, realtime, report_insights, schedules, tasks, tenant, work_reports, worktime_qr, worktime_reports
+from app.services.tenant_service import is_seat_limit_error
 from app.erp import router as erp
 from app import mcp_executor
 from app.hr import router as hr_router
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
+
+install_tenant_guards()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await seed_admin()
+    async with AsyncSessionLocal() as db:
+        await platform.seed_platform_operator(db)
     yield
 
 
@@ -50,8 +58,19 @@ async def seed_admin():
             admin.password_hash = hash_password(settings.ADMIN_PASSWORD)
         organization = await db.get(Organization, 1)
         if not organization:
-            organization = Organization(id=1, name="OYUNS", timezone="Asia/Ulaanbaatar", base_currency="MNT")
+            # A fresh install's first company is the primary tenant, exactly
+            # like the one the multi-tenant migration backfills.
+            organization = Organization(
+                id=1, name="OYUNS", timezone="Asia/Ulaanbaatar", base_currency="MNT",
+                slug="oyuns", is_primary=True, status="active", plan_code=None,
+                features=sorted(TENANT_FEATURES), license_required=False,
+                branding={"display_name": "OYUNS"},
+            )
             db.add(organization)
+            await db.flush()
+            # An explicit id does not advance the sequence; keep the next
+            # console-created tenant from colliding with this one.
+            await db.execute(text("SELECT setval(pg_get_serial_sequence('organizations', 'id'), (SELECT max(id) FROM organizations))"))
             await db.commit()
         account = (
             await db.execute(
@@ -99,7 +118,21 @@ async def seed_admin():
             await db.commit()
 
 
-app = FastAPI(title="OYUNS Agent — API", lifespan=lifespan)
+app = FastAPI(title="OYUNS ERP — API", lifespan=lifespan)
+
+
+@app.exception_handler(TenantBoundaryViolation)
+async def tenant_boundary_violation(request: Request, exc: TenantBoundaryViolation):
+    # A query reached another tenant's row: refuse instead of leaking. The
+    # guard already logged the details for investigation.
+    return JSONResponse(status_code=403, content={"detail": {"code": "tenant_boundary", "message": "Хандах эрхгүй өгөгдөл."}})
+
+
+@app.exception_handler(DBAPIError)
+async def database_error(request: Request, exc: DBAPIError):
+    if is_seat_limit_error(exc):
+        return JSONResponse(status_code=409, content={"detail": {"code": "seat_limit_reached", "message": "Лицензийн хэрэглэгчийн хязгаар дүүрсэн байна. Багцаа өргөтгөнө үү."}})
+    raise exc
 
 
 @app.middleware("http")
@@ -116,6 +149,8 @@ cors_origins = {
     if origin.strip()
 }
 
+# Inside CORS so tenant denials still carry CORS headers for native apps.
+app.add_middleware(TenantContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(cors_origins),
@@ -155,6 +190,8 @@ app.include_router(worktime_qr.router, prefix="/v1/worktime-qr", tags=["v1-workt
 app.include_router(erp.router, prefix="/v1/erp", tags=["v1-erp"])
 app.include_router(hr_router, prefix="/v1/hr", tags=["v1-hr"])
 app.include_router(mcp_executor.router, prefix="/v1/mcp-executor", tags=["v1-mcp-executor"])
+app.include_router(tenant.router, prefix="/v1/tenant", tags=["v1-tenant"])
+app.include_router(platform.router, prefix="/v1/platform", tags=["v1-platform"])
 
 
 @app.get("/health")

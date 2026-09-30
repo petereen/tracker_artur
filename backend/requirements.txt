@@ -9,6 +9,8 @@ pydantic-settings==2.5.2
 bcrypt==4.2.0
 argon2-cffi==23.1.0
 python-jose[cryptography]==3.3.0
+# Ed25519 license signing (app/services/licensing.py); also pulled in by python-jose.
+cryptography>=42
 python-multipart==0.0.12
 aiogram==3.13.1
 apscheduler==3.10.4

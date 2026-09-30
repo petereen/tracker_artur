@@ -17,6 +17,7 @@ from app.models.models import (
     Employee,
     DomainEvent,
     NotificationOutbox,
+    Organization,
     Task,
     TaskAssignee,
     TaskComment,
@@ -29,6 +30,17 @@ WORKFLOW_FROM_LEGACY = {
     "open": "to_do", "in_progress": "in_progress", "done": "done",
     "overdue": "to_do", "cancelled": "cancelled",
 }
+
+
+def _task_tenant(s, *employee_ids: Optional[int]) -> int:
+    """Tenant of a task: its assignee's/creator's, else the primary tenant."""
+    ids = [employee_id for employee_id in employee_ids if employee_id]
+    if ids:
+        organization_id = s.execute(select(Employee.organization_id).where(Employee.id.in_(ids)).order_by(Employee.id)).scalars().first()
+        if organization_id:
+            return organization_id
+    primary = s.execute(select(Organization.id).where(Organization.is_primary.is_(True))).scalar_one_or_none()
+    return primary or settings.DEFAULT_COMPANY_ORGANIZATION_ID
 
 
 def ensure_employee(tg_id, name: Optional[str] = None, username: Optional[str] = None) -> dict:
@@ -44,7 +56,8 @@ def ensure_employee(tg_id, name: Optional[str] = None, username: Optional[str] =
                 emp.telegram_username = uname
                 s.commit()
         else:
-            emp = Employee(organization_id=settings.DEFAULT_COMPANY_ORGANIZATION_ID, name=name or "Ажилтан", telegram_id=tg, telegram_username=uname, is_active=True)
+            # Legacy manager bootstrap (MANAGER_TG_ID) belongs to the primary tenant.
+            emp = Employee(organization_id=_task_tenant(s), name=name or "Ажилтан", telegram_id=tg, telegram_username=uname, is_active=True)
             s.add(emp)
             s.commit()
             s.refresh(emp)
@@ -87,7 +100,7 @@ def create_task(
             priority=priority,
             status="open",
             workflow_status="to_do",
-            organization_id=1,
+            organization_id=_task_tenant(s, assignee_id, created_by_id),
             reminder_intervals_min=list(reminder_intervals_min or DEFAULT_REMINDER_INTERVALS_MIN),
         )
         s.add(task)
@@ -113,6 +126,7 @@ def create_tasks_for_assignees(
     if not unique_ids:
         return []
     with get_session() as s:
+        organization_id = _task_tenant(s, created_by_id, *unique_ids)
         tasks = [
             Task(
                 title=title,
@@ -125,7 +139,7 @@ def create_tasks_for_assignees(
                 priority=priority,
                 status="open",
                 workflow_status="to_do",
-                organization_id=1,
+                organization_id=organization_id,
                 reminder_intervals_min=list(reminder_intervals_min or DEFAULT_REMINDER_INTERVALS_MIN),
             )
             for employee_id in unique_ids

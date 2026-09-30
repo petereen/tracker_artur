@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor
+from app.core.tenancy import state_from_organization
 from app.models.models import (
     Base, ERPAccessRole, ERPAccount, ERPAccountingSettings, ERPAccountRole, ERPDeletedSeedAccount, ERPCapability, ERPCustomField, ERPDocument, ERPDocumentLine,
     Employee, ERPFormDefinition, ERPGeneralLedgerEntry, ERPApprovalRule, ERPImportBatch, ERPPostingPeriod, ERPItem, ERPParty, ERPTeamRole, ERPWarehouse, ERPWorkflowTransition, ERPModuleConfig, ERPCostCenter, ERPSourceLineAllocation, IdempotencyRecord, Organization, PayrollPostingProfile, Project, Team, TeamMember, UserAccount,
@@ -452,8 +453,12 @@ async def meta(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends
         modules = {name: False for name in ERP_MODULES}
         # Rows for retired modules (selling, stock, …) may still exist; ignore them.
         modules.update({row.module: bool(row.enabled) for row in config_rows if row.module in ERP_MODULES})
+    # The tenant's license is the ceiling for what the module switches show.
+    tenant = state_from_organization(organization)
+    licensed = {name: tenant.has_feature(name) for name in ERP_MODULES}
+    modules = {name: enabled and licensed[name] for name, enabled in modules.items()}
     return {
-        "modules": modules, "module_labels": ERP_MODULES, "document_modules": DOCUMENT_MODULES,
+        "modules": modules, "licensed_modules": licensed, "module_labels": ERP_MODULES, "document_modules": DOCUMENT_MODULES,
         "actions": sorted(VALID_ACTIONS), "currency": organization.base_currency,
         "custom_fields": [{"resource": field.resource, "key": field.key, "label": field.label, "field_type": field.field_type,
             "options": field.options, "required": field.required, "posting_relevant": field.posting_relevant} for field in fields],
@@ -537,6 +542,10 @@ async def update_modules(data: ModulesInput, db: AsyncSession = Depends(get_db),
     if unknown:
         raise HTTPException(status_code=422, detail={"code": "erp_unknown_module", "modules": sorted(unknown)})
     organization = await _organization(db, actor)
+    tenant = state_from_organization(organization)
+    unlicensed = sorted(name for name, enabled in data.modules.items() if enabled and not tenant.has_feature(name))
+    if unlicensed:
+        raise HTTPException(status_code=403, detail={"code": "feature_not_licensed", "modules": unlicensed, "message": "Эдгээр модуль таны лицензэд ороогүй байна."})
     for name in ERP_MODULES:
         row = await db.scalar(select(ERPModuleConfig).where(ERPModuleConfig.organization_id == organization.id, ERPModuleConfig.module == name).with_for_update())
         if row is None:

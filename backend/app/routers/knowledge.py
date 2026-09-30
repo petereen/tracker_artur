@@ -19,6 +19,7 @@ from app.core.deps import get_current_user
 from app.core.config import settings
 from app.core.enterprise_deps import ActorContext, actor_from_token
 from app.core.security import decode_token
+from app.core.tenancy import current_tenant_id
 from app.models.models import AdminUser, CompanyKnowledge, JobQueue, KnowledgeDocument, UserAccount
 
 router = APIRouter()
@@ -121,6 +122,11 @@ def _delete_attachment(stored_name: str | None) -> None:
 
 async def _organization_id(db: AsyncSession, legacy_user) -> int:
     """Bridge the legacy knowledge admin gate to organization-scoped records."""
+    # The request middleware binds the caller's tenant from the access token;
+    # it is authoritative on a multi-tenant platform.
+    bound = current_tenant_id()
+    if bound is not None:
+        return bound
     organization_id = await db.scalar(select(UserAccount.organization_id).where(UserAccount.legacy_admin_id == legacy_user.id)) if legacy_user.id else None
     if organization_id:
         return organization_id

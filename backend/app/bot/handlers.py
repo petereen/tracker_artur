@@ -76,7 +76,7 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
     if len(parts) > 1 and parts[1].startswith("invite_"):
         bound, error = bind_employee_invite(parts[1][7:], message.from_user)
         if error:
-            messages = {"expired": "❌ Урилга хүчингүй болсон байна. HR-ээс шинэ холбоос авна уу.", "used": "ℹ️ Энэ урилга аль хэдийн ашиглагдсан байна.", "duplicate": "❌ Таны Telegram бүртгэл өөр ажилтантай холбогдсон байна."}
+            messages = {"expired": "❌ Урилга хүчингүй болсон байна. HR-ээс шинэ холбоос авна уу.", "used": "ℹ️ Энэ урилга аль хэдийн ашиглагдсан байна.", "duplicate": "❌ Таны Telegram бүртгэл өөр ажилтантай холбогдсон байна.", "seat_limit": "❌ Байгууллагын лицензийн хэрэглэгчийн хязгаар дүүрсэн байна. Админдаа хандана уу."}
             await message.answer(messages.get(error, "❌ Урилга олдсонгүй эсвэл хүчингүй байна."))
             return
         emp = bound

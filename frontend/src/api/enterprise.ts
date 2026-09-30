@@ -2,6 +2,7 @@ import { InfiniteData, keepPreviousData, useInfiniteQuery, useMutation, useQueri
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { acceptSession, api, clearAuthenticatedQueryCache, clearSessionCredentials, publicApi, refreshAccessToken } from './client'
+import { tenancyErrorMessage } from './tenancy'
 import { notificationService } from '../platform/notifications'
 import { getNativeRefreshToken } from '../platform/secure-session'
 import { isNativePlatform, requireWebCapability } from '../platform/runtime'
@@ -513,7 +514,7 @@ export function useCreateManagedAccount() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: { email: string; password: string; roles: string[]; locale: string; employee_id?: number }) => api.post('/v1/auth/accounts', input).then((response) => response.data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'accounts'] }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'accounts'] }); queryClient.invalidateQueries({ queryKey: ['tenant'] }) },
   })
 }
 
@@ -521,8 +522,8 @@ export function useUpdateManagedAccount() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, ...input }: { id: number; username?: string; password?: string; roles?: string[]; status?: 'active' | 'disabled' }) => api.patch(`/v1/auth/accounts/${id}`, input).then((response) => response.data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'accounts'] }),
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Хэрэглэгчийн эрх шинэчлэгдсэнгүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'accounts'] }); queryClient.invalidateQueries({ queryKey: ['tenant'] }) },
+    onError: (error: any) => toast.error(tenancyErrorMessage(error, 'Хэрэглэгчийн эрх шинэчлэгдсэнгүй')),
   })
 }
 

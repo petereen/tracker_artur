@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import decode_token
+from app.core.tenancy import TenantBoundaryViolation, bind_tenant, tenant_directory
 from app.models.models import Employee, RoleAssignment, UserAccount
 from app.services.file_search_service import FileSearchPrincipal
 from app.core.config import settings
@@ -101,9 +102,17 @@ def build_actor_context(*, account_id: int, organization_id: int, employee_id: i
 
 async def actor_from_account_id(account_id: int, db: AsyncSession) -> ActorContext:
     """Rehydrate current account status and time-bounded roles from storage."""
-    account = await db.get(UserAccount, account_id)
+    try:
+        account = await db.get(UserAccount, account_id)
+    except TenantBoundaryViolation:
+        account = None
     if not account or account.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account unavailable")
+    try:
+        # Pins the request (and RLS for its transactions) to this tenant.
+        await bind_tenant(db, account.organization_id)
+    except TenantBoundaryViolation:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account unavailable") from None
     if account.employee_id:
         employee = await db.get(Employee, account.employee_id)
         if not employee or not employee.is_active or employee.deleted_at is not None:
@@ -150,26 +159,37 @@ async def actor_from_telegram_id(telegram_id: str, db: AsyncSession) -> ActorCon
     account = await db.scalar(select(UserAccount).where(UserAccount.employee_id == employee.id, UserAccount.status == "active"))
     if not account:
         return None
+    if not await tenant_is_operational(account.organization_id):
+        return None
     today = date.today()
     roles = (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id, or_(RoleAssignment.valid_from.is_(None), RoleAssignment.valid_from <= today), or_(RoleAssignment.valid_until.is_(None), RoleAssignment.valid_until >= today)))).scalars().all()
     return build_actor_context(account_id=account.id, organization_id=account.organization_id, employee_id=account.employee_id, email=account.email, locale=account.locale, roles=frozenset(roles), channel="telegram")
+
+
+async def tenant_is_operational(organization_id: int) -> bool:
+    """Active tenant with a usable license (Telegram has no request middleware)."""
+    try:
+        state = await tenant_directory.state(organization_id)
+    except Exception:  # pragma: no cover - a failed lookup must not open access
+        return False
+    return bool(state and state.status == "active" and state.license_state() not in {"missing", "expired"})
 
 
 async def file_search_principal_from_telegram_id(telegram_id: str, db: AsyncSession) -> FileSearchPrincipal | None:
     """Resolve a verified Telegram employee for constrained company-file reads.
 
     This intentionally does not manufacture a UserAccount or workspace actor.
-    The fixed company tenant is used for discovery, while restricted account
+    The employee's own tenant is used for discovery, while restricted account
     grants remain unsatisfied unless a real workspace account exists.
     """
     employee = await db.scalar(select(Employee).where(
         Employee.telegram_id == str(telegram_id),
         Employee.is_active.is_(True),
     ))
-    if not employee:
+    if not employee or not await tenant_is_operational(employee.organization_id):
         return None
     return FileSearchPrincipal(
-        organization_id=settings.DEFAULT_COMPANY_ORGANIZATION_ID,
+        organization_id=employee.organization_id,
         employee_id=employee.id,
         channel="telegram",
         locale="mn",
