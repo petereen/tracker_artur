@@ -11,6 +11,7 @@ import { MonthlyPayrollProfileDrawer } from '../components/MonthlyPayrollProfile
 import { EmployeeWorktimeStats } from '../components/EmployeeWorktimeStats'
 import { AttendanceGrid } from '../components/attendance/AttendanceGrid'
 import { normalizeRegistrationNumber, parseRegistrationNumber } from '../utils/registrationNumber'
+import { TELEGRAM_BOT_REQUIRED_HINT, useTenantContext } from '../api/tenancy'
 
 type Tab = 'directory' | 'departments' | 'leave' | 'attendance' | 'payroll'
 const errorText = (error: any) => {
@@ -67,7 +68,7 @@ export function HRWorkspacePage() {
     {tab === 'attendance' && <Card className="hr-attendance-card"><AttendanceGrid canEdit={isManager} onOpenLeave={() => setTab('leave')} /></Card>}
     {tab === 'payroll' && isHR && <PayrollPanel onGoEmployees={() => setTab('directory')} />}
     {selected && <EmployeeDrawer employee={selected} isHR={isHR} canSeeStats={isManager} onClose={() => setSelected(null)} onEdit={() => { setEditing(selected); setSelected(null) }} />}
-    {editing && <WorkerFormModal employee={editing === 'new' ? null : editing} departments={departments.data || []} employees={allEmployees.data?.items || []} onClose={() => setEditing(null)} onCreated={(url) => { setEditing(null); setInvite(url) }} />}
+    {editing && <WorkerFormModal employee={editing === 'new' ? null : editing} departments={departments.data || []} employees={allEmployees.data?.items || []} onClose={() => setEditing(null)} onCreated={(url) => { setEditing(null); if (url) setInvite(url); else toast.success('Ажилтан нэмэгдлээ') }} />}
     {invite && <Modal title="Telegram урилга бэлэн" onClose={() => setInvite(null)}><div className="hr-invite-result"><p>Энэ холбоосыг ажилтанд илгээнэ үү. Нэг удаа ашиглагдана.</p><code>{invite}</code><div><Btn variant="primary" onClick={() => { void navigator.clipboard?.writeText(invite); toast.success('Хууллаа') }}><Copy size={14} />Хуулах</Btn><a className="secondary-action" href={invite} target="_blank" rel="noreferrer"><Link2 size={14} />Нээх</a></div></div></Modal>}
   </div>
 }
@@ -125,8 +126,11 @@ const workerForm = (employee: HREmployee | null): WorkerForm => ({
 })
 const formValue = (key: string, value: string) => value.trim() === '' ? null : WORKER_ID_FIELDS.has(key) ? Number(value) : value.trim()
 
-function WorkerFormModal({ employee, departments, employees, onClose, onCreated }: { employee: HREmployee | null; departments: HRDepartment[]; employees: HREmployee[]; onClose: () => void; onCreated: (url: string) => void }) {
+function WorkerFormModal({ employee, departments, employees, onClose, onCreated }: { employee: HREmployee | null; departments: HRDepartment[]; employees: HREmployee[]; onClose: () => void; onCreated: (url: string | null) => void }) {
   const create = useCreateHREmployee(); const update = useUpdateHREmployee()
+  const tenant = useTenantContext()
+  // Without the tenant's own Telegram bot a Telegram ID cannot be used.
+  const botConnected = tenant.data?.telegram_bot_connected !== false
   const initial = useMemo(() => workerForm(employee), [employee])
   const [form, setForm] = useState<WorkerForm>(initial)
   const set = (key: keyof WorkerForm) => (value: string) => setForm((current) => ({ ...current, [key]: value }))
@@ -155,8 +159,8 @@ function WorkerFormModal({ employee, departments, employees, onClose, onCreated 
         await update.mutateAsync({ id: employee.id, ...values })
         toast.success('Ажилтны мэдээлэл хадгалагдлаа'); onClose()
       } else {
-        const result = await create.mutateAsync({ ...values, telegram_id: form.telegram_id.trim() || null, annual_leave_days: form.annual_leave_days ? Number(form.annual_leave_days) : null })
-        onCreated(result.invite.deep_link)
+        const result = await create.mutateAsync({ ...values, telegram_id: botConnected ? form.telegram_id.trim() || null : null, annual_leave_days: form.annual_leave_days ? Number(form.annual_leave_days) : null })
+        onCreated(result.invite?.deep_link ?? null)
       }
     } catch (error) { toast.error(errorText(error)) }
   }
@@ -184,7 +188,7 @@ function WorkerFormModal({ employee, departments, employees, onClose, onCreated 
       <Input label="Ажилд орсон огноо" type="date" value={form.start_date} onChange={set('start_date')} fullWidth />
       {(status === 'probation' || form.probation_end_date) && <Input label="Туршилтын хугацаа дуусах" type="date" value={form.probation_end_date} onChange={set('probation_end_date')} fullWidth />}
       {status === 'terminated' && <><Input label="Ажлаас гарсан огноо (хоосон бол өнөөдөр)" type="date" value={form.end_date} onChange={set('end_date')} fullWidth /><Input label="Гарсан шалтгаан" value={form.termination_reason} onChange={set('termination_reason')} fullWidth /></>}
-      {!employee && <><Input label="Жилийн ээлжийн амралт (өдөр)" type="number" min="0" max="366" value={form.annual_leave_days} onChange={set('annual_leave_days')} placeholder="15" fullWidth /><Input label="Telegram ID (заавал биш)" value={form.telegram_id} onChange={set('telegram_id')} placeholder="123456789" fullWidth /></>}
+      {!employee && <><Input label="Жилийн ээлжийн амралт (өдөр)" type="number" min="0" max="366" value={form.annual_leave_days} onChange={set('annual_leave_days')} placeholder="15" fullWidth /><Input label="Telegram ID (заавал биш)" value={botConnected ? form.telegram_id : ''} onChange={set('telegram_id')} placeholder="123456789" fullWidth disabled={!botConnected} hint={botConnected ? undefined : TELEGRAM_BOT_REQUIRED_HINT} /></>}
     </div>
     {employee && !WORKING_STATUSES.includes(status) && WORKING_STATUSES.includes(employee.employment_status) && <p className="hr-form-note">Энэ төлөвт ажилтны нэвтрэх эрх хаагдаж, цалин болон өдөр тутмын асуулгад хамрагдахаа болино.</p>}
     <h4 className="hr-form-section">Яаралтай үед холбоо барих</h4>
@@ -192,7 +196,7 @@ function WorkerFormModal({ employee, departments, employees, onClose, onCreated 
       <Input label="Холбоо барих хүн" value={form.emergency_contact_name} onChange={set('emergency_contact_name')} placeholder="Нэр, хамаарал" fullWidth />
       <Input label="Утас" type="tel" value={form.emergency_contact_phone} onChange={set('emergency_contact_phone')} fullWidth />
     </div>
-    <div className="hr-modal-actions"><Btn onClick={onClose}>Цуцлах</Btn><Btn variant="primary" onClick={submit} disabled={nameMissing || registrationInvalid || pending}>{employee ? <><Check size={14} />Хадгалах</> : <><Plus size={14} />Урилгатай үүсгэх</>}</Btn></div>
+    <div className="hr-modal-actions"><Btn onClick={onClose}>Цуцлах</Btn><Btn variant="primary" onClick={submit} disabled={nameMissing || registrationInvalid || pending}>{employee ? <><Check size={14} />Хадгалах</> : <><Plus size={14} />{botConnected ? 'Урилгатай үүсгэх' : 'Үүсгэх'}</>}</Btn></div>
   </Modal>
 }
 

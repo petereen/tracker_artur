@@ -15,11 +15,11 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.enterprise_deps import tenant_is_operational
-from app.core.telegram_auth import verify_init_data
+from app.core.telegram_auth import verify_tenant_init_data
 from app.core.tenancy import bind_tenant, current_tenant_id, tenant_directory
-from app.models.models import DEFAULT_REMINDER_INTERVALS_MIN, Employee, ManagerSettings, NotificationOutbox, Task, TaskComment
+from app.models.models import DEFAULT_REMINDER_INTERVALS_MIN, Employee, NotificationOutbox, Task, TaskComment
 from app.services.notification_policy import load_policy, next_allowed
-from app.services.manager_recipients import manager_telegram_ids
+from app.services.manager_recipients import manager_settings_for, manager_telegram_ids
 from app.services.collaboration_permissions import employee_can_assign_tasks
 
 router = APIRouter()          # admin, mount /tasks
@@ -103,7 +103,7 @@ async def _enqueue_assignment(db: AsyncSession, task: Task, actor_tg: Optional[s
         return
     if actor_tg and str(assignee.telegram_id) == str(actor_tg):
         return  # сам себе не шлём
-    ms = (await db.execute(select(ManagerSettings))).scalars().first()
+    ms = await manager_settings_for(db, task.organization_id)
     policy = load_policy(ms)
     nb = next_allowed(datetime.now(timezone.utc), assignee.timezone or "Asia/Ulaanbaatar", policy)
     creator = await db.get(Employee, task.created_by_id) if task.created_by_id else None
@@ -233,29 +233,32 @@ async def add_comment(task_id: int, data: CommentCreate, db: AsyncSession = Depe
 # ─── MINI APP (Telegram initData) ────────────────────────────────────────────────
 
 async def _miniapp_actor(db: AsyncSession, init_data: Optional[str]) -> tuple[Employee, bool]:
-    tg_user = verify_init_data(init_data or "")
+    # initData is signed by the tenant's own bot: the signing bot names the tenant.
+    tg_user, bot_tenant = await verify_tenant_init_data(init_data or "")
     if not tg_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid initData")
     tg_id = str(tg_user.get("id"))
     emp = (await db.execute(select(Employee).where(Employee.telegram_id == tg_id))).scalar_one_or_none()
+    if emp is not None and bot_tenant is not None and emp.organization_id != bot_tenant:
+        emp = None
     # Фолбэк: найти по username из initData и автопроставить числовой telegram_id.
     if emp is None and tg_user.get("username"):
         uname = str(tg_user["username"]).lstrip("@")
-        emp = (await db.execute(
-            select(Employee).where(Employee.telegram_username.ilike(uname))
-        )).scalar_one_or_none()
+        query = select(Employee).where(Employee.telegram_username.ilike(uname))
+        if bot_tenant is not None:
+            query = query.where(Employee.organization_id == bot_tenant)
+        emp = (await db.execute(query)).scalars().first()
         if emp and emp.telegram_id != tg_id:
             emp.telegram_id = tg_id
             await db.commit()
-    is_manager = tg_id == str(settings.MANAGER_TG_ID)
-    if not is_manager:
-        ms = (await db.execute(select(ManagerSettings))).scalars().first()
-        is_manager = tg_id in manager_telegram_ids(ms)
+    primary_id = await tenant_directory.primary_id()
+    organization_id = emp.organization_id if emp else (bot_tenant or primary_id)
+    is_manager = tg_id == str(settings.MANAGER_TG_ID) and organization_id == primary_id
+    if not is_manager and organization_id:
+        ms = await manager_settings_for(db, organization_id)
+        is_manager = tg_id in manager_telegram_ids(ms, primary=organization_id == primary_id)
     if not emp and not is_manager:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not registered")
-    # initData carries no tenant: pin the request to the worker's tenant (the
-    # legacy MANAGER_TG_ID manager without a worker row is the primary one).
-    organization_id = emp.organization_id if emp else await tenant_directory.primary_id()
     if not organization_id or not await tenant_is_operational(organization_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace unavailable")
     await bind_tenant(db, organization_id)

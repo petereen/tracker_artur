@@ -47,18 +47,23 @@ def test_monthly_digest_summarizes_dummy_reports_and_sends_once(monkeypatch):
     bot = FakeBot()
     reserved: list[date] = []
 
-    monkeypatch.setattr(digest, "_reports_for_period", lambda period, report_type="monthly": (worker_names, reports))
-    monkeypatch.setattr(digest, "get_manager_settings", lambda: SimpleNamespace())
-    monkeypatch.setattr(digest, "manager_telegram_ids", lambda _: ["manager-1"])
-    monkeypatch.setattr(digest, "_reserve", lambda period: reserved.append(period) or True)
-    monkeypatch.setattr(digest, "_ai_summary", lambda _: None)
+    monkeypatch.setattr(digest, "_reports_for_period", lambda period, report_type="monthly", organization_id=None: (worker_names, reports))
+    monkeypatch.setattr(digest, "get_manager_settings", lambda organization_id=None: SimpleNamespace())
+    monkeypatch.setattr(digest, "manager_telegram_ids", lambda _, **_kwargs: ["manager-1"])
+    monkeypatch.setattr(digest, "_reserve", lambda period, organization_id: reserved.append((period, organization_id)) or True)
+
+    async def no_ai(_reports):
+        return None
+
+    monkeypatch.setattr(digest, "_ai_summary", no_ai)
+    monkeypatch.setattr("app.bot.db.is_primary_tenant", lambda organization_id: True)
 
     from app.bot import scheduler
 
-    monkeypatch.setattr(scheduler, "_make_bot", lambda: bot)
+    monkeypatch.setattr(scheduler, "_make_bot", lambda organization_id=None: bot)
 
-    assert asyncio.run(digest.try_send_monthly_report_digest(date(2026, 8, 4))) is True
-    assert reserved == [date(2026, 7, 1)]
+    assert asyncio.run(digest.try_send_monthly_report_digest(date(2026, 8, 4), organization_id=1)) is True
+    assert reserved == [(date(2026, 7, 1), 1)]
     assert len(bot.sent) == 1
 
     recipient, message = bot.sent[0]
@@ -73,18 +78,18 @@ def test_monthly_digest_waits_until_every_active_worker_has_submitted(monkeypatc
     monkeypatch.setattr(
         digest,
         "_reports_for_period",
-        lambda period, report_type="monthly": (["Бат", "Саруул"], [("Бат", "Зөвхөн нэг тайлан")]),
+        lambda period, report_type="monthly", organization_id=None: (["Бат", "Саруул"], [("Бат", "Зөвхөн нэг тайлан")]),
     )
     reserve_called = False
 
-    def reserve(period):
+    def reserve(period, organization_id):
         nonlocal reserve_called
         reserve_called = True
         return True
 
     monkeypatch.setattr(digest, "_reserve", reserve)
-    monkeypatch.setattr(digest, "get_manager_settings", lambda: SimpleNamespace())
-    monkeypatch.setattr(digest, "manager_telegram_ids", lambda _: ["manager-1"])
+    monkeypatch.setattr(digest, "get_manager_settings", lambda organization_id=None: SimpleNamespace())
+    monkeypatch.setattr(digest, "manager_telegram_ids", lambda _, **_kwargs: ["manager-1"])
 
-    assert asyncio.run(digest.try_send_monthly_report_digest(date(2026, 8, 4))) is False
+    assert asyncio.run(digest.try_send_monthly_report_digest(date(2026, 8, 4), organization_id=1)) is False
     assert reserve_called is False

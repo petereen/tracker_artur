@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -116,8 +117,57 @@ class TenantDomain(Base):
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     hostname = Column(Text, nullable=False, unique=True)
     verification_token = Column(Text, nullable=False)
+    # ``verified_at`` is what routes traffic: the middleware resolves only
+    # verified hostnames. Cloudflare domains get it once the custom hostname
+    # and its certificate are both active.
     verified_at = Column(DateTime(timezone=True))
+    # ``manual`` (operator-attested) or ``cloudflare`` (Cloudflare for SaaS).
+    provider = Column(Text, nullable=False, server_default="manual", default="manual")
+    provider_hostname_id = Column(Text, unique=True)
+    status = Column(Text, nullable=False, server_default="pending", default="pending")
+    ssl_status = Column(Text)
+    # Last DNS records the customer has to create (CNAME + TXT validation).
+    dns_records = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
+    last_error = Column(Text)
+    last_checked_at = Column(DateTime(timezone=True))
+    created_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+TELEGRAM_BOT_STATUSES = ("pending", "active", "error", "disabled")
+
+
+class TenantTelegramBot(Base):
+    """A tenant's own Telegram bot (BotFather token), one per tenant.
+
+    ``pending`` bots are already polled so the handshake ``/start`` from the
+    tenant admin can arrive; the handshake turns them ``active``. Tokens are
+    encrypted with ``secret_box`` and never leave the API.
+    """
+
+    __tablename__ = "tenant_telegram_bots"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','active','error','disabled')", name="ck_tenant_telegram_bots_status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True)
+    bot_id = Column(BigInteger, nullable=False, unique=True)
+    bot_username = Column(Text)
+    bot_name = Column(Text)
+    token_enc = Column(Text, nullable=False)
+    token_sha256 = Column(String(64), nullable=False, unique=True)
+    status = Column(Text, nullable=False, server_default="pending", default="pending")
+    handshake_code_enc = Column(Text)
+    handshake_expires_at = Column(DateTime(timezone=True))
+    handshake_completed_at = Column(DateTime(timezone=True))
+    handshake_telegram_id = Column(Text)
+    # Heartbeat written by the bot runner while it polls this bot.
+    last_seen_at = Column(DateTime(timezone=True))
+    last_error = Column(Text)
+    connected_by_account_id = Column(Integer, ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class PlatformOperator(Base):

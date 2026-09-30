@@ -64,7 +64,6 @@ FEATURE_ROUTES: tuple[tuple[str, str], ...] = (
     ("/questions", "legacy_workspace"),
     ("/schedules", "legacy_workspace"),
     ("/answers", "legacy_workspace"),
-    ("/manager-settings", "legacy_workspace"),
     ("/onboarding", "legacy_workspace"),
     ("/dashboard", "legacy_workspace"),
     ("/assistant-learning", "legacy_workspace"),

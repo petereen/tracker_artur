@@ -13,7 +13,8 @@ def test_alembic_has_one_deployable_head():
 
     heads = script.get_heads()
     assert len(heads) == 1
-    assert heads == ["e5f6a7b8c9d0"]
+    assert heads == ["d4e8f1a2b3c9"]
+    assert script.get_revision("d4e8f1a2b3c9").down_revision == "b3c4d5e6f7a8"
     assert script.get_revision("e5f6a7b8c9d0").down_revision == "d1e2f3a4b5c6"
     # The allowance-payout migration alters monthly_payroll_profiles, so it must
     # descend from the merge that includes the monthly payroll foundation.

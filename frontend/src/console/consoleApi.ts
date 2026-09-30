@@ -146,7 +146,7 @@ export interface ConsoleTenantDetail {
   tenant: ConsoleTenant
   seats: { used: number; limit: number | null; available: number | null; unlimited: boolean }
   licenses: ConsoleLicense[]
-  domains: Array<{ id: number; hostname: string; verified_at: string | null; verification_token: string }>
+  domains: ConsoleDomain[]
   admins: Array<{ id: number; email: string; status: string; last_login_at: string | null }>
   audit: ConsoleAuditEvent[]
 }
@@ -188,11 +188,26 @@ export interface TenantCreateInput {
   license: LicenseIssueInput | null
 }
 
+export interface ConsoleDomain {
+  id: number
+  hostname: string
+  verified_at: string | null
+  verification_token: string
+  provider: 'cloudflare' | 'manual'
+  status: 'pending' | 'active' | 'error'
+  ssl_status: string | null
+  dns_records: Array<{ type: string; name: string; value: string; purpose: string }>
+  last_error: string | null
+}
+
 export interface ConsoleSystem {
   rls: { available: boolean; db_role?: string; superuser?: boolean; bypass_rls?: boolean; protected_tables?: number; tenant_tables?: number; strict?: boolean; effective?: boolean }
   license_signing: { available: boolean; key_id: string; public_key_pem: string | null; grace_days: number }
   tenants: Record<string, number>
-  routing: { root_hosts: string[]; tenant_base_domain: string | null; unknown_host_policy: string; console_hosts: string[] }
+  routing: {
+    root_hosts: string[]; tenant_base_domain: string | null; unknown_host_policy: string; console_hosts: string[]
+    custom_domains?: { provider: 'cloudflare' | null; cname_target: string | null; ssl_method: string; limit_per_tenant: number }
+  }
 }
 
 // ── hooks ────────────────────────────────────────────────────────────────

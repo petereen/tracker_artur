@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.db import get_session
 from app.core.config import settings
+from app.core.tenancy import current_tenant_id
 from app.models.models import (
     DEFAULT_REMINDER_INTERVALS_MIN,
     Employee,
@@ -32,13 +33,21 @@ WORKFLOW_FROM_LEGACY = {
 }
 
 
+def _scoped(query, model):
+    """Limit a query to the bound tenant (bot turns); unchanged in the system context."""
+    tenant_id = current_tenant_id()
+    return query if tenant_id is None else query.where(model.organization_id == tenant_id)
+
+
 def _task_tenant(s, *employee_ids: Optional[int]) -> int:
-    """Tenant of a task: its assignee's/creator's, else the primary tenant."""
+    """Tenant of a task: its assignee's/creator's, else the bound tenant, else the primary tenant."""
     ids = [employee_id for employee_id in employee_ids if employee_id]
     if ids:
         organization_id = s.execute(select(Employee.organization_id).where(Employee.id.in_(ids)).order_by(Employee.id)).scalars().first()
         if organization_id:
             return organization_id
+    if current_tenant_id() is not None:
+        return current_tenant_id()
     primary = s.execute(select(Organization.id).where(Organization.is_primary.is_(True))).scalar_one_or_none()
     return primary or settings.DEFAULT_COMPANY_ORGANIZATION_ID
 
@@ -70,9 +79,10 @@ def resolve_employee_by_username(username: str) -> Optional[Employee]:
     if not uname:
         return None
     with get_session() as s:
+        # Usernames are unique only inside a tenant.
         return s.execute(
-            select(Employee).where(Employee.telegram_username.ilike(uname))
-        ).scalar_one_or_none()
+            _scoped(select(Employee).where(Employee.telegram_username.ilike(uname)), Employee).order_by(Employee.id)
+        ).scalars().first()
 
 
 def create_task(
@@ -153,7 +163,8 @@ def create_tasks_for_assignees(
 
 def get_task(task_id: int) -> Optional[dict]:
     with get_session() as s:
-        task = s.get(Task, task_id)
+        # Another tenant's task id behaves like a missing one.
+        task = s.execute(_scoped(select(Task).where(Task.id == task_id), Task)).scalar_one_or_none()
         return _to_dict(s, task) if task else None
 
 
@@ -304,10 +315,11 @@ def list_active_with_deadline() -> list[dict]:
 def all_active_grouped_by_assignee() -> dict[str, list[dict]]:
     """Для дашборда руководителя: активные задачи, сгруппированные по исполнителю."""
     with get_session() as s:
-        q = (
+        q = _scoped(
             select(Task)
             .where(Task.status.in_(ACTIVE_STATUSES), Task.workflow_status != "review")
-            .order_by(Task.assignee_id, Task.deadline_at.asc().nullslast())
+            .order_by(Task.assignee_id, Task.deadline_at.asc().nullslast()),
+            Task,
         )
         groups: dict[str, list[dict]] = {}
         for t in s.execute(q).scalars():
@@ -477,8 +489,17 @@ def fetch_due_outbox(limit: int = 25) -> list[dict]:
         out = []
         for r in rows:
             task = s.get(Task, r.task_id) if r.task_id else None
+            # The outbox row has no tenant key: route by task, web notification
+            # or recipient so the message leaves through the tenant's own bot.
+            organization_id = task.organization_id if task else None
+            if organization_id is None and r.user_notification_id:
+                notification = s.get(UserNotification, r.user_notification_id)
+                organization_id = notification.organization_id if notification else None
+            if organization_id is None:
+                organization_id = s.execute(select(Employee.organization_id).where(Employee.telegram_id == r.recipient_tg)).scalar_one_or_none()
             out.append({
                 "id": r.id, "recipient_tg": r.recipient_tg, "kind": r.kind,
+                "organization_id": organization_id,
                 "user_notification_id": r.user_notification_id,
                 "attempt_count": r.attempt_count,
                 "payload": r.payload or {}, "task_id": r.task_id,
@@ -491,12 +512,13 @@ def fetch_due_outbox(limit: int = 25) -> list[dict]:
         return out
 
 
-def mark_outbox(outbox_id: int, status: str, error: str | None = None) -> None:
+def mark_outbox(outbox_id: int, status: str, error: str | None = None, *, final: bool = False) -> None:
+    """``final`` skips the retry schedule (e.g. the tenant has no Telegram bot)."""
     with get_session() as s:
         r = s.get(NotificationOutbox, outbox_id)
         if r:
             now = datetime.now(timezone.utc)
-            if status == "failed" and (r.attempt_count or 0) < 5:
+            if status == "failed" and not final and (r.attempt_count or 0) < 5:
                 delays = (60, 300, 900, 3600, 21600)
                 r.status = "pending"
                 r.next_attempt_at = now + timedelta(seconds=delays[min((r.attempt_count or 1) - 1, len(delays) - 1)])
@@ -527,6 +549,7 @@ def _to_dict(s, task: Task) -> dict:
     assigned_people = s.execute(select(Employee).where(Employee.id.in_(assigned_ids))).scalars().all() if assigned_ids else []
     return {
         "id": task.id,
+        "organization_id": task.organization_id,
         "title": task.title,
         "description": task.description,
         "status": task.status,

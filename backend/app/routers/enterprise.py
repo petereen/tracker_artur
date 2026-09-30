@@ -82,6 +82,7 @@ from app.models.models import (
     UserNotification,
 )
 from app.services.enterprise_events import record_change
+from app.services.manager_recipients import manager_settings_for
 from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
 from app.core.config import settings
 from app.services import voice_service
@@ -3728,7 +3729,7 @@ async def transcribe_voice(file: UploadFile = File(...), actor: ActorContext = D
 @router.post("/assistant/speech")
 async def assistant_speech(data: AssistantChatInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     """Return a Chimege WAV answer only while the shared bot TTS mode is enabled."""
-    settings_row = (await db.execute(select(ManagerSettings).limit(1))).scalar_one_or_none()
+    settings_row = await manager_settings_for(db, actor.organization_id)
     if settings_row is not None and settings_row.tts_answers_enabled is False:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     tts_token = (await resolve_ai_runtime(db, actor.organization_id)).tts_token

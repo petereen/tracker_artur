@@ -26,7 +26,7 @@ target_metadata = Base.metadata
 DB_MANAGED_TENANT_COLUMN_TABLES = frozenset({
     "work_reports", "work_time_entries", "work_report_revisions", "work_report_prompts", "report_comments",
     "survey_sessions", "answers", "schedules", "shift_schedules", "streaks", "employee_questions",
-    "resource_allocations", "questions", "manager_settings", "unknown_assistant_requests", "assistant_context_examples",
+    "resource_allocations", "questions", "unknown_assistant_requests", "assistant_context_examples",
 })
 
 

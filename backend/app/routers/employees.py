@@ -9,6 +9,8 @@ from app.core.database import get_db
 from app.core.enterprise_deps import ActorContext, get_actor, require_roles
 from app.models.models import Employee, Schedule, Streak, SurveySession, WorkReport, WorkReportRevision, WorkTimeEntry
 from app.hr.service import archive_worker, set_worker_active
+from app.services.telegram_bots import TelegramBotError, require_bot_for_telegram_id
+from app.services.tenant_service import identity_in_use
 from app.services.work_report_service import summarize_work_time
 
 router = APIRouter()
@@ -16,9 +18,18 @@ router = APIRouter()
 
 class EmployeeCreate(BaseModel):
     name: str
-    telegram_id: str
+    # Optional: without a connected Telegram bot the worker is created first
+    # and binds Telegram later (invite or profile).
+    telegram_id: Optional[str] = None
     telegram_username: Optional[str] = None
     timezone: str = "Asia/Ulaanbaatar"
+
+    @field_validator("telegram_id", "telegram_username", mode="before")
+    @classmethod
+    def _blank_to_none(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+        return v or None
 
 
 class EmployeeUpdate(BaseModel):
@@ -213,6 +224,13 @@ async def employee_performance(
 
 @router.post("", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
 async def create_employee(data: EmployeeCreate, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin", "hr"))):
+    if data.telegram_id:
+        try:
+            await require_bot_for_telegram_id(db, actor.organization_id, data.telegram_id)
+        except TelegramBotError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from None
+        if await identity_in_use(db, "employee_telegram", data.telegram_id):
+            raise HTTPException(status_code=409, detail={"code": "telegram_id_exists", "message": "Энэ Telegram ID өөр ажилтанд холбогдсон байна."})
     emp = Employee(organization_id=actor.organization_id, **data.model_dump())
     db.add(emp)
     await db.flush()

@@ -1936,7 +1936,12 @@ export interface UserProfile {
   start_date: string | null
   employment_type: string | null
   telegram_connected: boolean
+  /** The account never chose its own password (created through Telegram/invite). */
   requires_password_setup: boolean
+  /** This session signed in through Telegram. */
+  telegram_session?: boolean
+  /** Username/password changes must be confirmed with the current password. */
+  credentials_require_current_password?: boolean
 }
 
 export function useProfile() {

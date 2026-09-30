@@ -15,6 +15,7 @@ from app.models.models import (
     UserNotification,
     DEFAULT_PRIORITY_NOTIFICATION_KINDS,
 )
+from app.services.manager_recipients import manager_settings_for
 from app.services.notification_policy import load_policy, next_allowed
 
 
@@ -48,7 +49,7 @@ async def create_notifications(
     if not employee_set and not account_set:
         return []
     rows = (await db.execute(query)).all()
-    manager_settings = (await db.execute(select(ManagerSettings).limit(1))).scalar_one_or_none()
+    manager_settings = await manager_settings_for(db, organization_id)
     policy = load_policy(manager_settings)
     created: list[UserNotification] = []
     covered_employee_ids: set[int] = set()

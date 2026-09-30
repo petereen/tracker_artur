@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.enterprise_deps import ActorContext
 from app.core.security import hash_account_password
-from app.core.telegram_auth import verify_init_data
+from app.core.telegram_auth import verify_tenant_init_data
 from app.hr.identity import WORKING_STATUSES
 from app.services.tenant_service import SEAT_STATUSES, ensure_seat_available, identity_in_use
 from app.models.models import (
@@ -159,9 +159,19 @@ def _apply_telegram_identity(employee: Employee, user: dict[str, Any], telegram_
         employee.name = _display_name(user)
 
 
-async def create_invite(db: AsyncSession, actor: ActorContext, employee: Employee) -> dict[str, Any]:
-    if not settings.TELEGRAM_BOT_USERNAME.strip():
-        raise HTTPException(status_code=503, detail="Telegram bot username is not configured")
+async def create_invite(db: AsyncSession, actor: ActorContext, employee: Employee, *, required: bool = False) -> dict[str, Any] | None:
+    """One-time ``/start invite_…`` link through the tenant's own bot.
+
+    Without a connected bot there is nothing to open: worker creation goes
+    on without an invite (``None``); an explicit invite request fails.
+    """
+    from app.services.telegram_bots import bot_username_for
+
+    bot = await bot_username_for(db, actor.organization_id)
+    if not bot:
+        if required:
+            raise HTTPException(status_code=409, detail={"code": "telegram_bot_not_connected", "message": "Telegram бот холбогдоогүй байна. Тохиргоо → Интеграци хэсэгт ботоо холбоно уу."})
+        return None
     await db.execute(
         WorkerInvite.__table__.update()
         .where(WorkerInvite.employee_id == employee.id, WorkerInvite.organization_id == actor.organization_id, WorkerInvite.used_at.is_(None), WorkerInvite.revoked_at.is_(None))
@@ -177,24 +187,23 @@ async def create_invite(db: AsyncSession, actor: ActorContext, employee: Employe
     )
     db.add(invite)
     await db.flush()
-    bot = settings.TELEGRAM_BOT_USERNAME.strip().lstrip("@")
     return {"invite_id": invite.id, "expires_at": invite.expires_at, "deep_link": f"https://t.me/{bot}?start=invite_{raw}"}
 
 
 async def bind_invite(db: AsyncSession, raw_token: str, init_data: str) -> dict[str, Any]:
-    user = verify_init_data(init_data)
+    user, bot_tenant = await verify_tenant_init_data(init_data)
     if not user or not str(user.get("id") or "").isdigit():
         raise HTTPException(status_code=401, detail="Invalid Telegram identity")
-    return await bind_invite_user(db, raw_token, user)
+    return await bind_invite_user(db, raw_token, user, organization_id=bot_tenant)
 
 
-async def bind_invite_user(db: AsyncSession, raw_token: str, user: dict[str, Any]) -> dict[str, Any]:
+async def bind_invite_user(db: AsyncSession, raw_token: str, user: dict[str, Any], *, organization_id: int | None = None) -> dict[str, Any]:
     telegram_id = str(user.get("id") or "")
     if not telegram_id.isdigit():
         raise HTTPException(status_code=401, detail="Invalid Telegram identity")
     now = datetime.now(timezone.utc)
     invite = await db.scalar(select(WorkerInvite).where(WorkerInvite.token_hash == _token_hash(raw_token)).with_for_update())
-    if not invite:
+    if not invite or (organization_id is not None and invite.organization_id != organization_id):
         raise HTTPException(status_code=404, detail="Invite not found")
     if invite.used_at:
         raise HTTPException(status_code=409, detail="Invite has already been used")

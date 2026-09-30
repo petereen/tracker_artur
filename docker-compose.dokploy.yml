@@ -136,6 +136,18 @@ services:
       LICENSE_SIGNING_KEY_ID: ${LICENSE_SIGNING_KEY_ID:-oyuns-license-1}
       LICENSE_PUBLIC_KEYS: ${LICENSE_PUBLIC_KEYS:-}
       LICENSE_GRACE_DAYS: ${LICENSE_GRACE_DAYS:-7}
+      # Tenant custom domains via Cloudflare for SaaS (docs/multi-tenancy.md §8).
+      # Empty token/zone/target keeps self-service domains switched off.
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CLOUDFLARE_ZONE_ID: ${CLOUDFLARE_ZONE_ID:-}
+      CLOUDFLARE_CNAME_TARGET: ${CLOUDFLARE_CNAME_TARGET:-}
+      CLOUDFLARE_SSL_METHOD: ${CLOUDFLARE_SSL_METHOD:-http}
+      CLOUDFLARE_CUSTOM_ORIGIN_SERVER: ${CLOUDFLARE_CUSTOM_ORIGIN_SERVER:-}
+      CLOUDFLARE_CUSTOM_ORIGIN_SNI: ${CLOUDFLARE_CUSTOM_ORIGIN_SNI:-}
+      TENANT_CUSTOM_DOMAIN_LIMIT: ${TENANT_CUSTOM_DOMAIN_LIMIT:-3}
+      # @username of the platform bot (BOT_TOKEN) for invite links; looked up
+      # with getMe when empty.
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
       # Keep the backend reachable when migrations need to be run manually
       # from Dokploy's terminal during a recovery deployment.
       ALLOW_START_WITH_MIGRATION_FAILURE: ${ALLOW_START_WITH_MIGRATION_FAILURE:-true}

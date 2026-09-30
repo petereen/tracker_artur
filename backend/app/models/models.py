@@ -143,6 +143,10 @@ class ManagerSettings(Base):
     __tablename__ = "manager_settings"
 
     id = Column(Integer, primary_key=True)
+    # One settings row per tenant. The column predates the mapping (migration
+    # b3c4d5e6f7a8); its fill trigger still stamps system-context inserts
+    # with the primary tenant.
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE", name="fk_manager_settings_organization"), nullable=False, index=True)
     telegram_id = Column(Text)
     telegram_username = Column(Text)
     # The original single recipient is kept for backwards compatibility.
@@ -168,12 +172,13 @@ class ManagerSettings(Base):
 
 
 class MonthlyReportDigest(Base):
-    """One successfully reserved monthly management digest per reporting period."""
+    """One successfully reserved monthly management digest per tenant and period."""
 
     __tablename__ = "monthly_report_digests"
-    __table_args__ = (UniqueConstraint("period_date", name="uq_monthly_report_digest_period"),)
+    __table_args__ = (UniqueConstraint("organization_id", "period_date", name="uq_monthly_report_digest_org_period"),)
 
     id = Column(Integer, primary_key=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     period_date = Column(Date, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

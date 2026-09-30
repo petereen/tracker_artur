@@ -610,7 +610,10 @@ async def cmd_monthly_digest(message: Message):
     the scheduled once-per-period delivery guard does not prevent a manager
     from requesting the current digest again.
     """
-    recipients = manager_telegram_ids(get_manager_settings())
+    from app.bot.db import is_primary_tenant
+    from app.core.tenancy import current_tenant_id
+
+    recipients = manager_telegram_ids(get_manager_settings(), primary=is_primary_tenant(current_tenant_id()))
     caller_id = str(message.chat.id)
     if caller_id not in recipients:
         await message.answer("❌ Энэ команд зөвхөн telegram_admin_ids-д бүртгэгдсэн удирдлагад зориулсан.")

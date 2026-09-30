@@ -55,15 +55,17 @@ export function Card({ children, className = '' }: { children: React.ReactNode; 
 }
 
 // --- Input ---
-export function Input({ label, value, onChange, type = 'text', placeholder = '', fullWidth, min, max }: {
+export function Input({ label, value, onChange, type = 'text', placeholder = '', fullWidth, min, max, disabled, hint }: {
   label?: string; value: string; onChange: (v: string) => void;
   type?: string; placeholder?: string; fullWidth?: boolean; min?: string | number; max?: string | number
+  disabled?: boolean; hint?: string
 }) {
   return (
     <div className={`flex flex-col gap-1.5 ${fullWidth ? 'w-full' : ''}`}>
       {label && <label className="text-xs text-muted font-medium">{label}</label>}
-      <input value={value} onChange={(e) => onChange(e.target.value)} type={type} min={min} max={max} placeholder={placeholder}
-        className={`workspace-input bg-surface2 border border-border rounded-lg px-3 py-2 text-text outline-none focus:border-accent transition-colors ${fullWidth ? 'w-full' : ''}`} />
+      <input value={value} onChange={(e) => onChange(e.target.value)} type={type} min={min} max={max} placeholder={placeholder} disabled={disabled} aria-label={label}
+        className={`workspace-input bg-surface2 border border-border rounded-lg px-3 py-2 text-text outline-none focus:border-accent transition-colors ${disabled ? 'opacity-60 cursor-not-allowed' : ''} ${fullWidth ? 'w-full' : ''}`} />
+      {hint && <span className="text-xs text-muted">{hint}</span>}
     </div>
   )
 }

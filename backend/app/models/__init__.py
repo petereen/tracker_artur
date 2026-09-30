@@ -115,4 +115,5 @@ from app.models.platform import (  # noqa: F401
     SubscriptionPlan,
     TenantDomain,
     TenantLicense,
+    TenantTelegramBot,
 )

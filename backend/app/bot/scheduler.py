@@ -1,5 +1,6 @@
 """APScheduler — джобы для каждого сотрудника."""
 import logging
+from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta
 from hashlib import sha256
 
@@ -49,11 +50,57 @@ def _missed_job_groups(employees_and_schedules):
     return groups.values()
 
 
-def _make_bot():
+def _make_bot(organization_id: int | None = None):
+    """A fresh client for the tenant's own (handshaken) bot, or ``None``.
+
+    Tenants without a connected bot get no Telegram messages; ``None`` means
+    the primary tenant (platform ``BOT_TOKEN`` fallback)."""
     from aiogram import Bot
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
-    return Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    from app.bot.db import primary_tenant_id
+    from app.services.telegram_bots import registry
+
+    tenant_bot = registry.for_organization_sync(organization_id if organization_id is not None else primary_tenant_id())
+    if tenant_bot is None:
+        return None
+    return Bot(token=tenant_bot.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
+
+@asynccontextmanager
+async def tenant_bot(organization_id: int | None):
+    """``async with tenant_bot(org) as bot`` — closes the client afterwards."""
+    bot = _make_bot(organization_id)
+    try:
+        yield bot
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+def organization_for_telegram_id(telegram_id: str | None) -> int | None:
+    """Tenant of a Telegram recipient (worker ids are unique platform-wide)."""
+    from sqlalchemy import select
+    from app.bot.db import get_session
+    from app.core.tenancy import system_scope
+    from app.models.models import Employee
+
+    if not telegram_id:
+        return None
+    with system_scope(), get_session() as s:
+        return s.execute(select(Employee.organization_id).where(Employee.telegram_id == str(telegram_id))).scalar_one_or_none()
+
+
+async def send_telegram(recipient_tg: str | None, text: str, *, organization_id: int | None = None, **kwargs) -> bool:
+    """Send through the recipient tenant's bot; ``False`` when it has none."""
+    if not recipient_tg or not text:
+        return False
+    organization_id = organization_id or organization_for_telegram_id(recipient_tg)
+    async with tenant_bot(organization_id) as bot:
+        if bot is None:
+            return False
+        await bot.send_message(recipient_tg, text, **kwargs)
+        return True
 
 
 def _rebuild_jobs_unlocked():
@@ -71,10 +118,19 @@ def _rebuild_jobs_unlocked():
             job.remove()
 
     from app.services.digest_service import send_employee_morning_digest, send_employee_evening_digest
-    md, ed = policy.morning_digest, policy.evening_digest
+
+    # Digest times follow each worker's tenant settings.
+    tenant_policies = {}
+
+    def policy_for(organization_id):
+        if organization_id not in tenant_policies:
+            tenant_policies[organization_id] = load_policy(get_manager_settings(organization_id))
+        return tenant_policies[organization_id]
 
     missed_job_groups = []
     for emp in employees:
+        tenant_policy = policy_for(emp.organization_id)
+        md, ed = tenant_policy.morning_digest, tenant_policy.evening_digest
         try:
             tz = pytz.timezone(emp.timezone)
         except Exception:
@@ -211,6 +267,11 @@ def _rebuild_jobs_unlocked():
     scheduler.add_job(reconcile_crm_activity_reminders, "interval", minutes=15,
         id="crm_activity_reminders", replace_existing=True)
 
+    # Cloudflare custom hostnames waiting for the customer's DNS/certificate.
+    from app.services.custom_domains import refresh_pending_domains
+    scheduler.add_job(refresh_pending_domains, "interval", minutes=5,
+        id="refresh_custom_domains", replace_existing=True)
+
     _last_schedule_fingerprint = _schedule_fingerprint()
     scheduler.add_job(reconcile_schedule_jobs, "interval", minutes=1,
         id="reconcile_schedules", replace_existing=True)
@@ -253,23 +314,26 @@ def rebuild_jobs():
 
 async def send_survey(employee_id: int):
     from app.models.models import Employee
-    from app.bot.db import canonical_checkin_complete, create_session, get_questions, get_session
+    from app.bot.db import canonical_checkin_complete, create_session, get_manager_settings, get_questions, get_session
     from app.bot.work_report_handlers import send_daily_prompts, send_report_prompt
     from app.services import work_report_service
 
-    bot = _make_bot()
-    try:
-        with get_session() as s:
-            emp = s.get(Employee, employee_id)
-            if not emp or not emp.is_active:
-                return
-            telegram_id = emp.telegram_id
-            timezone_name = emp.timezone
-            daily_report_reminders_enabled = getattr(get_manager_settings(), "daily_report_reminders_enabled", True)
-        local_day = _local_today(timezone_name)
-        report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
-        if not daily_report_reminders_enabled:
+    with get_session() as s:
+        emp = s.get(Employee, employee_id)
+        if not emp or not emp.is_active:
             return
+        telegram_id = emp.telegram_id
+        timezone_name = emp.timezone
+        organization_id = emp.organization_id
+    daily_report_reminders_enabled = getattr(get_manager_settings(organization_id), "daily_report_reminders_enabled", True)
+    local_day = _local_today(timezone_name)
+    report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
+    if not daily_report_reminders_enabled or not telegram_id:
+        return
+    bot = _make_bot(organization_id)
+    if bot is None:
+        return
+    try:
         # The report policy may drop daily reports for this worker; the
         # check-in questionnaire itself is independent of the policy.
         daily_reports = work_report_service.daily_reports_enabled(employee_id)
@@ -329,7 +393,12 @@ async def send_reminder(employee_id: int, num: int):
     from app.bot.db import canonical_checkin_complete, get_manager_settings, get_session
     from app.services import work_report_service
 
-    bot = _make_bot()
+    with get_session() as s:
+        emp = s.get(Employee, employee_id)
+        organization_id = emp.organization_id if emp else None
+    bot = _make_bot(organization_id) if emp and emp.telegram_id else None
+    if bot is None:
+        return
     try:
         with get_session() as s:
             emp = s.get(Employee, employee_id)
@@ -346,7 +415,7 @@ async def send_reminder(employee_id: int, num: int):
             ).scalars().first()
             telegram_id = emp.telegram_id
             timezone_name = emp.timezone
-            daily_report_reminders_enabled = getattr(get_manager_settings(), "daily_report_reminders_enabled", True)
+        daily_report_reminders_enabled = getattr(get_manager_settings(organization_id), "daily_report_reminders_enabled", True)
         if not daily_report_reminders_enabled:
             return
         checkin_complete = canonical_checkin_complete(employee_id, local_day) or sess is None
@@ -378,15 +447,18 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str, reminder
     from app.models.models import Employee, Schedule
     from app.services import work_report_service
 
-    bot = _make_bot()
+    with get_session() as s:
+        emp = s.get(Employee, employee_id)
+        if not emp or not emp.is_active or not emp.telegram_id:
+            return
+        telegram_id = emp.telegram_id
+        timezone_name = emp.timezone
+        organization_id = emp.organization_id
+        schedule = s.query(Schedule).filter(Schedule.employee_id == employee_id).one_or_none()
+    bot = _make_bot(organization_id)
+    if bot is None:
+        return
     try:
-        with get_session() as s:
-            emp = s.get(Employee, employee_id)
-            if not emp or not emp.is_active or not emp.telegram_id:
-                return
-            telegram_id = emp.telegram_id
-            timezone_name = emp.timezone
-            schedule = s.query(Schedule).filter(Schedule.employee_id == employee_id).one_or_none()
 
         local_day = _local_today(timezone_name)
         active_weekdays = set(_schedule_weekdays(schedule))
@@ -430,7 +502,7 @@ async def mark_missed_job(employee_ids: list[int]):
     from app.models.models import Employee, SurveySession
     from app.services.manager_recipients import manager_telegram_ids
 
-    missing_names = []
+    missing_by_tenant: dict[int, list[str]] = {}
     with get_session() as s:
         employees = [s.get(Employee, employee_id) for employee_id in employee_ids]
 
@@ -451,23 +523,22 @@ async def mark_missed_job(employee_ids: list[int]):
         if completed_session:
             continue
         mark_session_missed(employee.id)
-        missing_names.append(employee.name)
+        missing_by_tenant.setdefault(employee.organization_id, []).append(employee.name)
 
-    if not missing_names:
-        return
+    from app.bot.db import is_primary_tenant
 
-    ms = get_manager_settings()
-    recipients = manager_telegram_ids(ms)
-    if not ms or not ms.alerts_enabled or not recipients:
-        return
-
-    bot = _make_bot()
-    try:
-        message = "Өнөөдөр чек-ин бөглөөгүй ажилтан: " + ", ".join(missing_names)
-        for recipient in recipients:
-            await bot.send_message(recipient, message)
-    finally:
-        await bot.session.close()
+    # One alert per tenant, to that tenant's managers through its own bot.
+    for organization_id, missing_names in missing_by_tenant.items():
+        ms = get_manager_settings(organization_id)
+        recipients = manager_telegram_ids(ms, primary=is_primary_tenant(organization_id))
+        if not ms or not ms.alerts_enabled or not recipients:
+            continue
+        async with tenant_bot(organization_id) as bot:
+            if bot is None:
+                continue
+            message = "Өнөөдөр чек-ин бөглөөгүй ажилтан: " + ", ".join(missing_names)
+            for recipient in recipients:
+                await bot.send_message(recipient, message)
 
 
 def _local_today(timezone_name: str | None):
@@ -517,12 +588,13 @@ async def send_periodic_report_prompts(employee_id: int):
             return
         telegram_id = emp.telegram_id
         timezone_name = emp.timezone
+        organization_id = emp.organization_id
     local_day = _local_today(timezone_name)
     scope = work_report_service.employee_report_scope(employee_id)
     due = due_report_periods(scope, local_day)
     if not due:
         return
-    bot = _make_bot() if telegram_id else None
+    bot = _make_bot(organization_id) if telegram_id else None
     try:
         for period, department_id in due:
             if not work_report_service.period_report_needs_submission(employee_id, period, department_id=department_id):
@@ -589,14 +661,15 @@ async def send_birthday_greeting(employee_id: int):
         telegram_id = emp.telegram_id
         timezone_name = emp.timezone
         employee_name = emp.name
+        organization_id = emp.organization_id
 
     local_day = _local_today(timezone_name)
     if not _birthday_occurs_on_day(birthday, local_day):
         return
 
     telegram_status = "unavailable"
-    if telegram_id:
-        bot = _make_bot()
+    bot = _make_bot(organization_id) if telegram_id else None
+    if bot is not None:
         try:
             await bot.send_message(str(telegram_id), BIRTHDAY_MESSAGE)
             telegram_status = "sent"
@@ -663,9 +736,9 @@ async def morning_summary():
     if data["missed"]:
         lines.append(f"\n⚠️ Бөглөөгүй: {', '.join(data['missed'])}")
 
-    bot = _make_bot()
-    try:
+    # Check-in summaries are a primary-tenant (legacy) feature.
+    async with tenant_bot(None) as bot:
+        if bot is None:
+            return
         for recipient in recipients:
             await bot.send_message(recipient, "\n".join(lines), parse_mode="HTML")
-    finally:
-        await bot.session.close()

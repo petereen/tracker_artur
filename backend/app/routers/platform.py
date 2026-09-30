@@ -30,7 +30,7 @@ from app.core.tenancy import TENANT_FEATURES, _csv, current_tenant_id, normalize
 from app.models.models import Organization, RefreshSession, RoleAssignment, UserAccount
 from app.models.platform import PlatformAuditLog, PlatformOperator, SubscriptionPlan, TenantDomain, TenantLicense
 from app.routers.tenant import license_status, license_view
-from app.services import licensing
+from app.services import custom_domains, licensing
 from app.services.licensing import LicenseError
 from app.services.tenant_branding import BrandingInput, merge_branding, public_branding
 from app.services.tenant_service import (
@@ -301,6 +301,8 @@ class TerminateInput(BaseModel):
 
 class DomainInput(BaseModel):
     hostname: str
+    # Provision through Cloudflare for SaaS when the platform has it configured.
+    use_cloudflare: bool = True
 
     @field_validator("hostname")
     @classmethod
@@ -551,7 +553,7 @@ async def get_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: Plat
         "tenant": tenant_view(organization, usage.used),
         "seats": usage.as_dict(),
         "licenses": [license_admin_view(row) for row in licenses],
-        "domains": [{"id": d.id, "hostname": d.hostname, "verified_at": d.verified_at, "verification_token": d.verification_token} for d in domains],
+        "domains": [{**custom_domains.domain_view(d), "verification_token": d.verification_token} for d in domains],
         "admins": [{"id": row.id, "email": row.email, "status": row.status, "last_login_at": row.last_login_at} for row in admins],
         "audit": [audit_view(event) for event in events],
     }
@@ -671,11 +673,20 @@ async def add_domain(tenant_id: int, data: DomainInput, request: Request, db: As
         raise HTTPException(status_code=422, detail={"code": "reserved_host", "message": "This host is used by the platform"})
     if await db.scalar(select(TenantDomain.id).where(TenantDomain.hostname == data.hostname)):
         raise HTTPException(status_code=409, detail={"code": "domain_taken", "message": "Domain already mapped"})
-    domain = TenantDomain(organization_id=organization.id, hostname=data.hostname, verification_token=f"oyuns-verify={secrets.token_urlsafe(24)}")
-    db.add(domain)
+    if data.use_cloudflare and custom_domains.cloudflare_configured():
+        try:
+            domain = await custom_domains.add_tenant_domain(db, organization.id, data.hostname, account_id=None)
+        except custom_domains.DomainError as exc:
+            await db.rollback()
+            raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from None
+    else:
+        domain = TenantDomain(organization_id=organization.id, hostname=data.hostname, verification_token=f"oyuns-verify={secrets.token_urlsafe(24)}", dns_records=[])
+        db.add(domain)
+        await db.flush()
     audit(db, "domain.added", organization_id=organization.id, operator_id=operator.id, target_type="tenant_domain", target_id=data.hostname, ip_address=_ip(request))
     await db.commit()
-    return {"id": domain.id, "hostname": domain.hostname, "verification_token": domain.verification_token, "verified_at": None,
+    await db.refresh(domain)
+    return {**custom_domains.domain_view(domain), "verification_token": domain.verification_token,
             "instructions": f"Add a DNS TXT record _oyuns.{domain.hostname} = {domain.verification_token} and CNAME {domain.hostname} to the platform host."}
 
 
@@ -684,11 +695,19 @@ async def verify_domain(tenant_id: int, domain_id: int, request: Request, db: As
     domain = await db.get(TenantDomain, domain_id, with_for_update=True)
     if domain is None or domain.organization_id != tenant_id:
         raise HTTPException(status_code=404, detail="Domain not found")
-    domain.verified_at = datetime.now(timezone.utc)
+    if domain.provider == custom_domains.PROVIDER_CLOUDFLARE:
+        # Cloudflare domains are verified by their certificate, not by hand.
+        try:
+            await custom_domains.refresh_tenant_domain(domain)
+        except custom_domains.DomainError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from None
+    else:
+        domain.verified_at = datetime.now(timezone.utc)
+        domain.status = "active"
     audit(db, "domain.verified", organization_id=tenant_id, operator_id=operator.id, target_type="tenant_domain", target_id=domain.hostname, ip_address=_ip(request))
     await db.commit()
     tenant_directory.invalidate(tenant_id)
-    return {"id": domain.id, "hostname": domain.hostname, "verified_at": domain.verified_at}
+    return custom_domains.domain_view(domain)
 
 
 @router.delete("/tenants/{tenant_id}/domains/{domain_id}", status_code=204)
@@ -697,7 +716,10 @@ async def remove_domain(tenant_id: int, domain_id: int, request: Request, db: As
     if domain is None or domain.organization_id != tenant_id:
         raise HTTPException(status_code=404, detail="Domain not found")
     audit(db, "domain.removed", organization_id=tenant_id, operator_id=operator.id, target_type="tenant_domain", target_id=domain.hostname, ip_address=_ip(request))
-    await db.delete(domain)
+    try:
+        await custom_domains.remove_tenant_domain(db, domain)
+    except custom_domains.DomainError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from None
     await db.commit()
     tenant_directory.invalidate(tenant_id)
     return Response(status_code=204)
@@ -909,6 +931,12 @@ async def system_status(db: AsyncSession = Depends(get_db), _: PlatformOperator 
             "tenant_base_domain": settings.TENANT_BASE_DOMAIN or None,
             "unknown_host_policy": settings.TENANT_UNKNOWN_HOST_POLICY,
             "console_hosts": _csv(settings.PLATFORM_CONSOLE_HOSTS),
+            "custom_domains": {
+                "provider": "cloudflare" if custom_domains.cloudflare_configured() else None,
+                "cname_target": custom_domains.cname_target() or None,
+                "ssl_method": settings.CLOUDFLARE_SSL_METHOD,
+                "limit_per_tenant": settings.TENANT_CUSTOM_DOMAIN_LIMIT,
+            },
         },
     }
 

@@ -173,6 +173,20 @@ class Settings(BaseSettings):
     LICENSE_ISSUER: str = "oyuns-erp-licensing"
     LICENSE_AUDIENCE: str = "oyuns-erp"
     LICENSE_GRACE_DAYS: int = 7
+    # Tenant custom domains through Cloudflare for SaaS (docs/multi-tenancy.md
+    # §Custom domains). Customers CNAME their host to CLOUDFLARE_CNAME_TARGET
+    # (a proxied record in the SaaS zone whose fallback origin is this VPS);
+    # Cloudflare issues the certificate at its edge. Empty token/zone disables
+    # self-service domains.
+    CLOUDFLARE_API_TOKEN: str = ""
+    CLOUDFLARE_ZONE_ID: str = ""
+    CLOUDFLARE_CNAME_TARGET: str = ""
+    # Certificate validation: "http" (automatic once the CNAME resolves) or "txt".
+    CLOUDFLARE_SSL_METHOD: str = "http"
+    # Optional per-hostname origin override / origin SNI (Cloudflare plan dependent).
+    CLOUDFLARE_CUSTOM_ORIGIN_SERVER: str = ""
+    CLOUDFLARE_CUSTOM_ORIGIN_SNI: str = ""
+    TENANT_CUSTOM_DOMAIN_LIMIT: int = 3
 
     class Config:
         env_file = ".env"

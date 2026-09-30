@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import decode_token
-from app.core.tenancy import TenantBoundaryViolation, bind_tenant, tenant_directory
+from app.core.tenancy import TenantBoundaryViolation, bind_tenant, current_tenant_id, tenant_directory
 from app.models.models import Employee, RoleAssignment, UserAccount
 from app.services.file_search_service import FileSearchPrincipal
 from app.core.config import settings
@@ -153,7 +153,11 @@ async def actor_from_telegram_id(telegram_id: str, db: AsyncSession) -> ActorCon
     The legacy manager allowlist remains available to old bot commands only; it
     must not grant enterprise-data access without a linked UserAccount.
     """
-    employee = await db.scalar(select(Employee).where(Employee.telegram_id == str(telegram_id), Employee.is_active.is_(True), Employee.deleted_at.is_(None)))
+    query = select(Employee).where(Employee.telegram_id == str(telegram_id), Employee.is_active.is_(True), Employee.deleted_at.is_(None))
+    if current_tenant_id() is not None:
+        # A bot turn is bound to the bot's tenant: another tenant's worker is unknown here.
+        query = query.where(Employee.organization_id == current_tenant_id())
+    employee = await db.scalar(query)
     if not employee:
         return None
     account = await db.scalar(select(UserAccount).where(UserAccount.employee_id == employee.id, UserAccount.status == "active"))
@@ -182,10 +186,13 @@ async def file_search_principal_from_telegram_id(telegram_id: str, db: AsyncSess
     The employee's own tenant is used for discovery, while restricted account
     grants remain unsatisfied unless a real workspace account exists.
     """
-    employee = await db.scalar(select(Employee).where(
+    query = select(Employee).where(
         Employee.telegram_id == str(telegram_id),
         Employee.is_active.is_(True),
-    ))
+    )
+    if current_tenant_id() is not None:
+        query = query.where(Employee.organization_id == current_tenant_id())
+    employee = await db.scalar(query)
     if not employee or not await tenant_is_operational(employee.organization_id):
         return None
     return FileSearchPrincipal(

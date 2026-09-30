@@ -19,9 +19,10 @@ def _job_prefix(task_id: int) -> str:
     return f"task:{task_id}:"
 
 
-def _policy():
+def _policy(organization_id: int | None = None):
+    """Quiet hours etc. of the task's tenant (``None``: bound tenant or primary)."""
     from app.bot.db import get_manager_settings
-    return load_policy(get_manager_settings())
+    return load_policy(get_manager_settings(organization_id))
 
 
 def _task_tz(task: dict) -> str:
@@ -55,7 +56,7 @@ def schedule_task_reminders(task: dict) -> None:
 
     cancel_task_jobs(task["id"])
     now = datetime.now(timezone.utc)
-    policy = _policy()
+    policy = _policy(task.get("organization_id"))
     tz = _task_tz(task)
 
     scheduled_at: set[int] = set()  # дедуп схлопнувшихся в тихие часы напоминаний
@@ -162,7 +163,7 @@ def escalate_overdue(task_id: int) -> None:
         return  # уже пинговали (защита от повторного запуска джоба)
 
     if task["assignee_tg"]:
-        policy = _policy()
+        policy = _policy(task.get("organization_id"))
         not_before = next_allowed(datetime.now(timezone.utc), _task_tz(task), policy)
         task_service.enqueue_notification(
             task_id=task_id,
@@ -181,28 +182,41 @@ def _iso(dt: datetime | None) -> str | None:
 
 async def drain_notification_outbox() -> None:
     """Отправляет готовые (not_before<=now) уведомления из outbox. Interval-джоб бота."""
-    from app.bot.keyboards import task_actions_kb
     from app.bot.scheduler import _make_bot
+    from app.services.telegram_bots import tenant_app_url_sync
 
     due = task_service.fetch_due_outbox()
     if not due:
         return
-    bot = _make_bot()
+    # One client per tenant bot for this batch; tenants without a bot get
+    # their Telegram copy marked failed (the web notification still exists).
+    bots: dict[int | None, object] = {}
+    app_urls: dict[int | None, str] = {}
     try:
         for item in due:
+            organization_id = item.get("organization_id")
             try:
                 # Для задач, которые уже закрыты — не слать (но пометить отправленным).
                 if item["task_id"] and (item["task_status"] in ("done", "cancelled") or item.get("task_workflow_status") == "review"):
                     task_service.mark_outbox(item["id"], "sent")
                     continue
-                text, kb = _render_outbox(item)
+                if organization_id not in bots:
+                    bots[organization_id] = _make_bot(organization_id)
+                    app_urls[organization_id] = tenant_app_url_sync(organization_id)
+                bot = bots[organization_id]
+                if bot is None:
+                    task_service.mark_outbox(item["id"], "failed", "telegram_bot_not_connected", final=True)
+                    continue
+                text, kb = _render_outbox({**item, "app_url": app_urls[organization_id]})
                 await bot.send_message(item["recipient_tg"], text, reply_markup=kb)
                 task_service.mark_outbox(item["id"], "sent")
             except Exception as exc:  # noqa: BLE001
                 log.exception("drain: ошибка отправки outbox id=%s", item["id"])
                 task_service.mark_outbox(item["id"], "failed", str(exc))
     finally:
-        await bot.session.close()
+        for bot in bots.values():
+            if bot is not None:
+                await bot.session.close()
 
 
 def _render_outbox(item: dict):
@@ -210,6 +224,7 @@ def _render_outbox(item: dict):
 
     p = item.get("payload") or {}
     tid = item["task_id"]
+    app_url = (item.get("app_url") or settings.PUBLIC_APP_URL).rstrip("/")
     title = p.get("title") or item.get("task_title") or "Task"
     description = p.get("description") or item.get("task_description")
     deadline = p.get("deadline_iso")
@@ -217,7 +232,7 @@ def _render_outbox(item: dict):
     timezone_name = p.get("timezone_name") or "Asia/Ulaanbaatar"
     dl_h = _fmt_deadline(deadline_dt) if deadline_dt else "Хугацаагүй"
     if item["kind"] == "task_assigned":
-        task_url = p.get("task_url") or f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={tid}"
+        task_url = p.get("task_url") or f"{app_url}/tasks?task={tid}"
         creator_name = p.get("creator_name") or "Тодорхойгүй"
         text = (f"📌 Танд #{tid} даалгавар оноолоо:\n«{title}»\n"
                 f"Үүсгэсэн: {creator_name}\nХугацаа: {dl_h}\n"
@@ -230,7 +245,7 @@ def _render_outbox(item: dict):
             if tid else None
         )
     if item["kind"] == "task_review_requested":
-        task_url = p.get("task_url") or f"{settings.PUBLIC_APP_URL.rstrip('/')}/tasks?task={tid}"
+        task_url = p.get("task_url") or f"{app_url}/tasks?task={tid}"
         assignee = p.get("assignee_name") or "Хариуцагчгүй"
         text = f"🔎 <b>Хянах шаардлагатай</b>\n\n<b>Даалгавар:</b> #{tid} {title}\n<b>Хариуцагч:</b> {assignee}\n<b>Нээх:</b> {task_url}\n{p.get('text', '')}"
         return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, description=description, timezone_name=timezone_name, include_submit_for_review=False, task_url=task_url) if tid else None)
@@ -244,7 +259,7 @@ def _render_outbox(item: dict):
     if item["kind"] in {"calendar_reminder", "event"}:
         starts_at = p.get("starts_at")
         starts_at_dt = datetime.fromisoformat(starts_at) if starts_at else None
-        entry_url = p.get("target_url") or f"{settings.PUBLIC_APP_URL.rstrip('/')}/calendar"
+        entry_url = p.get("target_url") or f"{app_url}/calendar"
         text = (
             f"{'⏰' if item['kind'] == 'calendar_reminder' else '📅'} <b>{title}</b>\n\n"
             f"{p.get('body', '')}\n"

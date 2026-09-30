@@ -112,9 +112,9 @@ async def seed_admin():
             if not has_admin_role:
                 db.add(RoleAssignment(account_id=account.id, role="admin"))
             await db.commit()
-        result2 = await db.execute(select(ManagerSettings))
-        if not result2.scalar_one_or_none():
-            db.add(ManagerSettings())
+        has_settings = await db.scalar(select(ManagerSettings.id).where(ManagerSettings.organization_id == organization.id).limit(1))
+        if not has_settings:
+            db.add(ManagerSettings(organization_id=organization.id))
             await db.commit()
 
 

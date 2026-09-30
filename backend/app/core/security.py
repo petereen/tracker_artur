@@ -48,19 +48,20 @@ def create_access_token(data: dict) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_enterprise_access_token(account_id: int, organization_id: int) -> str:
+def create_enterprise_access_token(account_id: int, organization_id: int, auth_method: str | None = None) -> str:
     now = int(time.time())
-    return jwt.encode(
-        {
-            "sub": str(account_id),
-            "organization_id": organization_id,
-            "kind": "enterprise",
-            "iat": now,
-            "exp": now + settings.ENTERPRISE_ACCESS_TOKEN_MINUTES * 60,
-        },
-        settings.SECRET_KEY,
-        algorithm=ALGORITHM,
-    )
+    claims = {
+        "sub": str(account_id),
+        "organization_id": organization_id,
+        "kind": "enterprise",
+        "iat": now,
+        "exp": now + settings.ENTERPRISE_ACCESS_TOKEN_MINUTES * 60,
+    }
+    if auth_method:
+        # How this session signed in ("password", "telegram"): Telegram
+        # sessions may set a username/password without knowing the old one.
+        claims["amr"] = auth_method
+    return jwt.encode(claims, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 
 def create_mcp_access_token(

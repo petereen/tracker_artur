@@ -1,7 +1,23 @@
-import { useState, useEffect } from 'react'
+import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Btn, Card, Input, PageHeader, Select, Toggle } from '../components/ui'
-import { useAdminUsers, useChangeOwnPassword, useCreateAdminUser, useDeleteAdminUser, useManagerSettings, useUpdateManagerSettings } from '../api/hooks'
+import { Plus, Trash2 } from 'lucide-react'
+import { Banner } from '@astryxdesign/core/Banner'
+import { Button } from '@astryxdesign/core/Button'
+import { Card as AstryxCard } from '@astryxdesign/core/Card'
+import { Heading } from '@astryxdesign/core/Heading'
+import { HStack } from '@astryxdesign/core/HStack'
+import { List, ListItem } from '@astryxdesign/core/List'
+import { Selector } from '@astryxdesign/core/Selector'
+import { Slider } from '@astryxdesign/core/Slider'
+import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { Switch } from '@astryxdesign/core/Switch'
+import { Text } from '@astryxdesign/core/Text'
+import { TextInput } from '@astryxdesign/core/TextInput'
+import { TimeInput, type ISOTimeString } from '@astryxdesign/core/TimeInput'
+import { VStack } from '@astryxdesign/core/VStack'
+import { Btn, Card as LegacyCard, Input } from '../components/ui'
+import { type ManagerRecipientOption, useAdminUsers, useChangeOwnPassword, useCreateAdminUser, useDeleteAdminUser, useManagerRecipientOptions, useManagerSettings, useUpdateManagerSettings } from '../api/hooks'
+import { useTenantContext } from '../api/tenancy'
 
 const DAY_OPTIONS = [
   { value: '1', label: 'Даваа' }, { value: '2', label: 'Мягмар' },
@@ -45,7 +61,7 @@ export function AdminAccessPanel() {
   }
 
   return <>
-    <Card>
+    <LegacyCard>
       <div className="font-semibold text-[15px] mb-1">Админ хандалт</div>
       <div className="flex flex-col gap-3">
         {adminUsers.map((user) => (
@@ -60,9 +76,9 @@ export function AdminAccessPanel() {
         <Input label="Түр нууц үг" value={newAdmin.password} onChange={(v) => setNewAdmin((p) => ({ ...p, password: v }))} type="password" fullWidth />
         <Btn variant="primary" size="lg" onClick={addAdmin} disabled={createAdmin.isPending}>Админ нэмэх</Btn>
       </div>
-    </Card>
+    </LegacyCard>
 
-    <Card>
+    <LegacyCard>
       <div className="font-semibold text-[15px] mb-1">Миний нууц үг</div>
       <div className="grid grid-cols-3 gap-3 items-end">
         <Input label="Одоогийн нууц үг" value={passwordForm.current_password} onChange={(v) => setPasswordForm((p) => ({ ...p, current_password: v }))} type="password" fullWidth />
@@ -72,108 +88,147 @@ export function AdminAccessPanel() {
           <Btn variant="primary" size="lg" onClick={updatePassword} disabled={changePassword.isPending}>Солих</Btn>
         </div>
       </div>
-    </Card>
+    </LegacyCard>
   </>
+}
+
+type ManagerForm = {
+  telegram_admin_ids: string[]
+  summary_time: string
+  weekly_summary_time: string
+  weekly_summary_day: string
+  alerts_enabled: boolean
+  gamification_enabled: boolean
+  soft_mode_weeks: number
+  tts_answers_enabled: boolean
+  daily_report_reminders_enabled: boolean
+}
+
+const MANAGER_OPTIONS: { key: keyof ManagerForm; label: string; desc: string }[] = [
+  { key: 'alerts_enabled', label: 'Алгасалтын анхааруулга', desc: 'Ажилтан хугацаа дууссаны дараа бөглөөгүй бол удирдлагад мэдэгдэх' },
+  { key: 'gamification_enabled', label: 'Урамшууллын систем', desc: 'Ажилтнуудад чансаа болон бөглөлтийн цувралыг харуулах' },
+  { key: 'tts_answers_enabled', label: 'Агентын дуу хоолойгоор хариулах горим', desc: 'Асуултад хариулахдаа текстийн хамт Chimege-ээр үүсгэсэн аудио илгээх' },
+  { key: 'daily_report_reminders_enabled', label: 'Өдрийн ажлын тайлангийн сануулга', desc: 'Ажилтнуудад Telegram болон notification bar-аар өдрийн тайлангийн сануулга илгээх' },
+]
+
+function toForm(data: any): ManagerForm {
+  return {
+    telegram_admin_ids: (data?.telegram_admin_ids as string[] | undefined)?.filter(Boolean) ?? [],
+    summary_time: data?.summary_time?.slice(0, 5) || '09:00',
+    weekly_summary_time: data?.weekly_summary_time?.slice(0, 5) || '17:00',
+    weekly_summary_day: String(data?.weekly_summary_day ?? 5),
+    alerts_enabled: data?.alerts_enabled ?? true,
+    gamification_enabled: data?.gamification_enabled ?? true,
+    soft_mode_weeks: data?.soft_mode_weeks ?? 1,
+    tts_answers_enabled: data?.tts_answers_enabled ?? true,
+    daily_report_reminders_enabled: data?.daily_report_reminders_enabled ?? true,
+  }
+}
+
+/** "Захирал · Удирдлага" — position first, then the system role, then the department. */
+export function recipientSubtitle(option: ManagerRecipientOption) {
+  return [option.job_title || option.role, option.department].filter(Boolean).join(' · ')
+}
+
+function RecipientPicker({ selected, options, onChange, botConnected }: {
+  selected: string[]
+  options: ManagerRecipientOption[]
+  onChange: (ids: string[]) => void
+  botConnected: boolean
+}) {
+  const [manualId, setManualId] = useState('')
+  const byId = new Map(options.map((option) => [option.telegram_id, option]))
+  const available = options.filter((option) => !selected.includes(option.telegram_id))
+  const manual = manualId.trim()
+  const manualInvalid = Boolean(manual) && !/^\d{5,16}$/.test(manual)
+  const add = (id: string) => { if (id && !selected.includes(id)) onChange([...selected, id]) }
+
+  return <VStack gap={3}>
+    {!botConnected && <Banner status="warning" collapsible={false} title="Telegram бот холбогдоогүй"
+      description="Мэдэгдэл илгээхийн тулд эхлээд дээрх «Telegram бот» хэсэгт байгууллагынхаа ботыг холбоно уу." />}
+    {selected.length === 0
+      ? <Text type="supporting">Хүлээн авагч сонгоогүй байна.</Text>
+      : <List hasDividers density="compact">
+        {selected.map((id) => {
+          const option = byId.get(id)
+          return <ListItem key={id}
+            label={option ? option.name : `Telegram ID ${id}`}
+            description={option ? `${recipientSubtitle(option) || 'Ажилтан'} · ID ${id}` : 'Ажилтны бүртгэлтэй холбогдоогүй ID'}
+            endContent={<Button label="Хасах" size="sm" variant="ghost" icon={<Trash2 size={14} />} onClick={() => onChange(selected.filter((item) => item !== id))} />} />
+        })}
+      </List>}
+    <HStack gap={2} vAlign="end" wrap="wrap">
+      <Selector label="Ажилтнаас сонгох" value={undefined} onChange={(value) => add(value)} hasSearch searchPlaceholder="Нэр, албан тушаал…"
+        placeholder={available.length ? 'Telegram холбосон ажилтан' : 'Сонгох ажилтан алга'} isDisabled={available.length === 0}
+        emptyText="Telegram холбосон ажилтан алга"
+        options={available.map((option) => ({ value: option.telegram_id, label: option.name, description: [recipientSubtitle(option), `ID ${option.telegram_id}`].filter(Boolean).join(' · ') }))} />
+      <TextInput label="Эсвэл Telegram ID" value={manualId} onChange={setManualId} placeholder="100012345" width={200}
+        status={manualInvalid ? { type: 'error', message: 'Зөвхөн тоо' } : undefined}
+        onEnter={() => { if (manual && !manualInvalid) { add(manual); setManualId('') } }} />
+      <Button label="Нэмэх" variant="secondary" icon={<Plus size={15} />} isDisabled={!manual || manualInvalid}
+        onClick={() => { add(manual); setManualId('') }} />
+    </HStack>
+  </VStack>
 }
 
 export function ManagerSettingsPage() {
   const { data } = useManagerSettings()
   const save = useUpdateManagerSettings()
+  const recipients = useManagerRecipientOptions()
+  const tenant = useTenantContext()
+  const baseline = useMemo(() => toForm(data), [data])
+  const [draft, setDraft] = useState<ManagerForm | null>(null)
+  const form = draft ?? baseline
+  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(baseline)
+  const f = <K extends keyof ManagerForm>(key: K, value: ManagerForm[K]) => setDraft({ ...form, [key]: value })
+  const submit = async () => {
+    try {
+      await save.mutateAsync(form)
+      setDraft(null)
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail
+      toast.error(typeof detail === 'object' ? detail?.message || 'Тохиргоо хадгалагдсангүй' : detail || 'Тохиргоо хадгалагдсангүй')
+    }
+  }
 
-  const [form, setForm] = useState({
-    telegram_id: '', telegram_username: '', telegram_admin_ids: [''],
-    summary_time: '09:00', weekly_summary_time: '17:00', weekly_summary_day: '5',
-    alerts_enabled: true, gamification_enabled: true, soft_mode_weeks: 1,
-    tts_answers_enabled: true, daily_report_reminders_enabled: true,
-  })
+  return <VStack gap={4}>
+    <AstryxCard padding={5}>
+      <VStack gap={4}>
+        <VStack gap={1}>
+          <Heading level={3}>Удирдлагын телеграм мэдэгдлийн тохиргоо</Heading>
+          <Text type="supporting">Сарын AI хураангуй, алгасалтын анхааруулга болон удирдлагын мэдэгдлийг сонгосон хүмүүсийн Telegram руу илгээнэ.</Text>
+        </VStack>
+        <RecipientPicker selected={form.telegram_admin_ids} options={recipients.data ?? []} onChange={(ids) => f('telegram_admin_ids', ids)}
+          botConnected={tenant.data?.telegram_bot_connected ?? true} />
+      </VStack>
+    </AstryxCard>
 
-  useEffect(() => {
-    if (data) setForm({
-      telegram_id: data.telegram_id || '',
-      telegram_username: data.telegram_username || '',
-      telegram_admin_ids: data.telegram_admin_ids?.length ? data.telegram_admin_ids : [data.telegram_id || ''],
-      summary_time: data.summary_time?.slice(0, 5) || '09:00',
-      weekly_summary_time: data.weekly_summary_time?.slice(0, 5) || '17:00',
-      weekly_summary_day: String(data.weekly_summary_day ?? 5),
-      alerts_enabled: data.alerts_enabled,
-      gamification_enabled: data.gamification_enabled,
-      soft_mode_weeks: data.soft_mode_weeks,
-      tts_answers_enabled: data.tts_answers_enabled ?? true,
-      daily_report_reminders_enabled: data.daily_report_reminders_enabled ?? true,
-    })
-  }, [data])
+    <AstryxCard padding={5}>
+      <VStack gap={4}>
+        <Heading level={3}>Хураангуй</Heading>
+        <HStack gap={3} wrap="wrap" vAlign="end">
+          <TimeInput label="Өглөөний хураангуйн цаг" value={form.summary_time as ISOTimeString} onChange={(value) => value && f('summary_time', value)} hourFormat="24h" width={200} />
+          <Selector label="7 хоногийн хураангуйн өдөр" value={form.weekly_summary_day} onChange={(value) => f('weekly_summary_day', value)} options={DAY_OPTIONS} />
+          <TimeInput label="Цаг" value={form.weekly_summary_time as ISOTimeString} onChange={(value) => value && f('weekly_summary_time', value)} hourFormat="24h" width={160} />
+        </HStack>
+      </VStack>
+    </AstryxCard>
 
-  const f = (k: string, v: any) => setForm((prev) => ({ ...prev, [k]: v }))
-  const updateTelegramId = (index: number, value: string) => f('telegram_admin_ids', form.telegram_admin_ids.map((id, i) => i === index ? value : id))
+    <AstryxCard padding={5}>
+      <VStack gap={4}>
+        <Heading level={3}>Сонголтууд</Heading>
+        {MANAGER_OPTIONS.map((option) => <Switch key={option.key} label={option.label} description={option.desc}
+          value={Boolean(form[option.key])} onChange={(value) => f(option.key, value as never)} labelPosition="start" labelSpacing="spread" width="100%" />)}
+        <Slider label="Танилцуулгын зөөлөн горим" description={`Эхний ${form.soft_mode_weeks} долоо хоногт сануулгыг зөвхөн ажилтанд илгээнэ`}
+          value={form.soft_mode_weeks} min={0} max={4} valueDisplay="text" formatValue={(value) => `${value} долоо хоног`}
+          onChange={(value: number) => f('soft_mode_weeks', value)} width={320} />
+      </VStack>
+    </AstryxCard>
 
-  const OPTIONS = [
-    { key: 'alerts_enabled',        label: 'Алгасалтын анхааруулга', desc: 'Ажилтан хугацаа дууссаны дараа бөглөөгүй бол удирдлагад мэдэгдэх' },
-    { key: 'gamification_enabled',  label: 'Урамшууллын систем', desc: 'Ажилтнуудад чансаа болон бөглөлтийн цувралыг харуулах' },
-    { key: 'tts_answers_enabled',   label: 'Агентын дуу хоолойгоор хариулах горим', desc: 'Асуултад хариулахдаа текстийн хамт Chimege-ээр үүсгэсэн аудио илгээх' },
-    { key: 'daily_report_reminders_enabled', label: 'Өдрийн ажлын тайлангийн сануулга', desc: 'Ажилтнуудад Telegram болон notification bar-аар өдрийн тайлангийн сануулга илгээх' },
-  ]
-
-  return (
-    <div>
-      <PageHeader title="Удирдлагын телеграм мэдэгдлийн тохиргоо" />
-      <div className="settings-form-stack">
-        <Card>
-          <div className="font-semibold text-[15px] mb-4">Telegram</div>
-          <div className="flex flex-col gap-3.5">
-            {form.telegram_admin_ids.map((telegramId, index) => (
-              <div key={index} className="grid grid-cols-[1fr_auto] gap-2 items-end">
-                <Input label={index === 0 ? 'Удирдлагын Telegram ID' : `Удирдлагын Telegram ID #${index + 1}`} value={telegramId} onChange={(v) => updateTelegramId(index, v)} placeholder="100012345" />
-                {form.telegram_admin_ids.length > 1 && <Btn variant="danger" onClick={() => f('telegram_admin_ids', form.telegram_admin_ids.filter((_, i) => i !== index))}>Устгах</Btn>}
-              </div>
-            ))}
-            <div className="flex items-end gap-3">
-              <Input label="Username (сонголтоор)" value={form.telegram_username} onChange={(v) => f('telegram_username', v)} placeholder="@username" />
-              <Btn onClick={() => f('telegram_admin_ids', [...form.telegram_admin_ids, ''])}>+ Удирдлага нэмэх</Btn>
-            </div>
-            <div className="text-xs text-muted">Сарын AI хураангуй болон удирдлагын мэдэгдлийг энд оруулсан бүх Telegram ID руу илгээнэ.</div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="font-semibold text-[15px] mb-4">Хураангуй</div>
-          <div className="grid grid-cols-2 gap-3.5">
-            <Input label="Өглөөний хураангуйн цаг" value={form.summary_time} onChange={(v) => f('summary_time', v)} type="time" />
-            <div className="grid grid-cols-2 gap-2">
-              <Select label="7 хоногийн хураангуйн өдөр" value={form.weekly_summary_day} onChange={(v) => f('weekly_summary_day', v)} options={DAY_OPTIONS} />
-              <Input label="Цаг" value={form.weekly_summary_time} onChange={(v) => f('weekly_summary_time', v)} type="time" />
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="font-semibold text-[15px] mb-4">Сонголтууд</div>
-          <div className="flex flex-col gap-3.5">
-            {OPTIONS.map((opt) => (
-              <div key={opt.key} className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="font-medium text-[13px]">{opt.label}</div>
-                  <div className="text-xs text-muted mt-0.5 max-w-[480px]">{opt.desc}</div>
-                </div>
-                <Toggle checked={(form as any)[opt.key]} onChange={(v) => f(opt.key, v)} />
-              </div>
-            ))}
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="font-medium text-[13px]">Танилцуулгын зөөлөн горим</div>
-                <div className="text-xs text-muted mt-0.5">Эхний {form.soft_mode_weeks} долоо хоногт сануулгыг зөвхөн ажилтанд илгээнэ</div>
-              </div>
-              <input type="range" min={0} max={4} value={form.soft_mode_weeks}
-                onChange={(e) => f('soft_mode_weeks', +e.target.value)}
-                className="w-24 accent-accent mt-1" />
-            </div>
-          </div>
-        </Card>
-
-        <div className="flex justify-end gap-2.5">
-          <Btn>Сэргээх</Btn>
-          <Btn variant="primary" size="lg" onClick={() => save.mutate(form)} disabled={save.isPending}>Тохиргоо хадгалах</Btn>
-        </div>
-      </div>
-    </div>
-  )
+    <HStack gap={2} hAlign="end" vAlign="center">
+      {dirty && <StatusDot variant="warning" label="Хадгалаагүй өөрчлөлт" />}
+      <Button label="Буцаах" variant="ghost" onClick={() => setDraft(null)} isDisabled={!dirty} />
+      <Button label="Тохиргоо хадгалах" variant="primary" clickAction={submit} isDisabled={!dirty} />
+    </HStack>
+  </VStack>
 }

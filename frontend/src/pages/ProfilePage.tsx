@@ -177,6 +177,9 @@ export function ProfilePage() {
 
   const data = profile.data;
   const needsPasswordSetup = data?.requires_password_setup ?? false;
+  // Telegram sign-ins (and accounts without an own password yet) change the
+  // username and password without typing the current password.
+  const needsCurrentPassword = data?.credentials_require_current_password ?? !needsPasswordSetup;
   const usernameChanged = !!data && form.username !== data.username;
   const departmentLocked = data?.department_locked ?? false;
 
@@ -341,7 +344,7 @@ export function ProfilePage() {
         <Banner
           status="warning"
           title="Нууц үг үүсгээгүй байна"
-          description="Telegram-аар нэвтэрсэн тул вэбээр нэвтрэх нууц үгээ үүсгэнэ үү."
+          description={`Telegram-аар нэвтэрсэн тул вэбээр нэвтрэх нэр, нууц үгээ тохируулна уу. Одоогийн нэвтрэх нэр: ${data?.username ?? ""}`}
           endContent={<Button label="Нууц үг үүсгэх" size="sm" onClick={() => setPasswordOpen(true)} />}
           collapsible={false}
         />
@@ -481,11 +484,16 @@ export function ProfilePage() {
                 label="Нэвтрэх нэр"
                 value={form.username}
                 onChange={(value) => edit({ username: value })}
-                isDisabled={needsPasswordSetup}
-                disabledMessage="Эхлээд нууц үг үүсгэнэ үү"
+                description={
+                  data?.telegram_session
+                    ? "Telegram-аар нэвтэрсэн тул нэвтрэх нэр, нууц үгээ одоогийн нууц үггүйгээр сольж болно."
+                    : needsPasswordSetup
+                      ? "Нэвтрэх нэр ба нууц үгээ тохируулж, вебээр шууд нэвтэрнэ."
+                      : undefined
+                }
                 autoComplete="username"
               />
-              {usernameChanged && (
+              {usernameChanged && needsCurrentPassword && (
                 <TextInput
                   type="password"
                   label="Одоогийн нууц үг"
@@ -636,7 +644,7 @@ export function ProfilePage() {
               icon={<Save size={16} />}
               clickAction={saveProfile}
               isLoading={update.isPending}
-              isDisabled={!form.username.trim() || (usernameChanged && !form.username_password)}
+              isDisabled={!form.username.trim() || (usernameChanged && needsCurrentPassword && !form.username_password)}
             />
           </HStack>
         </Card>
@@ -649,13 +657,15 @@ export function ProfilePage() {
               title={needsPasswordSetup ? "Нууц үг үүсгэх" : "Нууц үг солих"}
               subtitle={
                 needsPasswordSetup
-                  ? "Энэ хэрэглэгчийн нэрээр нууц үг үүсгэнэ."
-                  : "Аюулгүй байдлын үүднээс одоогийн нууц үгээ оруулна."
+                  ? `«${data?.username ?? ""}» нэвтрэх нэрээр нууц үг үүсгэнэ.`
+                  : needsCurrentPassword
+                    ? "Аюулгүй байдлын үүднээс одоогийн нууц үгээ оруулна."
+                    : "Telegram-аар баталгаажсан тул одоогийн нууц үг шаардахгүй."
               }
               onOpenChange={setPasswordOpen}
             />
             <VStack gap={4} paddingInline={4}>
-              {!needsPasswordSetup && (
+              {needsCurrentPassword && (
                 <TextInput
                   type="password"
                   label="Одоогийн нууц үг"
@@ -672,7 +682,7 @@ export function ProfilePage() {
                 value={passwords.next}
                 onChange={(value) => setPasswords((current) => ({ ...current, next: value }))}
                 autoComplete="new-password"
-                hasAutoFocus={needsPasswordSetup}
+                hasAutoFocus={!needsCurrentPassword}
                 status={
                   passwords.next && passwords.next.length < 10
                     ? { type: "warning", message: `${10 - passwords.next.length} тэмдэгт дутуу` }
@@ -688,7 +698,7 @@ export function ProfilePage() {
                 variant="primary"
                 icon={<Save size={16} />}
                 isLoading={changePassword.isPending}
-                isDisabled={passwords.next.length < 10 || (!needsPasswordSetup && !passwords.current)}
+                isDisabled={passwords.next.length < 10 || (needsCurrentPassword && !passwords.current)}
               />
             </HStack>
           </VStack>

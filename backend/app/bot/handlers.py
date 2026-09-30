@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from app.bot.db import (
     complete_session, create_session, get_manager_settings,
     canonical_checkin_complete, get_questions, get_session, get_streak, get_yesterday_summary,
-    mirror_completed_session, bind_employee_invite,
+    mirror_completed_session, bind_employee_invite, is_primary_tenant,
     mark_employee_onboarded, save_answer,
 )
 from app.core.config import settings
@@ -29,9 +29,13 @@ class Survey(StatesGroup):
     answering = State()
 
 
-def mini_app_keyboard() -> InlineKeyboardMarkup | None:
-    """Return the launch button only when a public Mini App URL is configured."""
-    url = settings.MINI_APP_URL.strip()
+def mini_app_keyboard(organization_id: int | None = None) -> InlineKeyboardMarkup | None:
+    """Return the launch button only when a public Mini App URL is configured.
+
+    Each tenant's bot opens the Mini App on that tenant's own address."""
+    from app.services.telegram_bots import mini_app_url_sync
+
+    url = mini_app_url_sync(organization_id) if organization_id is not None else settings.MINI_APP_URL.strip()
     if not url:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -70,19 +74,22 @@ async def _ask_question(message_or_cb, question, state: FSMContext, session_id: 
 # ─── /start ──────────────────────────────────────────────────────────────────
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, employee=None):
+async def cmd_start(message: Message, state: FSMContext, employee=None, bot_tenant_id: int | None = None, foreign_tenant: bool = False):
     emp = employee
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) > 1 and parts[1].startswith("invite_"):
-        bound, error = bind_employee_invite(parts[1][7:], message.from_user)
+        bound, error = bind_employee_invite(parts[1][7:], message.from_user, bot_tenant_id)
         if error:
             messages = {"expired": "❌ Урилга хүчингүй болсон байна. HR-ээс шинэ холбоос авна уу.", "used": "ℹ️ Энэ урилга аль хэдийн ашиглагдсан байна.", "duplicate": "❌ Таны Telegram бүртгэл өөр ажилтантай холбогдсон байна.", "seat_limit": "❌ Байгууллагын лицензийн хэрэглэгчийн хязгаар дүүрсэн байна. Админдаа хандана уу."}
             await message.answer(messages.get(error, "❌ Урилга олдсонгүй эсвэл хүчингүй байна."))
             return
         emp = bound
-        await message.answer("✅ Telegram бүртгэл амжилттай холбогдлоо. OYUNS самбарыг нээж эхлүүлнэ үү.", reply_markup=mini_app_keyboard())
+        await message.answer("✅ Telegram бүртгэл амжилттай холбогдлоо. OYUNS самбарыг нээж эхлүүлнэ үү.", reply_markup=mini_app_keyboard(bot_tenant_id))
         return
     if not emp:
+        if foreign_tenant:
+            await message.answer("❌ Таны Telegram бүртгэл өөр байгууллагад холбогдсон байна. Өөрийн байгууллагын ботыг ашиглана уу.")
+            return
         await message.answer("❌ Та системд бүртгэгдээгүй байна. Удирдлагадаа хандана уу.")
         return
 
@@ -105,16 +112,16 @@ async def cmd_start(message: Message, state: FSMContext, employee=None):
         f"🏆 /leaderboard — багийн чансаа\n"
         f"❓ /help — тусламж"
     )
-    await message.answer(onboarding_text, reply_markup=mini_app_keyboard())
+    await message.answer(onboarding_text, reply_markup=mini_app_keyboard(bot_tenant_id))
 
 
 @router.message(Command("app"))
-async def cmd_app(message: Message, employee=None, is_manager: bool = False):
+async def cmd_app(message: Message, employee=None, is_manager: bool = False, bot_tenant_id: int | None = None):
     """Open the Telegram Mini App from the command menu or a typed /app."""
     if not employee and not is_manager:
         await message.answer("❌ Та системд бүртгэгдээгүй байна. Удирдлагадаа хандана уу.")
         return
-    keyboard = mini_app_keyboard()
+    keyboard = mini_app_keyboard(bot_tenant_id)
     if not keyboard:
         await message.answer("⚠️ Mini App холбоос тохируулагдаагүй байна. Админ MINI_APP_URL-г HTTPS хаягаар тохируулна уу.")
         return
@@ -308,17 +315,22 @@ async def cmd_stats(message: Message, employee=None):
 # ─── /leaderboard ────────────────────────────────────────────────────────────
 
 @router.message(Command("leaderboard"))
-async def cmd_leaderboard(message: Message):
-    ms = get_manager_settings()
+async def cmd_leaderboard(message: Message, bot_tenant_id: int | None = None):
+    ms = get_manager_settings(bot_tenant_id)
     if ms and not ms.gamification_enabled:
         await message.answer("🏆 Чансааг администратор түр хаасан байна.")
         return
 
     with get_session() as s:
-        rows = list(s.execute(
+        query = (
             select(Employee, Streak)
             .outerjoin(Streak, Streak.employee_id == Employee.id)
             .where(Employee.is_active == True)
+        )
+        if bot_tenant_id is not None:
+            query = query.where(Employee.organization_id == bot_tenant_id)
+        rows = list(s.execute(
+            query
             .order_by(Streak.current_streak.desc().nullslast())
             .limit(3)
         ).all())
@@ -391,12 +403,18 @@ async def cmd_help(message: Message, is_manager: bool = False):
 
 # ─── Команды руководителя ────────────────────────────────────────────────────
 
+CHECKIN_ONLY_PRIMARY = "ℹ️ Check-in асуулгын статистик танай байгууллагад идэвхгүй. Ажлын тайлан, даалгаврыг /dashboard, /app-аар харна уу."
+
+
 @router.message(Command("summary"))
-async def cmd_summary(message: Message, is_manager: bool = False):
+async def cmd_summary(message: Message, is_manager: bool = False, bot_tenant_id: int | None = None):
     if not is_manager:
         await message.answer("❌ Зөвхөн удирдлагад зориулсан команд.")
         return
-    data = get_yesterday_summary()
+    if not is_primary_tenant(bot_tenant_id):
+        await message.answer(CHECKIN_ONLY_PRIMARY)
+        return
+    data = get_yesterday_summary(bot_tenant_id)
     lines = [f"📊 <b>{data['date']}-ны хураангуй</b>\n"]
     for q_text, val in data["totals"].items():
         lines.append(f"• {q_text[:35]}: <b>{val}</b>")
@@ -406,9 +424,12 @@ async def cmd_summary(message: Message, is_manager: bool = False):
 
 
 @router.message(Command("week"))
-async def cmd_week(message: Message, is_manager: bool = False):
+async def cmd_week(message: Message, is_manager: bool = False, bot_tenant_id: int | None = None):
     if not is_manager:
         await message.answer("❌ Зөвхөн удирдлагад зориулсан команд.")
+        return
+    if not is_primary_tenant(bot_tenant_id):
+        await message.answer(CHECKIN_ONLY_PRIMARY)
         return
 
     with get_session() as s:
@@ -428,9 +449,12 @@ async def cmd_week(message: Message, is_manager: bool = False):
 
 
 @router.message(Command("blockers"))
-async def cmd_blockers(message: Message, is_manager: bool = False):
+async def cmd_blockers(message: Message, is_manager: bool = False, bot_tenant_id: int | None = None):
     if not is_manager:
         await message.answer("❌ Зөвхөн удирдлагад зориулсан команд.")
+        return
+    if not is_primary_tenant(bot_tenant_id):
+        await message.answer(CHECKIN_ONLY_PRIMARY)
         return
 
     with get_session() as s:

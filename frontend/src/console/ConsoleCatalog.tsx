@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { DialogScrollBody } from '../components/DialogScrollBody'
 import toast from 'react-hot-toast'
 import { Pencil, Plus } from 'lucide-react'
 import { Banner } from '@astryxdesign/core/Banner'
@@ -48,7 +49,7 @@ function PlanDialog({ plan, onClose }: { plan: ConsolePlan | null; onClose: () =
   }
   return <Dialog isOpen onOpenChange={(open) => { if (!open) onClose() }} width={620} purpose="form" maxHeight="90dvh">
     <DialogHeader title={plan ? `Багц засах · ${plan.code}` : 'Шинэ багц'} subtitle="Багц нь шинэ байгууллага, лиценз олгох үеийн анхдагч утга болно." onOpenChange={(open) => { if (!open) onClose() }} />
-    <VStack gap={4} padding={4}>
+    <DialogScrollBody label="Багцын талбарууд" actions={<><Button label="Болих" variant="ghost" onClick={onClose} /><Button label="Хадгалах" variant="primary" clickAction={submit} isDisabled={!draft.code || !draft.name} /></>}>
       <FormLayout>
         <TextInput label="Код" value={draft.code} onChange={(value) => set('code', value.toLowerCase())} isRequired isDisabled={Boolean(plan)} placeholder="professional" />
         <TextInput label="Нэр" value={draft.name} onChange={(value) => set('name', value)} isRequired />
@@ -60,8 +61,7 @@ function PlanDialog({ plan, onClose }: { plan: ConsolePlan | null; onClose: () =
         <CheckboxInput label="Идэвхтэй" value={draft.is_active} onChange={(value) => set('is_active', value)} />
       </FormLayout>
       <FeatureChecklist value={draft.features} onChange={(features) => set('features', features)} />
-      <HStack gap={2} hAlign="end"><Button label="Болих" variant="ghost" onClick={onClose} /><Button label="Хадгалах" variant="primary" clickAction={submit} isDisabled={!draft.code || !draft.name} /></HStack>
-    </VStack>
+    </DialogScrollBody>
   </Dialog>
 }
 
@@ -155,6 +155,7 @@ export function SystemPage() {
             <MetadataListItem label="Үндсэн хаягууд">{routing.root_hosts.join(', ') || '—'}</MetadataListItem>
             <MetadataListItem label="Subdomain домэйн">{routing.tenant_base_domain ?? 'Тохируулаагүй'}</MetadataListItem>
             <MetadataListItem label="Үл мэдэгдэх хаяг">{routing.unknown_host_policy}</MetadataListItem>
+            <MetadataListItem label="Өөрийн домэйн (Cloudflare)">{routing.custom_domains?.provider ? `CNAME → ${routing.custom_domains.cname_target} · ${routing.custom_domains.limit_per_tenant}/байгууллага` : 'Тохируулаагүй'}</MetadataListItem>
             <MetadataListItem label="Консолын хаяг">{routing.console_hosts.join(', ') || 'Аль ч үндсэн хаяг'}</MetadataListItem>
             <MetadataListItem label="Байгууллагууд">{Object.entries(tenants).map(([status, count]) => `${TENANT_STATUS[status as keyof typeof TENANT_STATUS]?.label ?? status}: ${count}`).join(' · ') || '—'}</MetadataListItem>
           </MetadataList>

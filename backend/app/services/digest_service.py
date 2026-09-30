@@ -22,9 +22,10 @@ log = logging.getLogger(__name__)
 _PRI = {1: "🔴", 2: "🟡", 3: "🟢"}
 
 
-def _policy():
+def _policy(organization_id: int | None = None):
+    """Notification policy of a tenant (explicit, bound, else primary)."""
     from app.bot.db import get_manager_settings
-    return load_policy(get_manager_settings())
+    return load_policy(get_manager_settings(organization_id))
 
 
 def _now_utc() -> datetime:
@@ -202,22 +203,16 @@ def build_manager_overview() -> str | None:
 
 # ─── Отправка ────────────────────────────────────────────────────────────────────
 
-async def _send(recipient_tg: str | None, text: str | None) -> None:
+async def _send(recipient_tg: str | None, text: str | None, organization_id: int | None = None) -> None:
     if not text or not recipient_tg:
         return
-    from app.bot.scheduler import _make_bot
-    bot = _make_bot()
-    try:
-        await bot.send_message(recipient_tg, text)
-    finally:
-        await bot.session.close()
+    from app.bot.scheduler import send_telegram
+    await send_telegram(recipient_tg, text, organization_id=organization_id)
 
 
 async def send_employee_morning_digest(emp_id: int) -> None:
-    if not _policy().enabled:
-        return
     emp = _get_employee(emp_id)
-    if not emp:
+    if not emp or not _policy(emp.organization_id).enabled:
         return
     message = build_employee_morning(emp_id, emp.timezone)
     from app.bot.db import get_schedule
@@ -229,14 +224,12 @@ async def send_employee_morning_digest(emp_id: int) -> None:
         _has_employee_task_on_day(emp_id, emp.timezone, local_day),
     ):
         return
-    await _send(emp.telegram_id, message)
+    await _send(emp.telegram_id, message, emp.organization_id)
 
 
 async def send_employee_evening_digest(emp_id: int) -> None:
-    if not _policy().enabled:
-        return
     emp = _get_employee(emp_id)
-    if not emp:
+    if not emp or not _policy(emp.organization_id).enabled:
         return
     message = build_employee_evening(emp_id, emp.timezone)
     from app.bot.db import get_schedule
@@ -252,17 +245,24 @@ async def send_employee_evening_digest(emp_id: int) -> None:
 
 
 async def send_manager_task_digest() -> None:
-    if not _policy().enabled:
-        return
-    from app.bot.db import get_manager_settings
-    ms = get_manager_settings()
-    local_day = _local_today("Asia/Ulaanbaatar")
-    if not _digest_allowed_on_day(
-        local_day,
-        _policy().work_weekdays,
-        _has_manager_task_on_day(local_day),
-    ):
-        return
-    message = build_manager_overview()
-    for recipient in manager_telegram_ids(ms):
-        await _send(recipient, message)
+    """One overview per tenant with a live bot, built from that tenant's tasks only."""
+    from app.bot.db import get_manager_settings, is_primary_tenant
+    from app.core.tenancy import tenant_scope
+    from app.services.telegram_bots import registry
+
+    for organization_id in sorted({bot.organization_id for bot in registry.bots_sync() if bot.delivers}):
+        try:
+            with tenant_scope(organization_id):
+                policy = _policy(organization_id)
+                if not policy.enabled:
+                    continue
+                ms = get_manager_settings(organization_id)
+                local_day = _local_today("Asia/Ulaanbaatar")
+                if not _digest_allowed_on_day(local_day, policy.work_weekdays, _has_manager_task_on_day(local_day)):
+                    continue
+                message = build_manager_overview()
+                recipients = manager_telegram_ids(ms, primary=is_primary_tenant(organization_id))
+            for recipient in recipients:
+                await _send(recipient, message, organization_id)
+        except Exception:  # noqa: BLE001 - one tenant must not block the others
+            log.exception("digest.manager_digest_failed tenant=%s", organization_id)

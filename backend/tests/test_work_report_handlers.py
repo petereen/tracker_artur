@@ -84,7 +84,7 @@ def test_monthly_digest_is_restricted_to_configured_manager_recipients(monkeypat
 
     message = SimpleNamespace(chat=SimpleNamespace(id="worker-1"), answer=answer)
     monkeypatch.setattr(work_report_handlers, "get_manager_settings", lambda: SimpleNamespace())
-    monkeypatch.setattr(work_report_handlers, "manager_telegram_ids", lambda _: ["manager-1"])
+    monkeypatch.setattr(work_report_handlers, "manager_telegram_ids", lambda _, **_kwargs: ["manager-1"])
 
     asyncio.run(cmd_monthly_digest(message))
 
@@ -104,7 +104,7 @@ def test_monthly_digest_sends_on_demand_only_to_configured_recipients(monkeypatc
 
     message = SimpleNamespace(chat=SimpleNamespace(id="manager-1"), answer=answer)
     monkeypatch.setattr(work_report_handlers, "get_manager_settings", lambda: SimpleNamespace())
-    monkeypatch.setattr(work_report_handlers, "manager_telegram_ids", lambda _: ["manager-1", "manager-2"])
+    monkeypatch.setattr(work_report_handlers, "manager_telegram_ids", lambda _, **_kwargs: ["manager-1", "manager-2"])
     monkeypatch.setattr(work_report_handlers, "try_send_monthly_report_digest", fake_send)
 
     asyncio.run(cmd_monthly_digest(message))

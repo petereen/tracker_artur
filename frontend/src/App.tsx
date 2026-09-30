@@ -41,6 +41,7 @@ const PermissionsSettingsPage = lazy(() => import('./pages/AdministrationSetting
 const AccessControlSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AccessControlSettingsPage })))
 const AutomationSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AutomationSettingsPage })))
 const ERPSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.ERPSettingsPage })))
+const DomainSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.DomainSettingsPage })))
 const AdminAccessSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.AdminAccessSettingsPage })))
 const LicenseSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.LicenseSettingsPage })))
 const OyunsAssistantSettingsPage = lazy(() => import('./pages/AdministrationSettingsPages').then((module) => ({ default: module.OyunsAssistantSettingsPage })))
@@ -191,6 +192,7 @@ function AuthenticatedApp() {
         <Route element={<RequireRoles allowedRoles={['admin']} />}>
           <Route path="administration/people/users" element={<AccessControlSettingsPage />} />
           <Route path="administration/organization/modules" element={<ERPSettingsPage />} />
+          <Route path="administration/organization/domains" element={<DomainSettingsPage />} />
           <Route path="administration/security/authentication" element={<AdminAccessSettingsPage />} />
           <Route path="administration/security/license" element={<LicenseSettingsPage />} />
         </Route>

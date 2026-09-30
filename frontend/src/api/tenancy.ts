@@ -31,6 +31,8 @@ export interface TenantContext {
   license: TenantLicenseStatus
   branding: TenantBranding
   seats?: SeatUsage
+  /** A handshaken tenant bot (or the platform bot for the primary tenant). */
+  telegram_bot_connected?: boolean
 }
 
 export interface LicenseRecord {
@@ -166,4 +168,117 @@ export function isFeatureEnabled(context: TenantContext | undefined, feature: Te
   // the API is the authority and answers 403 for unlicensed modules.
   if (!context) return true
   return context.features.some((item) => item.code === feature && item.enabled)
+}
+
+// ── Telegram bot (per tenant) ───────────────────────────────────────────────
+export const TELEGRAM_BOT_REQUIRED_HINT = 'Telegram бот холбогдоогүй байна. Тохиргоо → Интеграци → Telegram бот хэсэгт холбосны дараа идэвхжинэ.'
+
+export type TelegramBotStatus = 'not_connected' | 'pending' | 'active' | 'error' | 'disabled'
+
+export interface TenantTelegramBot {
+  connected: boolean
+  source: 'tenant' | 'platform' | null
+  status: TelegramBotStatus
+  bot_id?: number | null
+  bot_username?: string | null
+  bot_name?: string | null
+  handshake_url?: string | null
+  handshake_expires_at?: string | null
+  handshake_completed_at?: string | null
+  last_seen_at?: string | null
+  online?: boolean | null
+  last_error?: string | null
+  connected_at?: string | null
+}
+
+export function useTenantTelegramBot(enabled = true) {
+  return useQuery<TenantTelegramBot>({
+    queryKey: ['tenant', 'telegram-bot'],
+    queryFn: () => api.get('/v1/tenant/telegram-bot').then((response) => response.data),
+    enabled,
+    // While the handshake is open, follow the bot runner until it confirms.
+    refetchInterval: (query) => (query.state.data?.status === 'pending' ? 4000 : false),
+  })
+}
+
+function useTelegramBotMutation<TInput>(request: (input: TInput) => Promise<TenantTelegramBot>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (data) => {
+      queryClient.setQueryData(['tenant', 'telegram-bot'], data)
+      void queryClient.invalidateQueries({ queryKey: ['tenant', 'context'] })
+    },
+  })
+}
+
+export function useConnectTelegramBot() {
+  return useTelegramBotMutation((token: string) => api.put('/v1/tenant/telegram-bot', { token }).then((response) => response.data))
+}
+
+export function useRenewTelegramHandshake() {
+  return useTelegramBotMutation((_: void) => api.post('/v1/tenant/telegram-bot/handshake').then((response) => response.data))
+}
+
+export function useDisconnectTelegramBot() {
+  return useTelegramBotMutation((_: void) => api.delete('/v1/tenant/telegram-bot').then((response) => response.data))
+}
+
+// ── Custom domains (Cloudflare for SaaS) ─────────────────────────────────────
+export interface TenantDnsRecord { type: string; name: string; value: string; purpose: 'routing' | 'ownership' | 'certificate' }
+
+export interface TenantDomain {
+  id: number
+  hostname: string
+  provider: 'cloudflare' | 'manual'
+  status: 'pending' | 'active' | 'error'
+  ssl_status: string | null
+  verified_at: string | null
+  dns_records: TenantDnsRecord[]
+  last_error: string | null
+  last_checked_at: string | null
+  created_at: string
+  url: string
+}
+
+export interface TenantDomains {
+  available: boolean
+  cname_target: string | null
+  limit: number
+  platform_url: string
+  domains: TenantDomain[]
+}
+
+export function useTenantDomains(enabled = true) {
+  return useQuery<TenantDomains>({
+    queryKey: ['tenant', 'domains'],
+    queryFn: () => api.get('/v1/tenant/domains').then((response) => response.data),
+    enabled,
+    // Cloudflare activates hostnames within minutes of the DNS change.
+    refetchInterval: (query) => (query.state.data?.domains.some((domain) => domain.status === 'pending') ? 30_000 : false),
+  })
+}
+
+export function useAddTenantDomain() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (hostname: string) => api.post('/v1/tenant/domains', { hostname }).then((response) => response.data as TenantDomain),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tenant', 'domains'] }),
+  })
+}
+
+export function useRefreshTenantDomain() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.post(`/v1/tenant/domains/${id}/refresh`).then((response) => response.data as TenantDomain),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tenant', 'domains'] }),
+  })
+}
+
+export function useRemoveTenantDomain() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.delete(`/v1/tenant/domains/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tenant', 'domains'] }),
+  })
 }

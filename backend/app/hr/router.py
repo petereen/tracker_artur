@@ -38,6 +38,7 @@ from app.models.models import (
 )
 from app.services.attendance_service import sync_worktime_attendance
 from app.services.enterprise_events import record_change
+from app.services.telegram_bots import TelegramBotError, require_bot_for_telegram_id
 from app.services.user_notifications import create_notifications
 from app.services.tenant_service import identity_in_use
 from .schemas import (
@@ -327,6 +328,10 @@ async def _commit_worker(db: AsyncSession) -> None:
 async def create_hr_employee(data: EmployeeCreate, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
     if data.department_id: await _department(db, actor, data.department_id, active_only=True)
     if data.manager_id: await employee_in_scope(db, actor, data.manager_id)
+    try:
+        await require_bot_for_telegram_id(db, actor.organization_id, data.telegram_id)
+    except TelegramBotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from None
     await _ensure_identity_unique(db, actor, registration_number=data.registration_number, email=data.email, telegram_id=data.telegram_id)
     values = _registration_defaults(data.model_dump())
     employee = Employee(organization_id=actor.organization_id, name=data.name, telegram_id=data.telegram_id, first_name=data.first_name, last_name=data.last_name, timezone=data.timezone, phone_number=data.phone_number, email=data.email, birthday=values["birthday"], is_active=True)
@@ -463,7 +468,7 @@ async def deactivate_hr_employee(employee_id: int, permanent: bool = False, db: 
 @router.post("/employees/{employee_id}/invite")
 async def regenerate_employee_invite(employee_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles(*HR_ROLES))):
     employee = await employee_in_scope(db, actor, employee_id, write=True)
-    invite = await create_invite(db, actor, employee)
+    invite = await create_invite(db, actor, employee, required=True)
     await db.commit()
     return invite
 

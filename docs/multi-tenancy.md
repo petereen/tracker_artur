@@ -11,7 +11,7 @@ This turns the single-company deployment on the VPS (`erp.oyuns.mn`, Dokploy) in
 | Seat enforcement | App-level check that locks the tenant row, plus a database trigger as the backstop. |
 | Operators | A separate `platform_operators` table, a separate token signing key and audience, and optional console-host and CIDR pinning. |
 
-Code map: migration `backend/alembic/versions/b3c4d5e6f7a8_multi_tenant_saas.py` · `app/core/tenancy.py` (context, ORM guard, tenant directory, gates) · `app/core/tenant_middleware.py` · `app/services/licensing.py` · `app/services/tenant_service.py` (seats, activation, revocation) · `app/services/tenant_branding.py` · `app/routers/tenant.py` (`/v1/tenant`) · `app/routers/platform.py` (`/v1/platform`) · `app/models/platform.py` · `scripts/platform_admin.py` · `ops/sql/oyuns_app_role.sql`. Frontend: `src/api/tenancy.ts`, `src/components/TenantLicenseSettings.tsx`, `TenantBrandingSettings.tsx`, `TenantGate.tsx`, `src/theme/tenantBranding.ts`, `src/console/*` (the `/platform` console).
+Code map: migrations `backend/alembic/versions/b3c4d5e6f7a8_multi_tenant_saas.py` and `d4e8f1a2b3c9_tenant_telegram_bots_and_domains.py` (§8, §9) · `app/core/tenancy.py` (context, ORM guard, tenant directory, gates) · `app/core/tenant_middleware.py` · `app/services/licensing.py` · `app/services/tenant_service.py` (seats, activation, revocation) · `app/services/tenant_branding.py` · `app/routers/tenant.py` (`/v1/tenant`) · `app/routers/platform.py` (`/v1/platform`) · `app/models/platform.py` · `scripts/platform_admin.py` · `ops/sql/oyuns_app_role.sql`. Frontend: `src/api/tenancy.ts`, `src/components/TenantLicenseSettings.tsx`, `TenantBrandingSettings.tsx`, `TenantGate.tsx`, `src/theme/tenantBranding.ts`, `src/console/*` (the `/platform` console). Telegram bots and custom domains: `app/services/telegram_bots.py`, `app/bot/main.py` (multi-bot runner), `app/bot/handshake_handlers.py`, `app/services/custom_domains.py`, `src/components/TenantTelegramBotSettings.tsx`, `TenantDomainSettings.tsx`.
 
 ---
 
@@ -380,22 +380,27 @@ Pushing to `master` deploys to Dokploy. `start.sh` runs `alembic upgrade head` b
 | `LICENSE_PUBLIC_KEYS` | *(empty)* | `{"kid": "<PEM or base64>"}` accepted by verifiers (rotation). |
 | `LICENSE_GRACE_DAYS` | `7` | Access after expiry. |
 | `MIGRATION_DATABASE_URL` | *(empty)* | Owner URL for Alembic when the app runs as `oyuns_app`. |
+| `BOT_TOKEN` | *(empty)* | The platform bot. Only the primary tenant uses it, and only until it connects its own bot (§8). |
+| `TELEGRAM_BOT_USERNAME` | *(empty)* | @username of the platform bot for invite links; `getMe` is used when empty. |
+| `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ZONE_ID` | *(empty)* | Cloudflare for SaaS zone (custom hostnames). Empty disables self-service domains (§9). |
+| `CLOUDFLARE_CNAME_TARGET` | *(empty)* | Hostname customers CNAME to, e.g. `customers.oyunserp.com`. |
+| `CLOUDFLARE_SSL_METHOD` | `http` | Certificate validation for custom hostnames: `http` or `txt`. |
+| `CLOUDFLARE_CUSTOM_ORIGIN_SERVER` / `_SNI` | *(empty)* | Optional per-hostname origin override / origin SNI (plan dependent). |
+| `TENANT_CUSTOM_DOMAIN_LIMIT` | `3` | Custom domains per tenant. |
 
 ---
 
 ## 6. Limitations and phase 2
 
-- **The bot and scheduler run in the system context.**
-  - Telegram requests do check that the tenant is active and licensed (`actor_from_telegram_id`, Mini App auth). The Mini App also binds the tenant.
-  - Cron jobs (digests, reminders) iterate over all tenants.
-  - Binding tenants per bot turn and per job is required before `app.rls_strict = on`.
+- **Scheduler jobs run in the system context.** Every bot *turn* is bound to the bot's tenant (§8), and per-tenant jobs (manager digest, monthly digest) bind their tenant, but per-worker jobs still load in the system context and pass the tenant explicitly. Declaring them as system work is required before `app.rls_strict = on`.
 - **Legacy single-tenant features** (check-in surveys, `manager_settings`, `/dashboard`, the old admin panel) stay primary-only. Their tables now have tenant keys and RLS, so they can be opened to tenants once the bot and settings are made per-tenant.
 - **Identity is platform-wide.** One login e-mail, worker e-mail or Telegram account belongs to one tenant. Multi-workspace users would need a tenant picker and a membership table.
 - **Child tables without their own tenant key** (task comments, chat messages, …) are isolated through their parent row, which always carries one. Adding the key there too would let RLS cover them directly.
 - **Per-tenant export and purge.** Purge deletes by cascade from `organizations`, but a per-tenant export tool (JSON/SQL) still needs to be built before termination is offered to customers.
 - **AI provider keys.** Tenants configure their own OpenAI, Chimege and ElevenLabs keys in `organization.settings`. Without them, the platform env keys are the fallback. Decide per plan whether AI usage on platform keys is included.
 - **Unused AI response caches.** The response caches in `services/ai_gateway/cache.py` (exact and semantic) are not wired in today. They must be keyed by tenant before being enabled.
-- **Custom domains.** Verification is operator-attested (a TXT value is issued). Automatic DNS checks and on-demand TLS are follow-ups.
+- **Custom domains** are self-service through Cloudflare for SaaS (§9). Operator-added `manual` domains remain operator-attested.
+- **Telegram OIDC web login** uses one platform OIDC client, so the "Telegram-аар нэвтрэх" button on tenant custom domains still needs the redirect URI registered per host. The Mini App login works on every tenant bot.
 - **Billing.** Plans carry prices and cycles, but invoicing and payment collection are out of scope. Licences are the enforcement point that a billing system would drive.
 
 ## 7. Tests
@@ -407,3 +412,60 @@ Pushing to `master` deploys to Dokploy. `start.sh` runs `alembic upgrade head` b
   - cross-tenant host, token and login rejection, raw-SQL isolation, module gates;
   - branding validation, suspend and reactivate, upgrade and supersede, revoke, audit, terminate.
 - Frontend: `TenantLicenseSettings.test.tsx`, `theme/tenantBranding.test.ts`, `console/ConsoleApp.test.tsx`.
+- Telegram bots and domains: `tests/test_tenant_telegram_bots.py`, `test_bot_runner.py`, `test_custom_domains.py`, `test_manager_settings_tenant.py`, `test_profile_credentials.py`; frontend `TenantTelegramBotSettings.test.tsx`, `TenantDomainSettings.test.tsx`, `ManagerSettingsPage.test.tsx`, `AdministrationSettingsPages.test.tsx`.
+
+
+---
+
+## 8. Telegram bots per tenant
+
+Each tenant connects **its own BotFather bot**. One bot process serves all of them; data never crosses tenants.
+
+**Handshake** (Settings → Автоматжуулалт ба интеграци → «Telegram бот», tenant admin by granted role):
+
+1. The admin pastes the BotFather token. `PUT /v1/tenant/telegram-bot` calls `getMe`, rejects a bot that another tenant already owns (`bot_in_use`) or the platform bot on a non-primary tenant (`bot_reserved`), and stores the token encrypted (`secret_box`) as `tenant_telegram_bots.status = pending` with a one-time code (24 h).
+2. Within ~15 s the bot runner starts long-polling the new bot (`deleteWebhook`, commands, Mini App menu button).
+3. The admin opens `https://t.me/<bot>?start=oyuns-<code>`. The `/start` arrives **through that bot**, `handshake_handlers.py` checks the code, and the bot turns `active`. The connecting admin's worker profile gets this Telegram id if it had none. The settings page polls every 4 s and shows the result.
+
+`POST /v1/tenant/telegram-bot/handshake` issues a new link while pending; `DELETE` disconnects. A token revoked in BotFather makes the runner mark the bot `error` (the admin reconnects with a new token). The runner writes `last_seen_at` as a heartbeat ("Одоо ажиллаж байна").
+
+**The primary tenant** keeps the platform bot from `BOT_TOKEN` until it connects a bot of its own, so nothing changes for the existing company.
+
+**Runtime isolation**
+
+| Layer | What happens |
+|---|---|
+| Runner (`app/bot/main.py`) | `BotPool` reloads the registry every 15 s, polls each `pending`/`active` bot with its own `getUpdates` loop and feeds updates to one dispatcher with `bot_tenant_id`. FSM state is keyed by bot id. |
+| Middleware (`app/bot/middlewares.py`) | Resolves the tenant of the receiving bot; a worker of another tenant is unknown there (`foreign_tenant`); suspended/unlicensed tenants get a notice only. The whole handler runs in `tenant_scope(tenant)` (ORM guard + `app.tenant_id`). Username auto-linking and invite binding are limited to the bot's tenant. |
+| Services | `task_service` lookups (`get_task`, username resolution, manager dashboard) are scoped to the bound tenant; `actor_from_telegram_id` only resolves workers of the bound tenant. |
+| Sending | `_make_bot(organization_id)` / `send_telegram` pick the tenant's **active** bot; tenants without one get no Telegram message (the web notification still exists, outbox rows are marked `telegram_bot_not_connected`). The outbox routes by task → web notification → recipient. Links use the tenant's own address (custom domain > `<slug>.<base>` > shared host). |
+| Mini App | `verify_tenant_init_data` checks initData against every bot's token and returns the signing bot's tenant; on a tenant host only that tenant's bots are accepted. `/api/miniapp/*`, `/v1/auth/telegram`, profile Telegram link and HR invite binding use it. |
+| Jobs | Digest times, quiet hours and recipients come from each tenant's `manager_settings`. The manager digest and the monthly AI digest are built per tenant (`monthly_report_digests` is now unique per tenant and period). Check-in questionnaires stay primary-only (`legacy_workspace`). |
+
+**Manager settings are per tenant.** `manager_settings.organization_id` is now mapped; `/manager-settings` is no longer a primary-only route. Recipients are numeric Telegram ids only (usernames cannot be messaged by a bot); `GET /manager-settings/recipient-options` lists the tenant's workers with a connected Telegram account (name, position, department, role) for the picker. `MANAGER_TG_ID` is the primary tenant's fallback only.
+
+**Worker Telegram ids** can only be set once the tenant's bot is `active` (`telegram_bot_connected` in `/v1/tenant/context`; the API answers 409 `telegram_bot_not_connected`). HR invites (`/start invite_…`) point at the tenant's bot; without one the worker is created without an invite.
+
+## 9. Custom domains (Cloudflare for SaaS)
+
+```
+erp.customer.mn ──CNAME──▶ customers.oyunserp.com (proxied, SaaS zone)
+                ──Cloudflare edge: per-hostname DV certificate──▶ fallback origin = Dokploy VPS
+```
+
+**One-time platform setup**
+
+1. In the SaaS zone (e.g. `oyunserp.com`) enable **SSL/TLS → Custom Hostnames** (Cloudflare for SaaS).
+2. Create a proxied record for the origin, e.g. `app.oyunserp.com → <VPS IP>`, and set it as the **fallback origin**. Create the customer target `customers.oyunserp.com` (proxied CNAME to the fallback origin).
+3. Create an API token with *Zone → SSL and Certificates → Edit* for that zone. Set `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_CNAME_TARGET=customers.oyunserp.com` in Dokploy (backend, bot, worker).
+4. **Traefik/Dokploy must accept any Host.** Cloudflare forwards the customer's `Host` header. Add a catch-all router to the `frontend` service with the lowest priority, e.g. labels ``traefik.http.routers.oyuns-custom.rule=HostRegexp(`^.+$`)``, `…priority=1`, `…entrypoints=websecure`, `…tls=true` (default certificate), plus the matching `service`. Use SSL mode **Full** for the fallback origin (or set `CLOUDFLARE_CUSTOM_ORIGIN_SNI=app.oyunserp.com` where the plan supports it and use **Full (strict)**).
+5. Keep `TENANT_UNKNOWN_HOST_POLICY=shared` or `reject` as desired: only **verified** hostnames route to a tenant.
+
+**Tenant flow** (Settings → Байгууллага → «Өөрийн домэйн», tenant admin):
+
+1. `POST /v1/tenant/domains {hostname}` normalizes the host (IDN → punycode), refuses platform hosts, `<slug>.<base>` hosts and duplicates, and creates the Cloudflare custom hostname (`ssl.method = http`, DV, TLS ≥ 1.2).
+2. The page shows the DNS records to create: the **CNAME** to `CLOUDFLARE_CNAME_TARGET`, plus the ownership/certificate **TXT** records Cloudflare returns.
+3. The bot scheduler refreshes pending domains every 5 min (`refresh_pending_domains`); «Шалгах» refreshes on demand. When the hostname **and** its certificate are active, `verified_at` is set and the middleware routes the host to the tenant (cache 30 s). Certificate renewals keep an active domain routed; `blocked`/`moved`/deleted hostnames stop routing.
+4. `DELETE /v1/tenant/domains/{id}` removes the Cloudflare hostname too.
+
+Operators see provider, status and records in the console; «Шалгах» there refreshes Cloudflare domains, while manual domains keep the operator-attested verification. The console System page shows whether Cloudflare is configured.

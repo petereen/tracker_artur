@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HRWorkspacePage } from './HRWorkspacePage'
 
 const mocks = vi.hoisted(() => ({ updateWorker: vi.fn(), createWorker: vi.fn(), createDepartment: vi.fn(), deleteDepartment: vi.fn(), deleteForever: vi.fn(), downloadWorktime: vi.fn() }))
+const tenant = vi.hoisted(() => ({ botConnected: true }))
 
 const worker = {
   id: 5, name: 'Бат Дорж', first_name: 'Бат', last_name: 'Дорж', telegram_id: null, telegram_username: null, photo_url: null, timezone: 'Asia/Ulaanbaatar', is_active: true,
@@ -52,12 +53,16 @@ vi.mock('../api/enterprise', () => ({
   saveCompanyBlob: vi.fn(),
 }))
 vi.mock('../components/MonthlyPayrollProfileDrawer', () => ({ MonthlyPayrollProfileDrawer: () => null }))
+vi.mock('../api/tenancy', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/tenancy')>()),
+  useTenantContext: () => ({ data: { telegram_bot_connected: tenant.botConnected } }),
+}))
 
 const renderPage = () => render(<MemoryRouter><HRWorkspacePage /></MemoryRouter>)
 const choose = (label: string, option: string) => { fireEvent.click(screen.getByRole('button', { name: label })); fireEvent.click(screen.getByRole('option', { name: option })) }
 
 describe('HRWorkspacePage worker and department management', () => {
-  beforeEach(() => { Object.values(mocks).forEach((mock) => mock.mockReset().mockResolvedValue({})); vi.spyOn(window, 'confirm').mockReturnValue(true) })
+  beforeEach(() => { tenant.botConnected = true; Object.values(mocks).forEach((mock) => mock.mockReset().mockResolvedValue({})); vi.spyOn(window, 'confirm').mockReturnValue(true) })
 
   it('shows worktime stats in the person panel without the invite section', async () => {
     renderPage()
@@ -95,6 +100,21 @@ describe('HRWorkspacePage worker and department management', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /Урилгатай үүсгэх/ }))
     await waitFor(() => expect(mocks.createWorker).toHaveBeenCalled())
     expect(mocks.createWorker.mock.calls[0][0]).toMatchObject({ first_name: 'Сараа', registration_number: 'ТА01231524', birthday: '2001-03-15', gender: 'female', employment_status: 'active' })
+  })
+
+  it('keeps the Telegram ID field inactive until the tenant connects its bot', async () => {
+    tenant.botConnected = false
+    mocks.createWorker.mockResolvedValue({ invite: null })
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: /Ажилтан нэмэх/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Ажилтан нэмэх' })
+    const telegramId = within(dialog).getByLabelText('Telegram ID (заавал биш)') as HTMLInputElement
+    expect(telegramId.disabled).toBe(true)
+    expect(within(dialog).getByText(/Telegram бот холбогдоогүй/)).toBeTruthy()
+    fireEvent.change(within(dialog).getAllByRole('textbox')[1], { target: { value: 'Сараа' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Үүсгэх/ }))
+    await waitFor(() => expect(mocks.createWorker).toHaveBeenCalled())
+    expect(mocks.createWorker.mock.calls[0][0]).toMatchObject({ telegram_id: null })
   })
 
   it('blocks saving an invalid registration number', () => {

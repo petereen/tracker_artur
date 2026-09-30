@@ -25,10 +25,12 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { TenantFeatureCode } from '../api/tenancy'
+import { DialogScrollBody } from '../components/DialogScrollBody'
 import { RouterLink } from '../components/budget/shared'
 import { LICENSE_STATE, formatDate } from '../components/TenantLicenseSettings'
 import {
   type BillingCycle, type ConsoleLicense, type ConsoleTenant, type LicenseIssueInput, type TenantStatus,
+  type ConsoleDomain,
   consoleError, fetchLicenseToken, useAddDomain, useConsoleSession, useConsoleTenant, useConsoleTenants, useCreateTenant,
   useFeatureCatalog, useIssueLicense, useOperatorActivateLicense, usePlans, usePurgeTenant, useRemoveDomain, useRenewLicense,
   useRevokeLicense, useTenantLifecycle, useUpdateTenant, useVerifyDomain,
@@ -138,11 +140,10 @@ function IssueLicenseDialog({ tenant, renewing, onClose, onIssued }: { tenant: C
   }
   return <Dialog isOpen onOpenChange={(open) => { if (!open) onClose() }} width={640} purpose="form" maxHeight="90dvh">
     <DialogHeader title={renewing ? 'Лиценз сунгах / өргөтгөх' : 'Лиценз олгох'} subtitle={renewing ? 'Шинэ түлхүүр өмнөхийг орлоно; хугацаа өмнөх лицензийн дуусах огнооноос үргэлжилнэ.' : `${tenant.name} (${tenant.slug})`} onOpenChange={(open) => { if (!open) onClose() }} />
-    <VStack gap={4} padding={4}>
+    <DialogScrollBody label="Лицензийн талбарууд" actions={<><Button label="Болих" variant="ghost" onClick={onClose} />
+      <Button label={renewing ? 'Шинэ түлхүүр олгох' : 'Олгох'} variant="primary" clickAction={submit} isDisabled={!draft.seat_limit || (Boolean(draft.expires_at) && !DATE.test(draft.expires_at))} /></>}>
       <LicenseFields draft={draft} onChange={setDraft} />
-      <HStack gap={2} hAlign="end"><Button label="Болих" variant="ghost" onClick={onClose} />
-        <Button label={renewing ? 'Шинэ түлхүүр олгох' : 'Олгох'} variant="primary" clickAction={submit} isDisabled={!draft.seat_limit || (Boolean(draft.expires_at) && !DATE.test(draft.expires_at))} /></HStack>
-    </VStack>
+    </DialogScrollBody>
   </Dialog>
 }
 
@@ -182,7 +183,7 @@ function CreateTenantDialog({ onClose, onCreated }: { onClose: () => void; onCre
   }
   return <Dialog isOpen onOpenChange={(open) => { if (!open) onClose() }} width={720} purpose="form" maxHeight="92dvh">
     <DialogHeader title="Шинэ байгууллага" subtitle="Байгууллага, анхны админ, багц ба лицензийг нэг дор үүсгэнэ." onOpenChange={(open) => { if (!open) onClose() }} />
-    <VStack gap={4} padding={4}>
+    <DialogScrollBody label="Шинэ байгууллагын талбарууд" actions={<><Button label="Болих" variant="ghost" onClick={onClose} /><Button label="Үүсгэх" variant="primary" clickAction={submit} isDisabled={!valid} /></>}>
       <FormLayout>
         <TextInput label="Байгууллагын нэр" value={name} onChange={setName} isRequired />
         <TextInput label="Хаяг (subdomain)" value={slug} onChange={(value) => { setSlugEdited(true); setSlug(value.toLowerCase()) }} isRequired
@@ -196,8 +197,7 @@ function CreateTenantDialog({ onClose, onCreated }: { onClose: () => void; onCre
       <CheckboxInput label="Лицензийн түлхүүр одоо олгох" value={issueLicense} onChange={setIssueLicense} />
       {issueLicense ? <LicenseFields draft={license} onChange={setLicense} />
         : <FormLayout><NumberInput label="Хэрэглэгчийн хязгаар" value={license.seat_limit} onChange={(value) => setLicense({ ...license, seat_limit: value })} min={1} hasClear /></FormLayout>}
-      <HStack gap={2} hAlign="end"><Button label="Болих" variant="ghost" onClick={onClose} /><Button label="Үүсгэх" variant="primary" clickAction={submit} isDisabled={!valid} /></HStack>
-    </VStack>
+    </DialogScrollBody>
   </Dialog>
 }
 
@@ -370,7 +370,16 @@ function LicensesCard({ tenant, licenses, canEdit }: { tenant: ConsoleTenant; li
   </Card>
 }
 
-function DomainsCard({ tenantId, domains, hosts, canEdit }: { tenantId: number; domains: Array<{ id: number; hostname: string; verified_at: string | null; verification_token: string }>; hosts: string[]; canEdit: boolean }) {
+function domainHint(domain: ConsoleDomain) {
+  if (domain.provider === 'cloudflare') {
+    if (domain.last_error) return domain.last_error
+    const pending = domain.dns_records.filter((record) => record.purpose !== 'routing' || domain.status !== 'active')
+    return domain.status === 'active' ? 'Cloudflare · SSL идэвхтэй' : pending.map((record) => `${record.type} ${record.name} → ${record.value}`).join(' · ')
+  }
+  return `TXT _oyuns.${domain.hostname} = ${domain.verification_token}`
+}
+
+function DomainsCard({ tenantId, domains, hosts, canEdit }: { tenantId: number; domains: ConsoleDomain[]; hosts: string[]; canEdit: boolean }) {
   const add = useAddDomain()
   const verify = useVerifyDomain()
   const remove = useRemoveDomain()
@@ -387,10 +396,11 @@ function DomainsCard({ tenantId, domains, hosts, canEdit }: { tenantId: number; 
       <Heading level={3}>Домэйн</Heading>
       {hosts.map((host) => <HStack key={host} gap={2} vAlign="center"><Text>{host}</Text><Token size="sm" color="gray" label="Subdomain" /></HStack>)}
       {domains.map((domain) => <HStack key={domain.id} gap={2} vAlign="center" hAlign="between" wrap="wrap">
-        <VStack gap={0}><Text>{domain.hostname}</Text><Text type="supporting" maxLines={1}>{`TXT _oyuns.${domain.hostname} = ${domain.verification_token}`}</Text></VStack>
+        <VStack gap={0}><Text>{domain.hostname}</Text><Text type="supporting" maxLines={2}>{domainHint(domain)}</Text></VStack>
         <HStack gap={1} vAlign="center">
-          <Token size="sm" color={domain.verified_at ? 'green' : 'orange'} label={domain.verified_at ? 'Баталгаажсан' : 'Хүлээгдэж буй'} />
-          {canEdit && !domain.verified_at && <Button label="Баталгаажуулах" size="sm" variant="ghost" clickAction={async () => { try { await verify.mutateAsync({ tenantId, domainId: domain.id }) } catch (error) { toast.error(consoleError(error, 'Амжилтгүй')) } }} />}
+          {domain.provider === 'cloudflare' && <Token size="sm" color="blue" label="Cloudflare" />}
+          <Token size="sm" color={domain.verified_at ? 'green' : domain.status === 'error' ? 'red' : 'orange'} label={domain.verified_at ? 'Баталгаажсан' : domain.status === 'error' ? 'Алдаа' : 'Хүлээгдэж буй'} />
+          {canEdit && !domain.verified_at && <Button label={domain.provider === 'cloudflare' ? 'Шалгах' : 'Баталгаажуулах'} size="sm" variant="ghost" clickAction={async () => { try { await verify.mutateAsync({ tenantId, domainId: domain.id }) } catch (error) { toast.error(consoleError(error, 'Амжилтгүй')) } }} />}
           {canEdit && <IconButton label="Устгах" icon={<Trash2 size={14} />} size="sm" variant="ghost" onClick={() => { if (window.confirm(`${domain.hostname} домэйныг салгах уу?`)) remove.mutate({ tenantId, domainId: domain.id }) }} />}
         </HStack>
       </HStack>)}

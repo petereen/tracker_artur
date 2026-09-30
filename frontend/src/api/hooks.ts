@@ -62,7 +62,10 @@ export function useCreateEmployee() {
       qc.invalidateQueries({ queryKey: ['v1', 'workers'] })
       toast.success('Ажилтан нэмэгдлээ')
     },
-    onError: () => toast.error('Нэмэхэд алдаа гарлаа'),
+    onError: (error: any) => {
+      const detail = error?.response?.data?.detail
+      toast.error((typeof detail === 'object' ? detail?.message : detail) || 'Нэмэхэд алдаа гарлаа')
+    },
   })
 }
 export function useUpdateEmployee() {
@@ -252,6 +255,24 @@ export function useReorderCompanyPlan() {
 export function useManagerSettings() {
   return useQuery({ queryKey: ['manager-settings'], queryFn: () => api.get('/manager-settings').then((r) => r.data) })
 }
+export interface ManagerRecipientOption {
+  employee_id: number
+  name: string
+  telegram_id: string
+  telegram_username: string | null
+  job_title: string | null
+  department: string | null
+  role: string | null
+}
+
+/** Workers with a connected Telegram account, for the management recipient picker. */
+export function useManagerRecipientOptions() {
+  return useQuery<ManagerRecipientOption[]>({
+    queryKey: ['manager-settings', 'recipient-options'],
+    queryFn: () => api.get('/manager-settings/recipient-options').then((r) => r.data),
+  })
+}
+
 export function useUpdateManagerSettings() {
   const qc = useQueryClient()
   return useMutation({

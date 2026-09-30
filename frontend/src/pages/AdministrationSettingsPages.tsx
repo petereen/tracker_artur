@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, BookOpen, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, FileCheck2, KeyRound, LocateFixed, MapPin, MonitorUp, ScanLine, Settings2, ShieldAlert, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, Wifi, X } from 'lucide-react'
+import { ArrowLeft, Bot, BookOpen, Building2, Globe, Send, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, FileCheck2, KeyRound, LocateFixed, MapPin, MonitorUp, ScanLine, Settings2, ShieldAlert, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, Wifi, X } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useDeleteManagedAccount, useDeleteWorktimeQrKiosk, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useHolidaySettings, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useSetHolidayCountry, useUpdateBrandingSettings, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
@@ -20,6 +20,8 @@ import { WorktimeMethodsSettings } from '../components/WorktimeMethodsSettings'
 import { ReportPolicySettings } from '../components/ReportPolicySettings'
 import { SeatMeter, TenantLicenseSettings } from '../components/TenantLicenseSettings'
 import { TenantBrandingSettings } from '../components/TenantBrandingSettings'
+import { TenantDomainSettings } from '../components/TenantDomainSettings'
+import { TenantTelegramBotSettings } from '../components/TenantTelegramBotSettings'
 import { Banner } from '@astryxdesign/core/Banner'
 import { tenancyErrorMessage, useTenantSeats } from '../api/tenancy'
 
@@ -32,6 +34,7 @@ const SETTINGS_CATEGORIES: SettingsCategory[] = [
     tabs: [
       { to: '/administration/organization/profile', label: 'Профайл ба брэндинг', roles: ['admin', 'manager'] },
       { to: '/administration/organization/modules', label: 'Модуль ба боломжууд', roles: ['admin'] },
+      { to: '/administration/organization/domains', label: 'Өөрийн домэйн', roles: ['admin'] },
     ],
   },
   {
@@ -71,8 +74,9 @@ function firstAllowedSettingsPath(category: SettingsCategory, roles: string[]) {
   return category.tabs.find((tab) => !tab.roles || tab.roles.some((role) => roles.includes(role)))?.to || category.to
 }
 
-function SettingsSection({ title, icon: Icon, children, className = '', defaultOpen = false }: { title: string; icon: typeof Settings2; children: ReactNode; className?: string; defaultOpen?: boolean }) {
-  return <details className={`settings-section ${className}`} open={defaultOpen} data-slot="settings-section">
+/** Every admin setting is a collapsed section until the admin opens it. */
+function SettingsSection({ title, icon: Icon, children, className = '' }: { title: string; icon: typeof Settings2; children: ReactNode; className?: string }) {
+  return <details className={`settings-section ${className}`} data-slot="settings-section">
     <summary className="settings-section-summary" data-slot="settings-section-summary">
       <Icon className="settings-section-icon" size={18} />
       <span className="settings-section-title">{title}</span>
@@ -134,11 +138,15 @@ export function AdministrationHubPage() {
 }
 
 export function WorkspaceIdentitySettingsPage() {
-  return <SettingsPage categoryId="organization" activeTab="/administration/organization/profile" title="Байгууллагын профайл"><TenantBrandingSettings /><BrandingSettingsPanel /></SettingsPage>
+  return <SettingsPage categoryId="organization" activeTab="/administration/organization/profile" title="Байгууллагын профайл"><SettingsSection title="Байгууллагын брэндинг" icon={Building2} className="settings-embedded"><TenantBrandingSettings /></SettingsSection><BrandingSettingsPanel /></SettingsPage>
 }
 
 export function LicenseSettingsPage() {
-  return <SettingsPage categoryId="security" activeTab="/administration/security/license" title="Лиценз ба идэвхжүүлэлт"><TenantLicenseSettings /></SettingsPage>
+  return <SettingsPage categoryId="security" activeTab="/administration/security/license" title="Лиценз ба идэвхжүүлэлт"><SettingsSection title="Лиценз ба хэрэглэгчийн эрх" icon={ShieldCheck} className="settings-embedded"><TenantLicenseSettings /></SettingsSection></SettingsPage>
+}
+
+export function DomainSettingsPage() {
+  return <SettingsPage categoryId="organization" activeTab="/administration/organization/domains" title="Өөрийн домэйн"><SettingsSection title="Өөрийн домэйн (Cloudflare)" icon={Globe} className="settings-embedded"><TenantDomainSettings /></SettingsSection></SettingsPage>
 }
 
 /** Active users vs the license's seat ceiling, above user management. */
@@ -146,7 +154,7 @@ function SeatUsagePanel() {
   const seats = useTenantSeats()
   if (!seats.data) return null
   const full = seats.data.limit !== null && seats.data.used >= seats.data.limit
-  return <SettingsSection title={seats.data.limit === null ? `Хэрэглэгчийн эрх · ${seats.data.used}` : `Хэрэглэгчийн эрх · ${seats.data.used} / ${seats.data.limit}`} icon={ShieldCheck} className="settings-embedded" defaultOpen={full}>
+  return <SettingsSection title={seats.data.limit === null ? `Хэрэглэгчийн эрх · ${seats.data.used}` : `Хэрэглэгчийн эрх · ${seats.data.used} / ${seats.data.limit}`} icon={ShieldCheck} className="settings-embedded">
     <div className="settings-form-stack">
       <SeatMeter seats={seats.data} />
       {full && <Banner status="warning" collapsible={false} title="Лицензийн бүх хэрэглэгчийн эрх ашиглагдсан"
@@ -157,7 +165,7 @@ function SeatUsagePanel() {
 }
 
 export function ERPSettingsPage() {
-  return <SettingsPage categoryId="organization" activeTab="/administration/organization/modules" title="Модуль ба боломжууд"><ERPModuleSettings /></SettingsPage>
+  return <SettingsPage categoryId="organization" activeTab="/administration/organization/modules" title="Модуль ба боломжууд"><SettingsSection title="Модулиуд" icon={Settings2} className="settings-embedded"><ERPModuleSettings /></SettingsSection></SettingsPage>
 }
 
 function TaskAssignmentPermissionsPanel() {
@@ -176,7 +184,7 @@ export function CollaborationSettingsPage() {
     <SettingsSection title="Check-in асуултууд" icon={ClipboardList} className="settings-embedded"><QuestionsPage /></SettingsSection>
     <SettingsSection title="Ажилтны хуваарь" icon={CalendarDays} className="settings-embedded"><SchedulePage /></SettingsSection>
     <WorktimeHolidayPanel />
-    <SettingsSection title="Цаг бүртгэх арга" icon={ScanLine} className="settings-embedded" defaultOpen><WorktimeMethodsSettings /></SettingsSection>
+    <SettingsSection title="Цаг бүртгэх арга" icon={ScanLine} className="settings-embedded"><WorktimeMethodsSettings /></SettingsSection>
     <WorktimeQrKioskPanel />
     <WorktimeGeofencePanel />
   </SettingsPage>
@@ -184,7 +192,7 @@ export function CollaborationSettingsPage() {
 
 export function ReportSettingsPage() {
   return <SettingsPage categoryId="workflows" activeTab="/administration/workflows/reports" title="Тайлангийн тохиргоо">
-    <SettingsSection title="Тайлангийн давтамж ба хэлтсийн тайлан" icon={FileCheck2} className="settings-embedded" defaultOpen><ReportPolicySettings /></SettingsSection>
+    <SettingsSection title="Тайлангийн давтамж ба хэлтсийн тайлан" icon={FileCheck2} className="settings-embedded"><ReportPolicySettings /></SettingsSection>
   </SettingsPage>
 }
 
@@ -339,6 +347,7 @@ export function AccessControlSettingsPage() {
 }
 
 export function AutomationSettingsPage() {
+  const isAdmin = useAuthStore((state) => (state.actor?.account_roles ?? state.actor?.roles ?? EMPTY_ROLES).includes('admin'))
   const calendar = useGoogleCalendarConnect()
   const calendarStatus = useGoogleCalendarStatus()
   const syncMode = useGoogleCalendarSyncMode()
@@ -352,6 +361,7 @@ export function AutomationSettingsPage() {
   }
   return <SettingsPage categoryId="integrations" activeTab="/administration/integrations/overview" title="Интеграци ба төхөөрөмж">
     <SettingsSection title="Google Calendar" icon={CalendarClock} className="integration-grid settings-integrations"><article className="integration-panel"><div><strong>Google Calendar</strong><p>{calendarStatus.data?.status === 'active' ? `Холбогдсон · webhook ${calendarStatus.data.watch_active ? 'идэвхтэй' : 'шинэчлэгдэж байна'}${calendarStatus.data.last_error ? ` · ${calendarStatus.data.last_error}` : ''}` : 'Холбогдоогүй'}</p>{calendarStatus.data?.status === 'active' && <select aria-label="Calendar sync mode" value={calendarStatus.data.sync_mode} onChange={(event) => syncMode.mutate(event.target.value as 'outbound' | 'bidirectional')}><option value="outbound">Зөвхөн OYUNS → Google</option><option value="bidirectional">Хоёр чиглэлтэй хугацааны sync</option></select>}</div>{calendarStatus.data?.status === 'active' ? <button className="secondary-action" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>Салгах</button> : <button className="secondary-action" onClick={connectCalendar} disabled={calendar.isPending}>Холбох</button>}</article></SettingsSection>
+    {isAdmin && <SettingsSection title="Telegram бот" icon={Send} className="settings-embedded"><TenantTelegramBotSettings /></SettingsSection>}
     <SettingsSection title="Мэдэгдэл ба Telegram" icon={UserRoundCog} className="settings-embedded"><ManagerSettingsPage /></SettingsSection>
   </SettingsPage>
 }
@@ -366,7 +376,7 @@ export function OyunsAssistantSettingsPage() {
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const canManageAgent = roles.includes('admin')
   return <SettingsPage categoryId="ai" activeTab="/administration/ai/knowledge" title="OYUNS AI ба сургалт">
-    {canManageAgent && <SettingsSection title="AI модель ба API түлхүүр" icon={KeyRound} className="settings-embedded" defaultOpen><AiAgentSettings /></SettingsSection>}
+    {canManageAgent && <SettingsSection title="AI модель ба API түлхүүр" icon={KeyRound} className="settings-embedded"><AiAgentSettings /></SettingsSection>}
     {canManageAgent && <SettingsSection title="AI туслахын хандах эрх" icon={ShieldCheck} className="settings-embedded"><AiAccessSettings /></SettingsSection>}
     <SettingsSection title="Компанийн өгөгдлийн сан" icon={BookOpen} className="settings-embedded"><KnowledgePage /></SettingsSection>
     {canManageAgent && <SettingsSection title="OYUNS сургалт" icon={Code2} className="settings-embedded"><DeveloperPage /></SettingsSection>}

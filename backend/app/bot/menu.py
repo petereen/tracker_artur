@@ -1,5 +1,6 @@
 """Ролевое меню команд бота — setup_bot_menus вызывается при старте."""
 import logging
+from typing import Iterable
 
 from aiogram import Bot
 from aiogram.types import (
@@ -62,12 +63,12 @@ MANAGER_COMMANDS: list[BotCommand] = [
 
 
 async def setup_bot_menus(
-    bot: Bot, manager_tg: str | int | None = None, mini_app_url: str = ""
+    bot: Bot, manager_tg: str | int | Iterable[str | int] | None = None, mini_app_url: str = ""
 ) -> None:
     """Регистрирует команды в Telegram.
 
     - Default scope (все пользователи) → EMPLOYEE_COMMANDS.
-    - Если manager_tg задан → для этого чата дополнительно → MANAGER_COMMANDS.
+    - Для каждого чата руководителя (manager_tg: один id или список) → MANAGER_COMMANDS.
     """
     try:
         await bot.set_my_commands(EMPLOYEE_COMMANDS, scope=BotCommandScopeDefault())
@@ -75,9 +76,15 @@ async def setup_bot_menus(
     except Exception:
         log.exception("Не удалось установить меню по умолчанию")
 
-    if manager_tg is not None:
+    if manager_tg is None:
+        manager_ids: list[str | int] = []
+    elif isinstance(manager_tg, (str, int)):
+        manager_ids = [manager_tg]
+    else:
+        manager_ids = list(manager_tg)
+    for manager_id in manager_ids:
         try:
-            chat_id = int(manager_tg)
+            chat_id = int(manager_id)
             await bot.set_my_commands(
                 MANAGER_COMMANDS,
                 scope=BotCommandScopeChat(chat_id=chat_id),
@@ -88,7 +95,7 @@ async def setup_bot_menus(
                 len(MANAGER_COMMANDS),
             )
         except Exception:
-            log.exception("Не удалось установить меню руководителя (manager_tg=%r)", manager_tg)
+            log.exception("Не удалось установить меню руководителя (manager_tg=%r)", manager_id)
 
     # The persistent Telegram menu button gives every registered employee a
     # one-tap entry to /tg. Telegram accepts Web Apps only over HTTPS.

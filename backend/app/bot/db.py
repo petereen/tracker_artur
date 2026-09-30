@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_account_password
+from app.core.tenancy import current_tenant_id, system_scope
 from app.services.tenant_service import SEAT_STATUSES, ensure_seat_available_sync
 from app.models.models import (
     Answer, Checkin, CheckinAnswer, CheckinQuestion, CheckinTemplate, Employee, EmployeeQuestion,
-    ManagerSettings, Question, Schedule, Streak, SurveySession, UserAccount, WorkerInvite, EmployeeDetails, RoleAssignment,
+    ManagerSettings, Organization, Question, Schedule, Streak, SurveySession, UserAccount, WorkerInvite, EmployeeDetails, RoleAssignment,
 )
 
 engine = create_engine(settings.SYNC_DATABASE_URL)
@@ -22,21 +23,47 @@ def get_session():
     return Session(engine)
 
 
+_primary_tenant_id: int | None = None
+
+
+def primary_tenant_id() -> int | None:
+    """Id of the primary tenant (cached for the process lifetime)."""
+    global _primary_tenant_id
+    if _primary_tenant_id is None:
+        with system_scope(), get_session() as s:
+            _primary_tenant_id = s.execute(select(Organization.id).where(Organization.is_primary.is_(True))).scalar_one_or_none()
+            if _primary_tenant_id is None:
+                _primary_tenant_id = s.execute(select(Organization.id).order_by(Organization.id).limit(1)).scalar_one_or_none()
+    return _primary_tenant_id
+
+
+def is_primary_tenant(organization_id: int | None) -> bool:
+    return organization_id is None or organization_id == primary_tenant_id()
+
+
 def get_employee_by_tg(tg_id: str) -> Employee | None:
-    with get_session() as s:
+    # Telegram ids are unique platform-wide: the lookup runs in the system
+    # context and the caller checks the tenant of the receiving bot.
+    with system_scope(), get_session() as s:
         return s.execute(select(Employee).where(Employee.telegram_id == tg_id)).scalar_one_or_none()
 
 
-def bind_employee_invite(raw_token: str, user) -> tuple[Employee | None, str | None]:
-    """Consume a one-time HR invite from the trusted bot update identity."""
+def bind_employee_invite(raw_token: str, user, organization_id: int | None = None) -> tuple[Employee | None, str | None]:
+    """Consume a one-time HR invite from the trusted bot update identity.
+
+    ``organization_id`` is the tenant of the bot that received the invite:
+    another tenant's invite link does not bind through it.
+    """
     telegram_id = str(getattr(user, "id", ""))
     if not telegram_id.isdigit():
         return None, "invalid_identity"
     now = datetime.now(timezone.utc)
     token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-    with get_session() as s:
+    # The token may belong to any tenant: look it up in the system context and
+    # compare tenants explicitly (the bot turn's ORM guard would raise instead).
+    with system_scope(), get_session() as s:
         invite = s.execute(select(WorkerInvite).where(WorkerInvite.token_hash == token_hash).with_for_update()).scalar_one_or_none()
-        if not invite:
+        if not invite or (organization_id is not None and invite.organization_id != organization_id):
             return None, "not_found"
         if invite.used_at:
             return None, "used"
@@ -83,16 +110,21 @@ def bind_employee_invite(raw_token: str, user) -> tuple[Employee | None, str | N
         return employee, None
 
 
-def link_employee_telegram(username: str | None, tg_id: str) -> Employee | None:
+def link_employee_telegram(username: str | None, tg_id: str, organization_id: int | None = None) -> Employee | None:
     """Фолбэк: ищет сотрудника по telegram_username и автопроставляет числовой
-    telegram_id при первом контакте (чтобы заводить сотрудников по @username)."""
+    telegram_id при первом контакте (чтобы заводить сотрудников по @username).
+
+    Usernames are only unique inside a tenant: the search is limited to the
+    tenant of the bot that received the message."""
     uname = (username or "").lstrip("@")
     if not uname:
         return None
     with get_session() as s:
-        emp = s.execute(
-            select(Employee).where(Employee.telegram_username.ilike(uname))
-        ).scalar_one_or_none()
+        query = select(Employee).where(Employee.telegram_username.ilike(uname))
+        if organization_id is not None:
+            query = query.where(Employee.organization_id == organization_id)
+        emp = s.execute(query.limit(2)).scalars().all()
+        emp = emp[0] if len(emp) == 1 else None
         if emp and emp.telegram_id != tg_id:
             emp.telegram_id = tg_id
             s.commit()
@@ -100,9 +132,15 @@ def link_employee_telegram(username: str | None, tg_id: str) -> Employee | None:
         return emp
 
 
-def get_all_active_employees() -> list[Employee]:
+def get_all_active_employees(organization_id: int | None = None) -> list[Employee]:
+    """Active workers of one tenant (the bound one), or of all tenants in the
+    system context (scheduler)."""
+    organization_id = organization_id or current_tenant_id()
     with get_session() as s:
-        return list(s.execute(select(Employee).where(Employee.is_active == True)).scalars())
+        query = select(Employee).where(Employee.is_active == True)
+        if organization_id is not None:
+            query = query.where(Employee.organization_id == organization_id)
+        return list(s.execute(query).scalars())
 
 
 def get_questions(employee_id: int | None = None) -> list[Question]:
@@ -111,6 +149,14 @@ def get_questions(employee_id: int | None = None) -> list[Question]:
 
 
 def _get_questions_in_session(s: Session, employee_id: int | None = None) -> list[Question]:
+    # Check-in questions predate tenancy and belong to the primary tenant
+    # (legacy_workspace): other tenants' workers get no questionnaire.
+    if employee_id is not None:
+        organization_id = s.execute(select(Employee.organization_id).where(Employee.id == employee_id)).scalar_one_or_none()
+        if not is_primary_tenant(organization_id):
+            return []
+    elif not is_primary_tenant(current_tenant_id()):
+        return []
     query = select(Question).order_by(Question.sort_order, Question.id)
     if employee_id is not None:
         assigned = select(EmployeeQuestion.question_id).where(EmployeeQuestion.employee_id == employee_id)
@@ -123,9 +169,13 @@ def get_schedule(employee_id: int) -> Schedule | None:
         return s.execute(select(Schedule).where(Schedule.employee_id == employee_id)).scalar_one_or_none()
 
 
-def get_manager_settings() -> ManagerSettings | None:
+def get_manager_settings(organization_id: int | None = None) -> ManagerSettings | None:
+    """Settings row of a tenant: explicit, else the bound tenant, else primary."""
+    organization_id = organization_id or current_tenant_id() or primary_tenant_id()
     with get_session() as s:
-        return s.execute(select(ManagerSettings)).scalar_one_or_none()
+        return s.execute(
+            select(ManagerSettings).where(ManagerSettings.organization_id == organization_id).order_by(ManagerSettings.id).limit(1)
+        ).scalar_one_or_none()
 
 
 def get_streak(employee_id: int) -> Streak | None:
@@ -289,12 +339,15 @@ def mark_employee_onboarded(employee_id: int):
             s.commit()
 
 
-def get_yesterday_summary() -> dict:
+def get_yesterday_summary(organization_id: int | None = None) -> dict:
     from datetime import timedelta
     yesterday = date.today() - timedelta(days=1)
+    organization_id = organization_id or current_tenant_id() or primary_tenant_id()
     with get_session() as s:
         sessions = list(s.execute(
-            select(SurveySession).where(SurveySession.date == yesterday)
+            select(SurveySession)
+            .join(Employee, Employee.id == SurveySession.employee_id)
+            .where(SurveySession.date == yesterday, Employee.organization_id == organization_id)
         ).scalars())
         questions = list(s.execute(select(Question).order_by(Question.sort_order)).scalars())
         q_map = {q.id: q for q in questions}

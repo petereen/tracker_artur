@@ -1,4 +1,10 @@
-"""Валидация Telegram Mini App initData (подпись HMAC по BOT_TOKEN)."""
+"""Валидация Telegram Mini App initData (подпись HMAC по токену бота).
+
+Each tenant has its own bot, so initData is signed with *that* bot's token.
+``verify_tenant_init_data`` tries the known bots and also reports which
+tenant the signing bot belongs to; on a tenant host only that tenant's bots
+are tried.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -14,9 +20,8 @@ from app.core.config import settings
 MAX_AUTH_AGE_SEC = 24 * 3600
 
 
-def verify_init_data(init_data: str) -> Optional[dict]:
-    """Проверяет подпись initData. Возвращает dict telegram-пользователя или None."""
-    if not init_data or not settings.BOT_TOKEN:
+def _verify_with_token(init_data: str, bot_token: str) -> Optional[dict]:
+    if not init_data or not bot_token:
         return None
     try:
         pairs = dict(parse_qsl(init_data, keep_blank_values=True))
@@ -28,7 +33,7 @@ def verify_init_data(init_data: str) -> Optional[dict]:
         return None
 
     data_check_string = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
-    secret_key = hmac.new(b"WebAppData", settings.BOT_TOKEN.encode(), hashlib.sha256).digest()
+    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     calc_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(calc_hash, received_hash):
         return None
@@ -45,3 +50,31 @@ def verify_init_data(init_data: str) -> Optional[dict]:
         return json.loads(user_raw)
     except Exception:
         return None
+
+
+def verify_init_data(init_data: str) -> Optional[dict]:
+    """Проверяет подпись initData платформенного бота (BOT_TOKEN)."""
+    return _verify_with_token(init_data, settings.BOT_TOKEN)
+
+
+async def verify_tenant_init_data(init_data: str) -> tuple[Optional[dict], Optional[int]]:
+    """Verify initData against every tenant bot → ``(telegram user, tenant id)``."""
+    from app.core.tenancy import current_tenant_id
+    from app.services.telegram_bots import registry
+
+    if not init_data:
+        return None, None
+    host_tenant = current_tenant_id()
+    try:
+        bots = await registry.bots()
+    except Exception:  # pragma: no cover - registry outage falls back to the platform bot
+        bots = []
+    for bot in bots:
+        if host_tenant is not None and bot.organization_id != host_tenant:
+            continue
+        user = _verify_with_token(init_data, bot.token)
+        if user is not None:
+            return user, bot.organization_id
+    if not bots:
+        return verify_init_data(init_data), None
+    return None, None

@@ -5,7 +5,7 @@ import { KeyRound, MoreVertical, Pencil, Trash2, UserCheck, UserRoundX } from 'l
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 import { useEmployees, useCreateEmployee, useDeleteEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
 import { useCreateManagedAccount, useDeleteManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
-import { tenancyErrorMessage } from '../api/tenancy'
+import { TELEGRAM_BOT_REQUIRED_HINT, tenancyErrorMessage, useTenantContext } from '../api/tenancy'
 import { ReportDetailModal } from '../components/ReportDetailModal'
 import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
 
@@ -50,6 +50,9 @@ function localDate(value = new Date()) {
 }
 
 export function EmployeesPage() {
+  const tenant = useTenantContext()
+  // Telegram IDs only make sense once the tenant's own bot is connected.
+  const botConnected = tenant.data?.telegram_bot_connected !== false
   const [includeArchived, setIncludeArchived] = useState(false)
   const { data: employees = [] } = useEmployees(includeArchived)
   const create = useCreateEmployee()
@@ -116,7 +119,7 @@ export function EmployeesPage() {
     } else {
       await create.mutateAsync({
         name: form.name,
-        telegram_id: form.telegram_id,
+        telegram_id: botConnected ? form.telegram_id.trim() || null : null,
         telegram_username: form.telegram_username,
         timezone: form.timezone,
       })
@@ -238,7 +241,8 @@ export function EmployeesPage() {
                 <div className="bg-surface2 border border-border rounded-lg px-3 py-2 text-muted font-mono text-[13px]">{form.telegram_id}</div>
               </div>
             ) : (
-              <Input label="Telegram ID" value={form.telegram_id} onChange={(v) => setForm((f) => ({ ...f, telegram_id: v }))} placeholder="123456789" fullWidth />
+              <Input label="Telegram ID" value={botConnected ? form.telegram_id : ''} onChange={(v) => setForm((f) => ({ ...f, telegram_id: v }))} placeholder="123456789" fullWidth
+                disabled={!botConnected} hint={botConnected ? undefined : TELEGRAM_BOT_REQUIRED_HINT} />
             )}
             <Input label="Telegram username" value={form.telegram_username} onChange={(v) => setForm((f) => ({ ...f, telegram_username: v }))} placeholder="@username" fullWidth />
             <Select label="Цагийн бүс" value={form.timezone} onChange={(v) => setForm((f) => ({ ...f, timezone: v }))} options={TZ_OPTIONS} fullWidth />

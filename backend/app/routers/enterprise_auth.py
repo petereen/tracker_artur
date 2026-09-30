@@ -19,12 +19,13 @@ from app.core.database import get_db
 from app.core.enterprise_deps import WORKSPACE_MODE_ROLES, ActorContext, get_account_actor, get_actor, require_roles
 from app.core.security import (
     create_enterprise_access_token,
+    decode_token,
     hash_account_password,
     hash_refresh_token,
     new_refresh_token,
     verify_account_password,
 )
-from app.core.telegram_auth import verify_init_data
+from app.core.telegram_auth import verify_tenant_init_data
 from app.models.models import Department, Employee, EmployeeDetails, JobQueue, Organization, PasswordResetToken, RefreshSession, RoleAssignment, TelegramOAuthState, UserAccount
 from app.core.roles import SYSTEM_ROLES
 from app.services.email_service import email_is_configured
@@ -279,19 +280,41 @@ def _is_native_origin(origin: str | None) -> bool:
     return bool(origin and origin in _native_origins())
 
 
-def _access(account: UserAccount, refresh_token: str | None = None) -> AccessTokenOut:
+def _access(account: UserAccount, refresh_token: str | None = None, auth_method: str | None = None) -> AccessTokenOut:
     return AccessTokenOut(
-        access_token=create_enterprise_access_token(account.id, account.organization_id),
+        access_token=create_enterprise_access_token(account.id, account.organization_id, auth_method),
         expires_in=settings.ENTERPRISE_ACCESS_TOKEN_MINUTES * 60,
         refresh_token=refresh_token,
     )
 
 
-def _complete_session(response: Response, account: UserAccount, token: str, expires_at: datetime, origin: str | None):
+def _complete_session(response: Response, account: UserAccount, token: str, expires_at: datetime, origin: str | None, auth_method: str | None = None):
     if _is_native_origin(origin):
-        return _access(account, refresh_token=token)
+        return _access(account, refresh_token=token, auth_method=auth_method)
     _set_refresh_cookie(response, token, expires_at)
-    return _access(account)
+    return _access(account, auth_method=auth_method)
+
+
+async def _current_session(db: AsyncSession, account_id: int, authorization: str | None, refresh_cookie: str | None) -> tuple[str | None, RefreshSession | None]:
+    """Sign-in method of the calling session and its refresh row (web cookie).
+
+    The access token names the method (``amr``); tokens issued before that
+    claim existed fall back to the refresh session behind the cookie.
+    """
+    method = None
+    if authorization and authorization.lower().startswith("bearer "):
+        payload = decode_token(authorization[7:].strip()) or {}
+        method = payload.get("amr")
+    session = None
+    if refresh_cookie:
+        session = await db.scalar(select(RefreshSession).where(
+            RefreshSession.token_hash == hash_refresh_token(refresh_cookie),
+            RefreshSession.account_id == account_id,
+            RefreshSession.revoked_at.is_(None),
+        ))
+        if session is not None and not method:
+            method = session.auth_method
+    return method, session
 
 
 async def _issue_action_token(db: AsyncSession, account: UserAccount, purpose: str) -> str:
@@ -392,7 +415,7 @@ async def login(
         )
     )
     await db.commit()
-    return _complete_session(response, account, refresh_token, refresh_expires_at, origin)
+    return _complete_session(response, account, refresh_token, refresh_expires_at, origin, auth_method="password")
 
 
 async def _telegram_session(
@@ -404,8 +427,12 @@ async def _telegram_session(
     origin: str | None,
     oidc_subject: str | None = None,
     profile: dict | None = None,
+    organization_id: int | None = None,
 ):
-    """Link a registered Telegram identity and issue the one-year session."""
+    """Link a registered Telegram identity and issue the one-year session.
+
+    ``organization_id`` is the tenant of the bot that signed a Mini App login:
+    only that tenant's workers can sign in through it."""
     telegram_user = dict(profile or {})
     telegram_user["id"] = telegram_id
     if username and not telegram_user.get("username"):
@@ -422,9 +449,14 @@ async def _telegram_session(
 
     if employee is None:
         employee = await db.scalar(select(Employee).where(Employee.telegram_id == telegram_id))
+    if employee is not None and organization_id is not None and employee.organization_id != organization_id:
+        raise HTTPException(status_code=403, detail="Telegram user is not registered as an active employee")
     if employee is None and telegram_user.get("username"):
         username = str(telegram_user["username"]).lstrip("@")
-        employee = await db.scalar(select(Employee).where(Employee.telegram_username.ilike(username)))
+        username_query = select(Employee).where(Employee.telegram_username.ilike(username))
+        if organization_id is not None:
+            username_query = username_query.where(Employee.organization_id == organization_id)
+        employee = (await db.execute(username_query.order_by(Employee.id).limit(1))).scalar_one_or_none()
         if employee and employee.telegram_id != telegram_id:
             claimed_by = await db.scalar(select(Employee.id).where(Employee.telegram_id == telegram_id, Employee.id != employee.id))
             if claimed_by:
@@ -490,7 +522,7 @@ async def _telegram_session(
         expires_at=refresh_expires_at,
     ))
     await db.commit()
-    return _complete_session(response, account, refresh_token, refresh_expires_at, origin)
+    return _complete_session(response, account, refresh_token, refresh_expires_at, origin, auth_method="telegram")
 
 
 @router.get("/capabilities", response_model=AuthCapabilities)
@@ -729,11 +761,11 @@ async def telegram_login(
     origin: str | None = Header(default=None),
 ):
     """Exchange verified Telegram Mini App data for a durable web session."""
-    telegram_user = verify_init_data(x_telegram_init_data or "")
+    telegram_user, bot_tenant = await verify_tenant_init_data(x_telegram_init_data or "")
     telegram_id = str((telegram_user or {}).get("id") or "")
     if not telegram_user or not telegram_id.isdigit():
         raise HTTPException(status_code=401, detail="Invalid Telegram login")
-    return await _telegram_session(response, db, telegram_id, telegram_user.get("username"), "telegram-mini-app", origin, profile=telegram_user)
+    return await _telegram_session(response, db, telegram_id, telegram_user.get("username"), "telegram-mini-app", origin, profile=telegram_user, organization_id=bot_tenant)
 
 
 @router.post("/refresh", response_model=AccessTokenOut, response_model_exclude_none=True)
@@ -778,7 +810,7 @@ async def refresh(
         expires_at=expires_at,
     ))
     await db.commit()
-    return _complete_session(response, account, token, expires_at, origin)
+    return _complete_session(response, account, token, expires_at, origin, auth_method=session.auth_method)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -811,7 +843,7 @@ async def me(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(g
     )
 
 
-async def _profile_out(db: AsyncSession, actor: ActorContext, account: UserAccount, employee: Employee | None, password_setup_required: bool) -> dict:
+async def _profile_out(db: AsyncSession, actor: ActorContext, account: UserAccount, employee: Employee | None, password_setup_required: bool, telegram_session: bool = False) -> dict:
     details = await db.scalar(select(EmployeeDetails).where(EmployeeDetails.employee_id == employee.id)) if employee else None
     department = await db.scalar(select(Department).where(Department.id == details.department_id, Department.organization_id == actor.organization_id)) if details and details.department_id else None
     manager_id = (details.manager_id if details else None) or (employee.manager_id if employee else None)
@@ -836,17 +868,27 @@ async def _profile_out(db: AsyncSession, actor: ActorContext, account: UserAccou
         "start_date": details.start_date if details else None,
         "employment_type": details.employment_type if details else None,
         "telegram_connected": bool(employee and employee.telegram_id),
+        # The account never chose its own password (created by Telegram/invite).
         "requires_password_setup": password_setup_required,
+        # Signed in through Telegram: username and password can be changed
+        # without the current password (Telegram already proved the identity).
+        "telegram_session": telegram_session,
+        "credentials_require_current_password": not (password_setup_required or telegram_session),
         "roles": sorted(actor.granted_roles),
     }
 
 
 @router.get("/profile")
-async def profile(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def profile(
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+    authorization: str | None = Header(default=None),
+    oyuns_refresh: str | None = Cookie(default=None),
+):
     account = await db.get(UserAccount, actor.account_id)
     employee = await db.get(Employee, actor.employee_id) if actor.employee_id else None
-    password_setup_required = bool(account and account.must_change_password) or bool(await db.scalar(select(RefreshSession.id).where(RefreshSession.account_id == actor.account_id, RefreshSession.auth_method == "telegram", RefreshSession.revoked_at.is_(None)).limit(1)))
-    return await _profile_out(db, actor, account, employee, password_setup_required)
+    method, _ = await _current_session(db, actor.account_id, authorization, oyuns_refresh)
+    return await _profile_out(db, actor, account, employee, bool(account and account.must_change_password), method == "telegram")
 
 
 @router.get("/preferences/world-clock", response_model=WorldClockPreferences)
@@ -966,17 +1008,25 @@ async def upload_profile_avatar(
 
 
 @router.patch("/profile")
-async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def update_profile(
+    data: ProfilePatch,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+    authorization: str | None = Header(default=None),
+    oyuns_refresh: str | None = Cookie(default=None),
+):
     account = await db.get(UserAccount, actor.account_id, with_for_update=True)
     employee = await db.get(Employee, actor.employee_id, with_for_update=True) if actor.employee_id else None
-    password_setup_required = account.must_change_password or bool(await db.scalar(select(RefreshSession.id).where(RefreshSession.account_id == account.id, RefreshSession.auth_method == "telegram", RefreshSession.revoked_at.is_(None)).limit(1)))
+    method, _ = await _current_session(db, account.id, authorization, oyuns_refresh)
+    telegram_session = method == "telegram"
     if data.username and data.username != account.email:
-        if password_setup_required:
-            raise HTTPException(status_code=400, detail="Set a password before changing the username")
-        if not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]:
-            raise HTTPException(status_code=400, detail="Current password is required to change username")
-        duplicate = await db.scalar(select(UserAccount.id).where(func.lower(UserAccount.email) == data.username, UserAccount.id != account.id))
-        if duplicate:
+        if not (account.must_change_password or telegram_session):
+            if not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]:
+                raise HTTPException(status_code=400, detail="Current password is required to change username")
+        if data.username.startswith("telegram-"):
+            raise HTTPException(status_code=422, detail="This username is reserved")
+        # Logins are unique platform-wide; row-level security hides other tenants.
+        if await identity_in_use(db, "account_email", data.username, exclude_id=account.id):
             raise HTTPException(status_code=409, detail="Username already exists")
         account.email = data.username
     if data.locale:
@@ -1007,7 +1057,7 @@ async def update_profile(data: ProfilePatch, db: AsyncSession = Depends(get_db),
                 employee.work_branch = department.name
             await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="updated", after={"employee_id": employee.id, "department_id": details.department_id, "changed_fields": ["department_id"]})
     await db.commit()
-    return await _profile_out(db, actor, account, employee, account.must_change_password)
+    return await _profile_out(db, actor, account, employee, account.must_change_password, telegram_session)
 
 
 class ProfilePasswordChange(BaseModel):
@@ -1016,16 +1066,28 @@ class ProfilePasswordChange(BaseModel):
 
 
 @router.patch("/profile/password")
-async def change_profile_password(data: ProfilePasswordChange, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def change_profile_password(
+    data: ProfilePasswordChange,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+    authorization: str | None = Header(default=None),
+    oyuns_refresh: str | None = Cookie(default=None),
+):
     account = await db.get(UserAccount, actor.account_id, with_for_update=True)
-    password_setup_required = account.must_change_password or bool(await db.scalar(select(RefreshSession.id).where(RefreshSession.account_id == account.id, RefreshSession.auth_method == "telegram", RefreshSession.revoked_at.is_(None)).limit(1)))
-    if not password_setup_required and (not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]):
+    method, current = await _current_session(db, account.id, authorization, oyuns_refresh)
+    if not (account.must_change_password or method == "telegram") and (
+        not data.current_password or not verify_account_password(data.current_password, account.password_hash)[0]
+    ):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     account.password_hash = hash_account_password(data.new_password)
     account.must_change_password = False
-    await db.execute(RefreshSession.__table__.update().where(RefreshSession.account_id == account.id, RefreshSession.revoked_at.is_(None)).values(revoked_at=datetime.now(timezone.utc)))
+    # Sign out every other session; the one making the change stays signed in.
+    revoke = RefreshSession.__table__.update().where(RefreshSession.account_id == account.id, RefreshSession.revoked_at.is_(None))
+    if current is not None:
+        revoke = revoke.where(RefreshSession.id != current.id)
+    await db.execute(revoke.values(revoked_at=datetime.now(timezone.utc)))
     await db.commit()
-    return {"password_changed": True, "requires_password_setup": False}
+    return {"password_changed": True, "requires_password_setup": False, "username": account.email}
 
 
 @router.get("/workers/{employee_id}/profile")
@@ -1042,10 +1104,12 @@ async def worker_profile(employee_id: int, db: AsyncSession = Depends(get_db), a
 async def complete_telegram_link(init_data: str, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     if not actor.employee_id:
         raise HTTPException(status_code=409, detail="Link an employee profile before connecting Telegram")
-    telegram_user = verify_init_data(init_data)
+    telegram_user, bot_tenant = await verify_tenant_init_data(init_data)
     telegram_id = str((telegram_user or {}).get("id") or "")
     if not telegram_id.isdigit():
         raise HTTPException(status_code=400, detail="Telegram account is missing")
+    if bot_tenant is not None and bot_tenant != actor.organization_id:
+        raise HTTPException(status_code=409, detail="Open the Mini App from your organization's Telegram bot")
     duplicate = await identity_in_use(db, "employee_telegram", telegram_id, exclude_id=actor.employee_id)
     if duplicate:
         raise HTTPException(status_code=409, detail="This Telegram account is already connected")
