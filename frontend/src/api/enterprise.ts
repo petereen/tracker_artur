@@ -246,7 +246,7 @@ export function useDeleteWorktimeQrKiosk() {
 
 export function usePairWorktimeQrKiosk() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: (code: string) => publicApi.post('/v1/worktime-qr/pair', { code }).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: [...worktimeQrKeys, 'display-token'] }) })
+  return useMutation({ mutationFn: (code: string) => publicApi.post('/v1/worktime-qr/pair', { code }).then((response) => { storeKioskCredential(response.data?.device_credential ?? null); return response.data }), onSuccess: () => queryClient.invalidateQueries({ queryKey: [...worktimeQrKeys, 'display-token'] }) })
 }
 
 export interface WorktimeMethods { qr_enabled: boolean; location_enabled: boolean }
@@ -263,6 +263,19 @@ export function useUpdateWorktimeMethods() {
     mutationFn: (input: Partial<WorktimeMethods>) => api.put('/v1/settings/worktime-methods', input).then((response) => response.data as WorktimeMethods),
     onSuccess: (data) => queryClient.setQueryData(worktimeMethodsKey, data),
   })
+}
+
+const KIOSK_CREDENTIAL_KEY = 'oyuns.kiosk.credential'
+
+function readKioskCredential(): string | null {
+  try { return localStorage.getItem(KIOSK_CREDENTIAL_KEY) } catch { return null }
+}
+
+function storeKioskCredential(value: string | null) {
+  try {
+    if (value) localStorage.setItem(KIOSK_CREDENTIAL_KEY, value)
+    else localStorage.removeItem(KIOSK_CREDENTIAL_KEY)
+  } catch { /* storage may be blocked on kiosk browsers; the cookie still works */ }
 }
 
 export function useWorktimeQrDisplayToken(enabled = true) {
