@@ -24,7 +24,7 @@ from app.core.enterprise_deps import ActorContext, get_actor, require_roles
 from app.models.models import Employee, IdempotencyRecord, Organization, WorkReport, WorkTimeEntry, WorktimeQrKiosk
 from app.services.attendance_service import sync_worktime_attendance
 from app.services.enterprise_events import record_change
-from app.services.worktime_geofence import worktime_methods
+from app.services.worktime_geofence import qr_rotation_seconds, worktime_methods
 
 try:
     import redis.asyncio as redis
@@ -268,11 +268,11 @@ async def display_token(
     # credential in local storage and sends it as a fallback.
     kiosk_cookie = kiosk_cookie or kiosk_header
     kiosk = await _kiosk_from_cookie(kiosk_cookie, db)
-    await _require_qr_enabled(db, kiosk.organization_id)
+    organization = await _require_qr_enabled(db, kiosk.organization_id)
     if not await _limit(f"display:{kiosk.id}", 10):
         raise HTTPException(status_code=429, detail={"code": "rate_limited", "message": "Please wait before refreshing the display"})
     now = datetime.now(timezone.utc)
-    ttl = max(15, min(30, settings.WORKTIME_QR_ROTATION_SECONDS))
+    ttl = qr_rotation_seconds(organization.settings, settings.WORKTIME_QR_ROTATION_SECONDS)
     payload = {"v": 1, "org": kiosk.organization_id, "kiosk": kiosk.id, "location_id": kiosk.location_id, "iat": int(now.timestamp()), "exp": int((now + timedelta(seconds=ttl)).timestamp()), "nonce": _b64(secrets.token_bytes(16))}
     kiosk.last_seen_at = now
     await db.commit()
@@ -305,10 +305,11 @@ def _summary(entries: list[WorkTimeEntry], now: datetime) -> dict:
     return {"active": _entry_out(next((entry for entry in reversed(entries) if entry.ended_at is None), None)), "today_entries": [_entry_out(entry) for entry in entries]}
 
 
-async def _require_qr_enabled(db: AsyncSession, organization_id: int) -> None:
+async def _require_qr_enabled(db: AsyncSession, organization_id: int) -> Organization:
     organization = await db.get(Organization, organization_id)
     if not worktime_methods(organization.settings if organization else None)["qr_enabled"]:
         raise HTTPException(status_code=403, detail={"code": "worktime_qr_disabled", "message": "QR-аар цаг бүртгэх боломжийг админ хаасан байна."})
+    return organization
 
 
 @router.post("/clock")

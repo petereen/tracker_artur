@@ -21,7 +21,7 @@ function KioskCountdown({ expiresAt, issuedAt, offset, active }: { expiresAt?: s
   const end = expiresAt ? new Date(expiresAt).getTime() : 0
   const total = expiresAt && issuedAt ? Math.max(1, end - new Date(issuedAt).getTime()) : 30_000
   const remaining = active ? Math.max(0, end - (Date.now() + offset)) : 0
-  return <div className="kiosk-countdown"><strong>{active ? `${Math.ceil(remaining / 1000)}s` : '—'}</strong><span>Дараагийн код хүртэл</span><div className="kiosk-progress">{active && <i key={expiresAt} style={{ animationDuration: `${remaining}ms`, transform: `scaleX(${Math.min(1, remaining / total)})` }} />}</div></div>
+  return <div className="kiosk-countdown"><strong>{active ? `${Math.ceil(remaining / 1000)}s` : '—'}</strong><span>Дараагийн код хүртэл</span><div className="kiosk-progress">{active && <i style={{ transform: `scaleX(${Math.max(0, Math.min(1, (remaining - 1000) / total))})` }} />}</div></div>
 }
 
 export function WorktimeQrPage() {

@@ -9,8 +9,8 @@ OFFICE = {"worktime_geofence": {"latitude": 47.9184, "longitude": 106.9177, "rad
 
 
 def test_methods_default_on_and_respect_explicit_false():
-    assert worktime_methods(None) == {"qr_enabled": True, "location_enabled": True}
-    assert worktime_methods({"worktime_methods": {"qr_enabled": False}}) == {"qr_enabled": False, "location_enabled": True}
+    assert worktime_methods(None) == {"qr_enabled": True, "location_enabled": True, "qr_rotation_seconds": 30}
+    assert worktime_methods({"worktime_methods": {"qr_enabled": False}}) == {"qr_enabled": False, "location_enabled": True, "qr_rotation_seconds": 30}
 
 
 def test_location_start_follows_the_toggles():
@@ -29,3 +29,12 @@ def test_qr_endpoints_and_clock_start_enforce_the_toggles():
     enterprise = (ROOT / "app" / "routers" / "enterprise.py").read_text()
     assert '"/settings/worktime-methods"' in enterprise and "worktime_location_disabled" in enterprise
     assert "worktime_location_disabled" in (ROOT / "app" / "bot" / "work_report_handlers.py").read_text()
+
+
+def test_qr_rotation_seconds_is_clamped():
+    from app.services.worktime_geofence import qr_rotation_seconds
+
+    assert qr_rotation_seconds({"worktime_methods": {"qr_rotation_seconds": 120}}) == 120
+    assert qr_rotation_seconds({"worktime_methods": {"qr_rotation_seconds": 5}}) == 15
+    assert qr_rotation_seconds({"worktime_methods": {"qr_rotation_seconds": 9999}}) == 300
+    assert qr_rotation_seconds(None) == 30

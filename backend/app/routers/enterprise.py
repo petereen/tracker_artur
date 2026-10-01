@@ -309,6 +309,7 @@ async def update_worktime_geofence_settings(data: WorktimeGeofenceInput, db: Asy
 class WorktimeMethodsInput(BaseModel):
     qr_enabled: bool | None = None
     location_enabled: bool | None = None
+    qr_rotation_seconds: int | None = Field(default=None, ge=15, le=300)
 
 
 @router.get("/settings/worktime-methods")

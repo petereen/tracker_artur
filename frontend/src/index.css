@@ -3596,8 +3596,7 @@ body:has(.drag-overlay) {
 .kiosk-countdown strong { font-size: 27px; color: var(--color-green); }
 .kiosk-countdown span, .kiosk-hint { color: color-mix(in srgb, var(--color-paper) 68%, transparent); font-size: 13px; }
 .kiosk-progress { height: 7px; overflow: hidden; border-radius: var(--radius-full); background: rgba(255, 255, 255, .18); }
-.kiosk-progress i { display: block; width: 100%; height: 100%; background: var(--color-green); transform-origin: left center; animation: kiosk-drain linear forwards; will-change: transform; }
-@keyframes kiosk-drain { to { transform: scaleX(0); } }
+.kiosk-progress i { display: block; width: 100%; height: 100%; background: var(--color-green); transform-origin: left center; transition: transform 1s linear; will-change: transform; }
 .kiosk-control { display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--color-paper) 22%, transparent); border-radius: var(--radius-control); color: var(--color-on-solid); background: color-mix(in srgb, var(--color-paper) 8%, transparent); font: inherit; font-size: 12px; cursor: pointer; }
 .worktime-kiosk-display footer > span { margin-left: auto; color: color-mix(in srgb, var(--color-paper) 55%, transparent); font-size: 11px; }
 .pip-video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

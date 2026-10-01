@@ -249,7 +249,7 @@ export function usePairWorktimeQrKiosk() {
   return useMutation({ mutationFn: (code: string) => publicApi.post('/v1/worktime-qr/pair', { code }).then((response) => { storeKioskCredential(response.data?.device_credential ?? null); return response.data }), onSuccess: () => queryClient.invalidateQueries({ queryKey: [...worktimeQrKeys, 'display-token'] }) })
 }
 
-export interface WorktimeMethods { qr_enabled: boolean; location_enabled: boolean }
+export interface WorktimeMethods { qr_enabled: boolean; location_enabled: boolean; qr_rotation_seconds: number }
 const worktimeMethodsKey = ['v1', 'settings', 'worktime-methods'] as const
 
 /** Which office check-in methods the organization allows (admin settings). */

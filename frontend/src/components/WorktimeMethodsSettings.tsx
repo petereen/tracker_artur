@@ -1,6 +1,9 @@
+import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Banner } from '@astryxdesign/core/Banner'
+import { Button } from '@astryxdesign/core/Button'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
+import { NumberInput } from '@astryxdesign/core/NumberInput'
 import { Switch } from '@astryxdesign/core/Switch'
 import { VStack } from '@astryxdesign/core/VStack'
 import { useUpdateWorktimeMethods, useWorktimeMethods, type WorktimeMethods } from '../api/enterprise'
@@ -12,6 +15,9 @@ export function WorktimeMethodsSettings() {
   const update = useUpdateWorktimeMethods()
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const canEdit = roles.includes('admin')
+  const serverSeconds = methods.data?.qr_rotation_seconds
+  const [seconds, setSeconds] = useState<number | null>(null)
+  useEffect(() => { if (serverSeconds != null) setSeconds(serverSeconds) }, [serverSeconds])
   if (methods.isError) return <Banner status="error" title="Цаг бүртгэх аргын тохиргоог ачаалж чадсангүй" collapsible={false} />
   if (!methods.data) return <Skeleton height={96} />
   const { qr_enabled: qr, location_enabled: location } = methods.data
@@ -28,6 +34,18 @@ export function WorktimeMethodsSettings() {
       isDisabled={!canEdit}
       disabledMessage={disabledMessage}
     />
+    {qr && <NumberInput
+      label="QR кодын шинэчлэгдэх хугацаа"
+      description="Оффисын дэлгэц дээрх QR код энэ хугацаа тутамд шинэчлэгдэнэ (15–300 секунд)."
+      value={seconds ?? 30}
+      onChange={(value) => setSeconds(value)}
+      min={15}
+      max={300}
+      step={5}
+      units="сек"
+      isDisabled={!canEdit}
+    />}
+    {qr && canEdit && seconds != null && seconds !== methods.data.qr_rotation_seconds && <div><Button label="Хугацаа хадгалах" isDisabled={!Number.isInteger(seconds) || seconds < 15 || seconds > 300 || update.isPending} onClick={() => save({ qr_rotation_seconds: seconds })} /></div>}
     <Switch
       label="Байршлаар бүртгэх"
       description="Оффисын периметр дотор байхдаа вэб, аппликейшн болон Telegram-аар байршлаа илгээж ажлаа эхлүүлнэ."

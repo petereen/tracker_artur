@@ -12,12 +12,26 @@ WORKTIME_GEOFENCE_MAX_RADIUS_METERS = 5_000
 WORKTIME_METHODS_KEY = "worktime_methods"
 
 
-def worktime_methods(settings: dict[str, Any] | None) -> dict[str, bool]:
+QR_ROTATION_MIN_SECONDS = 15
+QR_ROTATION_MAX_SECONDS = 300
+QR_ROTATION_DEFAULT_SECONDS = 30
+
+
+def qr_rotation_seconds(settings: dict[str, Any] | None, default: int = QR_ROTATION_DEFAULT_SECONDS) -> int:
+    """How long one displayed QR code stays valid, clamped to 15..300 seconds."""
+    value = ((settings or {}).get(WORKTIME_METHODS_KEY) or {}).get("qr_rotation_seconds")
+    if isinstance(value, bool) or not isinstance(value, int):
+        value = default
+    return max(QR_ROTATION_MIN_SECONDS, min(QR_ROTATION_MAX_SECONDS, value))
+
+
+def worktime_methods(settings: dict[str, Any] | None) -> dict[str, Any]:
     """Which office check-in methods the organization allows; both on by default."""
     value = (settings or {}).get(WORKTIME_METHODS_KEY) or {}
     return {
         "qr_enabled": value.get("qr_enabled") is not False,
         "location_enabled": value.get("location_enabled") is not False,
+        "qr_rotation_seconds": qr_rotation_seconds(settings),
     }
 
 
