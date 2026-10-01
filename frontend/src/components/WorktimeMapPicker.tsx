@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 const TILE_SIZE = 256
@@ -39,6 +40,7 @@ function metersPerPixel(latitude: number) {
 }
 
 export function WorktimeMapPicker({ latitude, longitude, radiusMeters, disabled = false, onChange }: WorktimeMapPickerProps) {
+  const { t } = useTranslation()
   const mapRef = useRef<HTMLDivElement>(null)
   const [mapSize, setMapSize] = useState({ width: 640, height: 320 })
   const [viewCenter, setViewCenter] = useState<Point>(() => ({
@@ -131,7 +133,7 @@ export function WorktimeMapPicker({ latitude, longitude, radiusMeters, disabled 
       ref={mapRef}
       onClick={(event) => { if (!disabled && !dragging) choosePoint(event.clientX, event.clientY) }}
       role="application"
-      aria-label="Оффисын байршил сонгох газрын зураг"
+      aria-label={t('worktime.map.label')}
     >
       {tiles.map((tile) => <img key={tile.key} className="worktime-map-tile" src={`https://tile.openstreetmap.org/${ZOOM}/${tile.tileX}/${tile.tileY}.png`} referrerPolicy="origin" alt="" aria-hidden="true" style={{ left: tile.x, top: tile.y }} />)}
       {selected && <div className="worktime-geofence-circle" style={{ left: selectedScreen.x - radiusPixels, top: selectedScreen.y - radiusPixels, width: radiusPixels * 2, height: radiusPixels * 2 }} aria-hidden="true" />}
@@ -142,10 +144,10 @@ export function WorktimeMapPicker({ latitude, longitude, radiusMeters, disabled 
         disabled={disabled}
         onClick={(event) => event.stopPropagation()}
         onPointerDown={(event) => { event.stopPropagation(); event.preventDefault(); if (!disabled) setDragging(true) }}
-        aria-label="Оффисын байршлын цэгийг зөөх"
+        aria-label={t('worktime.map.moveMarker')}
       ><span /></button>
       <span className="worktime-map-attribution">© OpenStreetMap contributors</span>
-      {!selected && <span className="worktime-map-hint">Газрын зураг дээр дарж оффисын цэгийг сонгоно уу</span>}
+      {!selected && <span className="worktime-map-hint">{t('worktime.map.hint')}</span>}
     </div>
   </div>
 }

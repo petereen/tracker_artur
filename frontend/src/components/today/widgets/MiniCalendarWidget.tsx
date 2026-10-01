@@ -1,7 +1,9 @@
 import { useMemo, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { CalendarDays } from 'lucide-react'
 import { useCalendarEvents, useEnterpriseTasks, useTodayAgenda, type EnterpriseTask } from '../../../api/enterprise'
+import { intlLocale } from '../../../utils/locale'
 import { useWorkspaceMode } from '../../WorkspaceModeProvider'
 import { localDateKey, WidgetHeader } from './shared'
 
@@ -25,7 +27,10 @@ function calendarDayKey(value: string | null | undefined) {
 }
 
 /** Month grid with markers for tasks, events, reminders and multi-day task bars. */
+const WEEKDAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+
 export function MiniCalendarWidget() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { isManagerMode } = useWorkspaceMode()
   const today = new Date().toISOString().slice(0, 10)
@@ -119,11 +124,11 @@ export function MiniCalendarWidget() {
   const currentMonth = new Date().getMonth()
 
   return (
-    <aside className="today-widget today-mini-calendar" aria-label="Календарь">
-      <WidgetHeader icon={CalendarDays} title={new Date().toLocaleDateString('mn-MN', { month: 'long', year: 'numeric' })}>
-        <button type="button" className="today-widget-link" onClick={() => navigate('/calendar')}>Нээх</button>
+    <aside className="today-widget today-mini-calendar" aria-label={t('today.widget.mini-calendar.title')}>
+      <WidgetHeader icon={CalendarDays} title={new Date().toLocaleDateString(intlLocale(), { month: 'long', year: 'numeric' })}>
+        <button type="button" className="today-widget-link" onClick={() => navigate('/calendar')}>{t('today.miniCalendar.open')}</button>
       </WidgetHeader>
-      <div className="mini-weekdays">{['Да', 'Мя', 'Лх', 'Пү', 'Ба', 'Бя', 'Ня'].map((day) => <b key={day}>{day}</b>)}</div>
+      <div className="mini-weekdays">{WEEKDAY_KEYS.map((day) => <b key={day}>{t(`today.weekday.${day}`)}</b>)}</div>
       <div className="mini-month-grid">
         {monthDays.map((day, dayIndex) => {
           const local = localDateKey(day)
@@ -140,7 +145,7 @@ export function MiniCalendarWidget() {
                 return <u className={`mini-range-fragment${isStart ? ' range-start' : ''}${isEnd ? ' range-end' : ''}`} key={range.id} title={range.title} style={{ '--mini-lane': range.lane } as CSSProperties} />
               })}
               {dayMarkers.length > 0 && (
-                <em className="mini-day-markers" aria-label={`${dayMarkers.length} төрлийн календарийн item`}>
+                <em className="mini-day-markers" aria-label={t('today.miniCalendar.markers', { n: dayMarkers.length })}>
                   {dayMarkers.map((marker) => <b className={`mini-day-marker ${marker}`} key={marker} />)}
                 </em>
               )}

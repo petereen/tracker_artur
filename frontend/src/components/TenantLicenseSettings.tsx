@@ -22,6 +22,7 @@ import {
   type LicenseRecord, type LicenseState, type LicenseVerification, type SeatUsage, type TenantLicenseOverview,
   tenancyErrorMessage, useActivateLicense, useTenantLicense, useVerifyLicense,
 } from '../api/tenancy'
+import { intlLocale } from '../utils/locale'
 
 export const LICENSE_STATE: Record<LicenseState, { label: string; variant: 'success' | 'warning' | 'error' | 'neutral' }> = {
   valid: { label: 'Идэвхтэй', variant: 'success' },
@@ -43,7 +44,7 @@ const CYCLE_LABEL: Record<string, string> = { monthly: 'Сар бүр', quarterl
 export function formatDate(value: string | null | undefined) {
   if (!value) return '—'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('mn-MN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString(intlLocale(), { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
 /** Seat meter: active users vs the license ceiling. */

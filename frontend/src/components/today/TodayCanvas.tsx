@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+import i18n from '../../i18n'
 import {
   forwardRef,
   useCallback,
@@ -88,6 +90,7 @@ export const TodayCanvas = forwardRef<TodayCanvasHandle, TodayCanvasProps>(funct
   { items, isEditing, onRequestEdit, onLayoutChange, onRemove, onOpenSettings, hasSettings, limitsFor, labelFor, renderItem },
   ref,
 ) {
+  const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const [interaction, setInteraction] = useState<Interaction | null>(null)
@@ -240,7 +243,7 @@ export const TodayCanvas = forwardRef<TodayCanvasHandle, TodayCanvasProps>(funct
         const after = finished.preview.find((item) => item.id === finished.id)
         if (before && after && (before.x !== after.x || before.y !== after.y || before.w !== after.w || before.h !== after.h)) {
           onLayoutChange(finished.preview)
-          setAnnouncement(`${labelFor(finished.id)}: мөр ${after.y + 1}, багана ${after.x + 1}, хэмжээ ${after.w}×${after.h}`)
+          setAnnouncement(i18n.t('today.canvas.position', { label: labelFor(finished.id), row: after.y + 1, col: after.x + 1, w: after.w, h: after.h }))
         }
       } else if (finished.kind === 'drag' && hasSettings(finished.id)) {
         // A tap (no movement) on a jiggling widget opens its settings.
@@ -327,7 +330,7 @@ export const TodayCanvas = forwardRef<TodayCanvasHandle, TodayCanvasProps>(funct
       })
       if (!changed) return
       onLayoutChange(next)
-      if (moved) setAnnouncement(`${labelFor(item.id)}: мөр ${moved.y + 1}, багана ${moved.x + 1}, хэмжээ ${moved.w}×${moved.h}`)
+      if (moved) setAnnouncement(i18n.t('today.canvas.position', { label: labelFor(item.id), row: moved.y + 1, col: moved.x + 1, w: moved.w, h: moved.h }))
     } else if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault()
       onRemove(item.id)
@@ -373,12 +376,12 @@ export const TodayCanvas = forwardRef<TodayCanvasHandle, TodayCanvasProps>(funct
   const ordered = stacked ? sortByPosition(items) : items
 
   const controls = (item: GridItem, index: number) => isEditing && <>
-    <button type="button" className="today-widget-remove" data-today-control onClick={() => onRemove(item.id)} aria-label={`${labelFor(item.id)} хасах`} title="Хасах"><X size={13} strokeWidth={3} /></button>
-    {hasSettings(item.id) && <button type="button" className="today-widget-gear" data-today-control onClick={() => onOpenSettings(item.id)} aria-label={`${labelFor(item.id)} тохиргоо`} title="Тохиргоо"><Settings2 size={13} /></button>}
+    <button type="button" className="today-widget-remove" data-today-control onClick={() => onRemove(item.id)} aria-label={t('today.canvas.removeLabel', { label: labelFor(item.id) })} title={t('today.canvas.remove')}><X size={13} strokeWidth={3} /></button>
+    {hasSettings(item.id) && <button type="button" className="today-widget-gear" data-today-control onClick={() => onOpenSettings(item.id)} aria-label={t('today.canvas.settingsLabel', { label: labelFor(item.id) })} title={t('today.canvas.settings')}><Settings2 size={13} /></button>}
     {stacked ? <span className="today-widget-order" data-today-control>
-      <button type="button" onClick={() => onLayoutChange(shiftInReadingOrder(items, item.id, -1, GRID_COLUMNS))} disabled={index === 0} aria-label={`${labelFor(item.id)} дээш`}><ArrowUp size={14} /></button>
-      <button type="button" onClick={() => onLayoutChange(shiftInReadingOrder(items, item.id, 1, GRID_COLUMNS))} disabled={index === ordered.length - 1} aria-label={`${labelFor(item.id)} доош`}><ArrowDown size={14} /></button>
-    </span> : <span className="today-widget-resize" data-today-control onPointerDown={(event) => onResizePointerDown(event, item)} aria-hidden title="Хэмжээ өөрчлөх" />}
+      <button type="button" onClick={() => onLayoutChange(shiftInReadingOrder(items, item.id, -1, GRID_COLUMNS))} disabled={index === 0} aria-label={t('today.canvas.up', { label: labelFor(item.id) })}><ArrowUp size={14} /></button>
+      <button type="button" onClick={() => onLayoutChange(shiftInReadingOrder(items, item.id, 1, GRID_COLUMNS))} disabled={index === ordered.length - 1} aria-label={t('today.canvas.down', { label: labelFor(item.id) })}><ArrowDown size={14} /></button>
+    </span> : <span className="today-widget-resize" data-today-control onPointerDown={(event) => onResizePointerDown(event, item)} aria-hidden title={t('today.canvas.resize')} />}
   </>
 
   return (
@@ -387,7 +390,7 @@ export const TodayCanvas = forwardRef<TodayCanvasHandle, TodayCanvasProps>(funct
       className={`today-canvas${isEditing ? ' is-editing' : ''}${stacked ? ' is-stacked' : ''}${interaction?.active ? ' is-interacting' : ''}`}
       style={stacked ? undefined : { height: canvasHeight }}
       role="list"
-      aria-label="Өнөөдрийн виджетүүд"
+      aria-label={t('today.canvas.aria')}
     >
       {isEditing && !stacked && width > 0 && <div className="today-grid-overlay" aria-hidden style={{ '--today-cols': GRID_COLUMNS, '--today-row': `${ROW_HEIGHT}px`, '--today-gap': `${GRID_GAP}px` } as CSSProperties}>
         {Array.from({ length: canvasRows * GRID_COLUMNS }, (_, index) => <span key={index} />)}
@@ -419,7 +422,7 @@ export const TodayCanvas = forwardRef<TodayCanvasHandle, TodayCanvasProps>(funct
             style={style}
             data-widget-id={item.id}
             tabIndex={isEditing ? 0 : undefined}
-            aria-label={isEditing ? `${labelFor(item.id)}. Сумаар зөөнө, Shift+сумаар хэмжээ өөрчилнө, Delete дарж хасна.` : undefined}
+            aria-label={isEditing ? t('today.canvas.editHint', { label: labelFor(item.id) }) : undefined}
             onPointerDown={(event) => onItemPointerDown(event, item)}
             onKeyDown={(event) => onItemKeyDown(event, item)}
             onContextMenu={(event) => { if (isEditing || longPressRef.current) event.preventDefault() }}

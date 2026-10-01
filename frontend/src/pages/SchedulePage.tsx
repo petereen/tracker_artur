@@ -1,10 +1,12 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useEffect } from 'react'
 import { Btn, Card, Input, PageHeader } from '../components/ui'
 import { useEmployees, useSchedules, useUpdateSchedule } from '../api/hooks'
 
-const DAY_NAMES = ['Да', 'Мя', 'Лх', 'Пү', 'Ба', 'Бя', 'Ня']
+const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
 export function SchedulePage() {
+  const { t } = useTranslation()
   const { data: employees = [] } = useEmployees()
   const { data: schedules = [] } = useSchedules()
   const updateSchedule = useUpdateSchedule()
@@ -36,7 +38,7 @@ export function SchedulePage() {
 
   return (
     <div>
-      <PageHeader title="Хуваарь" />
+      <PageHeader title={t('schedule.title')} />
       <div className="grid grid-cols-[220px_1fr] gap-4">
         <Card className="!p-0 overflow-hidden self-start">
           {employees.map((e: any) => (
@@ -60,35 +62,35 @@ export function SchedulePage() {
               </div>
 
               <div className="mb-5">
-                <div className="text-xs text-muted font-medium mb-2">Асуулгын хувилбар</div>
+                <div className="text-xs text-muted font-medium mb-2">{t('schedule.variantTitle')}</div>
                 <div className="flex gap-2">
                   {['A', 'B'].map((v) => (
                     <button key={v} onClick={() => f('variant', v)}
                       style={{ borderColor: form.variant === v ? '#388BFD' : '#30363D', background: form.variant === v ? '#1C3A6B' : 'transparent', color: form.variant === v ? '#388BFD' : '#7D8590' }}
                       className="px-5 py-2 rounded-lg border cursor-pointer font-medium text-[13px] transition-all">
-                      Хувилбар {v} {v === 'A' ? '— нэг чек-ин' : '— өглөө + орой'}
+                      {t('schedule.variant', { v })} {v === 'A' ? t('schedule.variantA') : t('schedule.variantB')}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4 mb-5">
-                <Input label="Оройн чек-ин" value={form.evening_time || ''} onChange={(v) => f('evening_time', v)} type="time" />
-                <Input label="Өглөө / сарын тайлан" value={form.morning_time || ''} onChange={(v) => f('morning_time', v)} type="time" />
-                <Input label="Алгассан гэж тооцох цаг" value={form.deadline_time || ''} onChange={(v) => f('deadline_time', v)} type="time" />
+                <Input label={t('schedule.eveningCheckin')} value={form.evening_time || ''} onChange={(v) => f('evening_time', v)} type="time" />
+                <Input label={t('schedule.morningMonthly')} value={form.morning_time || ''} onChange={(v) => f('morning_time', v)} type="time" />
+                <Input label={t('schedule.skipAfter')} value={form.deadline_time || ''} onChange={(v) => f('deadline_time', v)} type="time" />
               </div>
 
               <div className="mb-5">
-                <div className="text-xs text-muted font-medium mb-2">Долоо хоногийн өдрүүд</div>
+                <div className="text-xs text-muted font-medium mb-2">{t('schedule.weekdays')}</div>
                 <div className="flex gap-1.5">
-                  {DAY_NAMES.map((d, i) => {
+                  {DAY_KEYS.map((d, i) => {
                     const idx = i + 1
                     const on = (form.weekdays || []).includes(idx)
                     return (
                       <button key={d} onClick={() => toggleDay(idx)}
                         style={{ borderColor: on ? '#388BFD' : '#30363D', background: on ? '#1C3A6B' : 'transparent', color: on ? '#388BFD' : '#7D8590' }}
                         className="w-9 h-9 rounded-lg border cursor-pointer font-medium text-xs transition-all">
-                        {d}
+                        {t(`schedule.day.${d}`)}
                       </button>
                     )
                   })}
@@ -97,12 +99,12 @@ export function SchedulePage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <div className="text-xs text-muted font-medium mb-1.5">Сануулга 1 (минут)</div>
+                  <div className="text-xs text-muted font-medium mb-1.5">{t('schedule.reminder1')}</div>
                   <input type="number" value={form.reminder_intervals?.[0] ?? 60} onChange={(e) => f('reminder_intervals', [+e.target.value, form.reminder_intervals?.[1] ?? 120])}
                     className="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-text outline-none focus:border-accent" />
                 </div>
                 <div>
-                  <div className="text-xs text-muted font-medium mb-1.5">Сануулга 2 (минут)</div>
+                  <div className="text-xs text-muted font-medium mb-1.5">{t('schedule.reminder2')}</div>
                   <input type="number" value={form.reminder_intervals?.[1] ?? 120} onChange={(e) => f('reminder_intervals', [form.reminder_intervals?.[0] ?? 60, +e.target.value])}
                     className="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-text outline-none focus:border-accent" />
                 </div>
@@ -110,8 +112,8 @@ export function SchedulePage() {
             </Card>
 
             <div className="flex justify-end gap-2.5">
-              <Btn onClick={() => setSelected(selected)}>Сэргээх</Btn>
-              <Btn variant="primary" size="lg" onClick={save} disabled={updateSchedule.isPending}>Хуваарь хадгалах</Btn>
+              <Btn onClick={() => setSelected(selected)}>{t('schedule.reset')}</Btn>
+              <Btn variant="primary" size="lg" onClick={save} disabled={updateSchedule.isPending}>{t('schedule.save')}</Btn>
             </div>
           </div>
         )}

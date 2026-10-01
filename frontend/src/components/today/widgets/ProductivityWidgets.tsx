@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 import { Hourglass, NotebookPen, Pause, Play, RotateCcw } from 'lucide-react'
 import { NumberInput } from '@astryxdesign/core/NumberInput'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Switch } from '@astryxdesign/core/Switch'
 import { VStack } from '@astryxdesign/core/VStack'
+import i18n from '../../../i18n'
 import { safeLocalStorage } from '../../../platform/runtime'
 import type { WidgetProps, WidgetSettingsProps } from '../types'
 import { WidgetHeader } from './shared'
@@ -56,6 +58,7 @@ function chime() {
 }
 
 export function TimerWidget({ id, settings }: WidgetProps<TimerSettings>) {
+  const { t } = useTranslation()
   const config = { ...DEFAULT_TIMER_SETTINGS, ...settings }
   const [run, setRunState] = useState<TimerRun>(() => loadRun(id))
   const [now, setNow] = useState(() => Date.now())
@@ -83,10 +86,10 @@ export function TimerWidget({ id, settings }: WidgetProps<TimerSettings>) {
     if (config.sound) chime()
     if (current.mode === 'focus') {
       const nextPhase = current.phase === 'focus' ? 'break' : 'focus'
-      toast(nextPhase === 'break' ? 'Төвлөрөх хугацаа дууслаа — завсарлаарай.' : 'Завсарлага дууслаа — дахин төвлөрье.', { icon: '⏱️' })
+      toast(i18n.t(nextPhase === 'break' ? 'today.timer.focusEnded' : 'today.timer.breakEnded'), { icon: '⏱️' })
       setRun({ ...current, phase: nextPhase, running: false, startedAt: null, accumulated: 0 })
     } else {
-      toast('Хугацаа дууслаа.', { icon: '⏱️' })
+      toast(i18n.t('today.timer.ended'), { icon: '⏱️' })
       setRun({ ...current, running: false, startedAt: null, accumulated: 0 })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,13 +106,13 @@ export function TimerWidget({ id, settings }: WidgetProps<TimerSettings>) {
   const progress = target ? Math.min(1, elapsed / target) : 0
 
   return (
-    <section className="today-widget today-timer" aria-label="Цаг хэмжигч">
-      <WidgetHeader icon={Hourglass} title="Цаг хэмжигч" meta={run.mode === 'focus' ? (run.phase === 'focus' ? 'Төвлөрөл' : 'Завсарлага') : undefined} />
+    <section className="today-widget today-timer" aria-label={t('today.widget.timer.title')}>
+      <WidgetHeader icon={Hourglass} title={t('today.widget.timer.title')} meta={run.mode === 'focus' ? (run.phase === 'focus' ? t('today.timer.focusPhase') : t('today.timer.breakPhase')) : undefined} />
       <span className="today-timer-mode" data-today-interactive>
-        <SegmentedControl label="Горим" size="sm" layout="fill" value={run.mode} onChange={(mode) => setRun({ ...IDLE_RUN, mode: mode as TimerMode })}>
-          <SegmentedControlItem value="focus" label="Төвлөрөл" />
-          <SegmentedControlItem value="countdown" label="Тоолуур" />
-          <SegmentedControlItem value="stopwatch" label="Секундомер" />
+        <SegmentedControl label={t('today.timer.mode')} size="sm" layout="fill" value={run.mode} onChange={(mode) => setRun({ ...IDLE_RUN, mode: mode as TimerMode })}>
+          <SegmentedControlItem value="focus" label={t('today.timer.focusPhase')} />
+          <SegmentedControlItem value="countdown" label={t('today.timer.countdown')} />
+          <SegmentedControlItem value="stopwatch" label={t('today.timer.stopwatch')} />
         </SegmentedControl>
       </span>
       <time className={`today-timer-display${run.running ? ' is-running' : ''}`} role="timer" aria-live="off">
@@ -117,22 +120,23 @@ export function TimerWidget({ id, settings }: WidgetProps<TimerSettings>) {
       </time>
       {target !== null && <span className="today-timer-progress" aria-hidden><i style={{ transform: `scaleX(${progress})` }} /></span>}
       <span className="today-timer-actions">
-        <button type="button" className="primary-action compact" onClick={toggle}>{run.running ? <><Pause size={14} />Зогсоох</> : <><Play size={14} />{elapsed > 0 ? 'Үргэлжлүүлэх' : 'Эхлүүлэх'}</>}</button>
-        <button type="button" className="secondary-action compact" onClick={reset} disabled={!elapsed && run.phase === 'focus'} aria-label="Дахин эхлүүлэх"><RotateCcw size={14} /></button>
+        <button type="button" className="primary-action compact" onClick={toggle}>{run.running ? <><Pause size={14} />{t('today.timer.stop')}</> : <><Play size={14} />{elapsed > 0 ? t('today.timer.resume') : t('today.timer.start')}</>}</button>
+        <button type="button" className="secondary-action compact" onClick={reset} disabled={!elapsed && run.phase === 'focus'} aria-label={t('today.timer.reset')}><RotateCcw size={14} /></button>
       </span>
     </section>
   )
 }
 
 export function TimerSettingsForm({ settings, onChange }: WidgetSettingsProps<TimerSettings>) {
+  const { t } = useTranslation()
   const config = { ...DEFAULT_TIMER_SETTINGS, ...settings }
   const minutes = (value: number) => Math.min(600, Math.max(1, Math.round(value) || 1))
   return (
     <VStack gap={3}>
-      <NumberInput label="Төвлөрөх хугацаа" units="мин" value={config.focusMinutes} min={1} max={600} isIntegerOnly hasNumberSteppers onChange={(value) => onChange({ ...config, focusMinutes: minutes(value) })} />
-      <NumberInput label="Завсарлага" units="мин" value={config.breakMinutes} min={1} max={600} isIntegerOnly hasNumberSteppers onChange={(value) => onChange({ ...config, breakMinutes: minutes(value) })} />
-      <NumberInput label="Тоолуурын хугацаа" units="мин" value={config.countdownMinutes} min={1} max={600} isIntegerOnly hasNumberSteppers onChange={(value) => onChange({ ...config, countdownMinutes: minutes(value) })} />
-      <Switch label="Дуусахад дуут дохио" value={config.sound} onChange={(sound) => onChange({ ...config, sound })} />
+      <NumberInput label={t('today.timer.focusMinutes')} units={t('today.timer.minutesUnit')} value={config.focusMinutes} min={1} max={600} isIntegerOnly hasNumberSteppers onChange={(value) => onChange({ ...config, focusMinutes: minutes(value) })} />
+      <NumberInput label={t('today.timer.breakMinutes')} units={t('today.timer.minutesUnit')} value={config.breakMinutes} min={1} max={600} isIntegerOnly hasNumberSteppers onChange={(value) => onChange({ ...config, breakMinutes: minutes(value) })} />
+      <NumberInput label={t('today.timer.countdownMinutes')} units={t('today.timer.minutesUnit')} value={config.countdownMinutes} min={1} max={600} isIntegerOnly hasNumberSteppers onChange={(value) => onChange({ ...config, countdownMinutes: minutes(value) })} />
+      <Switch label={t('today.timer.sound')} value={config.sound} onChange={(sound) => onChange({ ...config, sound })} />
     </VStack>
   )
 }
@@ -145,6 +149,7 @@ const NOTES_SAVE_DELAY_MS = 600
 
 /** Scratchpad that autosaves into the widget's (server-synced) settings. */
 export function NotesWidget({ settings, updateSettings }: WidgetProps<NotesSettings>) {
+  const { t } = useTranslation()
   const [text, setText] = useState(settings.text ?? '')
   const [status, setStatus] = useState<'saved' | 'dirty'>('saved')
   const timer = useRef<number | undefined>(undefined)
@@ -180,14 +185,14 @@ export function NotesWidget({ settings, updateSettings }: WidgetProps<NotesSetti
   }
 
   return (
-    <section className="today-widget today-notes" aria-label="Тэмдэглэл">
-      <WidgetHeader icon={NotebookPen} title="Тэмдэглэл" meta={<span aria-live="polite">{status === 'dirty' ? 'Хадгалж байна…' : text ? 'Хадгалсан' : ''}</span>} />
+    <section className="today-widget today-notes" aria-label={t('today.widget.notes.title')}>
+      <WidgetHeader icon={NotebookPen} title={t('today.widget.notes.title')} meta={<span aria-live="polite">{status === 'dirty' ? t('today.notes.saving') : text ? t('today.notes.saved') : ''}</span>} />
       <textarea
         className="today-notes-input"
         value={text}
         onChange={(event) => change(event.target.value)}
-        placeholder="Санаа, хийх зүйлсээ энд тэмдэглээрэй…"
-        aria-label="Тэмдэглэл"
+        placeholder={t('today.notes.placeholder')}
+        aria-label={t('today.widget.notes.title')}
         maxLength={NOTES_MAX_LENGTH}
         spellCheck
       />

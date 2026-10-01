@@ -1,4 +1,5 @@
 import { api } from '../api/client'
+import i18n from '../i18n'
 
 /**
  * Turn-based voice call: the browser detects the end of each utterance, sends
@@ -25,16 +26,6 @@ const MIN_SPEECH_MS = 350
 const MAX_UTTERANCE_MS = 30_000
 const MIN_THRESHOLD = 0.012
 const SPEECH_CHUNK_CHARS = 220
-const NOT_UNDERSTOOD: Record<string, string> = {
-  mn: 'Уучлаарай, сайн сонссонгүй. Дахин хэлнэ үү?',
-  ru: 'Извините, я не расслышала. Повторите, пожалуйста.',
-  en: "Sorry, I didn't catch that. Could you say it again?",
-}
-const AGENT_UNAVAILABLE: Record<string, string> = {
-  mn: 'Уучлаарай, одоогоор хариулж чадсангүй. Дахин асууна уу.',
-  ru: 'Извините, сейчас не получилось ответить. Спросите ещё раз.',
-  en: "Sorry, I couldn't answer just now. Please ask again.",
-}
 
 export interface TurnResult {
   transcript: string
@@ -226,7 +217,7 @@ export class ChimegeCall {
       if (this.stopped) return
       const detail = failure?.response?.data?.detail
       if (failure?.response?.status === 404) { this.callbacks.onError(typeof detail === 'string' ? detail : 'call_ended'); return }
-      this.callbacks.onLine('tool', 'Холболт тасарлаа, дахин хэлнэ үү.')
+      this.callbacks.onLine('tool', i18n.t('assistant.call.connectionLost'))
       this.setPhase('listening')
       return
     }
@@ -234,8 +225,8 @@ export class ChimegeCall {
     if (data.transcript) this.callbacks.onLine('user', data.transcript)
     const language = data.language || this.language
     const speechUrl = data.speech_url ?? undefined
-    if (!data.transcript) { await this.speak(NOT_UNDERSTOOD[language] ?? NOT_UNDERSTOOD.mn, speechUrl); return }
-    if (!data.answer) { await this.speak(AGENT_UNAVAILABLE[language] ?? AGENT_UNAVAILABLE.mn, speechUrl); return }
+    if (!data.transcript) { await this.speak(i18n.t('assistant.call.notUnderstood', { lng: language }), speechUrl); return }
+    if (!data.answer) { await this.speak(i18n.t('assistant.call.agentUnavailable', { lng: language }), speechUrl); return }
     await this.speak(data.answer, speechUrl)
   }
 
@@ -280,7 +271,7 @@ export class ChimegeCall {
       }
     }
     if (this.stopped || token !== this.speechToken) return
-    if (!spoke && chunks.length) this.callbacks.onLine('tool', 'Дуу үүсгэж чадсангүй, хариултыг бичвэрээр харуулав.')
+    if (!spoke && chunks.length) this.callbacks.onLine('tool', i18n.t('assistant.call.ttsFailed'))
     this.stopPlayback()
     this.setPhase('listening')
   }

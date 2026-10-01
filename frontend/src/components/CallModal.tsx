@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useRef } from 'react'
 import { Camera, CameraOff, Mic, MicOff, Phone, PhoneOff, Volume2, VolumeX } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
@@ -15,6 +16,7 @@ function CallAvatar({ name, avatar }: { name: string; avatar?: string | null }) 
 }
 
 export function CallModal({ call, onOpenConversation }: { call: CallController; onOpenConversation: () => void }) {
+  const { t } = useTranslation()
   const remoteVideo = useRef<HTMLVideoElement>(null)
   const remoteAudio = useRef<HTMLAudioElement>(null)
   const localVideo = useRef<HTMLVideoElement>(null)
@@ -56,11 +58,11 @@ export function CallModal({ call, onOpenConversation }: { call: CallController; 
   const visible = Boolean(active && call.state !== 'idle')
   if (!active) return null
   const connected = ['connecting', 'connected', 'reconnecting'].includes(call.state)
-  const status = call.state === 'incoming_ring' ? `${active.callType === 'video' ? 'Видео' : 'Аудио'} дуудлага` : call.state === 'outgoing_ring' ? 'Дуудаж байна…' : call.state === 'connecting' ? 'Холбож байна…' : call.state === 'reconnecting' ? 'Дахин холбож байна…' : call.state === 'connected' ? formatDuration(call.durationSeconds) : 'Дуудлага дууссан'
+  const status = call.state === 'incoming_ring' ? t(active.callType === 'video' ? 'chat.call.video' : 'chat.call.audio') : call.state === 'outgoing_ring' ? t('chat.call.ringing') : call.state === 'connecting' ? t('chat.call.connecting') : call.state === 'reconnecting' ? t('chat.call.reconnecting') : call.state === 'connected' ? formatDuration(call.durationSeconds) : t('chat.call.finished')
   const hasRemoteVideo = Boolean(call.remoteStream?.getVideoTracks().some((track) => track.enabled))
   const hasLocalVideo = Boolean(call.localStream?.getVideoTracks().some((track) => track.enabled))
   return <AnimatePresence>{visible && <motion.div className="call-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-    <motion.section ref={dialog} onPointerDown={() => { void remoteAudio.current?.play().catch(() => undefined) }} className={`call-modal ${connected ? 'active' : 'ringing'}`} role="dialog" aria-modal="true" aria-label={`${active.name} дуудлага`} initial={{ opacity: 0, scale: .96, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
+    <motion.section ref={dialog} onPointerDown={() => { void remoteAudio.current?.play().catch(() => undefined) }} className={`call-modal ${connected ? 'active' : 'ringing'}`} role="dialog" aria-modal="true" aria-label={t('chat.call.withName', { name: active.name })} initial={{ opacity: 0, scale: .96, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: .98 }} transition={{ type: 'spring', stiffness: 420, damping: 34 }}>
       {connected ? <div className="call-stage">
         <audio ref={remoteAudio} data-call-audio autoPlay />
         {hasRemoteVideo ? <video ref={remoteVideo} autoPlay muted playsInline className="call-remote-video" /> : <div className="call-audio-stage"><CallAvatar name={active.name} avatar={active.avatar} /></div>}
@@ -72,16 +74,16 @@ export function CallModal({ call, onOpenConversation }: { call: CallController; 
       </div>}
       {call.error && <p className="call-error" role="alert">{call.error}</p>}
       <div className="call-controls">
-        {call.state === 'incoming_ring' ? <><button className="call-control accept" onClick={call.accept}><Phone /><span>Хүлээн авах</span></button><button className="call-control end" onClick={call.decline}><PhoneOff /><span>Татгалзах</span></button></> : call.state === 'outgoing_ring' ? <button className="call-control end" onClick={() => call.end('canceled')}><PhoneOff /><span>Цуцлах</span></button> : connected ? <>
-          <button className={`call-control ${call.audioMuted ? 'off' : ''}`} onClick={call.toggleMuteAudio}>{call.audioMuted ? <MicOff /> : <Mic />}<span>{call.audioMuted ? 'Дуу нээх' : 'Дуу хаах'}</span></button>
-          <button className={`call-control ${call.audioRoute === 'speaker' ? 'active' : ''}`} onClick={call.switchAudioRoute}>{call.audioRoute === 'speaker' ? <VolumeX /> : <Volume2 />}<span>{call.audioRoute === 'speaker' ? 'Чихэвч' : 'Чанга яригч'}</span></button>
-          <button className={`call-control ${call.videoMuted ? 'off' : ''}`} onClick={call.toggleMuteVideo}>{call.videoMuted ? <CameraOff /> : <Camera />}<span>{hasLocalVideo ? 'Камер хаах' : 'Камер нээх'}</span></button>
-          <button className="call-control end" onClick={() => call.end()}><PhoneOff /><span>Дуусгах</span></button>
+        {call.state === 'incoming_ring' ? <><button className="call-control accept" onClick={call.accept}><Phone /><span>{t('chat.call.accept')}</span></button><button className="call-control end" onClick={call.decline}><PhoneOff /><span>{t('chat.call.decline')}</span></button></> : call.state === 'outgoing_ring' ? <button className="call-control end" onClick={() => call.end('canceled')}><PhoneOff /><span>{t('chat.call.cancel')}</span></button> : connected ? <>
+          <button className={`call-control ${call.audioMuted ? 'off' : ''}`} onClick={call.toggleMuteAudio}>{call.audioMuted ? <MicOff /> : <Mic />}<span>{call.audioMuted ? t('chat.call.unmute') : t('chat.call.mute')}</span></button>
+          <button className={`call-control ${call.audioRoute === 'speaker' ? 'active' : ''}`} onClick={call.switchAudioRoute}>{call.audioRoute === 'speaker' ? <VolumeX /> : <Volume2 />}<span>{call.audioRoute === 'speaker' ? t('chat.call.earpiece') : t('chat.call.speaker')}</span></button>
+          <button className={`call-control ${call.videoMuted ? 'off' : ''}`} onClick={call.toggleMuteVideo}>{call.videoMuted ? <CameraOff /> : <Camera />}<span>{hasLocalVideo ? t('chat.call.cameraOff') : t('chat.call.cameraOn')}</span></button>
+          <button className="call-control end" onClick={() => call.end()}><PhoneOff /><span>{t('chat.call.end')}</span></button>
         </> : null}
       </div>
       {connected && call.devices.length > 0 && <div className="call-device-controls">
-        <select aria-label="Микрофон сонгох" onChange={(event) => call.switchMediaDevice('audioinput', event.target.value)} defaultValue=""><option value="" disabled>Микрофон</option>{call.devices.filter((item) => item.kind === 'audioinput').map((item) => <option key={item.deviceId} value={item.deviceId}>{item.label || 'Микрофон'}</option>)}</select>
-        <select aria-label="Камер сонгох" onChange={(event) => call.switchMediaDevice('videoinput', event.target.value)} defaultValue=""><option value="" disabled>Камер</option>{call.devices.filter((item) => item.kind === 'videoinput').map((item) => <option key={item.deviceId} value={item.deviceId}>{item.label || 'Камер'}</option>)}</select>
+        <select aria-label={t('chat.call.pickMic')} onChange={(event) => call.switchMediaDevice('audioinput', event.target.value)} defaultValue=""><option value="" disabled>{t('chat.call.mic')}</option>{call.devices.filter((item) => item.kind === 'audioinput').map((item) => <option key={item.deviceId} value={item.deviceId}>{item.label || t('chat.call.mic')}</option>)}</select>
+        <select aria-label={t('chat.call.pickCamera')} onChange={(event) => call.switchMediaDevice('videoinput', event.target.value)} defaultValue=""><option value="" disabled>{t('chat.call.camera')}</option>{call.devices.filter((item) => item.kind === 'videoinput').map((item) => <option key={item.deviceId} value={item.deviceId}>{item.label || t('chat.call.camera')}</option>)}</select>
       </div>}
     </motion.section>
   </motion.div>}</AnimatePresence>

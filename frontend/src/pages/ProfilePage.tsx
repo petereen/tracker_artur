@@ -1,3 +1,7 @@
+import { LANGUAGE_NAMES } from '../components/LanguageSwitcher'
+import { LANGUAGES } from '../locales'
+import i18n from '../i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from "react";
 import {
   Bell,
@@ -61,29 +65,14 @@ const MEMOJI_OPTIONS = Array.from(
   (_, index) => `/emojis/memoji-${String(index + 1).padStart(2, "0")}.png`,
 );
 
-const LOCALE_OPTIONS = [
-  { value: "mn", label: "Монгол" },
-  { value: "en", label: "English" },
-  { value: "ru", label: "Русский" },
-];
+// Each language under its own name, in the order the profile has always listed them.
+const LOCALE_OPTIONS = (['mn', 'en', 'ru'] as const).map((value) => ({ value, label: LANGUAGE_NAMES[value].full }));
 
-const ROLE_LABELS: Record<string, string> = {
-  member: "Ажилтан",
-  manager: "Удирдлага",
-  team_lead: "Багийн ахлагч",
-  hr: "HR",
-  contractor: "Гэрээт",
-  client_auditor: "Аудитор",
-  legal_counsel: "Хуульч",
-  admin: "Админ",
-};
+const ROLE_KEYS = ["member", "manager", "team_lead", "hr", "contractor", "client_auditor", "legal_counsel", "admin"];
+const roleLabel = (role: string) => (ROLE_KEYS.includes(role) ? i18n.t(`profile.role.${role}`) : role);
 
-const EMPLOYMENT_TYPE_LABELS: Record<string, string> = {
-  full_time: "Бүтэн цаг",
-  part_time: "Цагийн",
-  contract: "Гэрээт",
-  intern: "Дадлагажигч",
-};
+const EMPLOYMENT_TYPE_KEYS = ["full_time", "part_time", "contract", "intern"];
+const employmentTypeLabel = (type: string) => (EMPLOYMENT_TYPE_KEYS.includes(type) ? i18n.t(`profile.employmentType.${type}`) : "");
 
 type ProfileForm = {
   username: string;
@@ -121,8 +110,8 @@ function tenureLabel(startDate: string | null) {
   if (months < 0) return null;
   const years = Math.floor(months / 12);
   const rest = months % 12;
-  if (!years && !rest) return "Энэ сард эхэлсэн";
-  return [years ? `${years} жил` : "", rest ? `${rest} сар` : ""].filter(Boolean).join(" ");
+  if (!years && !rest) return i18n.t('profile.tenure.thisMonth');
+  return [years ? i18n.t('profile.tenure.years', { n: years }) : "", rest ? i18n.t('profile.tenure.months', { n: rest }) : ""].filter(Boolean).join(" ");
 }
 
 function formatDate(value: string | null) {
@@ -145,6 +134,7 @@ function SectionHeader({ icon, title, description, end }: { icon: React.Componen
 }
 
 export function ProfilePage() {
+  const { t } = useTranslation()
   const profile = useProfile();
   const departments = useHRDepartments();
   const update = useUpdateProfile();
@@ -189,19 +179,19 @@ export function ProfilePage() {
     return rows.map((row) => ({
       value: String(row.id),
       label: row.name,
-      description: row.description || `${row.employee_count} ажилтан`,
+      description: row.description || t('profile.employeeCount', { n: row.employee_count }),
     }));
   }, [departments.data, form.department_id]);
 
   const completion = useMemo(() => {
     const checks = [
-      { label: "Зураг", done: !!form.avatar_url },
-      { label: "Утас", done: !!form.phone_number.trim() },
-      { label: "Төрсөн өдөр", done: !!form.birthday },
-      { label: "Алба", done: !!form.department_id },
-      { label: "Ажлын чиглэл", done: !!form.work_direction.trim() },
-      { label: "Telegram", done: !!data?.telegram_connected },
-      { label: "Нууц үг", done: !needsPasswordSetup },
+      { label: t('profile.field.photo'), done: !!form.avatar_url },
+      { label: t('profile.field.phone'), done: !!form.phone_number.trim() },
+      { label: t('profile.field.birthday'), done: !!form.birthday },
+      { label: t('profile.field.department'), done: !!form.department_id },
+      { label: t('profile.field.workDirection'), done: !!form.work_direction.trim() },
+      { label: t('profile.telegram'), done: !!data?.telegram_connected },
+      { label: t('profile.field.password'), done: !needsPasswordSetup },
     ];
     const done = checks.filter((item) => item.done).length;
     return { percent: Math.round((done / checks.length) * 100), missing: checks.filter((item) => !item.done) };
@@ -227,6 +217,8 @@ export function ProfilePage() {
       payload.department_id = form.department_id ? Number(form.department_id) : null;
     await update.mutateAsync(payload);
     setDraft(null);
+    // The saved locale takes effect immediately instead of on the next sign-in.
+    if ((LANGUAGES as readonly string[]).includes(form.locale) && i18n.language !== form.locale) await i18n.changeLanguage(form.locale);
   };
 
   const submitPassword = async (event: React.FormEvent) => {
@@ -295,17 +287,17 @@ export function ProfilePage() {
               <VStack gap={2}>
                 <VStack gap={0.5}>
                   <Heading level={2}>{data?.name ?? "…"}</Heading>
-                  <Text color="secondary">{subtitle || "Албан тушаал, алба оноогдоогүй"}</Text>
+                  <Text color="secondary">{subtitle || t('profile.noPosition')}</Text>
                 </VStack>
                 <HStack gap={2} wrap="wrap" vAlign="center">
                   {(data?.roles ?? []).map((role) => (
-                    <Token key={role} size="sm" color="blue" label={ROLE_LABELS[role] ?? role} />
+                    <Token key={role} size="sm" color="blue" label={roleLabel(role)} />
                   ))}
                   <Token
                     size="sm"
                     color={data?.telegram_connected ? "green" : "gray"}
                     icon={<Send size={12} />}
-                    label={data?.telegram_connected ? `@${data.telegram_username || "холбогдсон"}` : "Telegram холбоогүй"}
+                    label={data?.telegram_connected ? `@${data.telegram_username || t('profile.telegram.linkedLower')}` : t('profile.telegram.notLinked')}
                   />
                   {tenure && <Token size="sm" color="purple" icon={<CalendarDays size={12} />} label={tenure} />}
                 </HStack>
@@ -315,27 +307,27 @@ export function ProfilePage() {
           <VStack gap={2}>
             <HStack gap={2} vAlign="center">
               <StackItem size="fill">
-                <Text weight="semibold">Профайлын бүрдэл</Text>
+                <Text weight="semibold">{t('profile.completeness')}</Text>
               </StackItem>
               <Text weight="semibold" color={completion.percent === 100 ? "accent" : "secondary"} hasTabularNumbers>
                 {completion.percent}%
               </Text>
             </HStack>
             <ProgressBar
-              label="Профайлын бүрдэл"
+              label={t('profile.completeness')}
               isLabelHidden
               value={completion.percent}
               variant={completion.percent === 100 ? "success" : "accent"}
             />
             {completion.missing.length ? (
               <HStack gap={1.5} wrap="wrap" vAlign="center">
-                <Text type="supporting">Дутуу:</Text>
+                <Text type="supporting">{t('profile.missing')}</Text>
                 {completion.missing.map((item) => (
                   <Token key={item.label} size="sm" label={item.label} />
                 ))}
               </HStack>
             ) : (
-              <Text type="supporting">Бүх мэдээлэл бүрэн. Хамт олон таныг хялбар олох боломжтой.</Text>
+              <Text type="supporting">{t('profile.complete')}</Text>
             )}
           </VStack>
         </Grid>
@@ -344,9 +336,9 @@ export function ProfilePage() {
       {needsPasswordSetup && (
         <Banner
           status="warning"
-          title="Нууц үг үүсгээгүй байна"
-          description={`Telegram-аар нэвтэрсэн тул вэбээр нэвтрэх нэр, нууц үгээ тохируулна уу. Одоогийн нэвтрэх нэр: ${data?.username ?? ""}`}
-          endContent={<Button label="Нууц үг үүсгэх" size="sm" onClick={() => setPasswordOpen(true)} />}
+          title={t('profile.password.notCreated')}
+          description={t('profile.password.setupBanner', { username: data?.username ?? "" })}
+          endContent={<Button label={t('profile.password.create')} size="sm" onClick={() => setPasswordOpen(true)} />}
           collapsible={false}
         />
       )}
@@ -356,18 +348,18 @@ export function ProfilePage() {
         <VStack gap={5}>
           <Card padding={5}>
             <VStack gap={4}>
-              <SectionHeader icon={UserRound} title="Хувийн мэдээлэл" description="Байгууллагын ажилтнуудад харагдана." />
+              <SectionHeader icon={UserRound} title={t('profile.personal')} description={t('profile.personalHint')} />
               <Grid columns={{ minWidth: 220, max: 2, repeat: "fit" }} gap={4}>
                 <TextInput
-                  label="Утас"
+                  label={t('profile.field.phone')}
                   startIcon={Phone}
-                  placeholder="99xxxxxx"
+                  placeholder={t('profile.phonePlaceholder')}
                   value={form.phone_number}
                   onChange={(value) => edit({ phone_number: value })}
                   autoComplete="tel"
                 />
                 <DateInput
-                  label="Төрсөн өдөр"
+                  label={t('profile.field.birthday')}
                   value={(form.birthday || undefined) as any}
                   onChange={(value) => edit({ birthday: value ?? "" })}
                   max={new Date().toISOString().slice(0, 10) as any}
@@ -383,26 +375,26 @@ export function ProfilePage() {
             <VStack gap={4}>
               <SectionHeader
                 icon={BriefcaseBusiness}
-                title="Ажлын мэдээлэл"
-                description="Алба HR-ын бүртгэлээс сонгогдоно."
+                title={t('profile.work')}
+                description={t('profile.workHint')}
               />
               <Grid columns={{ minWidth: 220, max: 2, repeat: "fit" }} gap={4}>
                 <Selector
-                  label="Алба"
-                  placeholder={departments.isLoading ? "Ачаалж байна…" : "Албаа сонгоно уу"}
+                  label={t('profile.field.department')}
+                  placeholder={departments.isLoading ? t('profile.loading') : t('profile.pickDepartment')}
                   options={departmentOptions}
                   value={form.department_id || undefined}
                   onChange={(value) => edit({ department_id: value ?? "" })}
                   hasSearch={departmentOptions.length > 7}
-                  searchPlaceholder="Алба хайх…"
-                  emptyText="HR алба бүртгээгүй байна"
+                  searchPlaceholder={t('profile.searchDepartment')}
+                  emptyText={t('profile.noDepartments')}
                   isReadOnly={departmentLocked}
-                  description={departmentLocked ? "HR оноосон. Өөрчлөх бол HR-т хандана уу." : undefined}
+                  description={departmentLocked ? t('profile.assignedByHr') : undefined}
                 />
                 <TextInput
-                  label="Ажлын чиглэл"
+                  label={t('profile.field.workDirection')}
                   startIcon={Compass}
-                  placeholder="Жишээ: Систем хөгжүүлэлт"
+                  placeholder={t('profile.workDirectionPlaceholder')}
                   value={form.work_direction}
                   onChange={(value) => edit({ work_direction: value })}
                 />
@@ -410,13 +402,13 @@ export function ProfilePage() {
               <Divider />
               <HStack gap={2} vAlign="center">
                 <Icon icon={Lock} size="sm" color="secondary" />
-                <Text type="supporting">HR-ын бүртгэл — зөвхөн унших</Text>
+                <Text type="supporting">{t('profile.hrReadOnly')}</Text>
               </HStack>
               <MetadataList columns={2}>
-                <MetadataListItem label="Албан тушаал" icon={<Building2 size={14} />}>
+                <MetadataListItem label={t('profile.position')} icon={<Building2 size={14} />}>
                   <Text>{data?.job_title || "—"}</Text>
                 </MetadataListItem>
-                <MetadataListItem label="Шууд удирдлага" icon={<UserRound size={14} />}>
+                <MetadataListItem label={t('profile.manager')} icon={<UserRound size={14} />}>
                   {data?.manager_name ? (
                     <HStack gap={2} vAlign="center">
                       <Avatar
@@ -430,14 +422,14 @@ export function ProfilePage() {
                     <Text>—</Text>
                   )}
                 </MetadataListItem>
-                <MetadataListItem label="Ажилд орсон" icon={<CalendarDays size={14} />}>
+                <MetadataListItem label={t('profile.hired')} icon={<CalendarDays size={14} />}>
                   <Text>
                     {formatDate(data?.start_date ?? null)}
                     {tenure ? ` · ${tenure}` : ""}
                   </Text>
                 </MetadataListItem>
-                <MetadataListItem label="Ажлын төрөл" icon={<BriefcaseBusiness size={14} />}>
-                  <Text>{(data?.employment_type && EMPLOYMENT_TYPE_LABELS[data.employment_type]) || "—"}</Text>
+                <MetadataListItem label={t('profile.employmentType')} icon={<BriefcaseBusiness size={14} />}>
+                  <Text>{(data?.employment_type && employmentTypeLabel(data.employment_type)) || "—"}</Text>
                 </MetadataListItem>
               </MetadataList>
             </VStack>
@@ -445,7 +437,7 @@ export function ProfilePage() {
 
           <Card padding={5}>
             <VStack gap={4}>
-              <SectionHeader icon={ImageUp} title="Профайл зураг" description="Memoji сонгох эсвэл өөрийн зургаа оруулна." />
+              <SectionHeader icon={ImageUp} title={t('profile.avatar')} description={t('profile.avatarHint')} />
               <Grid columns={{ minWidth: 60, max: 5 }} gap={2}>
                 {MEMOJI_OPTIONS.map((url, index) => (
                   <SelectableCard
@@ -462,7 +454,7 @@ export function ProfilePage() {
                 ))}
               </Grid>
               <FileInput
-                label="Өөрийн зураг оруулах"
+                label={t('profile.uploadAvatar')}
                 isLabelHidden
                 mode="dropzone"
                 accept="image/png,image/jpeg,image/webp"
@@ -470,7 +462,7 @@ export function ProfilePage() {
                 value={uploadFile}
                 onChange={chooseUpload}
                 isLoading={uploadAvatar.isPending}
-                placeholder="Зураг чирж оруулах эсвэл сонгох · PNG, JPEG, WebP · 256×256, 2 MB"
+                placeholder={t('profile.uploadHint')}
               />
             </VStack>
           </Card>
@@ -480,16 +472,16 @@ export function ProfilePage() {
         <VStack gap={5}>
           <Card padding={5}>
             <VStack gap={4}>
-              <SectionHeader icon={ShieldCheck} title="Нэвтрэлт ба аюулгүй байдал" />
+              <SectionHeader icon={ShieldCheck} title={t('profile.security')} />
               <TextInput
-                label="Нэвтрэх нэр"
+                label={t('profile.username')}
                 value={form.username}
                 onChange={(value) => edit({ username: value })}
                 description={
                   data?.telegram_session
-                    ? "Telegram-аар нэвтэрсэн тул нэвтрэх нэр, нууц үгээ одоогийн нууц үггүйгээр сольж болно."
+                    ? t('profile.usernameHintTelegram')
                     : needsPasswordSetup
-                      ? "Нэвтрэх нэр ба нууц үгээ тохируулж, вебээр шууд нэвтэрнэ."
+                      ? t('profile.usernameHintSetup')
                       : undefined
                 }
                 autoComplete="username"
@@ -497,8 +489,8 @@ export function ProfilePage() {
               {usernameChanged && needsCurrentPassword && (
                 <TextInput
                   type="password"
-                  label="Одоогийн нууц үг"
-                  description="Нэвтрэх нэр солихыг баталгаажуулна."
+                  label={t('profile.currentPassword')}
+                  description={t('profile.usernameConfirm')}
                   value={form.username_password}
                   onChange={(value) => edit({ username_password: value })}
                   autoComplete="current-password"
@@ -508,12 +500,12 @@ export function ProfilePage() {
                 <Icon icon={KeyRound} color="secondary" />
                 <StackItem size="fill">
                   <VStack gap={0.5}>
-                    <Text weight="medium">Нууц үг</Text>
-                    <Text type="supporting">{needsPasswordSetup ? "Үүсгээгүй" : "Тохируулсан"}</Text>
+                    <Text weight="medium">{t('profile.field.password')}</Text>
+                    <Text type="supporting">{needsPasswordSetup ? t('profile.password.none') : t('profile.password.set')}</Text>
                   </VStack>
                 </StackItem>
                 <Button
-                  label={needsPasswordSetup ? "Үүсгэх" : "Солих"}
+                  label={needsPasswordSetup ? t('profile.create') : t('profile.change')}
                   size="sm"
                   onClick={() => setPasswordOpen(true)}
                 />
@@ -524,19 +516,19 @@ export function ProfilePage() {
                 <StackItem size="fill">
                   <VStack gap={0.5}>
                     <HStack gap={1.5} vAlign="center">
-                      <Text weight="medium">Telegram</Text>
+                      <Text weight="medium">{t('profile.telegram')}</Text>
                       <StatusDot
                         variant={data?.telegram_connected ? "success" : "neutral"}
-                        label={data?.telegram_connected ? "Холбогдсон" : "Холбоогүй"}
+                        label={data?.telegram_connected ? t('profile.telegram.linked') : t('profile.telegram.unlinked')}
                       />
                     </HStack>
                     <Text type="supporting">
-                      {data?.telegram_connected ? `@${data.telegram_username || "холбогдсон"}` : "Бот, мэдэгдэл хүлээн авахын тулд холбоно."}
+                      {data?.telegram_connected ? `@${data.telegram_username || t('profile.telegram.linkedLower')}` : t('profile.telegram.hint')}
                     </Text>
                   </VStack>
                 </StackItem>
                 <Button
-                  label={data?.telegram_connected ? "Дахин холбох" : "Холбох"}
+                  label={data?.telegram_connected ? t('profile.telegram.relink') : t('profile.telegram.link')}
                   size="sm"
                   onClick={linkTelegram}
                   isLoading={telegramLink.isPending}
@@ -547,9 +539,9 @@ export function ProfilePage() {
 
           <Card padding={5}>
             <VStack gap={4}>
-              <SectionHeader icon={Languages} title="Тохиргоо" />
+              <SectionHeader icon={Languages} title={t('profile.settings')} />
               <Selector
-                label="Хэл"
+                label={t('profile.language')}
                 options={LOCALE_OPTIONS}
                 value={form.locale}
                 onChange={(value) => value && edit({ locale: value })}
@@ -559,21 +551,21 @@ export function ProfilePage() {
 
           <Card padding={5}>
             <VStack gap={4}>
-              <SectionHeader icon={Bell} title="Мэдэгдэл" />
+              <SectionHeader icon={Bell} title={t('profile.notifications')} />
               {isNativePlatform() ? (
                 <HStack gap={3} vAlign="center">
                   <StackItem size="fill">
                     <VStack gap={0.5}>
-                      <Text weight="medium">Push мэдэгдэл</Text>
-                      <Text type="supporting">Төхөөрөмж дээрх ажлын мэдэгдлийг удирдана.</Text>
+                      <Text weight="medium">{t('profile.push')}</Text>
+                      <Text type="supporting">{t('profile.pushHint')}</Text>
                     </VStack>
                   </StackItem>
                   {notificationPermission === "granted" ? (
-                    <Token size="sm" color="green" icon={<Check size={12} />} label="Идэвхтэй" />
+                    <Token size="sm" color="green" icon={<Check size={12} />} label={t('profile.active')} />
                   ) : (
                     <Button
                       size="sm"
-                      label={notificationPermission === "denied" ? "Тохиргооноос зөвшөөрнө үү" : "Зөвшөөрөх"}
+                      label={notificationPermission === "denied" ? t('profile.allowInSettings') : t('profile.allow')}
                       onClick={requestNotifications}
                       isLoading={notificationPending}
                       isDisabled={notificationPermission === "denied"}
@@ -583,11 +575,11 @@ export function ProfilePage() {
               ) : (
                 <>
                   <Switch
-                    label="Чатын desktop мэдэгдэл"
+                    label={t('profile.desktopNotif')}
                     description={
                       desktopPermission === "denied"
-                        ? "Browser тохиргооноос мэдэгдлийг зөвшөөрнө үү."
-                        : "Апп нуугдсан эсвэл minimize үед мэдэгдэл харуулна."
+                        ? t('profile.desktopNotifDenied')
+                        : t('profile.desktopNotifHint')
                     }
                     value={desktopEnabled}
                     onChange={(next) => void toggleDesktopAlerts(next)}
@@ -600,7 +592,7 @@ export function ProfilePage() {
                   <HStack gap={2} vAlign="center">
                     <StackItem size="fill">
                       <Switch
-                        label="Мэдэгдлийн дуу"
+                        label={t('profile.sound')}
                         value={soundEnabled}
                         onChange={(next) =>
                           updateChatNotifications.mutate({
@@ -615,12 +607,12 @@ export function ProfilePage() {
                       />
                     </StackItem>
                     <Button
-                      label="Сонсох"
+                      label={t('profile.listen')}
                       size="sm"
                       variant="ghost"
                       icon={<Volume2 size={14} />}
                       isIconOnly
-                      tooltip="Дууг сонсох"
+                      tooltip={t('profile.listenSound')}
                       onClick={() => void previewChatSound()}
                     />
                   </HStack>
@@ -636,13 +628,13 @@ export function ProfilePage() {
       {dirty && (
         <Card padding={3} elevation="high" className="sticky bottom-4 z-20">
           <HStack gap={3} vAlign="center" wrap="wrap">
-            <StatusDot variant="warning" label="Хадгалаагүй" />
+            <StatusDot variant="warning" label={t('profile.unsaved')} />
             <StackItem size="fill">
-              <Text weight="medium">Хадгалаагүй өөрчлөлт байна</Text>
+              <Text weight="medium">{t('profile.unsavedChanges')}</Text>
             </StackItem>
-            <Button label="Буцаах" variant="ghost" onClick={() => setDraft(null)} isDisabled={update.isPending} />
+            <Button label={t('profile.revert')} variant="ghost" onClick={() => setDraft(null)} isDisabled={update.isPending} />
             <Button
-              label="Профайл хадгалах"
+              label={t('profile.save')}
               variant="primary"
               icon={<Save size={16} />}
               clickAction={saveProfile}
@@ -657,13 +649,13 @@ export function ProfilePage() {
         <form onSubmit={submitPassword}>
           <VStack gap={4}>
             <DialogHeader
-              title={needsPasswordSetup ? "Нууц үг үүсгэх" : "Нууц үг солих"}
+              title={needsPasswordSetup ? t('profile.password.create') : t('profile.password.change')}
               subtitle={
                 needsPasswordSetup
-                  ? `«${data?.username ?? ""}» нэвтрэх нэрээр нууц үг үүсгэнэ.`
+                  ? t('profile.password.setupFor', { username: data?.username ?? "" })
                   : needsCurrentPassword
-                    ? "Аюулгүй байдлын үүднээс одоогийн нууц үгээ оруулна."
-                    : "Telegram-аар баталгаажсан тул одоогийн нууц үг шаардахгүй."
+                    ? t('profile.password.confirmCurrent')
+                    : t('profile.password.noCurrent')
               }
               onOpenChange={setPasswordOpen}
             />
@@ -671,7 +663,7 @@ export function ProfilePage() {
               {needsCurrentPassword && (
                 <TextInput
                   type="password"
-                  label="Одоогийн нууц үг"
+                  label={t('profile.currentPassword')}
                   value={passwords.current}
                   onChange={(value) => setPasswords((current) => ({ ...current, current: value }))}
                   autoComplete="current-password"
@@ -680,24 +672,24 @@ export function ProfilePage() {
               )}
               <TextInput
                 type="password"
-                label="Шинэ нууц үг"
-                description="Хамгийн багадаа 10 тэмдэгт."
+                label={t('profile.password.new')}
+                description={t('profile.password.minHint')}
                 value={passwords.next}
                 onChange={(value) => setPasswords((current) => ({ ...current, next: value }))}
                 autoComplete="new-password"
                 hasAutoFocus={!needsCurrentPassword}
                 status={
                   passwords.next && passwords.next.length < 10
-                    ? { type: "warning", message: `${10 - passwords.next.length} тэмдэгт дутуу` }
+                    ? { type: "warning", message: t('profile.password.charsLeft', { n: 10 - passwords.next.length }) }
                     : undefined
                 }
               />
             </VStack>
             <HStack gap={2} hAlign="end" padding={4}>
-              <Button label="Цуцлах" variant="ghost" onClick={() => setPasswordOpen(false)} />
+              <Button label={t('profile.cancel')} variant="ghost" onClick={() => setPasswordOpen(false)} />
               <Button
                 type="submit"
-                label="Хадгалах"
+                label={t('profile.savePassword')}
                 variant="primary"
                 icon={<Save size={16} />}
                 isLoading={changePassword.isPending}

@@ -1,3 +1,6 @@
+import { intlLocale } from '../utils/locale'
+import i18n from '../i18n'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
@@ -9,42 +12,39 @@ import { useCreateManagedAccount, useManagedAccounts, useUpdateManagedAccount } 
 import { TELEGRAM_BOT_REQUIRED_HINT, tenancyErrorMessage, useTenantContext } from '../api/tenancy'
 import { ReportDetailModal } from '../components/ReportDetailModal'
 import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
-import { SEAT_FULL_WORKER_MESSAGE, SeatLimitNotice, useWorkerSeats } from '../components/SeatLimitNotice'
+import { seatFullWorkerMessage, SeatLimitNotice, useWorkerSeats } from '../components/SeatLimitNotice'
 
 const TZ_OPTIONS = [
-  { value: 'Asia/Ulaanbaatar',    label: 'Улаанбаатар (UTC+8)' },
-  { value: 'Asia/Hovd',           label: 'Ховд (UTC+7)' },
-  { value: 'Asia/Choibalsan',     label: 'Чойбалсан (UTC+8)' },
-  { value: 'Asia/Almaty',         label: 'Алматы (UTC+5)' },
-  { value: 'Europe/Moscow',       label: 'Москва (UTC+3)' },
+  { value: 'Asia/Ulaanbaatar', get label() { return i18n.t('hr.tz.ulaanbaatar') } },
+  { value: 'Asia/Hovd', get label() { return i18n.t('hr.tz.hovd') } },
+  { value: 'Asia/Choibalsan', get label() { return i18n.t('hr.tz.choibalsan') } },
+  { value: 'Asia/Almaty', get label() { return i18n.t('hr.tz.almaty') } },
+  { value: 'Europe/Moscow', get label() { return i18n.t('hr.tz.moscow') } },
 ]
 
 const STATUS_OPTIONS = [
-  { value: 'active',   label: 'Идэвхтэй' },
-  { value: 'inactive', label: 'Идэвхгүй' },
+  { value: 'active', get label() { return i18n.t('hr.active') } },
+  { value: 'inactive', get label() { return i18n.t('hr.inactive') } },
 ]
 
 const EMPTY_FORM = { name: '', telegram_id: '', telegram_username: '', timezone: 'Asia/Ulaanbaatar', is_active: true }
 
-const REPORT_TYPE_LABELS: Record<string, string> = {
-  daily: 'Өдрийн тайлан',
-  monthly: 'Сарын тайлан',
-  next_month_plan: 'Дараа сарын төлөвлөгөө',
-}
+const REPORT_TYPE_KEYS = ['daily', 'monthly', 'next_month_plan']
+const reportTypeLabel = (type: string) => REPORT_TYPE_KEYS.includes(type) ? i18n.t(`reports.detail.type.${type}`) : type
 
-const ACCESS_ROLES = [
+const accessRoles = () => [
   ['member', 'Member'], ['manager', 'Manager'], ['team_lead', 'Team lead'], ['hr', 'HR'],
-  ['contractor', 'Contractor'], ['client_auditor', 'Client auditor'], ['legal_counsel', 'Хуульч'], ['admin', 'Admin'],
+  ['contractor', 'Contractor'], ['client_auditor', 'Client auditor'], ['legal_counsel', i18n.t('hr.role.legalCounsel')], ['admin', 'Admin'],
 ] as const
 
 function formatMinutes(minutes: number) {
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
-  return hours ? `${hours}ц ${rest}м` : `${rest}м`
+  return hours ? `${hours}${i18n.t('worktime.unit.hour')} ${rest}${i18n.t('worktime.unit.minute')}` : `${rest}${i18n.t('worktime.unit.minute')}`
 }
 
 function formatTime(value: string | null) {
-  return value ? new Date(value).toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' }) : '—'
+  return value ? new Date(value).toLocaleTimeString(intlLocale(), { hour: '2-digit', minute: '2-digit' }) : '—'
 }
 
 function localDate(value = new Date()) {
@@ -52,6 +52,7 @@ function localDate(value = new Date()) {
 }
 
 export function EmployeesPage() {
+  const { t } = useTranslation()
   const tenant = useTenantContext()
   // Telegram IDs only make sense once the tenant's own bot is connected.
   const botConnected = tenant.data?.telegram_bot_connected !== false
@@ -101,12 +102,12 @@ export function EmployeesPage() {
 
   const runBatch = async (action: 'activate' | 'deactivate' | 'delete') => {
     const targets = visibleSelected.filter((e: any) => action === 'delete' ? !e.deleted_at : action === 'activate' ? !e.is_active || e.deleted_at : e.is_active)
-    if (!targets.length) { toast('Сонгосон ажилтанд хэрэгжих өөрчлөлт алга'); return }
-    if (action === 'delete' && !window.confirm(`${targets.length} ажилтныг жагсаалтаас устгах уу?`)) return
+    if (!targets.length) { toast(t('hr.emp.noChanges')); return }
+    if (action === 'delete' && !window.confirm(t('hr.emp.bulkDeleteConfirm', { n: targets.length }))) return
     const results = await Promise.allSettled(targets.map((e: any) => action === 'delete' ? deleteEmployee.mutateAsync(e.id) : update.mutateAsync({ id: e.id, is_active: action === 'activate' })))
     const failed = results.filter((r) => r.status === 'rejected').length
-    if (failed) toast.error(`${targets.length - failed} амжилттай, ${failed} амжилтгүй`)
-    else toast.success(`${targets.length} ажилтан шинэчлэгдлээ`)
+    if (failed) toast.error(t('hr.emp.bulkPartial', { ok: targets.length - failed, failed }))
+    else toast.success(t('hr.emp.bulkDone', { n: targets.length }))
     setSelectedIds(new Set())
   }
 
@@ -132,9 +133,9 @@ export function EmployeesPage() {
   const saveEdit = async (emp: any) => {
     try {
       await update.mutateAsync({ id: emp.id, name: form.name, telegram_username: form.telegram_username, timezone: form.timezone, is_active: form.is_active })
-      toast.success('Ажилтны мэдээлэл хадгалагдлаа')
+      toast.success(t('hr.emp.saved'))
     } catch (error: any) {
-      toast.error(tenancyErrorMessage(error, 'Хадгалагдсангүй'))
+      toast.error(tenancyErrorMessage(error, t('hr.emp.notSaved')))
     }
   }
 
@@ -156,7 +157,7 @@ export function EmployeesPage() {
         telegram_username: form.telegram_username,
         timezone: form.timezone,
       })
-      if (seatLimitReached) toast(SEAT_FULL_WORKER_MESSAGE, { icon: '⚠️', duration: 7000 })
+      if (seatLimitReached) toast(seatFullWorkerMessage(), { icon: '⚠️', duration: 7000 })
     }
     close()
   }
@@ -167,52 +168,52 @@ export function EmployeesPage() {
     const account = accountFor(emp)
     if (!account) return
     const roles = account.roles.includes(role) ? account.roles.filter((item) => item !== role) : [...account.roles, role]
-    if (!roles.length) { toast.error('Хэрэглэгч дор хаяж нэг эрхтэй байна'); return }
+    if (!roles.length) { toast.error(t('hr.emp.minOneRole')); return }
     try {
       await updateAccount.mutateAsync({ id: account.id, roles })
-      toast.success('Хандалтын эрх шинэчлэгдлээ')
+      toast.success(t('hr.emp.accessUpdated'))
     } catch (error: any) {
-      toast.error(tenancyErrorMessage(error, 'Эрх шинэчлэгдсэнгүй'))
+      toast.error(tenancyErrorMessage(error, t('hr.emp.accessNotUpdated')))
     }
   }
   const toggleCustomRole = async (accountId: number, roleId: number, assignmentId?: number) => {
     try {
       if (assignmentId) await unassignCustomRole.mutateAsync({ roleId, assignmentId })
       else await assignCustomRole.mutateAsync({ roleId, account_id: accountId })
-      toast.success('Хандалтын эрх шинэчлэгдлээ')
+      toast.success(t('hr.emp.accessUpdated'))
     } catch (error: any) {
-      toast.error(tenancyErrorMessage(error, 'Эрх шинэчлэгдсэнгүй'))
+      toast.error(tenancyErrorMessage(error, t('hr.emp.accessNotUpdated')))
     }
   }
   const linkAccess = async (emp: any) => {
-    if (seatLimitReached) { toast.error('Лицензийн хэрэглэгчийн эрх дүүрсэн тул нэвтрэх эрх холбох боломжгүй. Багцаа өргөтгөх эсвэл ашиглахгүй хэрэглэгчийг идэвхгүй болгоно уу.'); return }
-    const password = window.prompt(`${emp.name}-ийн шинэ нууц үг (10+ тэмдэгт):`)
+    if (seatLimitReached) { toast.error(t('hr.emp.seatLimit')); return }
+    const password = window.prompt(t('hr.emp.newPasswordPrompt', { name: emp.name }))
     if (!password) return
-    if (password.length < 10) { toast.error('Нууц үг 10+ тэмдэгт байх ёстой'); return }
+    if (password.length < 10) { toast.error(t('hr.emp.passwordMin')); return }
     try {
       await createAccount.mutateAsync({ email: `telegram-${emp.telegram_id}`, password, employee_id: emp.id, roles: ['member'], locale: 'mn' })
-      toast.success('Ажилтны хандалт холбогдлоо')
+      toast.success(t('hr.emp.accessLinked'))
     } catch (error: any) {
-      toast.error(tenancyErrorMessage(error, 'Хандалт холбогдсонгүй'))
+      toast.error(tenancyErrorMessage(error, t('hr.emp.accessNotLinked')))
     }
   }
   const changeAccessPassword = async (emp: any) => {
     const account = accountFor(emp)
     if (!account) return
-    const password = window.prompt(`${emp.name}-ийн шинэ нууц үг (10+ тэмдэгт):`)
+    const password = window.prompt(t('hr.emp.newPasswordPrompt', { name: emp.name }))
     if (!password) return
-    if (password.length < 10) { toast.error('Нууц үг 10+ тэмдэгт байх ёстой'); return }
+    if (password.length < 10) { toast.error(t('hr.emp.passwordMin')); return }
     try {
       await updateAccount.mutateAsync({ id: account.id, password })
-      toast.success('Нууц үг шинэчлэгдлээ')
-    } catch (error: any) { toast.error(tenancyErrorMessage(error, 'Нууц үг шинэчлэгдсэнгүй')) }
+      toast.success(t('hr.emp.passwordUpdated'))
+    } catch (error: any) { toast.error(tenancyErrorMessage(error, t('hr.emp.passwordNotUpdated'))) }
   }
   const toggleAccountStatus = (emp: any) => {
     const account = accountFor(emp)
     if (account) updateAccount.mutate({ id: account.id, status: account.status === 'disabled' ? 'active' : 'disabled' })
   }
   const removeEmployee = (emp: any) => {
-    if (!window.confirm(`${emp.name}-ийг ажилтны жагсаалтаас устгах уу?`)) return
+    if (!window.confirm(t('hr.emp.deleteConfirm', { name: emp.name }))) return
     deleteEmployee.mutate(emp.id, {
       onSuccess: () => {
         if (performanceId === emp.id) setPerformanceId(null)
@@ -227,29 +228,29 @@ export function EmployeesPage() {
 
   return (
     <div>
-      <PageHeader title="Ажилтнууд">
-        <label className="employee-archive-toggle"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} />Архивласан</label>
-        <Btn variant="primary" onClick={openCreate}>+ Нэмэх</Btn>
+      <PageHeader title={t('hr.emp.listLabel')}>
+        <label className="employee-archive-toggle"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} />{t('hr.archived')}</label>
+        <Btn variant="primary" onClick={openCreate}>{t('hr.emp.addPlus')}</Btn>
       </PageHeader>
 
       <Card className="admin-table-card employee-list-card p-0 overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
           <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Нэр эсвэл @username-аар хайх…"
+            placeholder={t('hr.emp.searchPlaceholder')}
             className="w-full bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none focus:border-accent" />
         </div>
-        {visibleSelected.length > 0 && <div className="flex items-center gap-2 flex-wrap px-5 py-2.5 border-b border-border bg-surface2" role="toolbar" aria-label="Бөөнөөр үйлдэх">
-          <strong className="text-[13px] mr-2">{visibleSelected.length} сонгосон</strong>
-          <Btn onClick={() => runBatch('activate')}>Идэвхжүүлэх</Btn>
-          <Btn onClick={() => runBatch('deactivate')}>Идэвхгүй болгох</Btn>
-          <Btn onClick={() => runBatch('delete')}>Устгах</Btn>
-          <Btn onClick={() => setSelectedIds(new Set())}>Болих</Btn>
+        {visibleSelected.length > 0 && <div className="flex items-center gap-2 flex-wrap px-5 py-2.5 border-b border-border bg-surface2" role="toolbar" aria-label={t('hr.emp.bulkActions')}>
+          <strong className="text-[13px] mr-2">{t('hr.emp.selectedCount', { n: visibleSelected.length })}</strong>
+          <Btn onClick={() => runBatch('activate')}>{t('hr.workerActions.activate')}</Btn>
+          <Btn onClick={() => runBatch('deactivate')}>{t('hr.workerActions.deactivate')}</Btn>
+          <Btn onClick={() => runBatch('delete')}>{t('hr.delete')}</Btn>
+          <Btn onClick={() => setSelectedIds(new Set())}>{t('hr.cancel')}</Btn>
         </div>}
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-surface2">
-              <th className="px-4 py-2.5 w-8 border-b border-border"><input type="checkbox" aria-label="Бүгдийг сонгох" checked={allSelected} onChange={toggleAll} /></th>
-              {['Нэр', 'Telegram', 'Telegram ID', 'Идэвхтэй эрх', 'Төлөв', ''].map((h) => (
+              <th className="px-4 py-2.5 w-8 border-b border-border"><input type="checkbox" aria-label={t('hr.emp.selectAll')} checked={allSelected} onChange={toggleAll} /></th>
+              {[t('hr.name'), 'Telegram', 'Telegram ID', t('hr.emp.activeRoles'), t('hr.status'), ''].map((h) => (
                 <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted border-b border-border whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -258,7 +259,7 @@ export function EmployeesPage() {
             {filtered.map((e: any, i: number) => (
               <tr key={e.id} onClick={() => { openEdit(e); setOpenMenuId(null) }}
                 className={`cursor-pointer transition-colors hover:bg-surface2 ${i < filtered.length - 1 ? 'border-b border-border2' : ''}`}>
-                <td className="px-4 py-2.5 w-8" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`${e.name} сонгох`} checked={selectedIds.has(e.id)} onChange={() => toggleSelected(e.id)} /></td>
+                <td className="px-4 py-2.5 w-8" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={t('hr.emp.selectOne', { name: e.name })} checked={selectedIds.has(e.id)} onChange={() => toggleSelected(e.id)} /></td>
                 <td className="px-4 py-2.5 font-medium">{e.name}</td>
                 <td className="px-4 py-2.5 text-muted font-mono text-xs">{e.telegram_username || '—'}</td>
                 <td className="px-4 py-2.5 text-muted2 font-mono text-[11px]">{e.telegram_id}</td>
@@ -266,10 +267,10 @@ export function EmployeesPage() {
                   {(() => { const account = accountFor(e)
                     const custom = account ? customRoles.filter((role) => role.account_assignments.some((a) => a.account_id === account.id)) : []
                     return account?.roles.length || custom.length
-                    ? <div className="employee-role-chips">{ACCESS_ROLES.filter(([value]) => account?.roles.includes(value)).map(([, label]) => <span key={label}>{label}</span>)}{custom.map((role) => <span key={`c${role.id}`}>{role.name}</span>)}</div>
-                    : <span className="text-xs text-muted">Эрх тохируулаагүй</span> })()}
+                    ? <div className="employee-role-chips">{accessRoles().filter(([value]) => account?.roles.includes(value)).map(([, label]) => <span key={label}>{label}</span>)}{custom.map((role) => <span key={`c${role.id}`}>{role.name}</span>)}</div>
+                    : <span className="text-xs text-muted">{t('hr.emp.noRoles')}</span> })()}
                 </td>
-                <td className="px-4 py-3"><Badge color={e.deleted_at ? 'muted' : e.is_active ? 'green' : 'muted'}>{e.deleted_at ? 'Архивласан' : e.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge></td>
+                <td className="px-4 py-3"><Badge color={e.deleted_at ? 'muted' : e.is_active ? 'green' : 'muted'}>{e.deleted_at ? t('hr.archived') : e.is_active ? t('hr.active') : t('hr.inactive')}</Badge></td>
                 <td className="px-3 py-1.5" onClick={(event) => event.stopPropagation()}>
                   <WorkerActionsMenu worker={e} open={openMenuId === e.id} onOpen={() => setOpenMenuId(openMenuId === e.id ? null : e.id)} onEdit={() => { openEdit(e); setOpenMenuId(null) }} onDelete={() => { removeEmployee(e); setOpenMenuId(null) }} onSetActive={(active) => { if (active && e.deleted_at) update.mutate({ id: e.id, is_active: true }); else update.mutate({ id: e.id, is_active: active }); setOpenMenuId(null) }} />
                 </td>
@@ -277,14 +278,14 @@ export function EmployeesPage() {
             ))}
           </tbody>
         </table>
-        {filtered.length === 0 && <div className="px-5 py-8 text-center text-muted">Ажилтан олдсонгүй</div>}
+        {filtered.length === 0 && <div className="px-5 py-8 text-center text-muted">{t('hr.emp.notFound')}</div>}
       </Card>
 
       {editing && createPortal(
-        <Modal title={isEdit ? 'Ажилтан засах' : 'Шинэ ажилтан'} onClose={close}>
+        <Modal title={isEdit ? t('hr.emp.editTitle') : t('hr.emp.newTitle')} onClose={close}>
           <div className="flex flex-col gap-3.5">
             {!isEdit && <SeatLimitNotice />}
-            <Input label="Нэр, овог" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="Бат Болд" fullWidth />
+            <Input label={t('hr.emp.fullName')} value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder={t('hr.emp.namePlaceholder')} fullWidth />
             {isEdit ? (
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs text-muted font-medium">Telegram ID</label>
@@ -295,14 +296,14 @@ export function EmployeesPage() {
                 disabled={!botConnected} hint={botConnected ? undefined : TELEGRAM_BOT_REQUIRED_HINT} />
             )}
             <Input label="Telegram username" value={form.telegram_username} onChange={(v) => setForm((f) => ({ ...f, telegram_username: v }))} placeholder="@username" fullWidth />
-            <Select label="Цагийн бүс" value={form.timezone} onChange={(v) => setForm((f) => ({ ...f, timezone: v }))} options={TZ_OPTIONS} fullWidth />
+            <Select label={t('hr.emp.timezone')} value={form.timezone} onChange={(v) => setForm((f) => ({ ...f, timezone: v }))} options={TZ_OPTIONS} fullWidth />
             {isEdit && (
-              <Select label="Төлөв" value={form.is_active ? 'active' : 'inactive'}
+              <Select label={t('hr.status')} value={form.is_active ? 'active' : 'inactive'}
                 onChange={(v) => setForm((f) => ({ ...f, is_active: v === 'active' }))} options={STATUS_OPTIONS} fullWidth />
             )}
             <div className="flex gap-2.5 justify-end pt-1">
-              <Btn onClick={close}>Цуцлах</Btn>
-              <Btn variant="primary" onClick={submit} disabled={create.isPending || update.isPending}>{isEdit ? 'Хадгалах' : 'Нэмэх'}</Btn>
+              <Btn onClick={close}>{t('hr.cancelAlt')}</Btn>
+              <Btn variant="primary" onClick={submit} disabled={create.isPending || update.isPending}>{isEdit ? t('hr.save') : t('hr.add')}</Btn>
             </div>
           </div>
         </Modal>, document.body
@@ -312,38 +313,38 @@ export function EmployeesPage() {
         const employee = employees.find((item: any) => item.id === selectedEmployeeId)
         if (!employee) return null
         const account = accountFor(employee)
-        return createPortal(<Modal title="Ажилтны дэлгэрэнгүй" onClose={() => { setSelectedEmployeeId(null); setPerformanceId(null) }} className="employee-detail-modal">
+        return createPortal(<Modal title={t('hr.emp.detailLabel')} onClose={() => { setSelectedEmployeeId(null); setPerformanceId(null) }} className="employee-detail-modal">
           <div className="employee-detail-heading">
-            <div><div className="employee-detail-name">{employee.name}</div><div className="employee-detail-meta">{employee.telegram_username || 'Telegram username байхгүй'} <span>·</span> ID {employee.telegram_id}</div></div>
-            <Badge color={employee.is_active ? 'green' : 'muted'}>{employee.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge>
+            <div><div className="employee-detail-name">{employee.name}</div><div className="employee-detail-meta">{employee.telegram_username || t('hr.emp.noUsername')} <span>·</span> ID {employee.telegram_id}</div></div>
+            <Badge color={employee.is_active ? 'green' : 'muted'}>{employee.is_active ? t('hr.active') : t('hr.inactive')}</Badge>
           </div>
-          <div className="employee-view-switch" role="radiogroup" aria-label="Хэрэглэгчийн харагдац">
-            {([['settings', 'Тохиргоо'], ['stats', 'Статистик']] as const).map(([view, label]) => <button key={view} type="button" role="radio" aria-checked={employeeView === view} className={employeeView === view ? 'active' : ''} onClick={() => { setEmployeeView(view); if (view === 'stats') { setPerformanceId(employee.id); setPerformanceRange('month'); setPerformanceFrom(''); setPerformanceTo('') } }}><span className="employee-radio-dot" />{label}</button>)}
+          <div className="employee-view-switch" role="radiogroup" aria-label={t('hr.emp.viewLabel')}>
+            {([['settings', t('hr.emp.tab.settings')], ['stats', t('hr.emp.tab.stats')]] as const).map(([view, label]) => <button key={view} type="button" role="radio" aria-checked={employeeView === view} className={employeeView === view ? 'active' : ''} onClick={() => { setEmployeeView(view); if (view === 'stats') { setPerformanceId(employee.id); setPerformanceRange('month'); setPerformanceFrom(''); setPerformanceTo('') } }}><span className="employee-radio-dot" />{label}</button>)}
           </div>
           {employeeView === 'settings' ? <section className="employee-settings-view">
             <div className="flex flex-col gap-3.5">
-              <Input label="Нэр, овог" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} fullWidth />
+              <Input label={t('hr.emp.fullName')} value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} fullWidth />
               <Input label="Telegram username" value={form.telegram_username} onChange={(v) => setForm((f) => ({ ...f, telegram_username: v }))} placeholder="@username" fullWidth />
-              <Select label="Цагийн бүс" value={form.timezone} onChange={(v) => setForm((f) => ({ ...f, timezone: v }))} options={TZ_OPTIONS} fullWidth />
-              <Select label="Төлөв" value={form.is_active ? 'active' : 'inactive'} onChange={(v) => setForm((f) => ({ ...f, is_active: v === 'active' }))} options={STATUS_OPTIONS} fullWidth />
-              <div className="flex justify-end"><Btn variant="primary" onClick={() => saveEdit(employee)} disabled={update.isPending || !form.name.trim()}>Хадгалах</Btn></div>
+              <Select label={t('hr.emp.timezone')} value={form.timezone} onChange={(v) => setForm((f) => ({ ...f, timezone: v }))} options={TZ_OPTIONS} fullWidth />
+              <Select label={t('hr.status')} value={form.is_active ? 'active' : 'inactive'} onChange={(v) => setForm((f) => ({ ...f, is_active: v === 'active' }))} options={STATUS_OPTIONS} fullWidth />
+              <div className="flex justify-end"><Btn variant="primary" onClick={() => saveEdit(employee)} disabled={update.isPending || !form.name.trim()}>{t('hr.save')}</Btn></div>
             </div>
-            <div className="employee-access-header"><div><strong>Хандалтын эрх</strong><span>Энэ ажилтанд оноосон role-ууд</span></div>
-              {!account && <Btn variant="primary" onClick={() => linkAccess(employee)} disabled={createAccount.isPending || seatLimitReached}>Хандалт холбох</Btn>}
+            <div className="employee-access-header"><div><strong>{t('hr.emp.access')}</strong><span>{t('hr.emp.accessHint')}</span></div>
+              {!account && <Btn variant="primary" onClick={() => linkAccess(employee)} disabled={createAccount.isPending || seatLimitReached}>{t('hr.emp.linkAccess')}</Btn>}
             </div>
             {!account && <SeatLimitNotice context="account" />}
-            {account ? <fieldset className="employee-role-editor"><legend>Хандалтын эрхүүд</legend>{ACCESS_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleAccessRole(employee, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}{customRoles.map((role) => { const assignment = role.account_assignments.find((a) => a.account_id === account.id); return <label key={`c${role.id}`} title={role.description || undefined}><input type="checkbox" checked={Boolean(assignment)} onChange={() => toggleCustomRole(account.id, role.id, assignment?.id)} disabled={assignCustomRole.isPending || unassignCustomRole.isPending} /><span>{role.name}</span></label> })}</fieldset> : <p className="employee-no-access">Хандалт холбогдоогүй байна.</p>}
-            <div className="employee-settings-footer"><span>{account ? `Хэрэглэгчийн төлөв · ${account.status === 'active' ? 'Идэвхтэй' : 'Идэвхгүй'}` : 'Хандалтын бүртгэл алга'}</span><div className="employee-detail-menu-wrap">
-              <button className="employee-detail-more" type="button" aria-label="Хэрэглэгчийн нэмэлт үйлдэл" aria-expanded={openMenuId === -1} onClick={() => setOpenMenuId(openMenuId === -1 ? null : -1)}><MoreVertical size={18} />Үйлдлүүд</button>
+            {account ? <fieldset className="employee-role-editor"><legend>{t('hr.emp.accessList')}</legend>{accessRoles().map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleAccessRole(employee, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}{customRoles.map((role) => { const assignment = role.account_assignments.find((a) => a.account_id === account.id); return <label key={`c${role.id}`} title={role.description || undefined}><input type="checkbox" checked={Boolean(assignment)} onChange={() => toggleCustomRole(account.id, role.id, assignment?.id)} disabled={assignCustomRole.isPending || unassignCustomRole.isPending} /><span>{role.name}</span></label> })}</fieldset> : <p className="employee-no-access">{t('hr.emp.notLinked')}</p>}
+            <div className="employee-settings-footer"><span>{account ? t('hr.emp.accountStatus', { status: account.status === 'active' ? t('hr.active') : t('hr.inactive') }) : t('hr.emp.noAccount')}</span><div className="employee-detail-menu-wrap">
+              <button className="employee-detail-more" type="button" aria-label={t('hr.emp.moreActions')} aria-expanded={openMenuId === -1} onClick={() => setOpenMenuId(openMenuId === -1 ? null : -1)}><MoreVertical size={18} />{t('hr.actions')}</button>
               {openMenuId === -1 && <div className="employee-action-menu employee-detail-action-menu" role="menu">
-                {account ? <><button role="menuitem" onClick={() => changeAccessPassword(employee)}><KeyRound size={15} />Нууц үг солих</button><button role="menuitem" onClick={() => toggleAccountStatus(employee)}>{account.status === 'disabled' ? <UserCheck size={15} /> : <UserRoundX size={15} />}{account.status === 'disabled' ? 'Нэвтрэх эрх нээх' : 'Нэвтрэх эрх хаах'}</button></> : null}
-                <button role="menuitem" onClick={() => { update.mutate({ id: employee.id, is_active: !employee.is_active }); setForm((f) => ({ ...f, is_active: !employee.is_active })); setOpenMenuId(null) }}>{employee.is_active ? <UserRoundX size={15} /> : <UserCheck size={15} />}{employee.is_active ? 'Ажилтныг идэвхгүй болгох' : 'Ажилтныг идэвхжүүлэх'}</button>
-                <button role="menuitem" className="danger" onClick={() => removeEmployee(employee)}><Trash2 size={15} />Ажилтныг устгах</button>
+                {account ? <><button role="menuitem" onClick={() => changeAccessPassword(employee)}><KeyRound size={15} />{t('hr.emp.changePassword')}</button><button role="menuitem" onClick={() => toggleAccountStatus(employee)}>{account.status === 'disabled' ? <UserCheck size={15} /> : <UserRoundX size={15} />}{account.status === 'disabled' ? t('hr.emp.openLogin') : t('hr.emp.closeLogin')}</button></> : null}
+                <button role="menuitem" onClick={() => { update.mutate({ id: employee.id, is_active: !employee.is_active }); setForm((f) => ({ ...f, is_active: !employee.is_active })); setOpenMenuId(null) }}>{employee.is_active ? <UserRoundX size={15} /> : <UserCheck size={15} />}{employee.is_active ? t('hr.emp.deactivate') : t('hr.emp.activate')}</button>
+                <button role="menuitem" className="danger" onClick={() => removeEmployee(employee)}><Trash2 size={15} />{t('hr.emp.delete')}</button>
               </div>}
             </div></div>
           </section> : <section className="employee-stats-view">
-          {performance.isLoading && <div className="py-12 text-center text-muted">Гүйцэтгэлийн мэдээлэл ачаалж байна…</div>}
-          {performance.isError && <div className="py-12 text-center text-red">Мэдээлэл ачаалахад алдаа гарлаа</div>}
+          {performance.isLoading && <div className="py-12 text-center text-muted">{t('hr.emp.statsLoading')}</div>}
+          {performance.isError && <div className="py-12 text-center text-red">{t('hr.emp.statsError')}</div>}
           {performance.data && (() => {
             const data = performance.data
             const checkins = data.checkins
@@ -353,94 +354,94 @@ export function EmployeesPage() {
               <div className="flex items-start justify-between gap-4 mb-5">
                 <div>
                   <div className="text-lg font-semibold">{data.employee.name}</div>
-                  <div className="text-xs text-muted mt-0.5">{data.employee.telegram_username || 'Telegram username байхгүй'} · {data.employee.timezone}</div>
+                  <div className="text-xs text-muted mt-0.5">{data.employee.telegram_username || t('hr.emp.noUsername')} · {data.employee.timezone}</div>
                 </div>
-                <Badge color={data.employee.is_active ? 'green' : 'muted'}>{data.employee.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge>
+                <Badge color={data.employee.is_active ? 'green' : 'muted'}>{data.employee.is_active ? t('hr.active') : t('hr.inactive')}</Badge>
               </div>
 
               <div className="flex gap-1 bg-surface2 rounded-lg p-1 flex-wrap mb-4">
-                {[['day', 'Өнөөдөр'], ['week', '7 хоног'], ['month', '30 хоног'], ['all', 'Бүх хугацаа']].map(([key, label]) => (
+                {[['day', t('hr.emp.range.today')], ['week', t('hr.emp.range.week')], ['month', t('hr.emp.range.month')], ['all', t('hr.emp.range.all')]].map(([key, label]) => (
                   <button key={key} onClick={() => key === 'day' ? setPerformanceQuickRange(1, 'day') : key === 'week' ? setPerformanceQuickRange(7, 'week') : key === 'month' ? setPerformanceQuickRange(30, 'month') : setPerformanceRange('all')}
                     className={`px-2.5 py-1.5 rounded text-xs cursor-pointer border-none ${performanceRange === key ? 'bg-accent text-white' : 'bg-transparent text-muted'}`}>{label}</button>
                 ))}
                 <input type="date" value={performanceFrom} onChange={(e) => { setPerformanceRange('custom'); setPerformanceFrom(e.target.value) }} className="ml-1 bg-surface border border-border rounded px-2 text-xs text-text outline-none" />
                 <input type="date" value={performanceTo} onChange={(e) => { setPerformanceRange('custom'); setPerformanceTo(e.target.value) }} className="bg-surface border border-border rounded px-2 text-xs text-text outline-none" />
               </div>
-              <div className="text-xs text-muted mb-2">{data.date_from ? `${data.date_from} – ${data.date_to}` : `Бүх хугацаа · ${data.date_to} хүртэл`}</div>
+              <div className="text-xs text-muted mb-2">{data.date_from ? `${data.date_from} – ${data.date_to}` : t('hr.emp.allTimeUntil', { date: data.date_to })}</div>
               <div className="grid grid-cols-3 gap-3 mb-5">
                 <Card className="!p-4">
-                  <div className="text-xs text-muted">Нийт ажилласан цаг</div>
+                  <div className="text-xs text-muted">{t('hr.emp.totalHours')}</div>
                   <div className="text-2xl font-semibold text-green mt-1">{formatMinutes(workTime.total_minutes)}</div>
-                  <div className="text-xs text-muted mt-1">{workTime.complete_entries} бүрэн цагийн бүртгэл</div>
+                  <div className="text-xs text-muted mt-1">{t('hr.emp.completeEntries', { n: workTime.complete_entries })}</div>
                 </Card>
                 <Card className="!p-4">
-                  <div className="text-xs text-muted">Чек-иний биелэлт</div>
+                  <div className="text-xs text-muted">{t('hr.emp.checkinRate')}</div>
                   <div className="text-2xl font-semibold text-accent mt-1">{checkins.completion_rate}%</div>
-                  <div className="text-xs text-muted mt-1">{checkins.submitted} / {checkins.total} илгээсэн</div>
+                  <div className="text-xs text-muted mt-1">{t('hr.emp.submittedOf', { submitted: checkins.submitted, total: checkins.total })}</div>
                 </Card>
                 <Card className="!p-4">
-                  <div className="text-xs text-muted">Батлагдсан өдрийн тайлан</div>
+                  <div className="text-xs text-muted">{t('hr.emp.approvedDaily')}</div>
                   <div className="text-2xl font-semibold text-purple mt-1">{reports.daily.approved}</div>
-                  <div className="text-xs text-muted mt-1">Нийт {reports.daily.total} тайлан</div>
+                  <div className="text-xs text-muted mt-1">{t('hr.emp.reportsTotal', { n: reports.daily.total })}</div>
                 </Card>
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-5">
                 <div className="bg-surface2 border border-border rounded-xl p-4">
-                  <div className="font-medium mb-3">Чек-иний статистик</div>
+                  <div className="font-medium mb-3">{t('hr.emp.checkinStats')}</div>
                   <div className="grid grid-cols-2 gap-y-2 text-[13px]">
-                    <span className="text-muted">Бүрэн бөглөсөн</span><span className="text-right text-green font-medium">{checkins.completed}</span>
-                    <span className="text-muted">Хэсэгчлэн</span><span className="text-right text-yellow font-medium">{checkins.partial}</span>
-                    <span className="text-muted">Алгассан</span><span className="text-right text-red font-medium">{checkins.missed}</span>
-                    <span className="text-muted">Хүлээгдэж буй</span><span className="text-right text-muted font-medium">{checkins.pending}</span>
+                    <span className="text-muted">{t('hr.emp.filledFull')}</span><span className="text-right text-green font-medium">{checkins.completed}</span>
+                    <span className="text-muted">{t('hr.emp.filledPartial')}</span><span className="text-right text-yellow font-medium">{checkins.partial}</span>
+                    <span className="text-muted">{t('hr.emp.skipped')}</span><span className="text-right text-red font-medium">{checkins.missed}</span>
+                    <span className="text-muted">{t('hr.emp.pending')}</span><span className="text-right text-muted font-medium">{checkins.pending}</span>
                   </div>
                 </div>
                 <div className="bg-surface2 border border-border rounded-xl p-4">
-                  <div className="font-medium mb-3">Ажлын цаг</div>
+                  <div className="font-medium mb-3">{t('hr.emp.workTime')}</div>
                   <div className="grid grid-cols-2 gap-y-2 text-[13px]">
-                    <span className="text-muted">Оффис</span><span className="text-right font-medium">{formatMinutes(workTime.in_person_minutes)}</span>
-                    <span className="text-muted">Remote</span><span className="text-right font-medium">{formatMinutes(workTime.remote_minutes)}</span>
-                    <span className="text-muted">Өдрийн дундаж</span><span className="text-right font-medium">{formatMinutes(workTime.average_minutes)}</span>
-                    <span className="text-muted">Бүрэн интервал</span><span className="text-right font-medium">{workTime.complete_entries}</span>
-                    <span className="text-muted">Дутуу бүртгэл</span><span className="text-right text-yellow font-medium">{workTime.incomplete_entries}</span>
+                    <span className="text-muted">{t('worktime.office')}</span><span className="text-right font-medium">{formatMinutes(workTime.in_person_minutes)}</span>
+                    <span className="text-muted">{t('worktime.remote')}</span><span className="text-right font-medium">{formatMinutes(workTime.remote_minutes)}</span>
+                    <span className="text-muted">{t('hr.emp.dailyAvg')}</span><span className="text-right font-medium">{formatMinutes(workTime.average_minutes)}</span>
+                    <span className="text-muted">{t('hr.emp.fullIntervals')}</span><span className="text-right font-medium">{workTime.complete_entries}</span>
+                    <span className="text-muted">{t('hr.emp.incomplete')}</span><span className="text-right text-yellow font-medium">{workTime.incomplete_entries}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="font-medium mb-2">Өдрийн ажлын цагийн дэлгэрэнгүй</div>
+              <div className="font-medium mb-2">{t('hr.emp.dayDetails')}</div>
               <div className="border border-border rounded-lg overflow-hidden max-h-56 overflow-y-auto mb-5">
                 {(workTime.days || []).length ? workTime.days.map((day: any, index: number) => <div key={day.period_date} className={`px-3 py-2.5 text-xs ${index ? 'border-t border-border2' : ''}`}>
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-medium">{day.period_date}</span>
-                    <span className="text-green font-medium">Нийт {formatMinutes(day.total_minutes)} · Оффис {formatMinutes(day.in_person_minutes)} · Remote {formatMinutes(day.remote_minutes)}</span>
+                    <span className="text-green font-medium">{t('hr.emp.dayTotals', { total: formatMinutes(day.total_minutes), office: formatMinutes(day.in_person_minutes), remote: formatMinutes(day.remote_minutes) })}</span>
                   </div>
-                  <div className="text-muted mt-1">{day.entries.map((entry: any) => `${entry.mode === 'remote' ? 'Remote' : 'Оффис'} ${formatTime(entry.started_at)}–${formatTime(entry.ended_at)} (${formatMinutes(entry.minutes)})`).join(' · ') || 'Интервал бүртгэгдээгүй'}</div>
-                </div>) : <div className="p-5 text-center text-sm text-muted">Ажлын цагийн мэдээлэл алга</div>}
+                  <div className="text-muted mt-1">{day.entries.map((entry: any) => `${entry.mode === 'remote' ? t('worktime.remote') : t('worktime.office')} ${formatTime(entry.started_at)}–${formatTime(entry.ended_at)} (${formatMinutes(entry.minutes)})`).join(' · ') || t('hr.emp.noInterval')}</div>
+                </div>) : <div className="p-5 text-center text-sm text-muted">{t('hr.emp.noWorktime')}</div>}
               </div>
 
               <div className="flex items-center justify-between mb-2">
-                <div className="font-medium">Тайлангийн статистик</div>
-                <div className="text-xs text-muted">батлагдсан / нийт</div>
+                <div className="font-medium">{t('hr.emp.reportStats')}</div>
+                <div className="text-xs text-muted">{t('hr.emp.approvedTotal')}</div>
               </div>
               <div className="grid grid-cols-3 gap-3 mb-5 text-center">
                 {[
-                  ['Өдрийн тайлан', reports.daily],
-                  ['Сарын тайлан', reports.monthly],
-                  ['Дараа сарын төлөвлөгөө', reports.next_month_plan],
+                  [t('reports.detail.type.daily'), reports.daily],
+                  [t('reports.detail.type.monthly'), reports.monthly],
+                  [t('reports.detail.type.next_month_plan'), reports.next_month_plan],
                 ].map(([label, stats]: any) => <div key={label} className="border border-border rounded-lg p-3">
                   <div className="text-xs text-muted">{label}</div>
                   <div className="font-semibold mt-1">{stats.approved} / {stats.total}</div>
-                  {stats.pending > 0 && <div className="text-[11px] text-yellow mt-0.5">{stats.pending} хүлээгдэж буй</div>}
+                  {stats.pending > 0 && <div className="text-[11px] text-yellow mt-0.5">{t('hr.emp.pendingCount', { n: stats.pending })}</div>}
                 </div>)}
               </div>
 
-              <div className="font-medium mb-2">Сүүлийн тайлангууд</div>
+              <div className="font-medium mb-2">{t('hr.emp.recentReports')}</div>
               <div className="border border-border rounded-lg overflow-hidden max-h-52 overflow-y-auto">
                 {data.recent_reports.length ? data.recent_reports.map((report: any, index: number) => <div key={report.id} className={`grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-center px-3 py-2.5 text-xs ${index ? 'border-t border-border2' : ''}`}>
-                  <div className="min-w-0"><div className="font-medium">{REPORT_TYPE_LABELS[report.report_type] || report.report_type}</div><div className="text-muted mt-0.5">{report.period_date}{report.report_type === 'daily' ? ` · ${formatMinutes(report.work_time?.total_minutes || 0)} · Оффис ${formatMinutes(report.work_time?.in_person_minutes || 0)} · Remote ${formatMinutes(report.work_time?.remote_minutes || 0)}` : ''}</div>{report.text && <div className="text-muted mt-1 truncate">{report.text}</div>}</div>
-                  <Badge color={report.status === 'approved' ? 'green' : report.status === 'awaiting' ? 'yellow' : 'blue'}>{report.status === 'approved' ? 'Батлагдсан' : report.status === 'awaiting' ? 'Хүлээгдэж буй' : 'Ноорог'}</Badge>
-                  <Btn onClick={() => setReportDetailId(report.id)}>Дэлгэрэнгүй</Btn>
-                </div>) : <div className="p-5 text-center text-sm text-muted">Тайлан байхгүй</div>}
+                  <div className="min-w-0"><div className="font-medium">{reportTypeLabel(report.report_type)}</div><div className="text-muted mt-0.5">{report.period_date}{report.report_type === 'daily' ? t('hr.emp.reportTotals', { total: formatMinutes(report.work_time?.total_minutes || 0), office: formatMinutes(report.work_time?.in_person_minutes || 0), remote: formatMinutes(report.work_time?.remote_minutes || 0) }) : ''}</div>{report.text && <div className="text-muted mt-1 truncate">{report.text}</div>}</div>
+                  <Badge color={report.status === 'approved' ? 'green' : report.status === 'awaiting' ? 'yellow' : 'blue'}>{report.status === 'approved' ? t('reports.detail.status.approved') : report.status === 'awaiting' ? t('hr.emp.pending') : t('reports.detail.status.draft')}</Badge>
+                  <Btn onClick={() => setReportDetailId(report.id)}>{t('hr.emp.details')}</Btn>
+                </div>) : <div className="p-5 text-center text-sm text-muted">{t('hr.emp.noReports')}</div>}
               </div>
             </div>
           })()}

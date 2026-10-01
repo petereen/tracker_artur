@@ -1,3 +1,6 @@
+import i18n from '../i18n'
+import { intlLocale } from '../utils/locale'
+import { useTranslation } from 'react-i18next'
 import { useMemo, useRef, useState } from 'react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Toggle } from '../components/ui'
 import {
@@ -22,6 +25,7 @@ const EMPTY_FORM: KnowledgeInput = {
 }
 
 export function KnowledgePage() {
+  const { t } = useTranslation()
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
   const canManageKnowledge = roles.includes('admin')
   const { data: entries = [], isLoading } = useKnowledge()
@@ -74,7 +78,7 @@ export function KnowledgePage() {
       ...form,
       title: form.title.trim(),
       category: form.category?.trim() || null,
-      content: form.content.trim() || (attachment ? `Хавсаргасан файл: ${attachment.name}` : ''),
+      content: form.content.trim() || (attachment ? i18n.t('knowledge.attachedFile', { name: attachment.name }) : ''),
     }
     if (editingId) {
       await update.mutateAsync({ id: editingId, ...payload })
@@ -118,7 +122,7 @@ export function KnowledgePage() {
   }
 
   const confirmDelete = (entry: KnowledgeEntry) => {
-    if (window.confirm(`“${entry.title}” мэдээллийг бүрмөсөн устгах уу?`)) {
+    if (window.confirm(t('knowledge.deleteConfirm', { title: entry.title }))) {
       remove.mutate(entry.id)
     }
   }
@@ -126,26 +130,26 @@ export function KnowledgePage() {
   return (
     <div>
       <PageHeader
-        title="Компаний өгөгдлийн сан"
+        title={t('knowledge.title')}
       >
-        {canManageKnowledge && <Btn variant="primary" onClick={openCreate}>+ Мэдээлэл нэмэх</Btn>}
+        {canManageKnowledge && <Btn variant="primary" onClick={openCreate}>{t('knowledge.add')}</Btn>}
       </PageHeader>
 
-      {!canManageKnowledge && <p className="text-sm text-muted mb-4">Та компаний өгөгдлийн санг зөвхөн харах эрхтэй.</p>}
+      {!canManageKnowledge && <p className="text-sm text-muted mb-4">{t('knowledge.readOnly')}</p>}
 
       <div className="max-w-[760px] mb-5">
         <Input
           value={query}
           onChange={setQuery}
-          placeholder="Гарчиг, ангилал эсвэл агуулгаар хайх"
+          placeholder={t('knowledge.search')}
           fullWidth
         />
       </div>
 
-      {isLoading && <div className="text-sm text-muted">Ачаалж байна...</div>}
+      {isLoading && <div className="text-sm text-muted">{t('dev.loading')}</div>}
       {!isLoading && filtered.length === 0 && (
         <Card className="text-center text-sm text-muted">
-          {entries.length ? 'Хайлтад тохирох мэдээлэл алга.' : 'Компаний өгөгдлийн санд мэдээлэл хараахан нэмээгүй байна.'}
+          {entries.length ? t('knowledge.noMatch') : t('knowledge.empty')}
         </Card>
       )}
 
@@ -158,7 +162,7 @@ export function KnowledgePage() {
                   <div className="font-semibold text-sm">{entry.title}</div>
                   {entry.category && <Badge color="blue">{entry.category}</Badge>}
                   <Badge color={entry.is_active ? 'green' : 'muted'}>
-                    {entry.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}
+                    {entry.is_active ? t('knowledge.active') : t('knowledge.inactive')}
                   </Badge>
                 </div>
                 <p className="text-[13px] text-muted leading-relaxed whitespace-pre-wrap line-clamp-4">
@@ -171,17 +175,17 @@ export function KnowledgePage() {
                   >
                     📎 {entry.attachment_filename}
                     {entry.attachment_size ? ` · ${(entry.attachment_size / 1024 / 1024).toFixed(1)} MB` : ''}
-                    {' · Татах'}
+                    {t('knowledge.download')}
                   </button>
                 )}
                 <div className="text-[11px] text-muted mt-3">
-                  Шинэчилсэн: {new Date(entry.updated_at).toLocaleString()}
+                  {t('knowledge.updated', { date: new Date(entry.updated_at).toLocaleString(intlLocale()) })}
                 </div>
               </div>
               {canManageKnowledge && <div className="flex items-center gap-2 flex-shrink-0">
                   <Toggle checked={entry.is_active} onChange={(value) => toggleActive(entry, value)} />
-                  <Btn onClick={() => openEdit(entry)}>Засах</Btn>
-                  <Btn variant="danger" onClick={() => confirmDelete(entry)}>Устгах</Btn>
+                  <Btn onClick={() => openEdit(entry)}>{t('dev.edit')}</Btn>
+                  <Btn variant="danger" onClick={() => confirmDelete(entry)}>{t('dev.delete')}</Btn>
                 </div>}
             </div>
           </Card>
@@ -190,38 +194,38 @@ export function KnowledgePage() {
 
       {showModal && (
         <Modal
-          title={editingId ? 'Мэдээлэл засах' : 'Шинэ мэдээлэл'}
+          title={editingId ? t('knowledge.editTitle') : t('knowledge.newTitle')}
           onClose={() => setShowModal(false)}
         >
           <div className="flex flex-col gap-3.5">
             <Input
-              label="Гарчиг"
+              label={t('knowledge.titleField')}
               value={form.title}
               onChange={(title) => setForm((current) => ({ ...current, title }))}
-              placeholder="Жишээ: Чөлөө авах журам"
+              placeholder={t('knowledge.titlePlaceholder')}
               fullWidth
             />
             <Input
-              label="Ангилал"
+              label={t('knowledge.category')}
               value={form.category || ''}
               onChange={(category) => setForm((current) => ({ ...current, category }))}
-              placeholder="Жишээ: Хүний нөөц"
+              placeholder={t('knowledge.categoryPlaceholder')}
               fullWidth
             />
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-muted font-medium">Агуулга</label>
+              <label className="text-xs text-muted font-medium">{t('knowledge.content')}</label>
               <textarea
                 value={form.content}
                 onChange={(event) => setForm((current) => ({ ...current, content: event.target.value }))}
                 rows={12}
                 maxLength={20000}
-                placeholder="Баталгаатай мэдээлэл, журам эсвэл зааврыг энд оруулна уу."
+                placeholder={t('knowledge.contentPlaceholder')}
                 className="w-full bg-surface2 border border-border rounded-lg p-3 text-text text-sm leading-relaxed resize-y outline-none focus:border-accent"
               />
               <div className="text-[11px] text-muted text-right">{form.content.length}/20000</div>
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-xs text-muted font-medium">Файл хавсаргах</label>
+              <label className="text-xs text-muted font-medium">{t('knowledge.attach')}</label>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -229,24 +233,24 @@ export function KnowledgePage() {
                 onChange={(event) => selectAttachment(event.target.files?.[0] || null)}
                 className="block w-full text-xs text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-surface3 file:px-3 file:py-2 file:text-xs file:font-medium file:text-text hover:file:bg-border"
               />
-              <div className="text-[11px] text-muted">PDF, Office баримт, TXT/CSV, зураг болон SVG · 20 MB хүртэл</div>
-              {attachment && <div className="text-xs text-accent">Шинэ хавсралт: {attachment.name}</div>}
+              <div className="text-[11px] text-muted">{t('knowledge.attachHint')}</div>
+              {attachment && <div className="text-xs text-accent">{t('knowledge.newAttachment', { name: attachment.name })}</div>}
               {selectedEntry?.attachment_filename && !attachment && (
                 <div className="flex items-center gap-2 text-xs text-muted">
-                  Одоогийн хавсралт: {selectedEntry.attachment_filename}
+                  {t('knowledge.currentAttachment', { name: selectedEntry.attachment_filename })}
                   <button
                     onClick={() => setRemoveExistingAttachment((value) => !value)}
                     className="text-red hover:underline"
                   >
-                    {removeExistingAttachment ? 'Устгахыг буцаах' : 'Устгах'}
+                    {removeExistingAttachment ? t('knowledge.undoDelete') : t('dev.delete')}
                   </button>
                 </div>
               )}
             </div>
             <div className="flex items-center justify-between rounded-lg bg-surface2 px-3 py-2">
               <div>
-                <div className="text-[13px] font-medium">Туслахад ашиглуулах</div>
-                <div className="text-[11px] text-muted">Идэвхгүй мэдээлэл ботын хариултад орохгүй.</div>
+                <div className="text-[13px] font-medium">{t('knowledge.useInAssistant')}</div>
+                <div className="text-[11px] text-muted">{t('knowledge.inactiveHint')}</div>
               </div>
               <Toggle
                 checked={form.is_active}
@@ -254,7 +258,7 @@ export function KnowledgePage() {
               />
             </div>
             <div className="flex gap-2.5 justify-end">
-              <Btn onClick={() => setShowModal(false)}>Цуцлах</Btn>
+              <Btn onClick={() => setShowModal(false)}>{t('dev.cancel')}</Btn>
               <Btn
                 variant="primary"
                 onClick={save}
@@ -268,7 +272,7 @@ export function KnowledgePage() {
                   || removeAttachment.isPending
                 }
               >
-                Хадгалах
+                {t('dev.save')}
               </Btn>
             </div>
           </div>

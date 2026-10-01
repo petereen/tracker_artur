@@ -1,4 +1,5 @@
 import { api } from '../api/client'
+import i18n from '../i18n'
 import { ChimegeCall, type ChimegeCallCallbacks } from './chimegeCall'
 
 /**
@@ -89,7 +90,7 @@ export class ElevenLabsCall extends ChimegeCall {
     if (this.stopped || token !== this.speechToken) return
     const spoke = url ? await this.streamAnswer(url, spoken, token) : false
     if (this.stopped || token !== this.speechToken) return
-    if (!spoke && spoken) this.callbacks.onLine('tool', 'Дуу үүсгэж чадсангүй, хариултыг бичвэрээр харуулав.')
+    if (!spoke && spoken) this.callbacks.onLine('tool', i18n.t('assistant.call.ttsFailed'))
     this.stopPlayback()
     this.setPhase('listening')
   }

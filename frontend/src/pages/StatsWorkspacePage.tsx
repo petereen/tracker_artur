@@ -1,3 +1,5 @@
+import { intlLocale } from '../utils/locale'
+import { useTranslation } from 'react-i18next'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   AnalyticsMetric,
@@ -16,6 +18,7 @@ import { DropdownSelect } from "../components/DropdownSelect";
 const LazyWorkHourHierarchyChart = lazy(() => import('../components/WorkHourHierarchyChart').then((module) => ({ default: module.WorkHourHierarchyChart })))
 
 function DeferredWorkHourChart({ period, employeeId }: { period: { date_from: string; date_to: string }; employeeId?: number }) {
+  const { t } = useTranslation()
   const [visible, setVisible] = useState(false)
   const region = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -24,7 +27,7 @@ function DeferredWorkHourChart({ period, employeeId }: { period: { date_from: st
     observer.observe(region.current)
     return () => observer.disconnect()
   }, [visible])
-  return <div ref={region} className="deferred-chart-region">{visible ? <Suspense fallback={<section className="panel work-hour-card"><Skeleton variant="chart" /></section>}><LazyWorkHourHierarchyChart period={period} employeeId={employeeId} /></Suspense> : <section className="panel work-hour-card" aria-label="Ажлын цагийн график"><Skeleton variant="chart" /></section>}</div>
+  return <div ref={region} className="deferred-chart-region">{visible ? <Suspense fallback={<section className="panel work-hour-card"><Skeleton variant="chart" /></section>}><LazyWorkHourHierarchyChart period={period} employeeId={employeeId} /></Suspense> : <section className="panel work-hour-card" aria-label={t('worktime.stats.chartLabel')}><Skeleton variant="chart" /></section>}</div>
 }
 
 function localDate(value: Date) {
@@ -33,6 +36,7 @@ function localDate(value: Date) {
 }
 
 export function StatsWorkspacePage() {
+  const { t } = useTranslation()
   const end = useMemo(() => new Date(), []);
   const start = useMemo(() => {
     const value = new Date(end);
@@ -89,7 +93,7 @@ export function StatsWorkspacePage() {
         <div className="toolbar-cluster">
           {canReview && (!isEligible || isManagerMode) && (
             <DropdownSelect
-              ariaLabel="Ажилтан сонгох"
+              ariaLabel={t('worktime.stats.pickEmployee')}
               value={employeeId ? String(employeeId) : ""}
               onChange={(value) =>
                 startTransition(() =>
@@ -99,7 +103,7 @@ export function StatsWorkspacePage() {
                 )
               }
               options={[
-                { value: "", label: "Байгууллагын нийлбэр" },
+                { value: "", label: t('worktime.stats.orgTotal') },
                 ...(workers.data?.map((worker) => ({ value: String(worker.id), label: worker.name })) ?? []),
               ]}
             />
@@ -132,24 +136,24 @@ export function StatsWorkspacePage() {
         <>
           <section className="metrics-grid">
             <article className="metric-card blue">
-              <span>Нийт ажилласан</span>
-              <strong>{Math.round((totalMinutes / 60) * 10) / 10}ц</strong>
+              <span>{t('worktime.stats.total')}</span>
+              <strong>{Math.round((totalMinutes / 60) * 10) / 10}{t('worktime.unit.hour')}</strong>
             </article>
             <article className="metric-card green">
-              <span>Өдрийн дундаж</span>
+              <span>{t('worktime.stats.dailyAvg')}</span>
               <strong>
                 {Math.round(
                   (totalMinutes / Math.max(workingDays, 1) / 60) * 10,
                 ) / 10}
-                ц
+                {t('worktime.unit.hour')}
               </strong>
             </article>
             <article className="metric-card purple">
-              <span>Даалгаврын гүйцэтгэл</span>
+              <span>{t('worktime.stats.taskCompletion')}</span>
               <strong>{summary.data?.completion_rate ?? 0}%</strong>
             </article>
             <article className="metric-card amber">
-              <span>Өдөрт дуусгасан даалгаврын дундаж</span>
+              <span>{t('worktime.stats.tasksPerDay')}</span>
               <strong>
                 {Math.round((completed / Math.max(workingDays, 1)) * 10) / 10}
               </strong>
@@ -159,17 +163,17 @@ export function StatsWorkspacePage() {
           <section className="panel heatmap-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Worktime heatmap</span>
-                <h2>Өдрүүдээр ажилласан цаг</h2>
+                <span className="eyebrow">{t('worktime.stats.heatmap')}</span>
+                <h2>{t('worktime.stats.hoursByDay')}</h2>
               </div>
               {focusedDay && (
                 <small className="heatmap-detail">
                   {new Date(`${focusedDay.date}T12:00:00`).toLocaleDateString(
-                    "mn-MN",
+                    intlLocale(),
                     { month: "long", day: "numeric", weekday: "long" },
                   )}
-                  : {Math.round((focusedDay.worked_minutes / 60) * 10) / 10}ц ·{" "}
-                  {focusedDay.completed_tasks} даалгавар
+                  : {Math.round((focusedDay.worked_minutes / 60) * 10) / 10}{t('worktime.unit.hour')} ·{" "}
+                  {t('worktime.stats.taskCount', { n: focusedDay.completed_tasks })}
                 </small>
               )}
             </div>
@@ -190,7 +194,7 @@ export function StatsWorkspacePage() {
               )}
               onCellClick={(cell) => setFocusedDay(cell.meta)}
               renderTooltip={(cell) =>
-                `${cell.label}: ${Math.round((cell.value / 60) * 10) / 10} цаг, ${(cell.meta as any)?.completed_tasks || 0} даалгавар`
+                t('worktime.stats.heatmapCell', { label: cell.label, hours: Math.round((cell.value / 60) * 10) / 10, tasks: (cell.meta as any)?.completed_tasks || 0 })
               }
             />
           </section>

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
+import { useTranslation } from 'react-i18next'
 import { Archive, Pencil, Plus, Trash2, Wand2 } from 'lucide-react'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
@@ -69,6 +70,7 @@ function usageText(usage: ERPAccountUsage | undefined, catalog: ERPAccountCatalo
 function AccountDialog({ account, accounts, catalog, usage, onClose }: {
   account: ERPAccountOption | null; accounts: ERPAccountOption[]; catalog: ERPAccountCatalog; usage?: ERPAccountUsage; onClose: () => void
 }) {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState<ERPAccountInput>({
     code: account?.code ?? '', name: account?.name ?? '', classification: account?.classification ?? 'expense', purpose: account?.purpose ?? 'general',
     currency: account?.currency ?? 'MNT', parent_id: account?.parent_id ?? null, is_group: account?.is_group ?? false, is_active: account?.is_active ?? true,
@@ -97,46 +99,47 @@ function AccountDialog({ account, accounts, catalog, usage, onClose }: {
     try {
       if (account) await update.mutateAsync({ id: account.id, ...draft })
       else await create.mutateAsync(draft)
-      toast.success(account ? 'Данс хадгалагдлаа' : 'Данс нээгдлээ')
+      toast.success(account ? t('accounts.toast.saved') : t('accounts.toast.created'))
       onClose()
     } catch (error) { toast.error(accountErrorText(error)) }
   }
-  const lockMessage = 'Ашиглагдсан дансны энэ талбарыг өөрчлөхгүй — шинэ данс нээнэ үү'
+  const lockMessage = t('accounts.dialog.lockedField')
   return <Dialog isOpen onOpenChange={(open) => { if (!open) onClose() }} width={600} purpose="form" maxHeight="90dvh">
-    <DialogHeader title={account ? `Данс засах · ${account.code}` : 'Шинэ данс'} subtitle="Дансны код, ангилал, зориулалт нь цалин, төсөв, төлбөр тооцооны бичилт аль дансанд орохыг тодорхойлно." onOpenChange={(open) => { if (!open) onClose() }} />
+    <DialogHeader title={account ? t('accounts.dialog.editTitle', { code: account.code }) : t('accounts.dialog.newTitle')} subtitle={t('accounts.dialog.subtitle')} onOpenChange={(open) => { if (!open) onClose() }} />
     <VStack gap={4} padding={4}>
-      {locked && <Banner status="info" collapsible={false} title="Энэ данс ашиглагдаж байна" description={`${usageText(usage, catalog)}. Нэр, хураангуй данс, банкны мэдээлэл, идэвхийг засах боломжтой.`} />}
+      {locked && <Banner status="info" collapsible={false} title={t('accounts.dialog.inUseTitle')} description={t('accounts.dialog.inUseDescription', { usage: usageText(usage, catalog) })} />}
       <FormLayout>
-        <TextInput label="Дансны код" value={draft.code} onChange={(code) => set('code', code)} isRequired placeholder="1010" isDisabled={locked} disabledMessage={lockMessage}
-          description="249-р тушаалын дансны төлөвлөгөөний дагуу дугаарлана (1 — хөрөнгө, 2 — өр төлбөр, 3 — өмч, 4/5 — орлого, зардал)." />
-        <TextInput label="Дансны нэр" value={draft.name} onChange={(name) => set('name', name)} isRequired placeholder="Харилцах данс — Хаан банк" />
-        <Selector label="Ангилал" value={draft.classification} onChange={pickClassification} isDisabled={locked} disabledMessage={lockMessage}
-          options={catalog.classifications.map((row) => ({ value: row.key, label: row.label, description: row.normal_side === 'debit' ? 'Дебет шинжтэй' : 'Кредит шинжтэй' }))} />
-        <Selector label="Зориулалт" value={draft.purpose} onChange={(purpose) => set('purpose', purpose ?? 'general')} isDisabled={locked} disabledMessage={lockMessage}
+        <TextInput label={t('accounts.dialog.code')} value={draft.code} onChange={(code) => set('code', code)} isRequired placeholder="1010" isDisabled={locked} disabledMessage={lockMessage}
+          description={t('accounts.dialog.codeHint')} />
+        <TextInput label={t('accounts.dialog.name')} value={draft.name} onChange={(name) => set('name', name)} isRequired placeholder={t('accounts.dialog.namePlaceholder')} />
+        <Selector label={t('accounts.dialog.classification')} value={draft.classification} onChange={pickClassification} isDisabled={locked} disabledMessage={lockMessage}
+          options={catalog.classifications.map((row) => ({ value: row.key, label: row.label, description: row.normal_side === 'debit' ? t('accounts.dialog.debitNature') : t('accounts.dialog.creditNature') }))} />
+        <Selector label={t('accounts.dialog.purpose')} value={draft.purpose} onChange={(purpose) => set('purpose', purpose ?? 'general')} isDisabled={locked} disabledMessage={lockMessage}
           options={purposes.map((row) => ({ value: row.key, label: row.label }))}
-          description="Систем бичилт хийхдээ энэ зориулалтаар данс хайна: касс/банк — төлбөр, авлага/өглөг — тооцоо, цалингийн — цалин." />
-        <Selector label="Хураангуй данс" value={draft.parent_id ? String(draft.parent_id) : null} onChange={(value) => set('parent_id', value ? Number(value) : null)} hasClear hasSearch isOptional
-          options={parents.map((row) => ({ value: String(row.id), label: accountLabel(row) }))} emptyText="Энэ ангилалд бүлэг данс алга" placeholder="—" />
-        <TextInput label="Валют" value={draft.currency} onChange={(currency) => set('currency', currency.toUpperCase().slice(0, 3))} isDisabled={locked} disabledMessage={lockMessage} width={120} />
-        <CheckboxInput label="Бүлэг (хураангуй) данс" description="Бүлэг дансанд гүйлгээ бичихгүй — дэд дансуудыг нэгтгэнэ." value={draft.is_group} onChange={(is_group) => set('is_group', is_group)} isDisabled={locked} />
-        <CheckboxInput label="Идэвхтэй" description="Идэвхгүй данс сонголтод гарахгүй, түүх хэвээр үлдэнэ." value={draft.is_active} onChange={(is_active) => set('is_active', is_active)} />
+          description={t('accounts.dialog.purposeHint')} />
+        <Selector label={t('accounts.dialog.parent')} value={draft.parent_id ? String(draft.parent_id) : null} onChange={(value) => set('parent_id', value ? Number(value) : null)} hasClear hasSearch isOptional
+          options={parents.map((row) => ({ value: String(row.id), label: accountLabel(row) }))} emptyText={t('accounts.dialog.parentEmpty')} placeholder="—" />
+        <TextInput label={t('accounts.dialog.currency')} value={draft.currency} onChange={(currency) => set('currency', currency.toUpperCase().slice(0, 3))} isDisabled={locked} disabledMessage={lockMessage} width={120} />
+        <CheckboxInput label={t('accounts.dialog.isGroup')} description={t('accounts.dialog.isGroupHint')} value={draft.is_group} onChange={(is_group) => set('is_group', is_group)} isDisabled={locked} />
+        <CheckboxInput label={t('accounts.dialog.isActive')} description={t('accounts.dialog.isActiveHint')} value={draft.is_active} onChange={(is_active) => set('is_active', is_active)} />
       </FormLayout>
       {purposeSpec?.has_bank_details && !draft.is_group && <VStack gap={2}>
-        <Heading level={4}>Банкны мэдээлэл</Heading>
+        <Heading level={4}>{t('accounts.dialog.bankHeading')}</Heading>
         <FormLayout>
-          <TextInput label="Банк" value={draft.bank_name ?? ''} onChange={(value) => set('bank_name', value)} isOptional placeholder="Хаан банк" />
-          <TextInput label="Дансны дугаар" value={draft.bank_account_number ?? ''} onChange={(value) => set('bank_account_number', value)} isOptional />
+          <TextInput label={t('accounts.dialog.bank')} value={draft.bank_name ?? ''} onChange={(value) => set('bank_name', value)} isOptional placeholder={t('accounts.dialog.bankPlaceholder')} />
+          <TextInput label={t('accounts.dialog.bankNumber')} value={draft.bank_account_number ?? ''} onChange={(value) => set('bank_account_number', value)} isOptional />
           <TextInput label="IBAN" value={draft.bank_iban ?? ''} onChange={(value) => set('bank_iban', value)} isOptional placeholder="MN12 0005 00…" />
-          <TextInput label="Данс эзэмшигч" value={draft.bank_account_holder ?? ''} onChange={(value) => set('bank_account_holder', value)} isOptional />
+          <TextInput label={t('accounts.dialog.bankHolder')} value={draft.bank_account_holder ?? ''} onChange={(value) => set('bank_account_holder', value)} isOptional />
         </FormLayout>
       </VStack>}
-      <HStack gap={2} hAlign="end"><Button label="Болих" variant="ghost" onClick={onClose} /><Button label="Хадгалах" variant="primary" clickAction={submit} isDisabled={!draft.code.trim() || !draft.name.trim() || draft.currency.length !== 3} /></HStack>
+      <HStack gap={2} hAlign="end"><Button label={t('accounts.dialog.cancel')} variant="ghost" onClick={onClose} /><Button label={t('accounts.dialog.save')} variant="primary" clickAction={submit} isDisabled={!draft.code.trim() || !draft.name.trim() || draft.currency.length !== 3} /></HStack>
     </VStack>
   </Dialog>
 }
 
 /** Дансны төлөвлөгөө («Данс код», Dayansoft d047): the one chart of accounts payroll, budget and posting share. */
 export function ChartOfAccountsPage() {
+  const { t } = useTranslation()
   const permissions = useERPAccountPermissions()
   const canView = Boolean(permissions.data?.view)
   const accounts = useERPAccountOptions(canView)
@@ -159,7 +162,7 @@ export function ChartOfAccountsPage() {
   const purposeLabels = useMemo(() => new Map((catalog.data?.purposes ?? []).map((row) => [row.key, row.label])), [catalog.data])
 
   if (permissions.isLoading || (canView && (accounts.isLoading || catalog.isLoading))) return <Skeleton height={320} />
-  if (!canView) return <Banner status="warning" collapsible={false} title="Дансны төлөвлөгөөнд хандах эрх танд олгогдоогүй байна" description="Системийн админаас “Accountant” ERP эрх хүснэ үү." />
+  if (!canView) return <Banner status="warning" collapsible={false} title={t('accounts.page.noAccess')} description={t('accounts.page.noAccessHint')} />
   if (!accounts.data || !catalog.data) return <Banner status="error" collapsible={false} title={accountErrorText(accounts.error ?? catalog.error)} />
 
   const all = accounts.data
@@ -175,74 +178,74 @@ export function ChartOfAccountsPage() {
   const budgetable = (account: ERPAccountOption) => !account.is_group && account.is_active !== false && !!account.classification && ['income', 'expense'].includes(account.classification)
   const unlinkedBudget = budgetLookups.data ? all.filter((account) => budgetable(account) && !budgetByLedger.get(account.id)).length : 0
   const generateBudgetAccounts = async () => {
-    if (!window.confirm(`Төсөвт холбогдоогүй ${unlinkedBudget} орлого/зардлын данс бүрт төсөвт данс үүсгэх үү?`)) return
-    try { const result = await generateBudget.mutateAsync(undefined); toast.success(`${result.created} төсөвт данс үүслээ`) } catch (error) { toast.error(accountErrorText(error)) }
+    if (!window.confirm(t('accounts.page.confirmGenerate', { n: unlinkedBudget }))) return
+    try { const result = await generateBudget.mutateAsync(undefined); toast.success(t('accounts.toast.budgetCreated', { n: result.created })) } catch (error) { toast.error(accountErrorText(error)) }
   }
   const inactive = all.filter((account) => account.is_active === false).length
 
   const removeAccount = async (account: ERPAccountOption, used: boolean) => {
     const question = used
-      ? `“${accountLabel(account)}” данс гүйлгээ/тохиргоонд ашиглагдсан тул устгахгүй, идэвхгүй болгоно. Үргэлжлүүлэх үү?`
-      : `“${accountLabel(account)}” дансыг устгах уу?`
+      ? t('accounts.page.confirmArchive', { label: accountLabel(account) })
+      : t('accounts.page.confirmDelete', { label: accountLabel(account) })
     if (!window.confirm(question)) return
     try {
       const result = await remove.mutateAsync(account.id)
-      toast.success(result.outcome === 'archived' ? 'Данс идэвхгүй боллоо' : 'Данс устгагдлаа')
+      toast.success(result.outcome === 'archived' ? t('accounts.toast.archived') : t('accounts.toast.deleted'))
     } catch (error) { toast.error(accountErrorText(error)) }
   }
 
   return <VStack gap={4}>
     <HStack gap={2} vAlign="end" hAlign="between" wrap="wrap">
       <HStack gap={2} vAlign="end" wrap="wrap">
-        <SegmentedControl label="Ангилал" size="sm" value={classification} onChange={(value) => setClassification(value as 'all' | ERPAccountClassification)}>
-          <SegmentedControlItem value="all" label={`Бүгд (${all.length - inactive})`} />
+        <SegmentedControl label={t('accounts.page.classification')} size="sm" value={classification} onChange={(value) => setClassification(value as 'all' | ERPAccountClassification)}>
+          <SegmentedControlItem value="all" label={t('accounts.page.all', { n: all.length - inactive })} />
           {CLASSIFICATION_ORDER.map((key) => <SegmentedControlItem key={key} value={key} label={`${CLASSIFICATION_LABELS[key]} (${counts[key]})`} />)}
         </SegmentedControl>
-        <Selector label="Төлөв" isLabelHidden width={160} value={status} onChange={(value) => setStatus((value ?? 'active') as StatusFilter)}
-          options={[{ value: 'active', label: 'Идэвхтэй' }, { value: 'inactive', label: `Идэвхгүй (${inactive})` }, { value: 'all', label: 'Бүгд' }]} />
-        <TextInput label="Хайх" isLabelHidden value={search} onChange={setSearch} placeholder="Код, нэр, банк…" hasClear width={240} />
+        <Selector label={t('accounts.page.status')} isLabelHidden width={160} value={status} onChange={(value) => setStatus((value ?? 'active') as StatusFilter)}
+          options={[{ value: 'active', label: t('accounts.page.statusActive') }, { value: 'inactive', label: t('accounts.page.statusInactive', { n: inactive }) }, { value: 'all', label: t('accounts.page.statusAll') }]} />
+        <TextInput label={t('accounts.page.search')} isLabelHidden value={search} onChange={setSearch} placeholder={t('accounts.page.searchPlaceholder')} hasClear width={240} />
       </HStack>
-      {perms.create && <Button label="Данс нэмэх" variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')} />}
+      {perms.create && <Button label={t('accounts.page.add')} variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')} />}
     </HStack>
 
     {budgetSettings?.view && budgetLookups.data && unlinkedBudget > 0 && <Banner status="warning" collapsible={false}
-      title={`${unlinkedBudget} орлого/зардлын данс төсөвт данстай холбогдоогүй байна`}
-      description="Төсөвт данс нь энд биш, Төсөв → Данс хэсэгт үүсдэг. Доорх товчоор орлого, зардлын дансуудаас шууд үүсгэнэ."
+      title={t('accounts.page.unlinkedTitle', { n: unlinkedBudget })}
+      description={t('accounts.page.unlinkedHint')}
       endContent={<HStack gap={2} vAlign="center">
-        <Link as={RouterLink} href="/erp/budget/accounts">Төсөвт данс</Link>
-        {budgetSettings.create && <Button label="Төсөвт данс үүсгэх" size="sm" icon={<Wand2 size={14} />} clickAction={generateBudgetAccounts} />}
+        <Link as={RouterLink} href="/erp/budget/accounts">{t('accounts.page.budgetAccounts')}</Link>
+        {budgetSettings.create && <Button label={t('accounts.page.generateBudget')} size="sm" icon={<Wand2 size={14} />} clickAction={generateBudgetAccounts} />}
       </HStack>} />}
 
     <Card padding={0}>
-      {rows.length === 0 ? <EmptyState title="Данс олдсонгүй" description={all.length ? 'Шүүлтүүрээ өөрчилнө үү.' : '“Данс нэмэх”-ээр эхэлнэ үү.'} />
+      {rows.length === 0 ? <EmptyState title={t('accounts.page.emptyTitle')} description={all.length ? t('accounts.page.emptyFiltered') : t('accounts.page.emptyNew')} />
         : <Table<AccountRow>
           data={rows} idKey="id" density="compact" hasHover
           columns={[
-            { key: 'code', header: 'Код', width: pixel(130), renderCell: ({ account, depth }) => <Text weight={account.is_group ? 'bold' : 'medium'}>{`${depth ? `${'  '.repeat(depth - 1)}└ ` : ''}${account.code}`}</Text> },
-            { key: 'name', header: 'Нэр', width: proportional(3), renderCell: ({ account }) => <VStack gap={0}>
+            { key: 'code', header: t('accounts.page.colCode'), width: pixel(130), renderCell: ({ account, depth }) => <Text weight={account.is_group ? 'bold' : 'medium'}>{`${depth ? `${'  '.repeat(depth - 1)}└ ` : ''}${account.code}`}</Text> },
+            { key: 'name', header: t('accounts.page.colName'), width: proportional(3), renderCell: ({ account }) => <VStack gap={0}>
               <HStack gap={1} vAlign="center" wrap="wrap">
                 <Text weight={account.is_group ? 'bold' : undefined}>{account.name}</Text>
-                {account.is_group && <Token size="sm" color="gray" label="Бүлэг" />}
-                {account.is_active === false && <Token size="sm" color="gray" label="Идэвхгүй" />}
+                {account.is_group && <Token size="sm" color="gray" label={t('accounts.page.group')} />}
+                {account.is_active === false && <Token size="sm" color="gray" label={t('accounts.inactive')} />}
               </HStack>
               {account.bank_name && <Text type="supporting" maxLines={1}>{[account.bank_name, account.bank_account_number].filter(Boolean).join(' · ')}</Text>}
             </VStack> },
-            { key: 'classification', header: 'Ангилал', width: pixel(120), renderCell: ({ account }) => <ClassificationToken classification={account.classification} /> },
-            { key: 'purpose', header: 'Зориулалт', width: proportional(2), renderCell: ({ account }) => <Text type={account.purpose === 'general' ? 'supporting' : undefined}>{purposeLabels.get(account.purpose ?? 'general') ?? account.purpose}</Text> },
-            { key: 'currency', header: 'Валют', width: pixel(80), renderCell: ({ account }) => <Text type="supporting">{account.currency ?? 'MNT'}</Text> },
-            ...(budgetSettings?.view ? [{ key: 'budget', header: 'Төсөвт данс', width: proportional(2), renderCell: ({ account }: AccountRow) => {
+            { key: 'classification', header: t('accounts.page.colClassification'), width: pixel(120), renderCell: ({ account }) => <ClassificationToken classification={account.classification} /> },
+            { key: 'purpose', header: t('accounts.page.colPurpose'), width: proportional(2), renderCell: ({ account }) => <Text type={account.purpose === 'general' ? 'supporting' : undefined}>{purposeLabels.get(account.purpose ?? 'general') ?? account.purpose}</Text> },
+            { key: 'currency', header: t('accounts.page.colCurrency'), width: pixel(80), renderCell: ({ account }) => <Text type="supporting">{account.currency ?? 'MNT'}</Text> },
+            ...(budgetSettings?.view ? [{ key: 'budget', header: t('accounts.page.colBudget'), width: proportional(2), renderCell: ({ account }: AccountRow) => {
               if (!budgetable(account)) return <Text type="supporting">—</Text>
               const linked = budgetByLedger.get(account.id)
-              return linked ? <Token size="sm" label={linked.code} description={linked.name} /> : <Token size="sm" color="orange" label="Холбоогүй" />
+              return linked ? <Token size="sm" label={linked.code} description={linked.name} /> : <Token size="sm" color="orange" label={t('accounts.page.unlinked')} />
             } }] : []),
-            { key: 'usage', header: 'Ашиглалт', width: proportional(2), renderCell: ({ usage: used }) => used?.total
+            { key: 'usage', header: t('accounts.page.colUsage'), width: proportional(2), renderCell: ({ usage: used }) => used?.total
               ? <HStack gap={0.5} wrap="wrap">{Object.entries(used.modules).map(([module, count]) => <Token key={module} size="sm" label={catalog.data!.usage_modules[module] ?? module} description={String(count)} />)}</HStack>
               : <Text type="supporting">—</Text> },
             { key: 'actions', header: '', width: pixel(90), renderCell: ({ account, usage: used }) => {
               const inUse = Boolean(used?.total)
               return <HStack gap={0.5} hAlign="end">
-                {perms.edit && <IconButton label="Засах" icon={<Pencil size={14} />} size="sm" variant="ghost" onClick={() => setEditing(account)} />}
-                {perms.administer && account.is_active !== false && <IconButton label={inUse ? 'Идэвхгүй болгох' : 'Устгах'} tooltip={inUse ? 'Ашиглагдсан данс — идэвхгүй болно' : 'Устгах'}
+                {perms.edit && <IconButton label={t('accounts.page.edit')} icon={<Pencil size={14} />} size="sm" variant="ghost" onClick={() => setEditing(account)} />}
+                {perms.administer && account.is_active !== false && <IconButton label={inUse ? t('accounts.page.archive') : t('accounts.page.delete')} tooltip={inUse ? t('accounts.page.archiveTooltip') : t('accounts.page.delete')}
                   icon={inUse ? <Archive size={14} /> : <Trash2 size={14} />} size="sm" variant="ghost" onClick={() => { void removeAccount(account, inUse) }} />}
               </HStack>
             } },

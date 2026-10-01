@@ -1,18 +1,21 @@
+import i18n from '../i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Save, Trash2 } from 'lucide-react'
 import { useReportPolicy, useUpdateReportPolicy, type CustomReportPeriod, type DepartmentReportRule, type ReportFrequencySettings, type ReportPolicyInput } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 
 const STANDARD = [
-  { value: 'daily', label: 'Өдөр' },
-  { value: 'weekly', label: '7 хоног' },
-  { value: 'monthly', label: 'Сар' },
-  { value: 'quarterly', label: 'Улирал' },
-  { value: 'half_yearly', label: 'Хагас жил' },
-  { value: 'yearly', label: 'Жил' },
+  { value: 'daily', get label() { return i18n.t('reports.policy.std.daily') } },
+  { value: 'weekly', get label() { return i18n.t('reports.policy.std.weekly') } },
+  { value: 'monthly', get label() { return i18n.t('reports.policy.std.monthly') } },
+  { value: 'quarterly', get label() { return i18n.t('reports.policy.std.quarterly') } },
+  { value: 'half_yearly', get label() { return i18n.t('reports.policy.std.half_yearly') } },
+  { value: 'yearly', get label() { return i18n.t('reports.policy.std.yearly') } },
 ]
-const WEEKDAYS = ['Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба', 'Ням']
-const MONTHS = Array.from({ length: 12 }, (_, index) => `${index + 1}-р сар`)
+const WEEKDAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+const weekdayName = (index: number) => i18n.t(`reports.policy.weekday.${WEEKDAY_KEYS[index]}`)
+const monthName = (index: number) => i18n.t('reports.policy.monthN', { n: index + 1 })
 const MONTH_SPAN_FREQUENCIES = new Set(['quarterly', 'half_yearly', 'yearly'])
 const DAYS_OF_MONTH = Array.from({ length: 28 }, (_, index) => index + 1)
 const HOURS = Array.from({ length: 24 }, (_, index) => index)
@@ -33,21 +36,22 @@ function numberOrNull(value: string, min: number, max: number) {
 
 /** Period start and reminder schedule of one report frequency. */
 function FrequencyScheduleCard({ frequency, label, value, onChange, disabled, companyReminderDays, preview }: { frequency: string; label: string; value: ReportFrequencySettings; onChange: (next: ReportFrequencySettings) => void; disabled: boolean; companyReminderDays: number; preview?: { start: string; end: string; due: string } }) {
+  const { t } = useTranslation()
   const set = (patch: Partial<ReportFrequencySettings>) => onChange({ ...value, ...patch })
   const monthSpan = MONTH_SPAN_FREQUENCIES.has(frequency)
-  return <article className="report-schedule-card panel" aria-label={`${label} хуваарь`}>
-    <header><strong>{label}</strong>{preview && <small>Одоогийн хугацаа: {preview.start} – {preview.end}{preview.due !== preview.end ? ` · Илгээх эцсийн өдөр: ${preview.due}` : ''}</small>}</header>
+  return <article className="report-schedule-card panel" aria-label={t('reports.policy.scheduleLabel', { label })}>
+    <header><strong>{label}</strong>{preview && <small>{t('reports.policy.currentPeriod')} {preview.start} – {preview.end}{preview.due !== preview.end ? t('reports.create.dueDateHint', { date: preview.due }) : ''}</small>}</header>
     <div className="report-schedule-grid">
-      {frequency === 'weekly' && <label>7 хоног эхлэх өдөр<select value={value.start_weekday ?? 0} disabled={disabled} onChange={(event) => set({ start_weekday: Number(event.target.value) })}>{WEEKDAYS.map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label>}
-      {monthSpan && <label>{frequency === 'yearly' ? 'Санхүүгийн жил эхлэх сар' : 'Эхний хугацаа эхлэх сар'}<select value={value.start_month ?? 1} disabled={disabled} onChange={(event) => set({ start_month: Number(event.target.value) })}>{MONTHS.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></label>}
-      {(frequency === 'monthly' || monthSpan) && <label>Эхлэх өдөр (сарын)<select value={value.start_day ?? 1} disabled={disabled} onChange={(event) => set({ start_day: Number(event.target.value) })}>{DAYS_OF_MONTH.map((day) => <option key={day} value={day}>{day}</option>)}</select></label>}
-      <label>Дуусахаас өмнө сануулах (өдөр)<input type="number" min={1} max={60} value={value.reminder_days ?? ''} placeholder={`${companyReminderDays} (компанийн)`} disabled={disabled} onChange={(event) => set({ reminder_days: numberOrNull(event.target.value, 1, 60) })} /></label>
-      <label>Дууссаны дараа илгээх хугацаа (өдөр)<input type="number" min={0} max={60} value={value.due_days} disabled={disabled} onChange={(event) => set({ due_days: numberOrNull(event.target.value, 0, 60) ?? 0 })} /></label>
-      <label>Сануулах цаг<select value={value.reminder_hour ?? ''} disabled={disabled} onChange={(event) => set({ reminder_hour: event.target.value === '' ? null : Number(event.target.value) })}><option value="">Өглөөний цаг (ажилтны хуваарь)</option>{HOURS.map((hour) => <option key={hour} value={hour}>{`${String(hour).padStart(2, '0')}:00`}</option>)}</select></label>
+      {frequency === 'weekly' && <label>{t('reports.policy.weekStartDay')}<select value={value.start_weekday ?? 0} disabled={disabled} onChange={(event) => set({ start_weekday: Number(event.target.value) })}>{WEEKDAY_KEYS.map((day, index) => <option key={day} value={index}>{weekdayName(index)}</option>)}</select></label>}
+      {monthSpan && <label>{frequency === 'yearly' ? t('reports.policy.fiscalStartMonth') : t('reports.policy.firstPeriodStartMonth')}<select value={value.start_month ?? 1} disabled={disabled} onChange={(event) => set({ start_month: Number(event.target.value) })}>{Array.from({ length: 12 }, (_, index) => <option key={index} value={index + 1}>{monthName(index)}</option>)}</select></label>}
+      {(frequency === 'monthly' || monthSpan) && <label>{t('reports.policy.startDayOfMonth')}<select value={value.start_day ?? 1} disabled={disabled} onChange={(event) => set({ start_day: Number(event.target.value) })}>{DAYS_OF_MONTH.map((day) => <option key={day} value={day}>{day}</option>)}</select></label>}
+      <label>{t('reports.policy.remindBefore')}<input type="number" min={1} max={60} value={value.reminder_days ?? ''} placeholder={t('reports.policy.companyDays', { n: companyReminderDays })} disabled={disabled} onChange={(event) => set({ reminder_days: numberOrNull(event.target.value, 1, 60) })} /></label>
+      <label>{t('reports.policy.dueAfter')}<input type="number" min={0} max={60} value={value.due_days} disabled={disabled} onChange={(event) => set({ due_days: numberOrNull(event.target.value, 0, 60) ?? 0 })} /></label>
+      <label>{t('reports.policy.reminderHour')}<select value={value.reminder_hour ?? ''} disabled={disabled} onChange={(event) => set({ reminder_hour: event.target.value === '' ? null : Number(event.target.value) })}><option value="">{t('reports.policy.morningHour')}</option>{HOURS.map((hour) => <option key={hour} value={hour}>{`${String(hour).padStart(2, '0')}:00`}</option>)}</select></label>
     </div>
   </article>
 }
-const UNIT_LABELS: Record<CustomReportPeriod['unit'], string> = { day: 'өдөр', week: '7 хоног', month: 'сар' }
+const UNIT_LABELS: Record<CustomReportPeriod['unit'], string> = { get day() { return i18n.t('reports.policy.unitShort.day') }, get week() { return i18n.t('reports.policy.unitShort.week') }, get month() { return i18n.t('reports.policy.unitShort.month') } }
 
 function slugify(label: string, taken: Set<string>) {
   const base = label.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'period'
@@ -75,6 +79,7 @@ function FrequencyPicker({ options, value, onChange, disabled, exclude = [], lab
  * department rules (worker override + department-level reports).
  */
 export function ReportPolicySettings() {
+  const { t } = useTranslation()
   const policy = useReportPolicy()
   const update = useUpdateReportPolicy()
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
@@ -98,8 +103,8 @@ export function ReportPolicySettings() {
     ...(form?.custom_periods ?? []).map((item) => ({ value: `custom:${item.id}`, label: item.label })),
   ], [form?.custom_periods])
 
-  if (policy.isLoading || !form) return <p className="query-region-state">Тайлангийн тохиргоог ачаалж байна…</p>
-  if (policy.isError) return <p className="query-region-state" role="alert">Тайлангийн тохиргоог ачаалж чадсангүй.</p>
+  if (policy.isLoading || !form) return <p className="query-region-state">{t('reports.policy.loading')}</p>
+  if (policy.isError) return <p className="query-region-state" role="alert">{t('reports.policy.loadFailed')}</p>
 
   const departments = policy.data?.department_options ?? []
   const ruleFor = (departmentId: number): DepartmentReportRule | undefined => form.departments.find((item) => item.department_id === departmentId)
@@ -145,56 +150,56 @@ export function ReportPolicySettings() {
   })
 
   return <div className="report-policy-settings">
-    {!canEdit && <p className="settings-readonly-note">Зөвхөн админ өөрчилнө. Та тохиргоог харах боломжтой.</p>}
+    {!canEdit && <p className="settings-readonly-note">{t('reports.policy.readOnly')}</p>}
     <section className="report-policy-block">
-      <h3>Ажилтны тайлангийн давтамж</h3>
-      <p>Сонгосон хугацаа бүрт ажилтанд сануулга очиж, тайлан автоматаар үүснэ. Бусад төрлийн тайлан ажилтны жагсаалтад харагдахгүй.</p>
-      <FrequencyPicker label="Компанийн бүх ажилтан" options={frequencyOptions} value={form.worker_frequencies} onChange={(next) => setForm({ ...form, worker_frequencies: next })} disabled={!canEdit} />
-      <label className="report-reminder-days">Хугацаа дуусахаас өмнө сануулах өдөр
+      <h3>{t('reports.policy.frequencyTitle')}</h3>
+      <p>{t('reports.policy.frequencyHint')}</p>
+      <FrequencyPicker label={t('reports.policy.allEmployees')} options={frequencyOptions} value={form.worker_frequencies} onChange={(next) => setForm({ ...form, worker_frequencies: next })} disabled={!canEdit} />
+      <label className="report-reminder-days">{t('reports.policy.reminderDays')}
         <input type="number" min={1} max={14} value={form.reminder_days} disabled={!canEdit} onChange={(event) => setForm({ ...form, reminder_days: Math.max(1, Math.min(14, Number(event.target.value) || 1)) })} />
       </label>
     </section>
 
     <section className="report-policy-block">
-      <h3>Хугацаа ба хуваарь</h3>
-      <p>Компани бүрийн тайлант хугацаа өөр: сар 26-нд эхэлж болно, санхүүгийн жил 7-р сард эхэлж болно. Давтамж бүрийн эхлэх өдөр, сануулга эхлэх хугацаа, илгээх эцсийн хугацаа, сануулах цагийг тохируулна.</p>
-      {usedFrequencies.length === 0 ? <p className="query-region-state">Идэвхтэй тайлангийн давтамж алга (өдрийн тайлан өдөр бүр оройн check-in-ээр сануулагдана).</p> : <div className="report-schedule-list">{usedFrequencies.map((option) => <FrequencyScheduleCard
+      <h3>{t('reports.policy.scheduleTitle')}</h3>
+      <p>{t('reports.policy.scheduleHint')}</p>
+      {usedFrequencies.length === 0 ? <p className="query-region-state">{t('reports.policy.noActiveFrequency')}</p> : <div className="report-schedule-list">{usedFrequencies.map((option) => <FrequencyScheduleCard
         key={option.value} frequency={option.value.startsWith('custom:') ? 'custom' : option.value} label={option.label}
         value={settingsFor(option.value)} onChange={(next) => setSettings(option.value, next)} disabled={!canEdit}
         companyReminderDays={form.reminder_days} preview={policy.data?.current_periods?.[option.value]} />)}</div>}
     </section>
 
     <section className="report-policy-block">
-      <h3>Тусгай хугацаа</h3>
-      <p>Жишээ нь “Спринт” (2 долоо хоног тутам) эсвэл “4 сар тутам”. Эхлэх огнооноос тоологдоно.</p>
+      <h3>{t('reports.policy.customTitle')}</h3>
+      <p>{t('reports.policy.customHint')}</p>
       {form.custom_periods.length > 0 && <ul className="report-custom-list">{form.custom_periods.map((item) => <li key={item.id}>
-        <span><strong>{item.label}</strong><small>{item.interval} {UNIT_LABELS[item.unit]} тутам · {item.anchor_date}-с</small></span>
-        {canEdit && <button type="button" className="danger-action compact" onClick={() => removeCustomPeriod(item.id)} aria-label={`${item.label} устгах`}><Trash2 size={14} /></button>}
+        <span><strong>{item.label}</strong><small>{t('reports.policy.customSummary', { interval: item.interval, unit: UNIT_LABELS[item.unit], date: item.anchor_date })}</small></span>
+        {canEdit && <button type="button" className="danger-action compact" onClick={() => removeCustomPeriod(item.id)} aria-label={t('reports.policy.deleteItem', { label: item.label })}><Trash2 size={14} /></button>}
       </li>)}</ul>}
       {canEdit && <div className="report-custom-form">
-        <label>Нэр<input value={newPeriod.label} maxLength={80} onChange={(event) => setNewPeriod({ ...newPeriod, label: event.target.value })} placeholder="Спринт" /></label>
-        <label>Тутам<input type="number" min={1} max={newPeriod.unit === 'day' ? 366 : newPeriod.unit === 'week' ? 52 : 24} value={newPeriod.interval} onChange={(event) => setNewPeriod({ ...newPeriod, interval: Math.max(1, Number(event.target.value) || 1) })} /></label>
-        <label>Нэгж<select value={newPeriod.unit} onChange={(event) => setNewPeriod({ ...newPeriod, unit: event.target.value as CustomReportPeriod['unit'] })}><option value="day">өдөр</option><option value="week">7 хоног</option><option value="month">сар</option></select></label>
-        <label>Эхлэх огноо<input type="date" value={newPeriod.anchor_date} onChange={(event) => setNewPeriod({ ...newPeriod, anchor_date: event.target.value })} /></label>
-        <button type="button" className="secondary-action compact" onClick={addCustomPeriod} disabled={!newPeriod.label.trim() || form.custom_periods.length >= 12}><Plus size={14} />Нэмэх</button>
+        <label>{t('reports.policy.name')}<input value={newPeriod.label} maxLength={80} onChange={(event) => setNewPeriod({ ...newPeriod, label: event.target.value })} placeholder={t('reports.policy.namePlaceholder')} /></label>
+        <label>{t('reports.policy.every')}<input type="number" min={1} max={newPeriod.unit === 'day' ? 366 : newPeriod.unit === 'week' ? 52 : 24} value={newPeriod.interval} onChange={(event) => setNewPeriod({ ...newPeriod, interval: Math.max(1, Number(event.target.value) || 1) })} /></label>
+        <label>{t('reports.policy.unit')}<select value={newPeriod.unit} onChange={(event) => setNewPeriod({ ...newPeriod, unit: event.target.value as CustomReportPeriod['unit'] })}><option value="day">{t('reports.policy.unit.day')}</option><option value="week">{t('reports.policy.unit.week')}</option><option value="month">{t('reports.policy.unit.month')}</option></select></label>
+        <label>{t('reports.policy.startDate')}<input type="date" value={newPeriod.anchor_date} onChange={(event) => setNewPeriod({ ...newPeriod, anchor_date: event.target.value })} /></label>
+        <button type="button" className="secondary-action compact" onClick={addCustomPeriod} disabled={!newPeriod.label.trim() || form.custom_periods.length >= 12}><Plus size={14} />{t('reports.policy.add')}</button>
       </div>}
     </section>
 
     <section className="report-policy-block">
-      <h3>Хэлтсээр</h3>
-      <p>Хэлтэс бүрт ажилтны давтамжийг өөрчлөх, мөн хэлтсийн даргаар бичүүлэх хэлтсийн тайлан тохируулна.</p>
-      {departments.length === 0 ? <p className="query-region-state">Хэлтэс бүртгэгдээгүй байна. HR хэсгээс хэлтэс нэмнэ үү.</p> : <div className="report-department-list">{departments.map((department) => {
+      <h3>{t('reports.insights.byDepartment')}</h3>
+      <p>{t('reports.policy.deptHint')}</p>
+      {departments.length === 0 ? <p className="query-region-state">{t('reports.policy.noDepartments')}</p> : <div className="report-department-list">{departments.map((department) => {
         const rule = ruleFor(department.id)
         const overrides = rule?.worker_frequencies != null
         return <article key={department.id} className="report-department-rule panel">
-          <header><strong>{department.name}</strong><small>{department.manager_name ? `Дарга: ${department.manager_name}` : 'Хэлтсийн дарга томилогдоогүй — хэлтсийн тайлан илгээгдэхгүй'}</small></header>
-          <label className="report-override-toggle"><input type="checkbox" checked={overrides} disabled={!canEdit} onChange={() => setRule(department.id, { worker_frequencies: overrides ? null : [...form.worker_frequencies] })} /><span>Энэ хэлтсийн ажилтанд өөр давтамж</span></label>
-          {overrides && <FrequencyPicker label="Ажилтны тайлан" options={frequencyOptions} value={rule?.worker_frequencies ?? []} onChange={(next) => setRule(department.id, { worker_frequencies: next })} disabled={!canEdit} />}
-          <FrequencyPicker label="Хэлтсийн тайлан (даргаар)" options={frequencyOptions} exclude={['daily']} value={rule?.department_frequencies ?? []} onChange={(next) => setRule(department.id, { department_frequencies: next })} disabled={!canEdit} />
+          <header><strong>{department.name}</strong><small>{department.manager_name ? t('reports.policy.manager', { name: department.manager_name }) : t('reports.policy.noManager')}</small></header>
+          <label className="report-override-toggle"><input type="checkbox" checked={overrides} disabled={!canEdit} onChange={() => setRule(department.id, { worker_frequencies: overrides ? null : [...form.worker_frequencies] })} /><span>{t('reports.policy.deptOverride')}</span></label>
+          {overrides && <FrequencyPicker label={t('reports.policy.employeeReport')} options={frequencyOptions} value={rule?.worker_frequencies ?? []} onChange={(next) => setRule(department.id, { worker_frequencies: next })} disabled={!canEdit} />}
+          <FrequencyPicker label={t('reports.policy.departmentReport')} options={frequencyOptions} exclude={['daily']} value={rule?.department_frequencies ?? []} onChange={(next) => setRule(department.id, { department_frequencies: next })} disabled={!canEdit} />
         </article>
       })}</div>}
     </section>
 
-    {canEdit && <div className="report-policy-actions"><button type="button" className="primary-action" onClick={save} disabled={update.isPending}><Save size={16} />Хадгалах</button></div>}
+    {canEdit && <div className="report-policy-actions"><button type="button" className="primary-action" onClick={save} disabled={update.isPending}><Save size={16} />{t('reports.policy.save')}</button></div>}
   </div>
 }

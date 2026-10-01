@@ -1,4 +1,6 @@
 import { Component, lazy, useEffect, useRef, useState, type ComponentType, type ErrorInfo, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
 
 export type SkeletonVariant = 'text' | 'card' | 'table-row' | 'calendar-cell' | 'kanban-card' | 'chart' | 'sheet'
 
@@ -106,9 +108,9 @@ export class RouteLoadErrorBoundary extends Component<RouteLoadErrorBoundaryProp
 
     return <main className="workspace-bootstrap-error" role="alert">
       <div className="query-region-state query-region-error">
-        <strong>Энэ хуудсыг ачаалж чадсангүй.</strong>
-        <span>Түр зуурын сүлжээний алдаа гарсан байж болно.</span>
-        <button className="secondary-action" type="button" onClick={this.reload}>Дахин ачаалах</button>
+        <strong>{i18n.t('common.pageLoadFailed')}</strong>
+        <span>{i18n.t('common.pageLoadFailedHint')}</span>
+        <button className="secondary-action" type="button" onClick={this.reload}>{i18n.t('common.reload')}</button>
       </div>
     </main>
   }
@@ -170,14 +172,17 @@ export function SkeletonRow({ columns = 4, className = '' }: { columns?: number;
   </div>
 }
 
-export function InlinePending({ label = 'Ачаалж байна…', size = 20 }: { label?: string; size?: number }) {
+export function InlinePending({ label, size = 20 }: { label?: string; size?: number }) {
+  const { t } = useTranslation()
+  label ??= t('common.loading')
   return <span className="inline-pending" role="status" aria-live="polite" aria-label={label} style={{ '--inline-pending-size': `${size}px` } as React.CSSProperties}>
     <span className="inline-pending-spinner" aria-hidden="true" />
     <span className="sr-only">{label}</span>
   </span>
 }
 
-export function QueryRegion<E = unknown>({ state, children, skeleton, empty = false, emptyFallback = null, errorFallback, refreshLabel = 'Шинэчилж байна…', className = '' }: QueryRegionProps<E>) {
+export function QueryRegion<E = unknown>({ state, children, skeleton, empty = false, emptyFallback = null, errorFallback, refreshLabel, className = '' }: QueryRegionProps<E>) {
+  const { t } = useTranslation()
   const showLoading = useDelayedLoading(state.initialPending)
   const showRefreshing = useDelayedLoading(state.refreshing, { delay: 250, minDuration: 300 })
   const resolved = !state.initialPending && (state.hasData || state.initialError !== null)
@@ -193,8 +198,8 @@ export function QueryRegion<E = unknown>({ state, children, skeleton, empty = fa
       {reserveSkeleton && <div aria-hidden="true" className={`query-region__layer query-region__skeleton-layer ${showLoading ? 'is-visible' : retainedSkeleton ? 'is-exiting' : 'is-reserved'}`}>{skeleton}</div>}
       {resolved && <div className={`query-region__layer query-region__result-layer ${showLoading ? 'is-hidden' : 'is-visible'}`}>{result}</div>}
     </div>
-    {showRefreshing && <span className="query-region__refresh" role="status" aria-live="polite"><span className="inline-pending-spinner" aria-hidden="true" />{refreshLabel}</span>}
-    {state.refreshError !== null && <button type="button" className="query-region__refresh-error" onClick={state.retry}>Шинэчлэхэд алдаа гарлаа · Дахин оролдох</button>}
+    {showRefreshing && <span className="query-region__refresh" role="status" aria-live="polite"><span className="inline-pending-spinner" aria-hidden="true" />{refreshLabel ?? t('common.refreshing')}</span>}
+    {state.refreshError !== null && <button type="button" className="query-region__refresh-error" onClick={state.retry}>{t('common.refreshFailed')}</button>}
   </div>
 }
 
@@ -210,23 +215,28 @@ export interface QueryRegionProps<E = unknown> {
 }
 
 export function QueryErrorState({ onRetry }: { onRetry: () => void }) {
-  return <div className="query-region-state query-region-error" role="alert"><strong>Агуулгыг ачаалж чадсангүй.</strong><button type="button" className="secondary-action" onClick={onRetry}>Дахин оролдох</button></div>
+  const { t } = useTranslation()
+  return <div className="query-region-state query-region-error" role="alert"><strong>{t('common.contentLoadFailed')}</strong><button type="button" className="secondary-action" onClick={onRetry}>{t('common.retry')}</button></div>
 }
 
 export function TableSkeleton({ rows = 5 }: { rows?: number }) {
-  return <div className="table-skeleton" aria-label="Агуулга ачаалж байна"><Skeleton variant="table-row" count={rows} /></div>
+  const { t } = useTranslation()
+  return <div className="table-skeleton" aria-label={t('common.contentLoading')}><Skeleton variant="table-row" count={rows} /></div>
 }
 
 export function KanbanSkeleton() {
-  return <div className="kanban-board kanban-skeleton" aria-label="Даалгаврууд ачаалж байна">{Array.from({ length: 5 }, (_, index) => <section className="kanban-column" key={index}><Skeleton variant="text" /><div className="kanban-dropzone"><Skeleton variant="kanban-card" count={3} /></div></section>)}</div>
+  const { t } = useTranslation()
+  return <div className="kanban-board kanban-skeleton" aria-label={t('common.tasksLoading')}>{Array.from({ length: 5 }, (_, index) => <section className="kanban-column" key={index}><Skeleton variant="text" /><div className="kanban-dropzone"><Skeleton variant="kanban-card" count={3} /></div></section>)}</div>
 }
 
 export function CalendarSkeleton() {
-  return <div className="planning-calendar panel calendar-skeleton" aria-label="Календарь ачаалж байна"><Skeleton variant="calendar-cell" count={42} /></div>
+  const { t } = useTranslation()
+  return <div className="planning-calendar panel calendar-skeleton" aria-label={t('common.calendarLoading')}><Skeleton variant="calendar-cell" count={42} /></div>
 }
 
 export function WorkspaceSkeleton() {
-  return <main className="workspace-loading" aria-label="Хуудас ачаалж байна"><Skeleton variant="text" count={3} /></main>
+  const { t } = useTranslation()
+  return <main className="workspace-loading" aria-label={t('common.pageLoading')}><Skeleton variant="text" count={3} /></main>
 }
 
 export function WorkspaceRouteSkeleton({ pathname }: { pathname: string }) {
@@ -240,7 +250,8 @@ export function WorkspaceRouteSkeleton({ pathname }: { pathname: string }) {
 }
 
 export function InitialWorkspaceSkeleton() {
-  return <div className="workspace-shell initial-workspace-skeleton" aria-label="Ажлын орон зайг ачаалж байна">
+  const { t } = useTranslation()
+  return <div className="workspace-shell initial-workspace-skeleton" aria-label={t('common.workspaceLoading')}>
     <aside className="workspace-sidebar" aria-hidden="true"><div className="sidebar-brand"><img src="/favicon.png" alt="" /></div><nav className="initial-nav-skeleton">{Array.from({ length: 11 }, (_, index) => <Skeleton key={index} variant="text" />)}</nav><div className="sidebar-footer"><Skeleton variant="text" /><Skeleton variant="text" /></div></aside>
     <main className="workspace-main"><header className="workspace-header"><Skeleton variant="text" /></header><div className="workspace-content"><WorkspaceSkeleton /></div></main>
   </div>

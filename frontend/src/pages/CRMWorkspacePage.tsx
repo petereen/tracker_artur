@@ -1,5 +1,6 @@
 import { createElement, useState } from 'react'
 import { MessagesSquare, Settings2, Users, type LucideIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useCRMActivity, useCRMCapabilities, useCRMLookups, type CRMActivity, type CRMParty } from '../api/crm'
 import { useActor } from '../api/enterprise'
@@ -14,11 +15,11 @@ import '../components/crm/crm.css'
 
 type Tab = 'activities' | 'customers' | 'settings'
 const TAB_PATHS: Record<Tab, string> = { activities: '/erp/crm', customers: '/erp/crm/customers', settings: '/erp/crm/settings' }
-const TAB_LABELS: Record<Tab, string> = { activities: 'Харилцаа холбоо', customers: 'Харилцагч', settings: 'Тохиргоо' }
 const TAB_ICONS: Record<Tab, LucideIcon> = { activities: MessagesSquare, customers: Users, settings: Settings2 }
 const MANAGER_ROLES = ['admin', 'manager', 'team_lead']
 
 export function CRMWorkspacePage() {
+  const { t } = useTranslation()
   const capabilities = useCRMCapabilities()
   const actor = useActor()
   const location = useLocation()
@@ -37,10 +38,10 @@ export function CRMWorkspacePage() {
   const tab: Tab = location.pathname.startsWith(TAB_PATHS.customers) ? 'customers' : location.pathname.startsWith(TAB_PATHS.settings) ? 'settings' : 'activities'
   const isManager = Boolean(actor.data?.roles?.some((role) => MANAGER_ROLES.includes(role)))
 
-  if (capabilities.isLoading || (canUse && lookups.isLoading)) return <div className="hr-empty">Ачаалж байна…</div>
+  if (capabilities.isLoading || (canUse && lookups.isLoading)) return <div className="hr-empty">{t('crm.common.loading')}</div>
   if (capabilities.isError) return <div className="hr-empty">{crmErrorText(capabilities.error)}</div>
-  if (!caps || !canUse) return <div className="hr-empty">CRM-д хандах эрх танд олгогдоогүй байна. Системийн админаас “Sales” ERP эрх хүснэ үү.</div>
-  if (!lookups.data) return <div className="hr-empty">{lookups.isError ? crmErrorText(lookups.error) : 'Ачаалж байна…'}</div>
+  if (!caps || !canUse) return <div className="hr-empty">{t('crm.page.noAccess')}</div>
+  if (!lookups.data) return <div className="hr-empty">{lookups.isError ? crmErrorText(lookups.error) : t('crm.common.loading')}</div>
 
   const data = lookups.data
   const visibleTabs = (['activities', 'customers', 'settings'] as Tab[]).filter((key) => (key === 'customers' ? caps.parties.view : key === 'activities' ? caps.activities.view : caps.activities.view || caps.settings.edit))
@@ -54,10 +55,12 @@ export function CRMWorkspacePage() {
 
   return <div className="crm-workspace">
     {!caps.module_enabled && <div className="crm-warning">
-      CRM модуль цэсэнд идэвхжээгүй байна. {actor.data?.roles?.includes('admin') ? <Link to="/administration/organization/modules">Модуль ба боломжууд</Link> : 'Админ'} хэсгээс идэвхжүүлнэ үү.
+      {actor.data?.roles?.includes('admin')
+        ? <>{t('crm.page.moduleOffBefore')} <Link to="/administration/organization/modules">{t('crm.page.moduleOffLink')}</Link> {t('crm.page.moduleOffAfter')}</>
+        : t('crm.page.moduleOffMember')}
     </div>}
-    <nav className="page-tabs"><div className="page-tabs-list" aria-label="CRM sections">
-      {visibleTabs.map((key) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(TAB_PATHS[key])}>{createElement(TAB_ICONS[key], { size: 15 })}{TAB_LABELS[key]}</button>)}
+    <nav className="page-tabs"><div className="page-tabs-list" aria-label={t('crm.page.tabsAria')}>
+      {visibleTabs.map((key) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(TAB_PATHS[key])}>{createElement(TAB_ICONS[key], { size: 15 })}{t(`crm.page.tab.${key}`)}</button>)}
     </div></nav>
 
     {tab === 'activities' && caps.activities.view && <ActivitiesPanel lookups={data} capabilities={caps} isManager={isManager} onOpen={openActivity} onCreate={() => setEditingActivity('new')} />}

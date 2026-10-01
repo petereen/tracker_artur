@@ -68,13 +68,13 @@ export function MobileMoreSheet({ open, onClose, items, unreadChat, actor, role,
 
   return createPortal(
     <div className="mobile-more-root">
-      <button type="button" className="mobile-more-scrim" aria-label="Цэс хаах" onClick={onClose} style={{ opacity: Math.max(0, 1 - offset / 400) }} />
+      <button type="button" className="mobile-more-scrim" aria-label={t('shell.mobile.closeMenu')} onClick={onClose} style={{ opacity: Math.max(0, 1 - offset / 400) }} />
       <div
         ref={sheetRef}
         className={`mobile-more-sheet ${dragging ? 'is-dragging' : ''}`}
         role="dialog"
         aria-modal="true"
-        aria-label="Бусад цэс"
+        aria-label={t('shell.mobile.moreMenu')}
         tabIndex={-1}
         style={offset ? { transform: `translate3d(0, ${offset}px, 0)` } : undefined}
         onTouchStart={onTouchStart}
@@ -92,11 +92,11 @@ export function MobileMoreSheet({ open, onClose, items, unreadChat, actor, role,
           <button type="button" className="mobile-more-search" onClick={() => { onClose(); onSearch() }}>
             <Search size={17} aria-hidden /><span>{t('action.search')}</span>
           </button>
-          <nav className="mobile-more-grid" aria-label="Бүх цэс">
+          <nav className="mobile-more-grid" aria-label={t('shell.mobile.allMenu')}>
             {items.map(({ to, label, icon: Icon }) => (
               <NavLink key={to} to={to} end={to === '/'} onClick={onClose} onTouchStart={() => preloadRoute(to)} className={({ isActive }) => isActive ? 'active' : ''}>
                 <span className="mobile-more-tile"><Icon size={22} strokeWidth={1.8} aria-hidden />{to === '/chat' && unreadChat > 0 && <b className="nav-unread-badge">{unreadChat > 99 ? '99+' : unreadChat}</b>}</span>
-                <span className="mobile-more-label">{label.startsWith('nav.') ? t(label) : label}</span>
+                <span className="mobile-more-label">{t(label)}</span>
               </NavLink>
             ))}
             <NavLink to="/company-files" onClick={onClose} className={({ isActive }) => isActive ? 'active' : ''}>
@@ -107,10 +107,10 @@ export function MobileMoreSheet({ open, onClose, items, unreadChat, actor, role,
           <div className="mobile-more-list">
             <div className="mobile-more-row mobile-more-mode"><WorkspaceModeToggle /></div>
             <button type="button" className="mobile-more-row" onClick={() => { onClose(); onWorkers() }}>
-              <Users2 size={18} aria-hidden /><span>Ажилтнууд</span><ChevronRight size={17} aria-hidden />
+              <Users2 size={18} aria-hidden /><span>{t('shell.workers.title')}</span><ChevronRight size={17} aria-hidden />
             </button>
             <button type="button" className="mobile-more-row" role="switch" aria-checked={theme === 'dark'} onClick={onToggleTheme}>
-              {theme === 'dark' ? <Moon size={18} aria-hidden /> : <Sun size={18} aria-hidden />}<span>Харанхуй горим</span><i className={`mobile-switch ${theme === 'dark' ? 'on' : ''}`} aria-hidden />
+              {theme === 'dark' ? <Moon size={18} aria-hidden /> : <Sun size={18} aria-hidden />}<span>{t('shell.theme.dark')}</span><i className={`mobile-switch ${theme === 'dark' ? 'on' : ''}`} aria-hidden />
             </button>
             <button type="button" className="mobile-more-row danger" onClick={() => { onClose(); onLogout() }}>
               <LogOut size={18} aria-hidden /><span>{t('action.logout')}</span>

@@ -2,6 +2,7 @@ import { App } from '@capacitor/app'
 import { Browser } from '@capacitor/browser'
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core'
 import { api, acceptSession } from '../api/client'
+import i18n from '../i18n'
 
 const CALLBACK_HOST = 'erp.oyuns.mn'
 const CALLBACK_PATH = '/mobile-auth/telegram/callback'
@@ -48,13 +49,13 @@ async function consumeCallback(url: string) {
   const providerError = params.get('error')
   if (providerError) {
     await Browser.close().catch(() => undefined)
-    emit({ status: providerError === 'access_denied' ? 'cancelled' : 'error', message: providerError === 'access_denied' ? 'Telegram нэвтрэлтийг цуцаллаа.' : 'Telegram нэвтрэлт амжилтгүй боллоо.' })
+    emit({ status: providerError === 'access_denied' ? 'cancelled' : 'error', message: i18n.t(providerError === 'access_denied' ? 'auth.telegram.cancelledNative' : 'auth.telegram.provider_error') })
     return true
   }
   const code = params.get('code')
   const state = params.get('state')
   if (!code || !state) {
-    emit({ status: 'error', message: 'Telegram нэвтрэлтийн буцаах холбоос буруу байна.' })
+    emit({ status: 'error', message: i18n.t('auth.telegram.badCallback') })
     return true
   }
   if (exchangeInFlight) return true
@@ -67,7 +68,7 @@ async function consumeCallback(url: string) {
     emit({ status: 'success' })
   } catch (error: any) {
     const detail = error?.response?.data?.detail
-    emit({ status: 'error', message: typeof detail === 'string' ? detail : 'Telegram нэвтрэлт амжилтгүй боллоо.' })
+    emit({ status: 'error', message: typeof detail === 'string' ? detail : i18n.t('auth.telegram.provider_error') })
   } finally {
     exchangeInFlight = false
   }
@@ -82,7 +83,7 @@ export function subscribeToNativeTelegramAuth(subscriber: AuthSubscriber) {
 
 export async function startNativeTelegramLogin() {
   if (!Capacitor.isNativePlatform()) {
-    emit({ status: 'error', message: 'Telegram нэвтрэлт зөвхөн native апп-д боломжтой.' })
+    emit({ status: 'error', message: i18n.t('auth.telegram.nativeOnly') })
     return
   }
   emit({ status: 'opening' })
@@ -94,7 +95,7 @@ export async function startNativeTelegramLogin() {
     await Browser.open({ url: data.authorization_url })
   } catch (error: any) {
     const detail = error?.response?.data?.detail
-    emit({ status: 'error', message: typeof detail === 'string' ? detail : 'Telegram нэвтрэлт эхлүүлж чадсангүй.' })
+    emit({ status: 'error', message: typeof detail === 'string' ? detail : i18n.t('auth.telegram.startFailed') })
   }
 }
 

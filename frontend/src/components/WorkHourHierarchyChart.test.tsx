@@ -65,7 +65,7 @@ describe("WorkHourHierarchyChart", () => {
 
     await waitFor(() => expect(container.querySelector(".work-hour-center")).toHaveTextContent("50.0%"));
     expect(container.querySelector(".work-hour-center")).toHaveTextContent("Remote");
-    expect(screen.getAllByText(/25.0pp/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/25\.0%/).length).toBeGreaterThan(0);
   });
 
   it("recalculates the center and remaining share when a category is hidden", () => {

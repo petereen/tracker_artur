@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { useTranslation } from 'react-i18next'
 import { useClockAction, useWorktimeMethods } from '../api/enterprise'
+import i18n from '../i18n'
 
 interface WorkdayStartButtonProps {
   children?: ReactNode
@@ -10,9 +12,9 @@ interface WorkdayStartButtonProps {
 }
 
 function locationErrorMessage(error: GeolocationPositionError) {
-  if (error.code === error.PERMISSION_DENIED) return 'Ажил эхлүүлэхийн тулд байршлын зөвшөөрөл олгоно уу.'
-  if (error.code === error.TIMEOUT) return 'Байршлыг тодорхойлох хугацаа дууслаа. Дахин оролдоно уу.'
-  return 'Таны байршлыг тодорхойлж чадсангүй. Байршлын тохиргоогоо шалгана уу.'
+  if (error.code === error.PERMISSION_DENIED) return i18n.t('shell.workdayStart.permissionDenied')
+  if (error.code === error.TIMEOUT) return i18n.t('shell.workdayStart.timeout')
+  return i18n.t('shell.workdayStart.failed')
 }
 
 /**
@@ -20,7 +22,8 @@ function locationErrorMessage(error: GeolocationPositionError) {
  * check when enabled, the QR scanner when only QR is on, and a plain start
  * when both are off.
  */
-export function WorkdayStartButton({ children = 'Оффис эхлэх', className = 'primary-action', disabled = false }: WorkdayStartButtonProps) {
+export function WorkdayStartButton({ children, className = 'primary-action', disabled = false }: WorkdayStartButtonProps) {
+  const { t } = useTranslation()
   const action = useClockAction()
   const methods = useWorktimeMethods()
   const navigate = useNavigate()
@@ -35,7 +38,7 @@ export function WorkdayStartButton({ children = 'Оффис эхлэх', classNa
       return
     }
     if (!navigator.geolocation) {
-      toast.error('Энэ төхөөрөмж байршил тодорхойлохыг дэмжихгүй байна.')
+      toast.error(t('shell.workdayStart.unsupported'))
       return
     }
     setLocating(true)
@@ -57,5 +60,5 @@ export function WorkdayStartButton({ children = 'Оффис эхлэх', classNa
     )
   }
 
-  return <button type="button" className={className} onClick={start} disabled={disabled || locating || action.isPending} aria-busy={locating || action.isPending}>{locating ? 'Байршил шалгаж байна…' : children}</button>
+  return <button type="button" className={className} onClick={start} disabled={disabled || locating || action.isPending} aria-busy={locating || action.isPending}>{locating ? t('shell.workdayStart.checking') : (children ?? t('shell.workdayStart.label'))}</button>
 }

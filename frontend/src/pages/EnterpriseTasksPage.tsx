@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -69,6 +70,8 @@ import {
   WorkflowStatus,
 } from "../api/enterprise";
 import { periodFromPreset } from "../components/TimePeriodFilter";
+import i18n from "../i18n";
+import { intlLocale } from "../utils/locale";
 import { EMPTY_ROLES, useAuthStore } from "../store/auth";
 import {
   KanbanSkeleton,
@@ -81,13 +84,11 @@ import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
 import { resolvePublicAssetUrl } from "../platform/runtime";
 import { CreateButton } from "../components/CreateButton";
 
-const COLUMNS: { key: WorkflowStatus; label: string }[] = [
-  { key: "backlog", label: "Backlog" },
-  { key: "to_do", label: "Хийх" },
-  { key: "in_progress", label: "Хийгдэж буй" },
-  { key: "review", label: "Хянах" },
-  { key: "done", label: "Дууссан" },
-];
+// Labels are getters so they follow the UI language when read at render time.
+const COLUMNS: { key: WorkflowStatus; readonly label: string }[] = (["backlog", "to_do", "in_progress", "review", "done"] as const).map((key) => ({
+  key,
+  get label() { return i18n.t(`tasks.status.${key}`); },
+}));
 const EMPTY = {
   title: "",
   description: "",
@@ -107,15 +108,15 @@ const EMPTY = {
 const taskPlace = (task: EnterpriseTask) =>
   task.work_location ||
   (task.work_location_type === "office"
-    ? "Оффис"
+    ? i18n.t('tasks.place.office')
     : task.work_location_type === "remote"
-      ? "Remote"
-      : "Байршилгүй");
+      ? i18n.t('tasks.remote')
+      : i18n.t('tasks.place.none'));
 
-const taskCreatorName = (task: EnterpriseTask) => task.creator_name || "Тодорхойгүй";
+const taskCreatorName = (task: EnterpriseTask) => task.creator_name || i18n.t('tasks.unknown');
 
 const formatTaskCreatedAt = (createdAt: string) =>
-  new Date(createdAt).toLocaleString("mn-MN", {
+  new Date(createdAt).toLocaleString(intlLocale(), {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -150,40 +151,41 @@ function TaskCardContent({
   onToggleSubtask,
   subtaskUpdating = false,
 }: TaskCardProps) {
+  const { t } = useTranslation()
   return (
     <>
       <button className="task-card-body" onClick={() => onOpen()}>
         <div className="task-priority" data-priority={task.priority} />
         {task.parent_task_id && (
-          <span className="subtask-tag">Дэд даалгавар</span>
+          <span className="subtask-tag">{t('tasks.filter.subtask')}</span>
         )}
         <h3>{task.title}</h3>
         <div className="task-facts">
           <span>
             <UserRound size={13} />
-            {task.primary_owner_name || "Хариуцагчгүй"}
+            {task.primary_owner_name || t('tasks.noOwner')}
           </span>
           <span>
             <CalendarDays size={13} />
             {task.deadline_at
-              ? new Date(task.deadline_at).toLocaleString("mn-MN")
-              : "Хугацаагүй"}
+              ? new Date(task.deadline_at).toLocaleString(intlLocale())
+              : t('tasks.noDeadline')}
           </span>
           <span>
             <MapPin size={13} />
             {taskPlace(task)}
           </span>
-          <span>{task.project_name || "Төсөл сонгоогүй"}</span>
-          <span className="task-creator-fact" title={`Үүсгэсэн: ${taskCreatorName(task)}`}>
+          <span>{task.project_name || t('tasks.noProject')}</span>
+          <span className="task-creator-fact" title={t('tasks.createdBy', { name: taskCreatorName(task) })}>
             <TaskCreatorAvatar task={task} />
-            Үүсгэсэн: {taskCreatorName(task)}
+            {t('tasks.createdByShort')} {taskCreatorName(task)}
           </span>
         </div>
       </button>
       {subtasks.length > 0 && (
-        <div className="nested-subtasks" aria-label={`${task.title} дэд даалгавар`}>
+        <div className="nested-subtasks" aria-label={t('tasks.subtasksOf', { title: task.title })}>
           <div className="nested-subtasks-heading">
-            <span>Дэд даалгавар</span>
+            <span>{t('tasks.filter.subtask')}</span>
             <b>{subtasks.length}</b>
           </div>
           {subtasks.map((subtask) => (
@@ -192,14 +194,14 @@ function TaskCardContent({
                 type="checkbox"
                 checked={subtask.workflow_status === "done"}
                 disabled={!onToggleSubtask || subtaskUpdating}
-                aria-label={`${subtask.title} ${subtask.workflow_status === "done" ? "буцаах" : "дуусгах"}`}
+                aria-label={t(subtask.workflow_status === "done" ? 'tasks.reopenSubtask' : 'tasks.completeSubtask', { title: subtask.title })}
                 onChange={() => onToggleSubtask?.(subtask)}
               />
               <button type="button" className="nested-subtask-title" onClick={() => onOpen(subtask)}>
                 <strong>{subtask.title}</strong>
                 <small>
-                  {subtask.primary_owner_name || "Хариуцагчгүй"}
-                  {subtask.deadline_at && ` · ${new Date(subtask.deadline_at).toLocaleDateString("mn-MN")}`}
+                  {subtask.primary_owner_name || t('tasks.noOwner')}
+                  {subtask.deadline_at && ` · ${new Date(subtask.deadline_at).toLocaleDateString(intlLocale())}`}
                 </small>
               </button>
               <span className={`nested-subtask-status ${subtask.workflow_status}`}>
@@ -217,6 +219,7 @@ function TaskCard({
   draggable = false,
   ...props
 }: TaskCardProps & { draggable?: boolean }) {
+  const { t } = useTranslation()
   const { task } = props;
   const sortable = useSortable({
     id: task.id,
@@ -237,8 +240,8 @@ function TaskCard({
       className={`kanban-card task-card-clear ${task.parent_task_id ? "subtask-card" : ""} ${draggable ? "is-draggable" : ""} ${sortable.isDragging ? "dragging" : ""} ${sortable.isOver && !sortable.isDragging ? "drop-target" : ""}`}
       {...(draggable ? sortable.attributes : {})}
       {...(draggable ? sortable.listeners : {})}
-      aria-roledescription={draggable ? "зөөх боломжтой даалгавар" : undefined}
-      aria-label={draggable ? `${task.title} зөөх` : undefined}
+      aria-roledescription={draggable ? t('tasks.draggable') : undefined}
+      aria-label={draggable ? t('tasks.moveTask', { title: task.title }) : undefined}
     >
       <TaskCardContent {...props} />
     </div>
@@ -289,19 +292,21 @@ function Column({
 
 type CollaborationTab = "subtasks" | "checklist" | "comments" | "files" | "activity";
 
+// Getters keep the labels in step with the UI language.
 export const taskCollaborationLabels: Record<CollaborationTab, string> = {
-  subtasks: "Дэд ажил",
-  checklist: "Checklist",
-  comments: "Сэтгэгдэл",
-  files: "Файл",
-  activity: "Түүх",
+  get subtasks() { return i18n.t("tasks.tab.subtasks"); },
+  get checklist() { return i18n.t("tasks.tab.checklist"); },
+  get comments() { return i18n.t("tasks.tab.comments"); },
+  get files() { return i18n.t("tasks.tab.files"); },
+  get activity() { return i18n.t("tasks.tab.activity"); },
 };
 
 export function taskActivitySummary(item: { entity_type: string; action: string; after: Record<string, unknown>; before: Record<string, unknown> }) {
   const detail = item.after.text || item.before.text || item.after.filename || item.before.filename;
-  const verb = item.action === "created" ? "нэмэгдлээ" : item.action === "deleted" ? "устгагдлаа" : item.action === "updated" ? "шинэчлэгдлээ" : item.action;
-  const subject = item.entity_type === "task_check_item" ? "Checklist" : item.entity_type === "task_comment" ? "Сэтгэгдэл" : item.entity_type === "task_dependency" ? "Холбоос" : item.entity_type === "attachment" ? "Файл" : item.entity_type === "task" ? "Даалгавар" : item.entity_type;
-  return detail ? `${subject}: “${detail}” ${verb}` : `${subject} ${verb}`;
+  const verb = ["created", "deleted", "updated"].includes(item.action) ? i18n.t(`tasks.activity.${item.action}`) : item.action;
+  const entityKeys: Record<string, string> = { task_check_item: "checklist", task_comment: "comment", task_dependency: "dependency", attachment: "attachment", task: "task" };
+  const subject = entityKeys[item.entity_type] ? i18n.t(`tasks.entity.${entityKeys[item.entity_type]}`) : item.entity_type;
+  return detail ? i18n.t("tasks.activity.withDetail", { subject, detail, verb }) : i18n.t("tasks.activity.plain", { subject, verb });
 }
 
 export function commentMentionQuery(value: string, caret: number): string | null {
@@ -331,6 +336,7 @@ function TaskCollaboration({
   onDeleteSubtask: (task: EnterpriseTask) => void;
   workers: { id: number; name: string }[];
 }) {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<CollaborationTab>("subtasks");
   const [text, setText] = useState("");
   const [progress, setProgress] = useState(0);
@@ -374,26 +380,26 @@ function TaskCollaboration({
     }
   };
   return (
-    <section className="task-collaboration" aria-label="Даалгаврын collaboration">
+    <section className="task-collaboration" aria-label={t('tasks.collab.aria')}>
       {conflict && (
         <div className="conflict-banner" role="alert">
-          <strong>Даалгавар өөр төхөөрөмж дээр шинэчлэгдсэн.</strong>
+          <strong>{t('tasks.conflict.title')}</strong>
           <button type="button" onClick={() => resolveConflict(false)}>
-            Сүүлийн хувилбар
+            {t('tasks.conflict.latest')}
           </button>
           <button type="button" onClick={() => resolveConflict(true)}>
-            Дахин хэрэглэх
+            {t('tasks.conflict.reapply')}
           </button>
         </div>
       )}
       <div className="collaboration-heading">
         <div>
-          <span className="eyebrow">Collaboration</span>
+          <span className="eyebrow">{t('tasks.collaboration')}</span>
           <h3>{taskCollaborationLabels[tab]}</h3>
         </div>
-        {tab === "checklist" && totalChecks > 0 && <span className="collaboration-summary">{completedChecks}/{totalChecks} дууссан</span>}
+        {tab === "checklist" && totalChecks > 0 && <span className="collaboration-summary">{t('tasks.checksDone', { done: completedChecks, total: totalChecks })}</span>}
       </div>
-      <nav className="collaboration-tabs" role="tablist" aria-label="Даалгаврын дэлгэрэнгүй">
+      <nav className="collaboration-tabs" role="tablist" aria-label={t('tasks.detail.aria')}>
         {tabs.map(({ id, Icon, count }) => (
           <button
             type="button"
@@ -414,57 +420,57 @@ function TaskCollaboration({
         {tab === "subtasks" && (
           <>
             <div className="collaboration-panel-copy">
-              <p>Том ажлыг жижиг, хянахад хялбар алхмуудад хуваана.</p>
-              {canManage && <button type="button" className="collaboration-icon-button collaboration-add-button" aria-label="Дэд ажил нэмэх" title="Дэд ажил нэмэх" onClick={onCreateSubtask}><Plus size={17} /></button>}
+              <p>{t('tasks.subtasks.intro')}</p>
+              {canManage && <button type="button" className="collaboration-icon-button collaboration-add-button" aria-label={t('tasks.subtasks.add')} title={t('tasks.subtasks.add')} onClick={onCreateSubtask}><Plus size={17} /></button>}
             </div>
             {subtasks.length ? <div className="collaboration-list subtask-list">
               {subtasks.map((item) => <article key={item.id}>
                 <div>
                   <button type="button" className="subtask-title-button" onClick={() => onOpenSubtask(item)}><strong>{item.title}</strong></button>
-                  <small>{item.primary_owner_name || "Хариуцагч сонгоогүй"} · {item.deadline_at ? new Date(item.deadline_at).toLocaleDateString("mn-MN") : "Хугацаагүй"}</small>
+                  <small>{item.primary_owner_name || t('tasks.subtasks.noOwner')} · {item.deadline_at ? new Date(item.deadline_at).toLocaleDateString(intlLocale()) : t('tasks.noDeadline')}</small>
                 </div>
-                <div className="subtask-list-actions"><span className="collaboration-status">{item.workflow_status}</span>{canManage && <><button type="button" aria-label="Дэд ажлыг засах" title="Засах" onClick={() => onOpenSubtask(item)}><Save size={14} /></button><button type="button" aria-label="Дэд ажлыг устгах" title="Устгах" onClick={() => onDeleteSubtask(item)}><Trash2 size={14} /></button></>}</div>
+                <div className="subtask-list-actions"><span className="collaboration-status">{item.workflow_status}</span>{canManage && <><button type="button" aria-label={t('tasks.subtasks.edit')} title={t('tasks.edit')} onClick={() => onOpenSubtask(item)}><Save size={14} /></button><button type="button" aria-label={t('tasks.subtasks.delete')} title={t('tasks.delete')} onClick={() => onDeleteSubtask(item)}><Trash2 size={14} /></button></>}</div>
               </article>)}
-            </div> : <div className="collaboration-empty"><CheckSquare2 size={20} /><p>Одоогоор дэд ажил алга.</p></div>}
+            </div> : <div className="collaboration-empty"><CheckSquare2 size={20} /><p>{t('tasks.subtasks.empty')}</p></div>}
           </>
         )}
         {tab === "checklist" && (
           <>
             <div className="collaboration-panel-copy">
-              <p>Гүйцэтгэлийг жижиг алхмуудаар тэмдэглэж, явцыг шууд хянаарай.</p>
+              <p>{t('tasks.checklist.intro')}</p>
               <span className="collaboration-summary">{checklistPercent}%</span>
             </div>
             <div className="checklist-progress" aria-label={`Checklist ${checklistPercent}%`}><i style={{ width: `${checklistPercent}%` }} /></div>
-            {checks.isLoading ? <p className="collaboration-state">Checklist ачаалж байна…</p> : checks.isError ? <p className="collaboration-state error">Checklist ачаалж чадсангүй.</p> : totalChecks ? <div className="collaboration-list checklist-list">
+            {checks.isLoading ? <p className="collaboration-state">{t('tasks.checklist.loading')}</p> : checks.isError ? <p className="collaboration-state error">{t('tasks.checklist.failed')}</p> : totalChecks ? <div className="collaboration-list checklist-list">
               {checks.data?.map((item) => <article key={item.id}>
                 <label>
                   <input type="checkbox" checked={item.is_completed} disabled={updateCheck.isPending} onChange={() => updateCheck.mutate({ taskId: task.id, id: item.id, is_completed: !item.is_completed })} />
                   <span>{item.text}</span>
                 </label>
-                <button type="button" aria-label="Checklist устгах" disabled={deleteCheck.isPending} onClick={() => deleteCheck.mutate({ taskId: task.id, id: item.id })}><Trash2 size={14} /></button>
+                <button type="button" aria-label={t('tasks.checklist.delete')} disabled={deleteCheck.isPending} onClick={() => deleteCheck.mutate({ taskId: task.id, id: item.id })}><Trash2 size={14} /></button>
               </article>)}
-            </div> : <div className="collaboration-empty"><ListChecks size={20} /><p>Checklist хоосон байна.</p></div>}
+            </div> : <div className="collaboration-empty"><ListChecks size={20} /><p>{t('tasks.checklist.empty')}</p></div>}
             <div className="collaboration-composer collaboration-pill-composer">
-              <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Checklist-д ажил нэмэх" onKeyDown={(event) => { if (event.key === "Enter") submitText(); }} />
-              <button type="button" className="composer-submit" aria-label="Checklist нэмэх" title="Checklist нэмэх" onClick={submitText} disabled={!text.trim() || addCheck.isPending}><ArrowUp size={17} /></button>
+              <input value={text} onChange={(e) => setText(e.target.value)} placeholder={t('tasks.checklist.addPlaceholder')} onKeyDown={(event) => { if (event.key === "Enter") submitText(); }} />
+              <button type="button" className="composer-submit" aria-label={t('tasks.checklist.add')} title={t('tasks.checklist.add')} onClick={submitText} disabled={!text.trim() || addCheck.isPending}><ArrowUp size={17} /></button>
             </div>
           </>
         )}
         {tab === "comments" && (
           <>
-            <div className="collaboration-panel-copy"><p>Шийдвэр, асуултаа нэг газар үлдээгээд холбогдох хүнээ дурдана.</p></div>
-            {comments.isLoading ? <p className="collaboration-state">Сэтгэгдэл ачаалж байна…</p> : comments.isError ? <p className="collaboration-state error">Сэтгэгдэл ачаалж чадсангүй.</p> : comments.data?.length ? <div className="collaboration-list comment-list">
+            <div className="collaboration-panel-copy"><p>{t('tasks.comments.intro')}</p></div>
+            {comments.isLoading ? <p className="collaboration-state">{t('tasks.comments.loading')}</p> : comments.isError ? <p className="collaboration-state error">{t('tasks.comments.failed')}</p> : comments.data?.length ? <div className="collaboration-list comment-list">
               {comments.data.map((item) => <article className={item.is_resolved ? "resolved" : ""} key={item.id}>
-                <div><span className="comment-avatar">{item.author_avatar_url ? <img src={resolvePublicAssetUrl(item.author_avatar_url) || undefined} alt="" /> : (item.author_name || "?").slice(0, 1)}</span><div><strong>{item.author_name || "Тодорхойгүй хэрэглэгч"}</strong><span>{item.text}</span><small>{new Date(item.created_at).toLocaleString("mn-MN")}</small></div></div>
-                <div className="comment-actions"><button type="button" className={`comment-status-toggle ${item.is_resolved ? "is-resolved" : ""}`} aria-label={item.is_resolved ? "Сэтгэгдлийг дахин нээх" : "Сэтгэгдлийг шийдсэн гэж тэмдэглэх"} title={item.is_resolved ? "Нээх" : "Шийдсэн"} disabled={resolveComment.isPending} onClick={() => resolveComment.mutate({ taskId: task.id, id: item.id, is_resolved: !item.is_resolved })}><Check size={15} /></button><button type="button" className="icon-danger" aria-label="Сэтгэгдэл устгах" title="Устгах" disabled={deleteComment.isPending} onClick={() => { if (window.confirm("Энэ сэтгэгдлийг устгах уу?")) deleteComment.mutate({ taskId: task.id, id: item.id }); }}><Trash2 size={15} /></button></div>
+                <div><span className="comment-avatar">{item.author_avatar_url ? <img src={resolvePublicAssetUrl(item.author_avatar_url) || undefined} alt="" /> : (item.author_name || "?").slice(0, 1)}</span><div><strong>{item.author_name || t('tasks.comments.unknownUser')}</strong><span>{item.text}</span><small>{new Date(item.created_at).toLocaleString(intlLocale())}</small></div></div>
+                <div className="comment-actions"><button type="button" className={`comment-status-toggle ${item.is_resolved ? "is-resolved" : ""}`} aria-label={item.is_resolved ? t('tasks.comments.reopen') : t('tasks.comments.resolve')} title={item.is_resolved ? t('tasks.comments.open') : t('tasks.comments.resolved')} disabled={resolveComment.isPending} onClick={() => resolveComment.mutate({ taskId: task.id, id: item.id, is_resolved: !item.is_resolved })}><Check size={15} /></button><button type="button" className="icon-danger" aria-label={t('tasks.comments.delete')} title={t('tasks.delete')} disabled={deleteComment.isPending} onClick={() => { if (window.confirm(t('tasks.comments.deleteConfirm'))) deleteComment.mutate({ taskId: task.id, id: item.id }); }}><Trash2 size={15} /></button></div>
               </article>)}
-            </div> : <div className="collaboration-empty"><MessageSquare size={20} /><p>Сэтгэгдэл алга байна.</p></div>}
+            </div> : <div className="collaboration-empty"><MessageSquare size={20} /><p>{t('tasks.comments.empty')}</p></div>}
             <div className="comment-composer">
               <div className="comment-input-wrap">
-                <textarea ref={commentInput} rows={1} value={text} onChange={(e) => { setText(e.target.value); setMentionQuery(commentMentionQuery(e.target.value, e.target.selectionStart)); }} onClick={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} onKeyUp={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} placeholder="Сэтгэгдэл бичих…" />
-                <button type="button" className="composer-submit" aria-label="Сэтгэгдэл илгээх" title="Сэтгэгдэл илгээх" onClick={submitText} disabled={!text.trim() || addComment.isPending}><ArrowUp size={17} /></button>
+                <textarea ref={commentInput} rows={1} value={text} onChange={(e) => { setText(e.target.value); setMentionQuery(commentMentionQuery(e.target.value, e.target.selectionStart)); }} onClick={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} onKeyUp={(e) => setMentionQuery(commentMentionQuery(e.currentTarget.value, e.currentTarget.selectionStart))} placeholder={t('tasks.comments.placeholder')} />
+                <button type="button" className="composer-submit" aria-label={t('tasks.comments.send')} title={t('tasks.comments.send')} onClick={submitText} disabled={!text.trim() || addComment.isPending}><ArrowUp size={17} /></button>
                 {mentionQuery !== null && workers.filter((worker) => worker.name.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())).slice(0, 6).length > 0 && (
-                  <div className="mention-suggestions" role="listbox" aria-label="Дурдах ажилтан">
+                  <div className="mention-suggestions" role="listbox" aria-label={t('tasks.comments.mention')}>
                     {workers.filter((worker) => worker.name.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())).slice(0, 6).map((worker) => (
                       <button type="button" role="option" key={worker.id} onMouseDown={(event) => event.preventDefault()} onClick={() => {
                         const input = commentInput.current;
@@ -481,29 +487,29 @@ function TaskCollaboration({
                   </div>
                 )}
               </div>
-              <UserTagPicker label="Дурдсан хүмүүс" value={commentMentionIds} users={workers} onChange={setCommentMentionIds} />
-              <div><span>Дурдсан хүмүүс web мэдэгдэл авна.</span></div>
+              <UserTagPicker label={t('tasks.comments.mentioned')} value={commentMentionIds} users={workers} onChange={setCommentMentionIds} />
+              <div><span>{t('tasks.comments.mentionHint')}</span></div>
             </div>
           </>
         )}
         {tab === "files" && (
           <>
-            <div className="collaboration-panel-copy"><p>Холбогдох баримт, эх файлаа аюулгүйгээр хавсаргана.</p><label className={`collaboration-icon-button collaboration-attach-button ${upload.isPending ? "uploading" : ""}`} aria-label="Файл хавсаргах" title={upload.isPending ? "Файл байршуулж байна…" : "Файл хавсаргах"}>
+            <div className="collaboration-panel-copy"><p>{t('tasks.files.intro')}</p><label className={`collaboration-icon-button collaboration-attach-button ${upload.isPending ? "uploading" : ""}`} aria-label={t('tasks.files.attach')} title={upload.isPending ? t('tasks.files.uploading') : t('tasks.files.attach')}>
               <Paperclip size={18} />
               <input type="file" disabled={upload.isPending} onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; try { await upload.mutateAsync({ objectType: "task", objectId: task.id, file, onProgress: setProgress }); e.currentTarget.value = ""; setProgress(0); } catch { /* the hook displays the error */ } }} />
             </label></div>
             {upload.isPending && <div className="upload-progress"><i style={{ width: `${progress}%` }} /></div>}
-            {files.isLoading ? <p className="collaboration-state">Файл ачаалж байна…</p> : files.isError ? <p className="collaboration-state error">Файл ачаалж чадсангүй.</p> : files.data?.length ? <div className="collaboration-list file-list">
-              {files.data.map((file) => <article key={file.id}><div><FileText size={17} /><div><strong>{file.filename}</strong><small>{Math.ceil(file.size / 1024)} KB</small></div></div><div><span className={`file-scan ${file.scan_status}`}>{file.scan_status}</span><button type="button" aria-label="Татах" onClick={() => downloadAttachment(file.id, file.filename)}><Download size={14} /></button><button type="button" aria-label="Файл устгах" disabled={deleteFile.isPending} onClick={() => deleteFile.mutate({ id: file.id, objectType: "task", objectId: task.id })}><Trash2 size={14} /></button></div></article>)}
-            </div> : <div className="collaboration-empty"><FileText size={20} /><p>Хавсаргасан файл алга.</p></div>}
+            {files.isLoading ? <p className="collaboration-state">{t('tasks.files.loading')}</p> : files.isError ? <p className="collaboration-state error">{t('tasks.files.failed')}</p> : files.data?.length ? <div className="collaboration-list file-list">
+              {files.data.map((file) => <article key={file.id}><div><FileText size={17} /><div><strong>{file.filename}</strong><small>{Math.ceil(file.size / 1024)} KB</small></div></div><div><span className={`file-scan ${file.scan_status}`}>{file.scan_status}</span><button type="button" aria-label={t('tasks.files.download')} onClick={() => downloadAttachment(file.id, file.filename)}><Download size={14} /></button><button type="button" aria-label={t('tasks.files.delete')} disabled={deleteFile.isPending} onClick={() => deleteFile.mutate({ id: file.id, objectType: "task", objectId: task.id })}><Trash2 size={14} /></button></div></article>)}
+            </div> : <div className="collaboration-empty"><FileText size={20} /><p>{t('tasks.files.empty')}</p></div>}
           </>
         )}
         {tab === "activity" && (
           <>
-            <div className="collaboration-panel-copy"><p>Энэ даалгаварт хийсэн өөрчлөлт бүр энд дарааллаар хадгалагдана.</p></div>
-            {activity.isLoading ? <p className="collaboration-state">Түүх ачаалж байна…</p> : activity.isError ? <p className="collaboration-state error">Түүх ачаалж чадсангүй.</p> : activity.data?.length ? <div className="activity-list">
-              {activity.data.map((item) => <article key={item.id}><span className="activity-icon">{item.action === "created" ? <Plus size={14} /> : item.action === "updated" ? <Check size={14} /> : <History size={14} />}</span><div><strong>{taskActivitySummary(item)}</strong><time>{new Date(item.created_at).toLocaleString("mn-MN")}</time></div></article>)}
-            </div> : <div className="collaboration-empty"><History size={20} /><p>Түүхийн бичлэг алга байна.</p></div>}
+            <div className="collaboration-panel-copy"><p>{t('tasks.activity.intro')}</p></div>
+            {activity.isLoading ? <p className="collaboration-state">{t('tasks.activity.loading')}</p> : activity.isError ? <p className="collaboration-state error">{t('tasks.activity.failed')}</p> : activity.data?.length ? <div className="activity-list">
+              {activity.data.map((item) => <article key={item.id}><span className="activity-icon">{item.action === "created" ? <Plus size={14} /> : item.action === "updated" ? <Check size={14} /> : <History size={14} />}</span><div><strong>{taskActivitySummary(item)}</strong><time>{new Date(item.created_at).toLocaleString(intlLocale())}</time></div></article>)}
+            </div> : <div className="collaboration-empty"><History size={20} /><p>{t('tasks.activity.empty')}</p></div>}
           </>
         )}
       </div>
@@ -512,6 +518,7 @@ function TaskCollaboration({
 }
 
 export function EnterpriseTasksPage() {
+  const { t } = useTranslation()
   const params = new URLSearchParams(location.search);
   const projectId = params.get("project")
     ? Number(params.get("project"))
@@ -718,7 +725,7 @@ export function EnterpriseTasksPage() {
     }
   };
   const remove = async () => {
-    if (!selected || !window.confirm("Энэ даалгаврыг устгах уу?")) return;
+    if (!selected || !window.confirm(t('tasks.deleteConfirm'))) return;
     try {
       await deleteTask.mutateAsync(selected.id);
       setConflict(null);
@@ -816,7 +823,7 @@ export function EnterpriseTasksPage() {
   const formFields = (
     <>
       <label>
-        Юу хийх вэ?
+        {t('tasks.form.title')}
         <input
           required
           value={form.title}
@@ -824,7 +831,7 @@ export function EnterpriseTasksPage() {
         />
       </label>
       <label>
-        Тайлбар
+        {t('tasks.form.description')}
         <textarea
           rows={4}
           value={form.description}
@@ -835,7 +842,7 @@ export function EnterpriseTasksPage() {
       </label>
       <div className="form-row">
         <label>
-          Төсөл
+          {t('tasks.form.project')}
           <select
             value={form.project_id}
             onChange={(event) =>
@@ -846,7 +853,7 @@ export function EnterpriseTasksPage() {
               })
             }
           >
-            <option value="">Төсөл сонгоогүй</option>
+            <option value="">{t('tasks.noProject')}</option>
             {projects.data?.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -855,14 +862,14 @@ export function EnterpriseTasksPage() {
           </select>
         </label>
         <label>
-          Харьяалагдах даалгавар
+          {t('tasks.form.parent')}
           <select
             value={form.parent_task_id}
             onChange={(event) =>
               setForm({ ...form, parent_task_id: event.target.value })
             }
           >
-            <option value="">Үндсэн даалгавар</option>
+            <option value="">{t('tasks.form.mainTask')}</option>
             {possibleParents.map((task) => (
               <option key={task.id} value={task.id}>
                 {task.title}
@@ -872,14 +879,14 @@ export function EnterpriseTasksPage() {
         </label>
       </div>
       <label>
-        Хэн хариуцах вэ?
+        {t('tasks.form.owner')}
         <select
           value={form.primary_owner_id}
           onChange={(event) =>
             setForm({ ...form, primary_owner_id: event.target.value })
           }
         >
-          <option value="">Хариуцагчгүй</option>
+          <option value="">{t('tasks.noOwner')}</option>
           {workers.data?.map((worker) => (
             <option key={worker.id} value={worker.id}>
               {worker.name}
@@ -887,10 +894,10 @@ export function EnterpriseTasksPage() {
           ))}
         </select>
       </label>
-      <UserTagPicker label="Оролцогчид" value={form.assignee_ids} users={workers.data || []} allLabel="Бүгдийг сонгох" onChange={(assignee_ids) => setForm({ ...form, assignee_ids })} />
+      <UserTagPicker label={t('tasks.form.participants')} value={form.assignee_ids} users={workers.data || []} allLabel={t('tasks.selectAll')} onChange={(assignee_ids) => setForm({ ...form, assignee_ids })} />
       <div className="form-row">
         <label>
-          Эхлэх
+          {t('tasks.form.start')}
           <input
             type="datetime-local"
             value={form.start_at}
@@ -900,7 +907,7 @@ export function EnterpriseTasksPage() {
           />
         </label>
         <label>
-          Дуусах
+          {t('tasks.form.end')}
           <input
             type="datetime-local"
             value={form.deadline_at}
@@ -912,34 +919,34 @@ export function EnterpriseTasksPage() {
       </div>
       <div className="form-row">
         <label>
-          Хаана?
+          {t('tasks.form.where')}
           <select
             value={form.work_location_type}
             onChange={(event) =>
               setForm({ ...form, work_location_type: event.target.value })
             }
           >
-            <option value="">Байршилгүй</option>
-            <option value="office">Оффис</option>
-            <option value="remote">Remote</option>
-            <option value="custom">Тодорхой байршил</option>
+            <option value="">{t('tasks.place.none')}</option>
+            <option value="office">{t('tasks.place.office')}</option>
+            <option value="remote">{t('tasks.remote')}</option>
+            <option value="custom">{t('tasks.form.specificPlace')}</option>
           </select>
         </label>
         <label>
-          Байршлын дэлгэрэнгүй
+          {t('tasks.form.placeDetail')}
           <input
             value={form.work_location}
             onChange={(event) =>
               setForm({ ...form, work_location: event.target.value })
             }
-            placeholder="Жишээ: УБ оффис, 3-р давхар"
+            placeholder={t('tasks.form.placePlaceholder')}
             disabled={form.work_location_type !== "custom"}
           />
         </label>
       </div>
       <div className="form-row">
         <label>
-          Төлөв
+          {t('tasks.form.status')}
           <select
             value={form.workflow_status}
             onChange={(event) =>
@@ -957,21 +964,21 @@ export function EnterpriseTasksPage() {
           </select>
         </label>
         <label>
-          Тэргүүлэх зэрэг
+          {t('tasks.form.priority')}
           <select
             value={form.priority}
             onChange={(event) =>
               setForm({ ...form, priority: event.target.value })
             }
           >
-            <option value="1">1 — Нэн яаралтай</option>
-            <option value="2">2 — Дундаж</option>
-            <option value="3">3 — Яаралтай бус</option>
+            <option value="1">{t('tasks.priority.1')}</option>
+            <option value="2">{t('tasks.priority.2')}</option>
+            <option value="3">{t('tasks.priority.3')}</option>
           </select>
         </label>
       </div>
       <label>
-        Тооцоолсон минут
+        {t('tasks.form.estimate')}
         <input
           type="number"
           min="0"
@@ -985,12 +992,12 @@ export function EnterpriseTasksPage() {
   );
   const simplifiedFormFields = (
     <>
-      <label>Нэр<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
-      <label>Тайлбар<textarea rows={4} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-      <div className="form-row"><label>Эхлэх огноо<input type="datetime-local" value={form.start_at} onChange={(event) => setForm({ ...form, start_at: event.target.value })} /></label><label>Дуусах огноо<input type="datetime-local" value={form.deadline_at} onChange={(event) => setForm({ ...form, deadline_at: event.target.value })} /></label></div>
-      <label>Тэргүүлэх зэрэг<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="1">1 — Нэн яаралтай</option><option value="2">2 — Дундаж</option><option value="3">3 — Яаралтай бус</option></select></label>
-      <label>Хэн хариуцах вэ?<select value={form.primary_owner_id} onChange={(event) => setForm({ ...form, primary_owner_id: event.target.value })}><option value="">Хариуцагчгүй</option>{workers.data?.map((worker) => <option key={worker.id} value={worker.id}>{worker.name}</option>)}</select></label>
-      <UserTagPicker label="Оролцогчид" value={form.assignee_ids} users={workers.data || []} onChange={(assignee_ids) => setForm({ ...form, assignee_ids })} />
+      <label>{t('tasks.simple.name')}<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+      <label>{t('tasks.form.description')}<textarea rows={4} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+      <div className="form-row"><label>{t('tasks.simple.start')}<input type="datetime-local" value={form.start_at} onChange={(event) => setForm({ ...form, start_at: event.target.value })} /></label><label>{t('tasks.simple.end')}<input type="datetime-local" value={form.deadline_at} onChange={(event) => setForm({ ...form, deadline_at: event.target.value })} /></label></div>
+      <label>{t('tasks.form.priority')}<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="1">{t('tasks.priority.1')}</option><option value="2">{t('tasks.priority.2')}</option><option value="3">{t('tasks.priority.3')}</option></select></label>
+      <label>{t('tasks.form.owner')}<select value={form.primary_owner_id} onChange={(event) => setForm({ ...form, primary_owner_id: event.target.value })}><option value="">{t('tasks.noOwner')}</option>{workers.data?.map((worker) => <option key={worker.id} value={worker.id}>{worker.name}</option>)}</select></label>
+      <UserTagPicker label={t('tasks.form.participants')} value={form.assignee_ids} users={workers.data || []} onChange={(assignee_ids) => setForm({ ...form, assignee_ids })} />
     </>
   );
   if (section === "deadlines")
@@ -1010,14 +1017,14 @@ export function EnterpriseTasksPage() {
               onClick={() => setView("board")}
             >
               <LayoutGrid size={15} />
-              Самбар
+              {t('tasks.view.board')}
             </button>
             <button
               className={view === "list" ? "active" : ""}
               onClick={() => setView("list")}
             >
               <List size={15} />
-              Жагсаалт
+              {t('tasks.view.list')}
             </button>
             <button
               className={view === "timeline" ? "active" : ""}
@@ -1031,7 +1038,7 @@ export function EnterpriseTasksPage() {
               onClick={() => setView("calendar")}
             >
               <CalendarDays size={15} />
-              Календарь
+              {t('tasks.view.calendar')}
             </button>
           </div>
         </div>
@@ -1041,16 +1048,16 @@ export function EnterpriseTasksPage() {
               className={`secondary-action compact ${dateFilters.date_from || dateFilters.date_to ? "active" : ""}`}
               onClick={() => setFiltersOpen(!filtersOpen)}
               aria-expanded={filtersOpen}
-              title={dateFilters.date_from && dateFilters.date_to ? `Хугацаа: ${dateFilters.date_from} – ${dateFilters.date_to}` : undefined}
+              title={dateFilters.date_from && dateFilters.date_to ? t('tasks.periodRange', { from: dateFilters.date_from, to: dateFilters.date_to }) : undefined}
             >
               <Filter size={15} />
-              Шүүлтүүр
+              {t('tasks.filter.title')}
             </button>
             {filtersOpen && (
             <div className="task-filter-panel">
               <div className="form-row">
                 <label>
-                  Эхлэх огноо
+                  {t('tasks.simple.start')}
                   <input
                     type="date"
                     value={dateFilters.date_from || ""}
@@ -1063,7 +1070,7 @@ export function EnterpriseTasksPage() {
                   />
                 </label>
                 <label>
-                  Дуусах огноо
+                  {t('tasks.simple.end')}
                   <input
                     type="date"
                     value={dateFilters.date_to || ""}
@@ -1085,10 +1092,10 @@ export function EnterpriseTasksPage() {
                   })
                 }
               >
-                <option value="all">Бүх төрөл</option>
-                <option value="standalone">Бие даасан</option>
-                <option value="project">Төслийн</option>
-                <option value="subtask">Дэд даалгавар</option>
+                <option value="all">{t('tasks.filter.allTypes')}</option>
+                <option value="standalone">{t('tasks.filter.standalone')}</option>
+                <option value="project">{t('tasks.filter.project')}</option>
+                <option value="subtask">{t('tasks.filter.subtask')}</option>
               </select>
               <select
                 value={filterProjectId || ""}
@@ -1098,7 +1105,7 @@ export function EnterpriseTasksPage() {
                   )
                 }
               >
-                <option value="">Бүх төсөл</option>
+                <option value="">{t('tasks.filter.allProjects')}</option>
                 {projects.data?.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -1114,7 +1121,7 @@ export function EnterpriseTasksPage() {
                   })
                 }
               >
-                <option value="">Бүх төлөв</option>
+                <option value="">{t('tasks.filter.allStatuses')}</option>
                 {COLUMNS.map((column) => (
                   <option key={column.key} value={column.key}>
                     {column.label}
@@ -1132,10 +1139,10 @@ export function EnterpriseTasksPage() {
                   })
                 }
               >
-                <option value="">Бүх priority</option>
-                <option value="1">1 — Нэн яаралтай</option>
-                <option value="2">2 — Дундаж</option>
-                <option value="3">3 — Яаралтай бус</option>
+                <option value="">{t('tasks.filter.allPriorities')}</option>
+                <option value="1">{t('tasks.priority.1')}</option>
+                <option value="2">{t('tasks.priority.2')}</option>
+                <option value="3">{t('tasks.priority.3')}</option>
               </select>
               <label>
                 <input
@@ -1145,10 +1152,10 @@ export function EnterpriseTasksPage() {
                     setFilters({ ...filters, overdue: event.target.checked })
                   }
                 />
-                Хугацаа хэтэрсэн
+                {t('tasks.overdue')}
               </label>
               <button className="text-action" onClick={resetFilters}>
-                Цэвэрлэх
+                {t('tasks.filter.clear')}
               </button>
             </div>
           )}
@@ -1158,15 +1165,15 @@ export function EnterpriseTasksPage() {
               className="secondary-action compact"
               onClick={() => setSection("deadlines")}
             >
-              Нийт даалгаврууд
+              {t('tasks.allTasks')}
             </button>
           )}
-          <CreateButton label="Даалгавар" onClick={() => openCreate()} />
+          <CreateButton label={t('tasks.task')} onClick={() => openCreate()} />
         </div>
       </div>
       {lastMove && (
         <div className="undo-banner" role="status">
-          Даалгавар зөөгдлөө.<button onClick={undoMove}>Буцаах</button>
+          {t('tasks.moved')}<button onClick={undoMove}>{t('tasks.undo')}</button>
         </div>
       )}
       <QueryRegion
@@ -1203,7 +1210,7 @@ export function EnterpriseTasksPage() {
                       <button
                         className="column-add"
                         onClick={() => openCreate(column.key)}
-                        aria-label={`${column.label} төлөвт даалгавар нэмэх`}
+                        aria-label={t('tasks.addInStatus', { status: column.label })}
                       >
                         <Plus size={14} />
                       </button>
@@ -1225,7 +1232,7 @@ export function EnterpriseTasksPage() {
                     {column.key === "review" && (
                       <section className="review-queue">
                         <header>
-                          <strong>Хянах шаардлагатай</strong>
+                          <strong>{t('tasks.reviewQueue')}</strong>
                           <b>{reviewQueue.length}</b>
                         </header>
                         {reviewQueue.length ? (
@@ -1241,7 +1248,7 @@ export function EnterpriseTasksPage() {
                             />
                           ))
                         ) : (
-                          <p>Танд хянах шаардлагатай даалгавар байхгүй байна.</p>
+                          <p>{t('tasks.reviewEmpty')}</p>
                         )}
                       </section>
                     )}
@@ -1296,7 +1303,7 @@ export function EnterpriseTasksPage() {
                   <header>
                     <strong>{day.getDate()}</strong>
                     <span>
-                      {day.toLocaleDateString("mn-MN", { weekday: "short" })}
+                      {day.toLocaleDateString(intlLocale(), { weekday: "short" })}
                     </span>
                   </header>
                   {dayTasks.map((task) => (
@@ -1341,12 +1348,12 @@ export function EnterpriseTasksPage() {
                   <span className="eyebrow">
                     {selected ? `Task #${selected.id}` : "Quick create"}
                   </span>
-                  <h2>{selected ? selected.title : "Шинэ даалгавар"}</h2>
+                  <h2>{selected ? selected.title : t('tasks.new')}</h2>
                 </div>
                 <button
                   type="button"
                   className="sheet-close-button"
-                  aria-label="Хаах"
+                  aria-label={t('chat.close')}
                   onClick={() => {
                     setSelected(null);
                     setCreating(false);
@@ -1357,12 +1364,12 @@ export function EnterpriseTasksPage() {
                 </button>
               </div>
               {selected && (
-                <section className="task-creator-meta" aria-label="Даалгавар үүсгэсэн мэдээлэл">
+                <section className="task-creator-meta" aria-label={t('tasks.creatorMeta')}>
                   <TaskCreatorAvatar task={selected} large />
                   <div>
-                    <span className="eyebrow">Даалгавар үүсгэгч</span>
+                    <span className="eyebrow">{t('tasks.creator')}</span>
                     <strong>
-                      Үүсгэсэн: {taskCreatorName(selected)} <span aria-hidden="true">•</span>{" "}
+                      {t('tasks.createdByShort')} {taskCreatorName(selected)} <span aria-hidden="true">•</span>{" "}
                       <time dateTime={selected.created_at}>{formatTaskCreatedAt(selected.created_at)}</time>
                     </strong>
                   </div>
@@ -1370,14 +1377,14 @@ export function EnterpriseTasksPage() {
               )}
               <form className={`sheet-form ${selected ? "task-edit-form" : "task-create-form"}`} onSubmit={selected ? save : submit}>
                 {selected?.parent_task_id ? simplifiedFormFields : formFields}
-                <UserTagPicker label="Хянагч" value={form.reviewer_ids} users={workers.data || []} onChange={(reviewer_ids) => setForm({ ...form, reviewer_ids })} />
+                <UserTagPicker label={t('tasks.reviewer')} value={form.reviewer_ids} users={workers.data || []} onChange={(reviewer_ids) => setForm({ ...form, reviewer_ids })} />
                 {selected ? (
                   <div className="task-settings-actions">
                     <button
                       type="button"
                       className="danger-action task-delete-action"
-                      aria-label="Даалгавар устгах"
-                      title="Даалгавар устгах"
+                      aria-label={t('tasks.deleteTask')}
+                      title={t('tasks.deleteTask')}
                       onClick={remove}
                       disabled={deleteTask.isPending || updateTask.isPending}
                     >
@@ -1388,7 +1395,7 @@ export function EnterpriseTasksPage() {
                       disabled={deleteTask.isPending || updateTask.isPending}
                     >
                       <Save size={16} />
-                      Хадгалах
+                      {t('tasks.save')}
                     </button>
                   </div>
                 ) : (
@@ -1397,7 +1404,7 @@ export function EnterpriseTasksPage() {
                     className="primary-action task-submit-action"
                     disabled={createTask.isPending}
                   >
-                    Үүсгэх
+                    {t('tasks.create')}
                   </button>
                 )}
               </form>
@@ -1410,7 +1417,7 @@ export function EnterpriseTasksPage() {
                   resolveConflict={resolveConflict}
                   onCreateSubtask={() => openSubtaskCreate(selected)}
                   onOpenSubtask={openTask}
-                  onDeleteSubtask={(subtask) => { if (window.confirm("Энэ дэд ажлыг устгах уу?")) deleteTask.mutate(subtask.id); }}
+                  onDeleteSubtask={(subtask) => { if (window.confirm(t('tasks.subtaskDeleteConfirm'))) deleteTask.mutate(subtask.id); }}
                   workers={workers.data ?? []}
                 />
               )}
@@ -1431,11 +1438,12 @@ function Timeline({
   period: { date_from: string; date_to: string };
   onOpen: (task: EnterpriseTask) => void;
 }) {
+  const { t } = useTranslation()
   const start = new Date(`${period.date_from}T00:00:00`).getTime();
   const end = new Date(`${period.date_to}T23:59:59`).getTime();
   const duration = Math.max(end - start, 86_400_000);
   const labels = [0, 0.25, 0.5, 0.75, 1].map((part) =>
-    new Date(start + duration * part).toLocaleDateString("mn-MN", {
+    new Date(start + duration * part).toLocaleDateString(intlLocale(), {
       month: "short",
       day: "numeric",
     }),
@@ -1444,10 +1452,10 @@ function Timeline({
   return (
     <section
       className="task-timeline panel"
-      aria-label="Даалгаврын хугацааны зураглал"
+      aria-label={t('tasks.timeline.aria')}
     >
       <header className="timeline-axis">
-        <span>Даалгавар</span>
+        <span>{t('tasks.task')}</span>
         <div>
           {labels.map((label) => (
             <b key={label}>{label}</b>
@@ -1487,7 +1495,7 @@ function Timeline({
                   className={task.is_overdue ? "overdue" : ""}
                   style={{ left: `${left}%`, width: `${width}%` }}
                 >
-                  <em>{task.primary_owner_name || "Томилоогүй"}</em>
+                  <em>{task.primary_owner_name || t('tasks.unassigned')}</em>
                 </i>
               </span>
             </button>
@@ -1495,8 +1503,7 @@ function Timeline({
         })
       ) : (
         <p className="timeline-empty">
-          Энэ хугацаанд товлосон даалгавар байхгүй байна. Даалгаварт эхлэх эсвэл дуусах
-          огноо оруулж Timeline дээр харна.
+          {t('tasks.timelineEmpty')}
         </p>
       )}
     </section>
@@ -1504,6 +1511,7 @@ function Timeline({
 }
 
 function Deadlines({ onBack, onEditTask }: { onBack: () => void; onEditTask: (id: number) => void }) {
+  const { t } = useTranslation()
   const deadlines = useDeadlines();
   const updateTask = useUpdateEnterpriseTask();
   const deleteTask = useDeleteEnterpriseTask();
@@ -1546,50 +1554,50 @@ function Deadlines({ onBack, onEditTask }: { onBack: () => void; onEditTask: (id
     setSelectedIds([]);
   };
   const batchDelete = async () => {
-    if (!selectedTasks.length || !window.confirm(`${selectedTasks.length} даалгаврыг устгах уу?`)) return;
+    if (!selectedTasks.length || !window.confirm(t('tasks.batchDeleteConfirm', { n: selectedTasks.length }))) return;
     for (const item of selectedTasks) await deleteTask.mutateAsync(item.entity_id);
     setSelectedIds([]);
   };
   const buckets = [
-    { id: "overdue", label: "Хугацаа хэтэрсэн" },
-    { id: "soon", label: "7 хоногт" },
-    { id: "later", label: "Дараа" },
-    { id: "none", label: "Хугацаагүй" },
+    { id: "overdue", label: t('tasks.overdue') },
+    { id: "soon", label: t('tasks.bucket.week') },
+    { id: "later", label: t('tasks.bucket.later') },
+    { id: "none", label: t('tasks.noDeadline') },
   ];
   return (
     <div className="deadline-workspace">
       <div className="view-toolbar">
         <div>
           <button className="text-action" onClick={onBack}>
-            ← Миний даалгавар
+            {t('tasks.backToMine')}
           </button>
-          <h2>Байгууллагын нийт даалгаврууд</h2>
+          <h2>{t('tasks.orgAll')}</h2>
         </div>
         <div className="deadline-filters">
-          {visibleTasks.length > 0 && <label className="deadline-select-all"><input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedIds(allVisibleSelected ? [] : visibleTasks.map((item) => item.entity_id))} />Бүгдийг сонгох</label>}
-          {selectedTasks.length > 0 && <div className="deadline-batch-actions" aria-label="Сонгосон даалгаврын багц үйлдэл">
-            <span>{selectedTasks.length} сонгосон</span>
-            <select aria-label="Сонгосон даалгаврын төлөв" defaultValue="" onChange={(event) => { if (event.target.value) void batchStatus(event.target.value as WorkflowStatus); }} disabled={updateTask.isPending}>
-              <option value="">Төлөв өөрчлөх</option>
+          {visibleTasks.length > 0 && <label className="deadline-select-all"><input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedIds(allVisibleSelected ? [] : visibleTasks.map((item) => item.entity_id))} />{t('tasks.selectAll')}</label>}
+          {selectedTasks.length > 0 && <div className="deadline-batch-actions" aria-label={t('tasks.batch.aria')}>
+            <span>{t('chat.selectedN', { n: selectedTasks.length })}</span>
+            <select aria-label={t('tasks.batch.status')} defaultValue="" onChange={(event) => { if (event.target.value) void batchStatus(event.target.value as WorkflowStatus); }} disabled={updateTask.isPending}>
+              <option value="">{t('tasks.changeStatus')}</option>
               {COLUMNS.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}
             </select>
-            <button type="button" className="danger-action compact" onClick={() => void batchDelete()} disabled={deleteTask.isPending}><Trash2 size={14} />Устгах</button>
+            <button type="button" className="danger-action compact" onClick={() => void batchDelete()} disabled={deleteTask.isPending}><Trash2 size={14} />{t('tasks.delete')}</button>
           </div>}
           <select
             value={type}
             onChange={(event) => setType(event.target.value)}
           >
-            <option value="all">Бүх төрөл</option>
-            <option value="project">Төсөл</option>
-            <option value="plan">Төлөвлөгөө</option>
-            <option value="task">Даалгавар</option>
-            <option value="subtask">Дэд даалгавар</option>
+            <option value="all">{t('tasks.filter.allTypes')}</option>
+            <option value="project">{t('tasks.form.project')}</option>
+            <option value="plan">{t('tasks.plan')}</option>
+            <option value="task">{t('tasks.task')}</option>
+            <option value="subtask">{t('tasks.filter.subtask')}</option>
           </select>
           <select
             value={project}
             onChange={(event) => setProject(event.target.value)}
           >
-            <option value="all">Бүх төсөл</option>
+            <option value="all">{t('tasks.filter.allProjects')}</option>
             {projects.map((value) => (
               <option key={value}>{value}</option>
             ))}
@@ -1598,7 +1606,7 @@ function Deadlines({ onBack, onEditTask }: { onBack: () => void; onEditTask: (id
             value={owner}
             onChange={(event) => setOwner(event.target.value)}
           >
-            <option value="all">Бүх хариуцагч</option>
+            <option value="all">{t('tasks.allAssignees')}</option>
             {owners.map((value) => (
               <option key={value}>{value}</option>
             ))}
@@ -1607,7 +1615,7 @@ function Deadlines({ onBack, onEditTask }: { onBack: () => void; onEditTask: (id
             value={status}
             onChange={(event) => setStatus(event.target.value)}
           >
-            <option value="all">Бүх төлөв</option>
+            <option value="all">{t('tasks.filter.allStatuses')}</option>
             {statuses.map((value) => (
               <option key={value}>{value}</option>
             ))}
@@ -1627,28 +1635,28 @@ function Deadlines({ onBack, onEditTask }: { onBack: () => void; onEditTask: (id
               .filter((item) => item.bucket === bucket.id)
               .map((item) => (
                 <article key={item.id} className={item.type === "task" || item.type === "subtask" ? "deadline-task-row" : ""}>
-                  {(item.type === "task" || item.type === "subtask") && <input type="checkbox" aria-label={`${item.title} сонгох`} checked={selectedIds.includes(item.entity_id)} onChange={() => toggleSelected(item.entity_id)} />}
+                  {(item.type === "task" || item.type === "subtask") && <input type="checkbox" aria-label={t('tasks.selectItem', { title: item.title })} checked={selectedIds.includes(item.entity_id)} onChange={() => toggleSelected(item.entity_id)} />}
                   <span className={`deadline-type ${item.type}`}>
                     {item.type}
                   </span>
                   <div>
                     <strong>{item.title}</strong>
                     <small>
-                      {item.project_name || item.owner || "Байгууллага"}
+                      {item.project_name || item.owner || t('tasks.organization')}
                     </small>
                   </div>
                   <time>
                     {item.due_date
-                      ? new Date(item.due_date).toLocaleDateString("mn-MN")
+                      ? new Date(item.due_date).toLocaleDateString(intlLocale())
                       : "—"}
                   </time>
                   <span className={`status-pill ${item.status}`}>{statusLabel(item.status as WorkflowStatus)}</span>
                   {(item.type === "task" || item.type === "subtask") && <div className="deadline-row-menu">
-                    <button type="button" className="icon-button" aria-label={`${item.title} үйлдлүүд`} aria-expanded={openMenu === item.id} onClick={() => setOpenMenu(openMenu === item.id ? null : item.id)}><MoreVertical size={18} /></button>
+                    <button type="button" className="icon-button" aria-label={t('tasks.itemActions', { title: item.title })} aria-expanded={openMenu === item.id} onClick={() => setOpenMenu(openMenu === item.id ? null : item.id)}><MoreVertical size={18} /></button>
                     {openMenu === item.id && <div className="deadline-action-menu">
-                      <button type="button" onClick={() => onEditTask(item.entity_id)}>Засах</button>
-                      <label>Төлөв<select value={item.status} onChange={(event) => void changeStatus(item, event.target.value as WorkflowStatus)} disabled={updateTask.isPending}>{COLUMNS.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}</select></label>
-                      <button type="button" className="danger" onClick={() => { if (window.confirm(`“${item.title}” даалгаврыг устгах уу?`)) void deleteTask.mutateAsync(item.entity_id).then(() => setOpenMenu(null)); }}>Устгах</button>
+                      <button type="button" onClick={() => onEditTask(item.entity_id)}>{t('tasks.edit')}</button>
+                      <label>{t('tasks.form.status')}<select value={item.status} onChange={(event) => void changeStatus(item, event.target.value as WorkflowStatus)} disabled={updateTask.isPending}>{COLUMNS.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}</select></label>
+                      <button type="button" className="danger" onClick={() => { if (window.confirm(t('today.tasks.confirmDelete', { title: item.title }))) void deleteTask.mutateAsync(item.entity_id).then(() => setOpenMenu(null)); }}>{t('tasks.delete')}</button>
                     </div>}
                   </div>}
                 </article>

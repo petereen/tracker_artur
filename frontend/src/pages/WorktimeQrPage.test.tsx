@@ -58,7 +58,7 @@ describe('Worktime QR display pairing state', () => {
 
     render(<WorktimeQrPage />)
 
-    expect(screen.getByText('Offline')).toBeInTheDocument()
+    expect(screen.getByText('Офлайн')).toBeInTheDocument()
     expect(screen.getByTestId('qr-code')).toHaveTextContent('still-valid-qr-token')
     expect(screen.queryByRole('heading', { name: 'Дэлгэц холбох' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Pairing код')).not.toBeInTheDocument()

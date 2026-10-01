@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useRef } from 'react'
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { clearAuthenticatedQueryCache } from './api/client'
 import { bootstrapSession, useActor } from './api/enterprise'
 import { EnterpriseShell } from './components/EnterpriseShell'
@@ -227,7 +228,8 @@ function AuthenticatedApp() {
 }
 
 function SessionBootstrapError({ onRetry }: { onRetry: () => void }) {
-  return <main className="workspace-bootstrap-error" role="alert"><div className="query-region-state"><strong>Ажлын орон зайг нээж чадсангүй.</strong><button className="secondary-action" type="button" onClick={onRetry}>Дахин оролдох</button></div></main>
+  const { t } = useTranslation()
+  return <main className="workspace-bootstrap-error" role="alert"><div className="query-region-state"><strong>{t('common.workspaceOpenFailed')}</strong><button className="secondary-action" type="button" onClick={onRetry}>{t('common.retry')}</button></div></main>
 }
 
 export default function App() {

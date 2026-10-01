@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
   ChevronUp,
@@ -16,6 +17,8 @@ import {
   useWorldClockPreferences,
   type WorldClockPreferences,
 } from "../api/enterprise";
+import i18n from "../i18n";
+import { intlLocale } from "../utils/locale";
 import {
   DndContext,
   KeyboardSensor,
@@ -126,7 +129,7 @@ function formatOffset(minutes: number) {
   const absolute = Math.abs(minutes);
   const hours = Math.floor(absolute / 60);
   const remaining = absolute % 60;
-  return `${sign}${hours}${remaining ? `:${String(remaining).padStart(2, "0")}` : ""} HRS`;
+  return `${sign}${hours}${remaining ? `:${String(remaining).padStart(2, "0")}` : ""} ${i18n.t("worldClock.hrs")}`;
 }
 
 function dayDifference(fromTimezone: string, toTimezone: string, date: Date) {
@@ -136,14 +139,12 @@ function dayDifference(fromTimezone: string, toTimezone: string, date: Date) {
 }
 
 function relativeDayLabel(delta: number) {
-  if (delta === 0) return "өнөөдөр";
-  if (delta === 1) return "+1 өдөр";
-  if (delta === -1) return "-1 өдөр";
-  return delta > 0 ? `+${delta} өдөр` : `${delta} өдөр`;
+  if (delta === 0) return i18n.t("worldClock.today");
+  return i18n.t("worldClock.dayShift", { sign: delta > 0 ? "+" : "-", n: Math.abs(delta) });
 }
 
 function DigitalClock({ timezone, hourFormat, now, localTimezone }: { timezone: string; hourFormat: "12" | "24"; now: Date; localTimezone: string }) {
-  const parts = new Intl.DateTimeFormat(undefined, {
+  const parts = new Intl.DateTimeFormat(intlLocale(), {
     timeZone: timezone,
     hour: "numeric",
     minute: "2-digit",
@@ -170,7 +171,7 @@ function AnalogClock({ timezone, hourFormat, now, localTimezone }: { timezone: s
   const minuteAngle = (time.minute + time.second / 60) * 6;
   const offset = timezoneOffsetMinutes(timezone, now) - timezoneOffsetMinutes(localTimezone, now);
   const day = relativeDayLabel(dayDifference(localTimezone, timezone, now));
-  const label = new Intl.DateTimeFormat(undefined, {
+  const label = new Intl.DateTimeFormat(intlLocale(), {
     timeZone: timezone,
     hour: "2-digit",
     minute: "2-digit",
@@ -194,23 +195,25 @@ function AnalogClock({ timezone, hourFormat, now, localTimezone }: { timezone: s
 }
 
 function SortableClockRow({ timezone, index, total, onMove, onEdit, onRemove }: { timezone: string; index: number; total: number; onMove: (from: number, to: number) => void; onEdit: () => void; onRemove: () => void }) {
+  const { t } = useTranslation();
   const sortable = useSortable({ id: timezone });
   const style = { transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition };
   return (
     <li ref={sortable.setNodeRef} style={style} className="world-clock-setting-row">
-      <button type="button" className="world-clock-drag" ref={sortable.setActivatorNodeRef} {...sortable.listeners} {...sortable.attributes} aria-label={`${timezoneLabel(timezone)}-г шилжүүлэх`}><GripVertical size={15} /></button>
+      <button type="button" className="world-clock-drag" ref={sortable.setActivatorNodeRef} {...sortable.listeners} {...sortable.attributes} aria-label={t("worldClock.dragLabel", { city: timezoneLabel(timezone) })}><GripVertical size={15} /></button>
       <span><strong>{timezoneLabel(timezone)}</strong><small>{timezone}</small></span>
       <div>
-        <button type="button" onClick={() => onMove(index, index - 1)} disabled={index === 0} aria-label="Дээш зөөх"><ChevronUp size={15} /></button>
-        <button type="button" onClick={() => onMove(index, index + 1)} disabled={index === total - 1} aria-label="Доош зөөх"><ChevronDown size={15} /></button>
-        <button type="button" onClick={onEdit} aria-label={`${timezoneLabel(timezone)} засах`}><Settings2 size={15} /></button>
-        <button type="button" onClick={onRemove} aria-label={`${timezoneLabel(timezone)} устгах`}><Trash2 size={15} /></button>
+        <button type="button" onClick={() => onMove(index, index - 1)} disabled={index === 0} aria-label={t("worldClock.moveUp")}><ChevronUp size={15} /></button>
+        <button type="button" onClick={() => onMove(index, index + 1)} disabled={index === total - 1} aria-label={t("worldClock.moveDown")}><ChevronDown size={15} /></button>
+        <button type="button" onClick={onEdit} aria-label={t("worldClock.editLabel", { city: timezoneLabel(timezone) })}><Settings2 size={15} /></button>
+        <button type="button" onClick={onRemove} aria-label={t("worldClock.removeLabel", { city: timezoneLabel(timezone) })}><Trash2 size={15} /></button>
       </div>
     </li>
   );
 }
 
 function WorldClockEditor({ draft, onChange, onClose, onSave, saving, style }: { draft: WorldClockPreferences; onChange: (value: WorldClockPreferences) => void; onClose: () => void; onSave: () => void; saving: boolean; style?: CSSProperties }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -253,23 +256,24 @@ function WorldClockEditor({ draft, onChange, onClose, onSave, saving, style }: {
   useEffect(() => { panelRef.current?.querySelector<HTMLElement>("input")?.focus(); }, []);
   return (
     <section ref={panelRef} className="world-clock-settings" style={style} role="dialog" aria-modal="true" aria-labelledby="world-clock-settings-title" onMouseDown={(event) => event.stopPropagation()}>
-      <header><div><span className="eyebrow">World clock</span><h3 id="world-clock-settings-title">Цагийн тохиргоо</h3></div><button type="button" onClick={onClose} aria-label="Хаах"><X size={17} /></button></header>
+      <header><div><span className="eyebrow">{t("worldClock.eyebrowSettings")}</span><h3 id="world-clock-settings-title">{t("worldClock.settingsTitle")}</h3></div><button type="button" onClick={onClose} aria-label={t("worldClock.close")}><X size={17} /></button></header>
       <div className="world-clock-setting-toggles">
-        <fieldset><legend>Дэлгэц</legend><button type="button" className={draft.display_mode === "digital" ? "active" : ""} onClick={() => onChange({ ...draft, display_mode: "digital" })}>Digital</button><button type="button" className={draft.display_mode === "analog" ? "active" : ""} onClick={() => onChange({ ...draft, display_mode: "analog" })}>Analog</button></fieldset>
-        <fieldset><legend>Формат</legend><button type="button" className={draft.hour_format === "24" ? "active" : ""} onClick={() => onChange({ ...draft, hour_format: "24" })}>24h</button><button type="button" className={draft.hour_format === "12" ? "active" : ""} onClick={() => onChange({ ...draft, hour_format: "12" })}>12h</button></fieldset>
+        <fieldset><legend>{t("worldClock.display")}</legend><button type="button" className={draft.display_mode === "digital" ? "active" : ""} onClick={() => onChange({ ...draft, display_mode: "digital" })}>{t("worldClock.digital")}</button><button type="button" className={draft.display_mode === "analog" ? "active" : ""} onClick={() => onChange({ ...draft, display_mode: "analog" })}>{t("worldClock.analog")}</button></fieldset>
+        <fieldset><legend>{t("worldClock.format")}</legend><button type="button" className={draft.hour_format === "24" ? "active" : ""} onClick={() => onChange({ ...draft, hour_format: "24" })}>24h</button><button type="button" className={draft.hour_format === "12" ? "active" : ""} onClick={() => onChange({ ...draft, hour_format: "12" })}>12h</button></fieldset>
       </div>
-      <div className="world-clock-setting-search"><Search size={15} /><input value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder={editingIndex === null ? "Search time zones" : "Replace time zone"} aria-label="Цагийн бүс хайх" />{query && <button type="button" onClick={() => setQuery("")} aria-label="Хайлтыг цэвэрлэх"><X size={14} /></button>}</div>
-      {searchOpen && <div className="world-clock-zone-results" role="listbox">{filtered.map((timezone) => <button type="button" key={timezone} onClick={() => chooseTimezone(timezone)} role="option"><strong>{timezoneLabel(timezone)}</strong><small>{timezone}</small></button>)}{filtered.length === 0 && <p>Цагийн бүс олдсонгүй.</p>}</div>}
+      <div className="world-clock-setting-search"><Search size={15} /><input value={query} onFocus={() => setSearchOpen(true)} onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }} placeholder={editingIndex === null ? t("worldClock.searchPlaceholder") : t("worldClock.replacePlaceholder")} aria-label={t("worldClock.searchLabel")} />{query && <button type="button" onClick={() => setQuery("")} aria-label={t("worldClock.clearSearch")}><X size={14} /></button>}</div>
+      {searchOpen && <div className="world-clock-zone-results" role="listbox">{filtered.map((timezone) => <button type="button" key={timezone} onClick={() => chooseTimezone(timezone)} role="option"><strong>{timezoneLabel(timezone)}</strong><small>{timezone}</small></button>)}{filtered.length === 0 && <p>{t("worldClock.noZones")}</p>}</div>}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}><SortableContext items={draft.clocks} strategy={verticalListSortingStrategy}><ul className="world-clock-setting-list">{draft.clocks.map((timezone, index) => <SortableClockRow key={timezone} timezone={timezone} index={index} total={draft.clocks.length} onMove={move} onEdit={() => { setEditingIndex(index); setQuery(""); setSearchOpen(true); }} onRemove={() => onChange({ ...draft, clocks: draft.clocks.filter((item) => item !== timezone) })} />)}</ul></SortableContext></DndContext>
-      {draft.clocks.length < MAX_CLOCKS && <button type="button" className="world-clock-add" onClick={() => { setEditingIndex(null); setQuery(""); setSearchOpen(true); setLimitMessage(false); panelRef.current?.querySelector<HTMLInputElement>("input")?.focus(); }}><Plus size={15} />Цаг нэмэх</button>}
-      {draft.clocks.length >= MAX_CLOCKS && <p className="world-clock-limit" role="alert">Хамгийн ихдээ 6 хот нэмэх боломжтой.</p>}
-      {limitMessage && <p className="world-clock-limit" role="alert">6-аас илүү хот нэмэх боломжгүй. Илүүдэл хотыг устгаад дахин оролдоно уу.</p>}
-      <footer><button type="button" className="secondary-action compact" onClick={onClose}>Цуцлах</button><button type="button" className="primary-action compact" onClick={onSave} disabled={saving || draft.clocks.length > MAX_CLOCKS}>{saving ? "Хадгалж байна…" : "Хадгалах"}</button></footer>
+      {draft.clocks.length < MAX_CLOCKS && <button type="button" className="world-clock-add" onClick={() => { setEditingIndex(null); setQuery(""); setSearchOpen(true); setLimitMessage(false); panelRef.current?.querySelector<HTMLInputElement>("input")?.focus(); }}><Plus size={15} />{t("worldClock.add")}</button>}
+      {draft.clocks.length >= MAX_CLOCKS && <p className="world-clock-limit" role="alert">{t("worldClock.maxReached")}</p>}
+      {limitMessage && <p className="world-clock-limit" role="alert">{t("worldClock.limitExceeded")}</p>}
+      <footer><button type="button" className="secondary-action compact" onClick={onClose}>{t("worldClock.cancel")}</button><button type="button" className="primary-action compact" onClick={onSave} disabled={saving || draft.clocks.length > MAX_CLOCKS}>{saving ? t("worldClock.saving") : t("worldClock.save")}</button></footer>
     </section>
   );
 }
 
 export function WorldClockWidget() {
+  const { t } = useTranslation();
   const preferences = useWorldClockPreferences();
   const update = useUpdateWorldClockPreferences();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -300,15 +304,15 @@ export function WorldClockWidget() {
   useEffect(() => { if (!open) triggerRef.current?.focus(); }, [open]);
   const openEditor = () => { setDraft(clonePreferences(saved)); setOpen(true); };
   const save = async () => { if (!draft) return; await update.mutateAsync(draft); setOpen(false); };
-  if (preferences.isLoading) return <section className="world-clock-panel panel" aria-label="World clock"><div className="panel-heading"><div><span className="eyebrow">WORLD CLOCK</span><h2>Дэлхийн цаг</h2></div><span className="skeleton world-clock-skeleton-icon" /></div><div className="world-clock-loading"><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /></div></section>;
-  if (preferences.isError) return <section className="world-clock-panel panel" aria-label="World clock"><div className="panel-heading"><div><span className="eyebrow">WORLD CLOCK</span><h2>Дэлхийн цаг</h2></div></div><p className="world-clock-error">Цагийн тохиргоо ачаалагдсангүй.</p><button type="button" className="secondary-action compact" onClick={() => preferences.refetch()}>Дахин оролдох</button></section>;
+  if (preferences.isLoading) return <section className="world-clock-panel panel" aria-label={t("worldClock.aria")}><div className="panel-heading"><div><span className="eyebrow">{t("worldClock.eyebrow")}</span><h2>{t("worldClock.title")}</h2></div><span className="skeleton world-clock-skeleton-icon" /></div><div className="world-clock-loading"><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /></div></section>;
+  if (preferences.isError) return <section className="world-clock-panel panel" aria-label={t("worldClock.aria")}><div className="panel-heading"><div><span className="eyebrow">{t("worldClock.eyebrow")}</span><h2>{t("worldClock.title")}</h2></div></div><p className="world-clock-error">{t("worldClock.loadFailed")}</p><button type="button" className="secondary-action compact" onClick={() => preferences.refetch()}>{t("common.retry")}</button></section>;
   return (
-    <section className={`world-clock-panel panel ${open ? "settings-open" : ""}`} aria-label="World clock">
-      <div className="panel-heading"><div><span className="eyebrow">WORLD CLOCK</span><h2>Дэлхийн цаг</h2></div><button ref={triggerRef} type="button" className="world-clock-settings-trigger" onClick={openEditor} aria-expanded={open} aria-label="Цагийн тохиргоо"><Settings2 size={17} /></button></div>
-      {hasTooManyClocks && <p className="world-clock-limit-banner" role="alert">Хамгийн ихдээ 6 хот нэмэх боломжтой. Илүүдэл хотыг тохиргооноос устгана уу.</p>}
+    <section className={`world-clock-panel panel ${open ? "settings-open" : ""}`} aria-label={t("worldClock.aria")}>
+      <div className="panel-heading"><div><span className="eyebrow">{t("worldClock.eyebrow")}</span><h2>{t("worldClock.title")}</h2></div><button ref={triggerRef} type="button" className="world-clock-settings-trigger" onClick={openEditor} aria-expanded={open} aria-label={t("worldClock.settingsTitle")}><Settings2 size={17} /></button></div>
+      {hasTooManyClocks && <p className="world-clock-limit-banner" role="alert">{t("worldClock.tooMany")}</p>}
       {visibleClocks.length ? <div className={`world-clock-list ${saved.display_mode} count-${visibleClocks.length}`}>
         {visibleClocks.map((timezone) => saved.display_mode === "analog" ? <AnalogClock key={timezone} timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /> : <article className="world-clock-tile" key={timezone}><div className="world-clock-tile-city"><strong>{timezoneLabel(timezone)}</strong></div><DigitalClock timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /></article>)}
-      </div> : <div className="world-clock-empty"><Clock3 size={25} /><strong>Цаг нэмээгүй байна</strong><span>Ажлынхаа хотуудын цагийг нэг дор хараарай.</span><button type="button" className="secondary-action compact" onClick={openEditor}><Plus size={14} />Цаг нэмэх</button></div>}
+      </div> : <div className="world-clock-empty"><Clock3 size={25} /><strong>{t("worldClock.emptyTitle")}</strong><span>{t("worldClock.emptyBody")}</span><button type="button" className="secondary-action compact" onClick={openEditor}><Plus size={14} />{t("worldClock.add")}</button></div>}
       {open && <div className="world-clock-settings-layer" onMouseDown={() => setOpen(false)}><WorldClockEditor draft={draft || clonePreferences(saved)} onChange={setDraft} onClose={() => setOpen(false)} onSave={save} saving={update.isPending} /></div>}
     </section>
   );
@@ -319,7 +323,7 @@ function stripOffsetLabel(timezone: string, localTimezone: string, now: Date) {
   if (!minutes) return "";
   const sign = minutes < 0 ? "−" : "+";
   const absolute = Math.abs(minutes);
-  return `${sign}${Math.floor(absolute / 60)}${absolute % 60 ? `:${String(absolute % 60).padStart(2, "0")}` : ""}ц`;
+  return `${sign}${Math.floor(absolute / 60)}${absolute % 60 ? `:${String(absolute % 60).padStart(2, "0")}` : ""}${i18n.t("worldClock.hoursUnit")}`;
 }
 
 /**
@@ -328,6 +332,7 @@ function stripOffsetLabel(timezone: string, localTimezone: string, now: Date) {
  * editor floats over the page because the strip is only one row tall.
  */
 export function WorldClockStrip() {
+  const { t } = useTranslation();
   const preferences = useWorldClockPreferences();
   const update = useUpdateWorldClockPreferences();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -365,15 +370,15 @@ export function WorldClockStrip() {
   const save = async () => { if (!draft) return; await update.mutateAsync(draft); close(); };
 
   return (
-    <section className="world-clock-strip" aria-label="Дэлхийн цаг">
+    <section className="world-clock-strip" aria-label={t("worldClock.title")}>
       {preferences.isLoading ? (
         <span className="world-clock-strip-chips"><span className="skeleton world-clock-strip-skeleton" /><span className="skeleton world-clock-strip-skeleton" /></span>
       ) : preferences.isError ? (
-        <span className="world-clock-strip-chips"><button type="button" className="world-clock-chip is-action" onClick={() => preferences.refetch()}>Цаг ачаалагдсангүй · дахин оролдох</button></span>
+        <span className="world-clock-strip-chips"><button type="button" className="world-clock-chip is-action" onClick={() => preferences.refetch()}>{t("worldClock.chipFailed")}</button></span>
       ) : (
         <span className="world-clock-strip-chips">
           {clocks.map((timezone) => {
-            const time = new Intl.DateTimeFormat(undefined, { timeZone: timezone, hour: "numeric", minute: "2-digit", hour12: saved.hour_format === "12" }).format(now);
+            const time = new Intl.DateTimeFormat(intlLocale(), { timeZone: timezone, hour: "numeric", minute: "2-digit", hour12: saved.hour_format === "12" }).format(now);
             const offset = stripOffsetLabel(timezone, localTimezone, now);
             const delta = dayDifference(localTimezone, timezone, now);
             return (
@@ -384,10 +389,10 @@ export function WorldClockStrip() {
               </span>
             );
           })}
-          {clocks.length === 0 && <button type="button" className="world-clock-chip is-action" onClick={openEditor}><Plus size={13} />Цаг нэмэх</button>}
+          {clocks.length === 0 && <button type="button" className="world-clock-chip is-action" onClick={openEditor}><Plus size={13} />{t("worldClock.add")}</button>}
         </span>
       )}
-      <button ref={triggerRef} type="button" className="world-clock-strip-settings" onClick={openEditor} aria-expanded={open} aria-label="Цагийн тохиргоо" title="Цагийн тохиргоо"><Settings2 size={14} /></button>
+      <button ref={triggerRef} type="button" className="world-clock-strip-settings" onClick={openEditor} aria-expanded={open} aria-label={t("worldClock.settingsTitle")} title={t("worldClock.settingsTitle")}><Settings2 size={14} /></button>
       {open && createPortal(
         <div className="world-clock-settings-layer is-floating" onMouseDown={close}>
           <WorldClockEditor draft={draft || clonePreferences(saved)} onChange={setDraft} onClose={close} onSave={save} saving={update.isPending} style={anchor ? { top: anchor.top, right: anchor.right } : undefined} />

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Coffee, House, Laptop2, Pause, Play, Timer } from 'lucide-react'
 import { useClock, useClockAction } from '../../../api/enterprise'
 import { useAuthStore } from '../../../store/auth'
+import { intlLocale } from '../../../utils/locale'
 import { WorkdayStartButton } from '../../WorkdayStartButton'
 import { WidgetHeader } from './shared'
 
@@ -14,14 +16,15 @@ function formatDuration(seconds: number) {
 
 function formatLocalTime(value: string, timezone: string) {
   try {
-    return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone }).format(new Date(value))
+    return new Intl.DateTimeFormat(intlLocale(), { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone }).format(new Date(value))
   } catch {
-    return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+    return new Date(value).toLocaleTimeString(intlLocale(), { hour: '2-digit', minute: '2-digit', hour12: false })
   }
 }
 
 /** Today's work-hour clock: start (office/remote), break, resume, stop. */
 export function WorktimeWidget() {
+  const { t } = useTranslation()
   const employeeId = useAuthStore((state) => state.actor?.employee_id)
   const clock = useClock(employeeId != null)
   const action = useClockAction()
@@ -85,45 +88,45 @@ export function WorktimeWidget() {
   const todayWorkSeconds = todayEntries.reduce((total, entry) => (entry.entry_type === 'work' ? total + entrySeconds(entry) : total), 0)
 
   return (
-    <section className="today-widget clock-panel today-worktime" aria-label="Өнөөдрийн ажлын цаг">
-      <WidgetHeader icon={Timer} title="Өнөөдрийн ажлын цаг" meta={<span className={`live-indicator ${active ? 'online' : ''}`}>{active ? 'АЖИЛЛАЖ БАЙНА' : 'АМАРЧ БАЙНА'}</span>} />
+    <section className="today-widget clock-panel today-worktime" aria-label={t('today.worktime.title')}>
+      <WidgetHeader icon={Timer} title={t('today.worktime.title')} meta={<span className={`live-indicator ${active ? 'online' : ''}`}>{active ? t('today.worktime.working') : t('today.worktime.resting')}</span>} />
       {clockReady ? (
         <div className="clock-summary">
           <div className="clock-time" aria-live="polite">{formatDuration(todayWorkSeconds)}</div>
           <p>
             {working
-              ? `${active?.mode === 'remote' ? 'Remote' : 'Оффис'} горимоор ажиллаж байна.`
-              : onBreak ? 'Завсарлагын хугацаа ажилласан цагт орохгүй.' : 'Telegram болон вэбийн цагийн төлөв үргэлж ижил байна.'}
+              ? t('today.worktime.workingIn', { mode: active?.mode === 'remote' ? t('today.worktime.remote') : t('today.worktime.office') })
+              : onBreak ? t('today.worktime.breakNote') : t('today.worktime.syncNote')}
           </p>
-          <div className="clock-details" aria-label="Өнөөдрийн цагийн дэлгэрэнгүй">
+          <div className="clock-details" aria-label={t('today.worktime.details')}>
             {todayEntries.map((entry) => (
               <div key={entry.id}>
-                {entry.entry_type === 'break' ? 'Завсарлага' : entry.mode === 'remote' ? 'Remote' : 'Оффис'}:{' '}
-                {formatLocalTime(entry.started_at, timezone)}–{entry.ended_at ? formatLocalTime(entry.ended_at, timezone) : 'одоо'}{' '}
+                {entry.entry_type === 'break' ? t('today.worktime.break') : entry.mode === 'remote' ? t('today.worktime.remote') : t('today.worktime.office')}:{' '}
+                {formatLocalTime(entry.started_at, timezone)}–{entry.ended_at ? formatLocalTime(entry.ended_at, timezone) : t('today.worktime.now')}{' '}
                 ({formatDuration(entrySeconds(entry))})
               </div>
             ))}
           </div>
         </div>
       ) : (
-        <div className="clock-summary clock-summary-skeleton" aria-label="Цагийн төлөв ачаалж байна">
+        <div className="clock-summary clock-summary-skeleton" aria-label={t('today.worktime.loading')}>
           <span className="skeleton clock-time-skeleton" />
           <span className="skeleton clock-copy-skeleton" />
         </div>
       )}
-      {recoveredClock && <div className="clock-recovery" role="alert"><strong>Өмнөх сесс сэргээгдлээ.</strong><span>Энэ цагийн бүртгэл удаан нээлттэй эсвэл өөр өдрөөс үргэлжилж байна. Одоогийн төлөвөө шалгаад үргэлжлүүлэх эсвэл дуусгана уу.</span></div>}
+      {recoveredClock && <div className="clock-recovery" role="alert"><strong>{t('today.worktime.recoveredTitle')}</strong><span>{t('today.worktime.recoveredBody')}</span></div>}
       <div className="clock-actions">
         {!active && <>
-          <WorkdayStartButton className="clock-button office"><House />Оффис эхлэх</WorkdayStartButton>
-          <button className="clock-button remote" onClick={() => action.mutate({ action: 'start', mode: 'remote' })}><Laptop2 />Remote эхлэх</button>
+          <WorkdayStartButton className="clock-button office"><House />{t('today.worktime.startOffice')}</WorkdayStartButton>
+          <button className="clock-button remote" onClick={() => action.mutate({ action: 'start', mode: 'remote' })}><Laptop2 />{t('today.worktime.startRemote')}</button>
         </>}
         {working && <>
-          <button className="clock-button break" onClick={() => action.mutate({ action: 'break' })}><Coffee />Завсарлага</button>
-          <button className="clock-button stop" onClick={() => action.mutate({ action: 'stop' })}><Pause />Өдөр дуусгах</button>
+          <button className="clock-button break" onClick={() => action.mutate({ action: 'break' })}><Coffee />{t('today.worktime.break')}</button>
+          <button className="clock-button stop" onClick={() => action.mutate({ action: 'stop' })}><Pause />{t('today.worktime.finishDay')}</button>
         </>}
         {onBreak && <>
-          <button className="clock-button office" onClick={() => action.mutate({ action: 'resume' })}><Play />Үргэлжлүүлэх</button>
-          <button className="clock-button stop" onClick={() => action.mutate({ action: 'stop' })}><Pause />Өдөр дуусгах</button>
+          <button className="clock-button office" onClick={() => action.mutate({ action: 'resume' })}><Play />{t('today.worktime.resume')}</button>
+          <button className="clock-button stop" onClick={() => action.mutate({ action: 'stop' })}><Pause />{t('today.worktime.finishDay')}</button>
         </>}
       </div>
     </section>

@@ -1,3 +1,5 @@
+import i18n from '../../i18n'
+
 /** Pure Markdown edits for the announcement editor's toolbar. */
 
 export type MarkdownFormat = 'bold' | 'italic' | 'heading' | 'bullet' | 'numbered' | 'quote' | 'link'
@@ -8,9 +10,10 @@ export interface MarkdownEdit {
   selectionEnd: number
 }
 
-const WRAPPERS: Partial<Record<MarkdownFormat, { mark: string; placeholder: string }>> = {
-  bold: { mark: '**', placeholder: 'тод текст' },
-  italic: { mark: '_', placeholder: 'налуу текст' },
+/** The placeholder is text inserted into the post, so it is resolved when the button is pressed. */
+const WRAPPERS: Partial<Record<MarkdownFormat, { mark: string; placeholderKey: string }>> = {
+  bold: { mark: '**', placeholderKey: 'announcements.md.boldPlaceholder' },
+  italic: { mark: '_', placeholderKey: 'announcements.md.italicPlaceholder' },
 }
 
 const LINE_PREFIX = /^(#{1,6} |[-*] |\d+\. |> )/
@@ -35,17 +38,17 @@ export function applyMarkdownFormat(value: string, start: number, end: number, f
 
   const wrapper = WRAPPERS[format]
   if (wrapper) {
-    const { mark, placeholder } = wrapper
+    const { mark, placeholderKey } = wrapper
     // Pressing the button again on wrapped text removes the marks.
     if (value.slice(start - mark.length, start) === mark && value.slice(end, end + mark.length) === mark) {
       return { value: value.slice(0, start - mark.length) + selected + value.slice(end + mark.length), selectionStart: start - mark.length, selectionEnd: end - mark.length }
     }
-    const inner = selected || placeholder
+    const inner = selected || i18n.t(placeholderKey)
     return { value: value.slice(0, start) + mark + inner + mark + value.slice(end), selectionStart: start + mark.length, selectionEnd: start + mark.length + inner.length }
   }
 
   if (format === 'link') {
-    const text = selected || 'холбоос'
+    const text = selected || i18n.t('announcements.md.linkPlaceholder')
     const url = 'https://'
     const inserted = `[${text}](${url})`
     const urlStart = start + text.length + 3

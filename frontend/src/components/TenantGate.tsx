@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import toast from 'react-hot-toast'
 import { LogOut } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { Center } from '@astryxdesign/core/Center'
@@ -10,27 +11,27 @@ import { Text } from '@astryxdesign/core/Text'
 import { VStack } from '@astryxdesign/core/VStack'
 import { useEnterpriseLogout } from '../api/enterprise'
 import type { TenantContext } from '../api/tenancy'
+import i18n from '../i18n'
 import { TenantLicenseSettings, formatDate } from './TenantLicenseSettings'
 
-const UNAVAILABLE: Record<string, { title: string; description: string }> = {
-  tenant_suspended: { title: 'Ажлын орон зай түр түдгэлзсэн', description: 'Байгууллагын эрх үйлчилгээ үзүүлэгчийн шийдвэрээр түр зогссон байна. Админ эсвэл OYUNS ERP-тэй холбогдоно уу.' },
-  tenant_terminated: { title: 'Ажлын орон зай хаагдсан', description: 'Энэ байгууллагын гэрээ дууссан тул нэвтрэх боломжгүй.' },
-  tenant_mismatch: { title: 'Өөр байгууллагын холбоос', description: 'Энэ хаяг таны байгууллагынх биш байна. Өөрийн байгууллагын хаягаар нэвтэрнэ үү.' },
-  tenant_not_found: { title: 'Ажлын орон зай олдсонгүй', description: 'Хаягаа шалгаад дахин оролдоно уу.' },
-}
+const UNAVAILABLE_CODES = ['tenant_suspended', 'tenant_terminated', 'tenant_mismatch', 'tenant_not_found'] as const
+type UnavailableCode = (typeof UNAVAILABLE_CODES)[number]
 
-export function isWorkspaceUnavailable(code: string | undefined): code is keyof typeof UNAVAILABLE {
-  return Boolean(code && code in UNAVAILABLE)
+export function isWorkspaceUnavailable(code: string | undefined): code is UnavailableCode {
+  return Boolean(code && (UNAVAILABLE_CODES as readonly string[]).includes(code))
 }
 
 function LogoutButton() {
+  const { t } = useTranslation()
   const logout = useEnterpriseLogout()
-  return <Button label="Гарах" variant="secondary" icon={<LogOut size={15} />} onClick={() => logout.mutate()} isDisabled={logout.isPending} />
+  return <Button label={t('action.logout')} variant="secondary" icon={<LogOut size={15} />} onClick={() => logout.mutate()} isDisabled={logout.isPending} />
 }
 
 /** Suspended/terminated tenant or a session opened on another tenant's domain. */
 export function WorkspaceUnavailableScreen({ code }: { code: string }) {
-  const copy = UNAVAILABLE[code] ?? UNAVAILABLE.tenant_suspended
+  const { t } = useTranslation()
+  const key = isWorkspaceUnavailable(code) ? code : 'tenant_suspended'
+  const copy = { title: t(`tenant.unavailable.${key}.title`), description: t(`tenant.unavailable.${key}.description`) }
   return <Center minHeight="100dvh" padding={6}>
     <Card padding={6} maxWidth={520}>
       <VStack gap={4}>
@@ -44,18 +45,19 @@ export function WorkspaceUnavailableScreen({ code }: { code: string }) {
 
 /** No valid license: admins activate a key here, everyone else waits for them. */
 export function LicenseRequiredScreen({ context, isAdmin }: { context: TenantContext; isAdmin: boolean }) {
+  const { t } = useTranslation()
   const expired = context.license.state === 'expired'
   return <Center minHeight="100dvh" padding={6}>
     <VStack gap={4} width="100%" maxWidth={960}>
       <VStack gap={1}>
         <Heading level={1}>{context.branding.name}</Heading>
         <Text type="supporting">{expired
-          ? `Лицензийн хугацаа ${formatDate(context.license.expires_at)}-нд дууссан.`
-          : 'Ажлын орон зайг ашиглахын тулд лицензийн түлхүүр идэвхжүүлнэ үү.'}</Text>
+          ? t('tenant.licenseExpired', { date: formatDate(context.license.expires_at) })
+          : t('tenant.licenseActivate')}</Text>
       </VStack>
       {isAdmin
         ? <TenantLicenseSettings />
-        : <Card padding={6}><Text>Байгууллагын админ лицензийг идэвхжүүлсний дараа ажлын орон зай нээгдэнэ.</Text></Card>}
+        : <Card padding={6}><Text>{t('tenant.licenseWaitAdmin')}</Text></Card>}
       <HStack><LogoutButton /></HStack>
     </VStack>
   </Center>
@@ -72,8 +74,6 @@ export function useLicenseGraceNotice(context: TenantContext | undefined, isAdmi
       if (sessionStorage.getItem(key)) return
       sessionStorage.setItem(key, '1')
     } catch { /* private mode: remind every load */ }
-    toast(isAdmin
-      ? `Лицензийн хугацаа дууссан. ${formatDate(graceEnds)} хүртэл сунгалтын түлхүүрээ идэвхжүүлнэ үү (Тохиргоо → Лиценз).`
-      : `Байгууллагын лицензийн хугацаа дууссан. ${formatDate(graceEnds)}-наас хойш хандалт хаагдана.`, { icon: '⚠️', duration: 8000 })
+    toast(i18n.t(isAdmin ? 'tenant.graceAdmin' : 'tenant.graceMember', { date: formatDate(graceEnds) }), { icon: '⚠️', duration: 8000 })
   }, [graceEnds, isAdmin, state])
 }

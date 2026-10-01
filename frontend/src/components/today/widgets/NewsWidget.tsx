@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { Megaphone, Pin, SquarePen } from 'lucide-react'
 import { ANNOUNCEMENT_AUTHOR_ROLES } from '../../../api/announcements'
 import { useAnnouncements, type Announcement } from '../../../api/today'
@@ -27,6 +28,7 @@ const shortDate = (value: string) => {
 
 /** Company news & announcements: dense one-line rows, full article in a dialog. */
 export function NewsWidget() {
+  const { t } = useTranslation()
   const accountId = useAuthStore((state) => state.actor?.id)
   const canAuthor = useAuthStore((state) => Boolean(state.actor?.roles.some((role) => ANNOUNCEMENT_AUTHOR_ROLES.includes(role))))
   const news = useAnnouncements()
@@ -44,14 +46,14 @@ export function NewsWidget() {
   }
 
   return (
-    <section className="today-widget today-news" aria-label="Мэдээ, мэдэгдэл">
-      <WidgetHeader icon={Megaphone} title="Мэдээ, мэдэгдэл" meta={unread ? `${unread} шинэ` : undefined}>
-        {canAuthor && <Link to="/announcements" className="today-widget-link" aria-label="Мэдээ бичих, удирдах" title="Мэдээ бичих, удирдах"><SquarePen size={14} aria-hidden /></Link>}
+    <section className="today-widget today-news" aria-label={t('today.widget.news.title')}>
+      <WidgetHeader icon={Megaphone} title={t('today.widget.news.title')} meta={unread ? t('today.news.unread', { n: unread }) : undefined}>
+        {canAuthor && <Link to="/announcements" className="today-widget-link" aria-label={t('today.news.manage')} title={t('today.news.manage')}><SquarePen size={14} aria-hidden /></Link>}
       </WidgetHeader>
       {news.isLoading ? (
         <div className="today-news-list" aria-busy>{Array.from({ length: 5 }, (_, index) => <span key={index} className="skeleton today-news-skeleton" />)}</div>
       ) : news.isError ? (
-        <p className="today-widget-empty">Мэдээ ачаалагдсангүй. <button type="button" className="today-widget-link" onClick={() => news.refetch()}>Дахин оролдох</button></p>
+        <p className="today-widget-empty">{t('today.news.loadFailed')} <button type="button" className="today-widget-link" onClick={() => news.refetch()}>{t('common.retry')}</button></p>
       ) : items.length ? (
         <ul className="today-news-list">
           {items.map((item) => {
@@ -59,7 +61,7 @@ export function NewsWidget() {
             return (
               <li key={item.id}>
                 <button type="button" className={`today-news-row${isUnread ? ' is-unread' : ''}`} onClick={() => openArticle(item)}>
-                  {item.is_pinned ? <Pin size={11} className="today-news-pin" aria-label="Онцолсон" /> : <span className="today-news-dot" aria-hidden />}
+                  {item.is_pinned ? <Pin size={11} className="today-news-pin" aria-label={t('today.news.pinned')} /> : <span className="today-news-dot" aria-hidden />}
                   <span className="today-news-title">{item.title}</span>
                   <time dateTime={item.published_at}>{shortDate(item.published_at)}</time>
                 </button>
@@ -68,7 +70,7 @@ export function NewsWidget() {
           })}
         </ul>
       ) : (
-        <div className="today-widget-empty"><strong>Мэдээ, мэдэгдэл алга</strong><span>Байгууллагын шинэ мэдээ энд харагдана.</span></div>
+        <div className="today-widget-empty"><strong>{t('today.news.emptyTitle')}</strong><span>{t('today.news.emptyBody')}</span></div>
       )}
       {open && <Suspense fallback={null}><ArticleDialog article={open} onClose={() => setOpen(null)} /></Suspense>}
     </section>

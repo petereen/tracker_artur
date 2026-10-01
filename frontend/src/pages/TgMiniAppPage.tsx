@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { acceptSession, api } from '../api/client'
@@ -29,6 +30,7 @@ async function loadTelegramSdk() {
  * a second, task-only application.
  */
 export function TgMiniAppPage() {
+  const { t } = useTranslation()
   const [state, setState] = useState<'loading' | 'ready' | 'unavailable' | 'error'>('loading')
   const setInitialized = useAuthStore((store) => store.setInitialized)
 
@@ -66,8 +68,8 @@ export function TgMiniAppPage() {
     <main className="telegram-entry-state" aria-live="polite">
       <img src="/oyuns-aio-logo.png" alt="OYUNS" />
       {state === 'error'
-        ? <><h1>Нэвтрэх боломжгүй байна</h1><p>Таны Telegram бүртгэл ERP эрхтэй эсэхийг админаасаа шалгуулна уу.</p></>
-        : <><h1>Ажлын орон зайг нээж байна…</h1><p>Таны OYUNS ERP-д аюулгүй нэвтэрч байна.</p></>}
+        ? <><h1>{t('profile.miniapp.deniedTitle')}</h1><p>{t('profile.miniapp.deniedBody')}</p></>
+        : <><h1>{t('profile.miniapp.openingTitle')}</h1><p>{t('profile.miniapp.openingBody')}</p></>}
     </main>
   )
 }

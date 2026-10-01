@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreVertical, Pencil, Trash2, UserCheck, UserRoundX, XCircle } from 'lucide-react'
@@ -25,6 +26,7 @@ export function WorkerActionsMenu({ worker, open, onOpen, onClose, onEdit, onDel
   /** Shown only for archived workers; hard-deletes a record created by mistake. */
   onPermanentDelete?: () => void
 }) {
+  const { t } = useTranslation()
   const archived = Boolean(worker.deleted_at)
   const trigger = useRef<HTMLButtonElement>(null)
   const menu = useRef<HTMLDivElement>(null)
@@ -69,14 +71,14 @@ export function WorkerActionsMenu({ worker, open, onOpen, onClose, onEdit, onDel
   }, [open, close])
 
   return <div className="employee-menu-wrap">
-    <button ref={trigger} type="button" className="employee-more-button" aria-label={`${worker.name} үйлдлүүд`} aria-haspopup="menu" aria-expanded={open} onClick={onOpen}><MoreVertical size={18} /></button>
+    <button ref={trigger} type="button" className="employee-more-button" aria-label={t('hr.workerActions.menuLabel', { name: worker.name })} aria-haspopup="menu" aria-expanded={open} onClick={onOpen}><MoreVertical size={18} /></button>
     {open && createPortal(<div ref={menu} className="employee-action-menu employee-action-menu-floating" role="menu"
       style={{ position: 'fixed', top: position?.top ?? -9999, left: position?.left ?? -9999, right: 'auto', visibility: position ? 'visible' : 'hidden' }}
       onClick={(event) => event.stopPropagation()}>
-      <button role="menuitem" onClick={onEdit}><Pencil size={15} />Засах</button>
-      <button role="menuitem" onClick={() => onSetActive(!worker.is_active)}>{worker.is_active ? <UserRoundX size={15} /> : <UserCheck size={15} />}{worker.is_active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}</button>
-      {!archived && <button role="menuitem" className="danger" onClick={onDelete}><Trash2 size={15} />Архивлах</button>}
-      {archived && onPermanentDelete && <button role="menuitem" className="danger" onClick={onPermanentDelete}><XCircle size={15} />Бүр мөсөн устгах</button>}
+      <button role="menuitem" onClick={onEdit}><Pencil size={15} />{t('hr.workerActions.edit')}</button>
+      <button role="menuitem" onClick={() => onSetActive(!worker.is_active)}>{worker.is_active ? <UserRoundX size={15} /> : <UserCheck size={15} />}{worker.is_active ? t('hr.workerActions.deactivate') : t('hr.workerActions.activate')}</button>
+      {!archived && <button role="menuitem" className="danger" onClick={onDelete}><Trash2 size={15} />{t('hr.workerActions.archive')}</button>}
+      {archived && onPermanentDelete && <button role="menuitem" className="danger" onClick={onPermanentDelete}><XCircle size={15} />{t('hr.workerActions.deleteForever')}</button>}
     </div>, document.body)}
   </div>
 }

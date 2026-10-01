@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { CalendarRange, Check, ChevronDown, X } from 'lucide-react'
 import { DateRange } from '../api/enterprise'
 
@@ -18,12 +19,7 @@ export function periodFromPreset(preset: PeriodPreset): DateRange {
   return { date_from: localDate(start), date_to: localDate(end) }
 }
 
-const OPTIONS: { key: PeriodPreset; label: string }[] = [
-  { key: 'today', label: 'Өнөөдөр' },
-  { key: 'week', label: '7 хоног' },
-  { key: 'month', label: '30 хоног' },
-  { key: 'quarter', label: '90 хоног' },
-]
+const OPTIONS: PeriodPreset[] = ['today', 'week', 'month', 'quarter']
 
 /** "2026-09-02" → "09.02"; the year is added only when the range leaves the current year. */
 function shortDate(value: string, withYear: boolean) {
@@ -46,6 +42,7 @@ const PANEL_WIDTH = 288
  * becomes a bottom sheet on phones (CSS decides; the anchor is passed as custom properties).
  */
 export function TimePeriodFilter({ preset, period, onChange }: { preset: PeriodPreset | 'custom'; period: DateRange; onChange: (preset: PeriodPreset | 'custom', period: DateRange) => void }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(period)
   const [draftPreset, setDraftPreset] = useState<PeriodPreset | 'custom'>(preset)
@@ -90,7 +87,7 @@ export function TimePeriodFilter({ preset, period, onChange }: { preset: PeriodP
     }
   }, [open])
 
-  const presetLabel = OPTIONS.find((option) => option.key === preset)?.label
+  const presetLabel = OPTIONS.includes(preset as PeriodPreset) ? t(`period.${preset}`) : undefined
   const range = rangeLabel(period)
 
   const selectPreset = (nextPreset: PeriodPreset) => {
@@ -100,7 +97,7 @@ export function TimePeriodFilter({ preset, period, onChange }: { preset: PeriodP
 
   const applyCustom = () => {
     if (!draft.date_from || !draft.date_to || draft.date_from > draft.date_to) {
-      setError('Эхлэх огноо нь дуусах огнооноос өмнө байна уу шалгана уу.')
+      setError(t('period.invalidRange'))
       return
     }
     onChange('custom', draft)
@@ -110,7 +107,7 @@ export function TimePeriodFilter({ preset, period, onChange }: { preset: PeriodP
   const panelStyle = anchor ? { '--period-picker-top': `${anchor.top}px`, '--period-picker-left': `${anchor.left}px` } as CSSProperties : undefined
 
   return <>
-    <button ref={triggerRef} type="button" className="period-picker-trigger" onClick={() => setOpen((current) => !current)} aria-haspopup="dialog" aria-expanded={open} aria-label={`Хугацаа: ${presetLabel ?? range}`}>
+    <button ref={triggerRef} type="button" className="period-picker-trigger" onClick={() => setOpen((current) => !current)} aria-haspopup="dialog" aria-expanded={open} aria-label={t('period.trigger', { value: presetLabel ?? range })}>
       <CalendarRange size={15} aria-hidden />
       <strong>{presetLabel ?? range}</strong>
       {presetLabel && <span className="period-picker-range">{range}</span>}
@@ -118,14 +115,14 @@ export function TimePeriodFilter({ preset, period, onChange }: { preset: PeriodP
     </button>
     {open && createPortal(<div className="period-picker-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close() }}>
       <section className="period-picker-panel" role="dialog" aria-modal="true" aria-labelledby="period-picker-title" style={panelStyle}>
-        <header><h2 id="period-picker-title">Хугацаа сонгох</h2><button type="button" onClick={close} aria-label="Хаах"><X size={16} /></button></header>
-        <div className="period-picker-presets">{OPTIONS.map((option) => <button type="button" key={option.key} className={draftPreset === option.key ? 'active' : ''} aria-pressed={draftPreset === option.key} onClick={() => selectPreset(option.key)}><span>{option.label}</span>{draftPreset === option.key && <Check size={15} aria-hidden />}</button>)}</div>
+        <header><h2 id="period-picker-title">{t('period.pickTitle')}</h2><button type="button" onClick={close} aria-label={t('period.close')}><X size={16} /></button></header>
+        <div className="period-picker-presets">{OPTIONS.map((option) => <button type="button" key={option} className={draftPreset === option ? 'active' : ''} aria-pressed={draftPreset === option} onClick={() => selectPreset(option)}><span>{t(`period.${option}`)}</span>{draftPreset === option && <Check size={15} aria-hidden />}</button>)}</div>
         <div className="period-picker-custom">
-          <span className="period-picker-caption">Өөрийн хугацаа</span>
-          <div><label>Эхлэх<input type="date" value={draft.date_from} onChange={(event) => { setDraftPreset('custom'); setDraft({ ...draft, date_from: event.target.value }); setError('') }} /></label><label>Дуусах<input type="date" value={draft.date_to} onChange={(event) => { setDraftPreset('custom'); setDraft({ ...draft, date_to: event.target.value }); setError('') }} /></label></div>
+          <span className="period-picker-caption">{t('period.custom')}</span>
+          <div><label>{t('period.from')}<input type="date" value={draft.date_from} onChange={(event) => { setDraftPreset('custom'); setDraft({ ...draft, date_from: event.target.value }); setError('') }} /></label><label>{t('period.to')}<input type="date" value={draft.date_to} onChange={(event) => { setDraftPreset('custom'); setDraft({ ...draft, date_to: event.target.value }); setError('') }} /></label></div>
           {error && <p role="alert">{error}</p>}
         </div>
-        <footer><button type="button" className="secondary-action" onClick={close}>Цуцлах</button><button type="button" className="primary-action" onClick={applyCustom}>Хэрэглэх</button></footer>
+        <footer><button type="button" className="secondary-action" onClick={close}>{t('period.cancel')}</button><button type="button" className="primary-action" onClick={applyCustom}>{t('period.apply')}</button></footer>
       </section>
     </div>, document.body)}
   </>

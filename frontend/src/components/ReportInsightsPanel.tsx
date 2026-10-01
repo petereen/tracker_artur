@@ -1,3 +1,5 @@
+import i18n from '../i18n'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'motion/react'
@@ -16,31 +18,16 @@ export type InsightPeriodPreset = 'week' | 'month' | 'quarter' | 'year' | 'custo
 type Tab = 'download' | 'summary' | 'chat'
 type ChatTurn = { role: 'user' | 'assistant'; content: string; degraded?: boolean }
 
-const PRESETS: Array<{ key: InsightPeriodPreset; label: string }> = [
-  { key: 'week', label: 'Долоо хоног' },
-  { key: 'month', label: 'Сар' },
-  { key: 'quarter', label: 'Улирал' },
-  { key: 'year', label: 'Жил' },
-  { key: 'custom', label: 'Сонгох' },
-]
-const REPORT_TYPES: Array<{ key: ReportType; label: string }> = [
-  { key: 'daily', label: 'Өдрийн' },
-  { key: 'weekly', label: '7 хоногийн' },
-  { key: 'monthly', label: 'Сарын' },
-  { key: 'quarterly', label: 'Улирлын' },
-  { key: 'half_yearly', label: 'Хагас жилийн' },
-  { key: 'yearly', label: 'Жилийн' },
-  { key: 'custom', label: 'Тусгай' },
-  { key: 'next_month_plan', label: 'Дараа сарын төлөвлөгөө' },
-]
-const PROMPT_CHIPS = [
-  'Энэ хугацааны ашиг, орлогын талаар тайланд юу дурдагдсан бэ?',
-  'Зардлын гол эх үүсвэр ба бууруулах боломж юу вэ?',
-  'ROI-г тооцох боломжтой өгөгдөл байна уу? Байгаа бол тооцоол.',
-  'KPI гүйцэтгэлээр хамгийн сайн ба сул ажилтнууд хэн бэ?',
-  'Бизнест хамгийн түрүүнд анхаарах 3 зүйл юу вэ?',
-  'Эрсдэл, саад бэрхшээлүүдийг нэгтгэ.',
-]
+const PRESETS: Array<{ key: InsightPeriodPreset; label: string }> = (['week', 'month', 'quarter', 'year', 'custom'] as const).map((key) => ({
+  key,
+  get label() { return i18n.t(`reports.insights.preset.${key}`) },
+}))
+const REPORT_TYPES: Array<{ key: ReportType; label: string }> = (['daily', 'weekly', 'monthly', 'quarterly', 'half_yearly', 'yearly', 'custom', 'next_month_plan'] as const).map((key) => ({
+  key,
+  get label() { return i18n.t(`reports.insights.type.${key}`) },
+}))
+// The chip text is also the question sent to the agent, so it is resolved when the button renders/clicks.
+const PROMPT_CHIPS = ['profit', 'cost', 'roi', 'kpi', 'focus', 'risk']
 
 const pad = (value: number) => String(value).padStart(2, '0')
 const isoDate = (value: Date) => `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`
@@ -70,9 +57,9 @@ export function shiftAnchor(preset: Exclude<InsightPeriodPreset, 'custom'>, anch
 
 function periodTitle(preset: InsightPeriodPreset, period: { date_from: string; date_to: string }) {
   const [year, month] = period.date_from.split('-').map(Number)
-  if (preset === 'month') return `${year} оны ${month}-р сар`
-  if (preset === 'quarter') return `${year} оны ${Math.floor((month - 1) / 3) + 1}-р улирал`
-  if (preset === 'year') return `${year} он`
+  if (preset === 'month') return i18n.t('reports.insights.monthTitle', { year, month })
+  if (preset === 'quarter') return i18n.t('reports.insights.quarterTitle', { year, quarter: Math.floor((month - 1) / 3) + 1 })
+  if (preset === 'year') return i18n.t('reports.insights.yearTitle', { year })
   return `${period.date_from} – ${period.date_to}`
 }
 
@@ -82,6 +69,7 @@ function errorDetail(error: any, fallback: string) {
 }
 
 export function ReportInsightsPanel({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('download')
   const [preset, setPreset] = useState<InsightPeriodPreset>('month')
   const [anchor, setAnchor] = useState(() => new Date())
@@ -129,10 +117,10 @@ export function ReportInsightsPanel({ onClose }: { onClose: () => void }) {
     setDownloading(true)
     try {
       const result = await downloadReportExport(exportParams)
-      toast.success(result.count > 1 ? `${result.count} тайлан zip-ээр татагдлаа` : 'Тайлан татагдлаа')
+      toast.success(result.count > 1 ? t('reports.insights.zipDownloaded', { n: result.count }) : t('reports.insights.downloaded'))
     } catch (error: any) {
       // Blob responses carry JSON errors as Blob; read them for a useful message.
-      let message = 'Татаж чадсангүй'
+      let message = t('reports.insights.downloadFailed')
       const data = error?.response?.data
       if (data instanceof Blob) { try { message = JSON.parse(await data.text()).detail || message } catch { /* keep fallback */ } }
       toast.error(message)
@@ -140,7 +128,7 @@ export function ReportInsightsPanel({ onClose }: { onClose: () => void }) {
   }
 
   const runSummary = async () => {
-    try { setSummary(await summarize.mutateAsync(summaryInput)) } catch (error) { toast.error(errorDetail(error, 'Хураангуй гаргаж чадсангүй')) }
+    try { setSummary(await summarize.mutateAsync(summaryInput)) } catch (error) { toast.error(errorDetail(error, t('reports.insights.summaryFailed'))) }
   }
 
   const ask = async (text: string) => {
@@ -155,88 +143,88 @@ export function ReportInsightsPanel({ onClose }: { onClose: () => void }) {
     } catch (error) {
       setTurns((current) => current.slice(0, -1))
       setQuestion(prompt)
-      toast.error(errorDetail(error, 'OYUNS Agent хариулж чадсангүй'))
+      toast.error(errorDetail(error, t('reports.insights.agentFailed')))
     }
   }
 
   const saveMarkdown = (content: string, suffix: string) => saveBlob(new Blob([content], { type: 'text/markdown;charset=utf-8' }), `oyuns_${suffix}_${period.date_from}_${period.date_to}.md`)
-  const copy = async (content: string) => { try { await navigator.clipboard.writeText(content); toast.success('Хуулагдлаа') } catch { toast.error('Хуулж чадсангүй') } }
+  const copy = async (content: string) => { try { await navigator.clipboard.writeText(content); toast.success(t('reports.insights.copied')) } catch { toast.error(t('reports.insights.copyFailed')) } }
 
   return createPortal(<motion.div className="sheet-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
     <motion.aside className="detail-sheet report-insights-sheet" role="dialog" aria-modal="true" aria-labelledby="report-insights-title" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', bounce: 0, duration: .4 }} onMouseDown={(event) => event.stopPropagation()}>
-      <div className="sheet-header"><div><span className="eyebrow">REPORT INSIGHTS</span><h2 id="report-insights-title">Тайлан татах ба хураангуй</h2></div><button onClick={onClose} aria-label="Хаах"><X /></button></div>
+      <div className="sheet-header"><div><span className="eyebrow">{t('reports.insights.eyebrow')}</span><h2 id="report-insights-title">{t('reports.insights.title')}</h2></div><button onClick={onClose} aria-label={t('reports.insights.close')}><X /></button></div>
 
-      <section className="report-insights-controls" aria-label="Хугацаа ба хамрах хүрээ">
-        <div className="segmented-control report-insights-presets" role="group" aria-label="Хугацаа">
+      <section className="report-insights-controls" aria-label={t('reports.insights.periodScope')}>
+        <div className="segmented-control report-insights-presets" role="group" aria-label={t('reports.insights.period')}>
           {PRESETS.map((item) => <button type="button" key={item.key} className={preset === item.key ? 'active' : ''} aria-pressed={preset === item.key} onClick={() => { setPreset(item.key); if (item.key !== 'custom') setAnchor(new Date()) }}>{item.label}</button>)}
         </div>
         {preset === 'custom'
-          ? <div className="report-insights-custom"><label>Эхлэх<input type="date" value={custom.date_from} max={custom.date_to} onChange={(event) => setCustom({ ...custom, date_from: event.target.value })} /></label><label>Дуусах<input type="date" value={custom.date_to} min={custom.date_from} onChange={(event) => setCustom({ ...custom, date_to: event.target.value })} /></label></div>
-          : <div className="report-insights-stepper"><button type="button" onClick={() => setAnchor(shiftAnchor(preset, anchor, -1))} aria-label="Өмнөх хугацаа"><ChevronLeft size={16} /></button><div><strong>{periodTitle(preset, period)}</strong><small>{period.date_from} – {period.date_to}</small></div><button type="button" onClick={() => setAnchor(shiftAnchor(preset, anchor, 1))} aria-label="Дараах хугацаа"><ChevronRight size={16} /></button></div>}
+          ? <div className="report-insights-custom"><label>{t('reports.insights.from')}<input type="date" value={custom.date_from} max={custom.date_to} onChange={(event) => setCustom({ ...custom, date_from: event.target.value })} /></label><label>{t('reports.insights.to')}<input type="date" value={custom.date_to} min={custom.date_from} onChange={(event) => setCustom({ ...custom, date_to: event.target.value })} /></label></div>
+          : <div className="report-insights-stepper"><button type="button" onClick={() => setAnchor(shiftAnchor(preset, anchor, -1))} aria-label={t('reports.insights.prevPeriod')}><ChevronLeft size={16} /></button><div><strong>{periodTitle(preset, period)}</strong><small>{period.date_from} – {period.date_to}</small></div><button type="button" onClick={() => setAnchor(shiftAnchor(preset, anchor, 1))} aria-label={t('reports.insights.nextPeriod')}><ChevronRight size={16} /></button></div>}
 
         <div className="report-insights-scope">
-          <DropdownSelect ariaLabel="Хамрах хүрээ" value={scope} onChange={(value) => setScope(value as ReportScope)} options={[{ value: 'all', label: 'Бүх ажилтан' }, { value: 'employee', label: 'Нэг ажилтан' }, { value: 'department', label: 'Хэлтэс' }]} />
-          {scope === 'employee' && <DropdownSelect ariaLabel="Ажилтан сонгох" value={employeeId} onChange={setEmployeeId} options={[{ value: '', label: 'Ажилтан сонгох…', disabled: true }, ...employees.map((item) => ({ value: String(item.id), label: `${item.name}${item.department ? ` · ${item.department}` : ''}${item.is_active ? '' : ' (идэвхгүй)'}` }))]} />}
-          {scope === 'department' && <DropdownSelect ariaLabel="Хэлтэс сонгох" value={departmentId} onChange={setDepartmentId} options={[{ value: '', label: departments.length ? 'Хэлтэс сонгох…' : 'Хэлтэс бүртгэгдээгүй', disabled: true }, ...departments.map((item) => ({ value: String(item.id), label: item.name }))]} />}
+          <DropdownSelect ariaLabel={t('reports.insights.scope')} value={scope} onChange={(value) => setScope(value as ReportScope)} options={[{ value: 'all', label: t('reports.insights.scopeAll') }, { value: 'employee', label: t('reports.insights.scopeEmployee') }, { value: 'department', label: t('reports.insights.scopeDepartment') }]} />
+          {scope === 'employee' && <DropdownSelect ariaLabel={t('reports.insights.pickEmployee')} value={employeeId} onChange={setEmployeeId} options={[{ value: '', label: t('reports.insights.pickEmployeePlaceholder'), disabled: true }, ...employees.map((item) => ({ value: String(item.id), label: `${item.name}${item.department ? ` · ${item.department}` : ''}${item.is_active ? '' : t('reports.insights.inactiveSuffix')}` }))]} />}
+          {scope === 'department' && <DropdownSelect ariaLabel={t('reports.insights.pickDepartment')} value={departmentId} onChange={setDepartmentId} options={[{ value: '', label: departments.length ? t('reports.insights.pickDepartmentPlaceholder') : t('reports.insights.noDepartments'), disabled: true }, ...departments.map((item) => ({ value: String(item.id), label: item.name }))]} />}
         </div>
-        <div className="report-insights-types" role="group" aria-label="Тайлангийн төрөл">
+        <div className="report-insights-types" role="group" aria-label={t('reports.insights.types')}>
           {REPORT_TYPES.map((item) => <label key={item.key} className={types.includes(item.key) ? 'active' : ''}><input type="checkbox" checked={types.includes(item.key)} onChange={() => toggleType(item.key)} />{item.label}</label>)}
         </div>
       </section>
 
-      <div className="segmented-control report-insights-tabs" role="tablist" aria-label="Үйлдэл">
-        <button type="button" role="tab" aria-selected={tab === 'download'} className={tab === 'download' ? 'active' : ''} onClick={() => setTab('download')}><FileArchive size={15} />Татах</button>
-        <button type="button" role="tab" aria-selected={tab === 'summary'} className={tab === 'summary' ? 'active' : ''} onClick={() => setTab('summary')}><Sparkles size={15} />Хураангуй</button>
-        <button type="button" role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}><Bot size={15} />OYUNS чат</button>
+      <div className="segmented-control report-insights-tabs" role="tablist" aria-label={t('reports.insights.action')}>
+        <button type="button" role="tab" aria-selected={tab === 'download'} className={tab === 'download' ? 'active' : ''} onClick={() => setTab('download')}><FileArchive size={15} />{t('reports.insights.download')}</button>
+        <button type="button" role="tab" aria-selected={tab === 'summary'} className={tab === 'summary' ? 'active' : ''} onClick={() => setTab('summary')}><Sparkles size={15} />{t('reports.insights.summary')}</button>
+        <button type="button" role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}><Bot size={15} />{t('reports.insights.chat')}</button>
       </div>
 
-      {!validPeriod && <p className="report-insights-note error">Эхлэх огноо дуусах огнооноос хойш байж болохгүй.</p>}
-      {validPeriod && !scopeReady && <p className="report-insights-note">{scope === 'employee' ? 'Ажилтнаа сонгоно уу.' : 'Хэлтсээ сонгоно уу.'}</p>}
+      {!validPeriod && <p className="report-insights-note error">{t('reports.insights.rangeInvalid')}</p>}
+      {validPeriod && !scopeReady && <p className="report-insights-note">{scope === 'employee' ? t('reports.insights.needEmployee') : t('reports.insights.needDepartment')}</p>}
 
-      {tab === 'download' && <section className="report-insights-body" role="tabpanel" aria-label="Татах">
+      {tab === 'download' && <section className="report-insights-body" role="tabpanel" aria-label={t('reports.insights.download')}>
         <div className="report-insights-row">
-          <span>Хавтас</span>
-          <div className="segmented-control" role="group" aria-label="Хавтасны бүтэц"><button type="button" className={groupBy === 'worker' ? 'active' : ''} aria-pressed={groupBy === 'worker'} onClick={() => setGroupBy('worker')}>Ажилтнаар</button><button type="button" className={groupBy === 'department' ? 'active' : ''} aria-pressed={groupBy === 'department'} onClick={() => setGroupBy('department')}>Хэлтсээр</button></div>
+          <span>{t('reports.insights.folders')}</span>
+          <div className="segmented-control" role="group" aria-label={t('reports.insights.folderStructure')}><button type="button" className={groupBy === 'worker' ? 'active' : ''} aria-pressed={groupBy === 'worker'} onClick={() => setGroupBy('worker')}>{t('reports.insights.byEmployee')}</button><button type="button" className={groupBy === 'department' ? 'active' : ''} aria-pressed={groupBy === 'department'} onClick={() => setGroupBy('department')}>{t('reports.insights.byDepartment')}</button></div>
         </div>
-        <label className="report-insights-toggle"><input type="checkbox" checked={approvedOnly} onChange={(event) => setApprovedOnly(event.target.checked)} />Зөвхөн батлагдсан тайлан</label>
+        <label className="report-insights-toggle"><input type="checkbox" checked={approvedOnly} onChange={(event) => setApprovedOnly(event.target.checked)} />{t('reports.insights.approvedOnly')}</label>
         <div className="report-insights-preview" aria-live="polite">
-          {preview.isFetching && !preview.data ? <span>Тооцоолж байна…</span> : preview.data && <>
-            <strong>{preview.data.report_count} тайлан{preview.data.format === 'zip' ? ' · ZIP' : preview.data.format === 'md' ? ' · Markdown файл' : ''}</strong>
-            {preview.data.groups.length > 0 && <ul>{preview.data.groups.slice(0, 12).map((group) => <li key={group.name}><FileText size={13} />{group.name}<span>{group.count}</span></li>)}{preview.data.groups.length > 12 && <li className="more">+{preview.data.groups.length - 12} хавтас</li>}</ul>}
+          {preview.isFetching && !preview.data ? <span>{t('reports.insights.counting')}</span> : preview.data && <>
+            <strong>{t('reports.insights.reportCount', { n: preview.data.report_count })}{preview.data.format === 'zip' ? ' · ZIP' : preview.data.format === 'md' ? t('reports.insights.markdownFile') : ''}</strong>
+            {preview.data.groups.length > 0 && <ul>{preview.data.groups.slice(0, 12).map((group) => <li key={group.name}><FileText size={13} />{group.name}<span>{group.count}</span></li>)}{preview.data.groups.length > 12 && <li className="more">{t('reports.insights.moreFolders', { n: preview.data.groups.length - 12 })}</li>}</ul>}
           </>}
         </div>
-        <button type="button" className="primary-action" disabled={downloading || !validPeriod || !scopeReady || !types.length || !preview.data?.report_count} onClick={download}><Download size={16} />{downloading ? 'Бэлтгэж байна…' : preview.data?.format === 'md' ? 'Тайлан татах' : 'ZIP татах'}</button>
+        <button type="button" className="primary-action" disabled={downloading || !validPeriod || !scopeReady || !types.length || !preview.data?.report_count} onClick={download}><Download size={16} />{downloading ? t('reports.insights.preparing') : preview.data?.format === 'md' ? t('reports.insights.downloadReports') : t('reports.insights.downloadZip')}</button>
       </section>}
 
-      {tab === 'summary' && <section className="report-insights-body" role="tabpanel" aria-label="Хураангуй">
-        <p className="report-insights-note">OYUNS Agent сонгосон хугацааны тайлан болон KPI-г (даалгавар, ажилласан цаг, тайлангийн идэвх) нэгтгэнэ.</p>
-        <button type="button" className="primary-action" disabled={summarize.isPending || !validPeriod || !scopeReady || !types.length} onClick={runSummary}><Sparkles size={16} />{summary ? 'Дахин гаргах' : 'Хураангуй гаргах'}</button>
+      {tab === 'summary' && <section className="report-insights-body" role="tabpanel" aria-label={t('reports.insights.summary')}>
+        <p className="report-insights-note">{t('reports.insights.summaryHint')}</p>
+        <button type="button" className="primary-action" disabled={summarize.isPending || !validPeriod || !scopeReady || !types.length} onClick={runSummary}><Sparkles size={16} />{summary ? t('reports.insights.regenerate') : t('reports.insights.generate')}</button>
         {summarize.isPending && <AiGeneratingAnimation className="report-insights-generating" />}
         {summary && !summarize.isPending && <article className="report-insights-answer">
           <div className="report-insights-kpis">
-            <span><strong>{summary.report_count}</strong>тайлан</span>
-            <span><strong>{summary.kpis.task_completion_rate ?? 0}%</strong>даалгавар дууссан</span>
-            <span><strong>{summary.kpis.tasks_overdue_open ?? 0}</strong>хэтэрсэн</span>
-            <span><strong>{((summary.kpis.worked_minutes ?? 0) / 60).toFixed(0)}ц</strong>ажилласан</span>
+            <span><strong>{summary.report_count}</strong>{t('reports.insights.reportsUnit')}</span>
+            <span><strong>{summary.kpis.task_completion_rate ?? 0}%</strong>{t('reports.insights.tasksDone')}</span>
+            <span><strong>{summary.kpis.tasks_overdue_open ?? 0}</strong>{t('reports.insights.overdue')}</span>
+            <span><strong>{((summary.kpis.worked_minutes ?? 0) / 60).toFixed(0)}{t('worktime.unit.hour')}</strong>{t('reports.insights.worked')}</span>
           </div>
-          {summary.degraded && <p className="report-insights-note">AI түр ашиглах боломжгүй тул автомат нэгтгэлийг харуулав.</p>}
+          {summary.degraded && <p className="report-insights-note">{t('reports.insights.degradedShort')}</p>}
           <div className="report-insights-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{summary.answer}</ReactMarkdown></div>
-          <footer><button type="button" className="secondary-action" onClick={() => copy(summary.answer)}><Copy size={15} />Хуулах</button><button type="button" className="secondary-action" onClick={() => saveMarkdown(summary.answer, 'summary')}><Download size={15} />.md татах</button></footer>
+          <footer><button type="button" className="secondary-action" onClick={() => copy(summary.answer)}><Copy size={15} />{t('reports.insights.copy')}</button><button type="button" className="secondary-action" onClick={() => saveMarkdown(summary.answer, 'summary')}><Download size={15} />{t('reports.insights.downloadMd')}</button></footer>
         </article>}
       </section>}
 
-      {tab === 'chat' && <section className="report-insights-body report-insights-chat" role="tabpanel" aria-label="OYUNS чат">
+      {tab === 'chat' && <section className="report-insights-body report-insights-chat" role="tabpanel" aria-label={t('reports.insights.chat')}>
         <div ref={chatLogRef} className="report-insights-chat-log" role="log" aria-live="polite">
-          {!turns.length && <div className="report-insights-chat-empty"><Bot /><strong>Тайлангаас асуух</strong><span>Ашиг, зардал, ROI, KPI эсвэл бизнест анхаарах зүйлсийн талаар асуугаарай. Хариулт зөвхөн сонгосон хугацаа ба хүрээний өгөгдөлд тулгуурлана.</span></div>}
+          {!turns.length && <div className="report-insights-chat-empty"><Bot /><strong>{t('reports.insights.askTitle')}</strong><span>{t('reports.insights.askHint')}</span></div>}
           {turns.map((turn, index) => <div key={index} className={`report-insights-turn ${turn.role}`}>
-            {turn.role === 'assistant' ? <><div className="report-insights-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.content}</ReactMarkdown></div>{turn.degraded && <small>AI түр ашиглах боломжгүй — автомат нэгтгэл</small>}<footer><button type="button" onClick={() => copy(turn.content)} aria-label="Хуулах"><Copy size={13} /></button><button type="button" onClick={() => saveMarkdown(turn.content, 'answer')} aria-label=".md татах"><Download size={13} /></button></footer></> : <p>{turn.content}</p>}
+            {turn.role === 'assistant' ? <><div className="report-insights-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.content}</ReactMarkdown></div>{turn.degraded && <small>{t('reports.insights.degradedLong')}</small>}<footer><button type="button" onClick={() => copy(turn.content)} aria-label={t('reports.insights.copy')}><Copy size={13} /></button><button type="button" onClick={() => saveMarkdown(turn.content, 'answer')} aria-label={t('reports.insights.downloadMd')}><Download size={13} /></button></footer></> : <p>{turn.content}</p>}
           </div>)}
           {chat.isPending && <AiGeneratingAnimation className="report-insights-generating" />}
         </div>
-        <div className="report-insights-chips">{PROMPT_CHIPS.map((chip) => <button type="button" key={chip} disabled={chat.isPending || !scopeReady || !validPeriod} onClick={() => ask(chip)}>{chip}</button>)}</div>
+        <div className="report-insights-chips">{PROMPT_CHIPS.map((chip) => <button type="button" key={chip} disabled={chat.isPending || !scopeReady || !validPeriod} onClick={() => ask(t(`reports.insights.chip.${chip}`))}>{t(`reports.insights.chip.${chip}`)}</button>)}</div>
         <form className="report-insights-compose" onSubmit={(event) => { event.preventDefault(); void ask(question) }}>
-          <textarea rows={2} maxLength={2000} value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void ask(question) } }} placeholder="Жишээ: Борлуулалтын хэлтсийн зардал, орлогын талаар тайланд юу бичигдсэн бэ?" aria-label="OYUNS Agent-д асуулт" />
-          <button type="submit" className="chat-send-button" disabled={!question.trim() || chat.isPending || !scopeReady || !validPeriod} aria-label="Илгээх"><Send /></button>
+          <textarea rows={2} maxLength={2000} value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void ask(question) } }} placeholder={t('reports.insights.askPlaceholder')} aria-label={t('reports.insights.askAgent')} />
+          <button type="submit" className="chat-send-button" disabled={!question.trim() || chat.isPending || !scopeReady || !validPeriod} aria-label={t('reports.insights.send')}><Send /></button>
         </form>
       </section>}
     </motion.aside>

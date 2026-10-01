@@ -1,3 +1,5 @@
+import { intlLocale } from '../../utils/locale'
+import i18n from '../../i18n'
 import type { HRAttendanceItem, HRAttendanceStatus } from '../../api/enterprise'
 
 export type PeriodMode = 'week' | 'month'
@@ -25,17 +27,19 @@ export interface GridRow {
 }
 
 export const EDITABLE_STATUSES: HRAttendanceStatus[] = ['present', 'remote', 'late', 'absent']
+/** Getters so the label follows the UI language at render time, not at import time. */
 export const STATUS_LABELS: Record<CellKind, string> = {
-  present: 'Ирсэн',
-  remote: 'Remote',
-  late: 'Хоцорсон',
-  absent: 'Ирээгүй',
-  leave: 'Чөлөө',
-  sick: 'Өвчтэй',
-  weekend_off: 'Амралтын өдөр',
-  pending: 'Бүртгэлгүй',
+  get present() { return i18n.t('worktime.attendance.present') },
+  get remote() { return i18n.t('worktime.remote') },
+  get late() { return i18n.t('worktime.attendance.late') },
+  get absent() { return i18n.t('worktime.attendance.absent') },
+  get leave() { return i18n.t('worktime.attendance.leave') },
+  get sick() { return i18n.t('worktime.attendance.sick') },
+  get weekend_off() { return i18n.t('worktime.attendance.weekendOff') },
+  get pending() { return i18n.t('worktime.attendance.pending') },
 }
-export const WEEKDAYS = ['Да', 'Мя', 'Лх', 'Пү', 'Ба', 'Бя', 'Ня']
+const WEEKDAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+export const weekdayLabel = (index: number) => i18n.t(`worktime.attendance.weekday.${WEEKDAY_KEYS[index]}`)
 
 export const toISODate = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
 const parse = (value: string) => new Date(`${value}T12:00:00`)
@@ -62,9 +66,9 @@ export function periodDates(start: string, end: string): string[] {
 }
 
 export function periodLabel(mode: PeriodMode, start: string, end: string): string {
-  if (mode === 'month') return new Intl.DateTimeFormat('mn-MN', { year: 'numeric', month: 'long' }).format(parse(start))
-  const short = new Intl.DateTimeFormat('mn-MN', { month: 'short', day: 'numeric' })
-  const long = new Intl.DateTimeFormat('mn-MN', { month: 'short', day: 'numeric', year: 'numeric' })
+  if (mode === 'month') return new Intl.DateTimeFormat(intlLocale(), { year: 'numeric', month: 'long' }).format(parse(start))
+  const short = new Intl.DateTimeFormat(intlLocale(), { month: 'short', day: 'numeric' })
+  const long = new Intl.DateTimeFormat(intlLocale(), { month: 'short', day: 'numeric', year: 'numeric' })
   return `${short.format(parse(start))} – ${long.format(parse(end))}`
 }
 
@@ -100,7 +104,7 @@ export function buildRows(items: HRAttendanceItem[], dates: string[], canEdit: b
       return classifyCell(item, canEdit, today)
     })
   }
-  return rows.sort((a, b) => a.name.localeCompare(b.name, 'mn'))
+  return rows.sort((a, b) => a.name.localeCompare(b.name, intlLocale()))
 }
 
 export const ALL_DEPARTMENTS = 'all'
@@ -139,7 +143,7 @@ export function toggleKeys(selected: ReadonlySet<string>, keys: string[], on: bo
 const csvCell = (value: string | number) => { const text = String(value); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text }
 
 export function buildCsv(rows: GridRow[], dates: string[]): string {
-  const header = ['Ажилтан', 'Хэлтэс', ...dates, 'Ирсэн', 'Remote', 'Хоцорсон', 'Ирээгүй', 'Чөлөө', 'Өвчтэй', 'Амралтын өдөр ажилласан', 'Ажилласан цаг']
+  const header = [i18n.t('worktime.attendance.csv.employee'), i18n.t('worktime.attendance.csv.department'), ...dates, STATUS_LABELS.present, STATUS_LABELS.remote, STATUS_LABELS.late, STATUS_LABELS.absent, STATUS_LABELS.leave, STATUS_LABELS.sick, i18n.t('worktime.attendance.csv.weekendWorked'), i18n.t('worktime.attendance.csv.hoursWorked')]
   const lines = [header]
   for (const row of rows) {
     const counts: Record<CellKind, number> = { present: 0, remote: 0, late: 0, absent: 0, leave: 0, sick: 0, weekend_off: 0, pending: 0 }
@@ -150,7 +154,7 @@ export function buildCsv(rows: GridRow[], dates: string[]): string {
       else counts[cell.kind] += 1
       minutes += cell.item.worked_minutes || 0
       if (cell.kind === 'weekend_off' || cell.kind === 'pending') return ''
-      return cell.overtime ? `${STATUS_LABELS[cell.kind]} (амралтын өдөр)` : STATUS_LABELS[cell.kind]
+      return cell.overtime ? i18n.t('worktime.attendance.weekendSuffix', { status: STATUS_LABELS[cell.kind] }) : STATUS_LABELS[cell.kind]
     })
     lines.push([row.name, row.departmentName ?? '', ...days, String(counts.present), String(counts.remote), String(counts.late), String(counts.absent), String(counts.leave), String(counts.sick), String(overtime), (minutes / 60).toFixed(1)])
   }

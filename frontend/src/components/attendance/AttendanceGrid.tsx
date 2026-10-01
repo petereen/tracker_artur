@@ -1,3 +1,6 @@
+import i18n from '../../i18n'
+import { useTranslation } from 'react-i18next'
+import { intlLocale } from '../../utils/locale'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -22,7 +25,7 @@ import { saveCompanyBlob, useBulkUpdateHRAttendance, useHRAttendance, useResetHR
 import type { HRAttendanceItem, HRAttendanceStatus } from '../../api/enterprise'
 import { WorktimeExportModal } from '../WorktimeExportModal'
 import {
-  ALL_DEPARTMENTS, EDITABLE_STATUSES, NO_DEPARTMENT, STATUS_LABELS, WEEKDAYS,
+  ALL_DEPARTMENTS, EDITABLE_STATUSES, NO_DEPARTMENT, STATUS_LABELS, weekdayLabel,
   buildCsv, buildRows, cellKey, chunk, filterRows, periodDates, periodLabel, periodRange, rectKeys, rowSelection, shiftPeriod, toISODate, toggleKeys, weekdayIndex,
 } from './attendanceModel'
 import type { CellKind, GridCell, GridRow, PeriodMode, Point } from './attendanceModel'
@@ -35,21 +38,20 @@ const ROW_HEIGHT: Record<PeriodMode, number> = { week: 52, month: 44 }
 const BULK_LIMIT = 500
 
 const STATUS_ICONS: Record<CellKind, LucideIcon | null> = { present: Check, remote: Laptop, late: Clock3, absent: X, leave: TreePalm, sick: Thermometer, weekend_off: null, pending: null }
-const longDate = new Intl.DateTimeFormat('mn-MN', { weekday: 'long', month: 'long', day: 'numeric' })
-const formatLongDate = (value: string) => longDate.format(new Date(`${value}T12:00:00`))
-const formatTime = (value: string | null) => value ? new Date(value).toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' }) : null
-const formatMinutes = (minutes: number) => `${Math.floor(minutes / 60)}ц ${minutes % 60}м`
+const formatLongDate = (value: string) => new Intl.DateTimeFormat(intlLocale(), { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date(`${value}T12:00:00`))
+const formatTime = (value: string | null) => value ? new Date(value).toLocaleTimeString(intlLocale(), { hour: '2-digit', minute: '2-digit' }) : null
+const formatMinutes = (minutes: number) => `${Math.floor(minutes / 60)}${i18n.t('worktime.unit.hour')} ${minutes % 60}${i18n.t('worktime.unit.minute')}`
 
 const readPeriod = (): PeriodMode => { try { return window.localStorage.getItem(PERIOD_STORAGE_KEY) === 'month' ? 'month' : 'week' } catch { return 'week' } }
 const writePeriod = (mode: PeriodMode) => { try { window.localStorage.setItem(PERIOD_STORAGE_KEY, mode) } catch { /* storage unavailable */ } }
 
 const errorText = (error: unknown) => {
   const response = (error as { response?: { status?: number; data?: { detail?: unknown } } })?.response
-  if (response?.status === 409) return 'Энэ өдрийн ирцийг өөр хэрэглэгч өөрчилсөн байна. Мэдээллийг шинэчиллээ.'
-  return typeof response?.data?.detail === 'string' ? response.data.detail : 'Ирц хадгалж чадсангүй'
+  if (response?.status === 409) return i18n.t('worktime.attendance.conflict')
+  return typeof response?.data?.detail === 'string' ? response.data.detail : i18n.t('worktime.attendance.saveFailed')
 }
 
-const describeCell = (cell: GridCell) => cell.overtime ? `${STATUS_LABELS[cell.kind]} · амралтын өдөр ажилласан` : cell.kind === 'weekend_off' && cell.item.non_working_day_name ? cell.item.non_working_day_name : STATUS_LABELS[cell.kind]
+const describeCell = (cell: GridCell) => cell.overtime ? i18n.t('worktime.attendance.weekendWorkedDesc', { status: STATUS_LABELS[cell.kind] }) : cell.kind === 'weekend_off' && cell.item.non_working_day_name ? cell.item.non_working_day_name : STATUS_LABELS[cell.kind]
 
 function StatusBadge({ kind, confirmed, overtime, compact }: { kind: CellKind; confirmed: boolean; overtime: boolean; compact: boolean }) {
   if (kind === 'weekend_off') return null
@@ -74,12 +76,13 @@ const Cell = memo(function Cell({ r, c, cell, rowName, selected, tabbable, compa
 interface RowProps { row: GridRow; r: number; selected: ReadonlySet<string>; active: Point | null; canEdit: boolean; compact: boolean; weekendCols: boolean[]; todayCol: number; onToggleRow: (row: GridRow, on: boolean) => void }
 
 const Row = memo(function Row({ row, r, selected, active, canEdit, compact, weekendCols, todayCol, onToggleRow }: RowProps) {
+  const { t } = useTranslation()
   const rowState = canEdit ? rowSelection(row, selected) : false
   const hasSelectable = row.cells.some((cell) => cell.selectable)
   return <tr role="row" aria-rowindex={r + 2} className={rowState ? 'is-row-selected' : undefined}>
     <th role="rowheader" scope="row" className="att-sticky att-name-cell"><span className="att-name-inner">
       <span className="att-row-index">{r + 1}</span>
-      {canEdit && <span className="att-row-check"><CheckboxInput label={`${row.name}: мөрийн бүх өдрийг сонгох`} isLabelHidden size="sm" value={rowState} isDisabled={!hasSelectable} onChange={(checked) => onToggleRow(row, checked)} /></span>}
+      {canEdit && <span className="att-row-check"><CheckboxInput label={t('worktime.attendance.selectRow', { name: row.name })} isLabelHidden size="sm" value={rowState} isDisabled={!hasSelectable} onChange={(checked) => onToggleRow(row, checked)} /></span>}
       <span className="att-person"><strong>{row.name}</strong>{row.departmentName && <small>{row.departmentName}</small>}</span>
     </span></th>
     {row.cells.map((cell, c) => <Cell key={cell.key} r={r} c={c} cell={cell} rowName={row.name} selected={selected.has(cell.key)} tabbable={active ? active.r === r && active.c === c : r === 0 && c === 0} compact={compact} weekend={weekendCols[c]} today={todayCol === c} />)}
@@ -89,6 +92,7 @@ const Row = memo(function Row({ row, r, selected, active, canEdit, compact, week
 interface EditorProps { cell: GridCell; rowName: string; anchor: HTMLElement; canEdit: boolean; onPick: (status: HRAttendanceStatus) => void; onReset: () => void; onClose: (restoreFocus: boolean) => void; onOpenLeave?: () => void }
 
 function CellEditor({ cell, rowName, anchor, canEdit, onPick, onReset, onClose, onOpenLeave }: EditorProps) {
+  const { t } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
   const { item } = cell
@@ -131,43 +135,45 @@ function CellEditor({ cell, rowName, anchor, canEdit, onPick, onReset, onClose, 
   }
 
   const times = [formatTime(item.first_started_at), formatTime(item.last_ended_at)].filter(Boolean).join(' – ')
-  const source = item.on_leave ? 'Батлагдсан чөлөөний хүсэлт' : item.confirmed ? 'Баталгаажсан' : item.source === 'worktime' ? 'Ажлын цагаас автоматаар' : cell.kind === 'pending' || weekendOff ? null : 'Автомат санал'
+  const source = item.on_leave ? t('worktime.attendance.source.leaveRequest') : item.confirmed ? t('worktime.attendance.source.confirmed') : item.source === 'worktime' ? t('worktime.attendance.source.worktime') : cell.kind === 'pending' || weekendOff ? null : t('worktime.attendance.source.suggested')
 
   return createPortal(<div ref={ref} className="att-editor" role="dialog" tabIndex={-1} aria-label={`${rowName} · ${formatLongDate(item.attendance_date)}`} onKeyDown={onKeyDown} style={{ top: position?.top ?? -9999, left: position?.left ?? -9999 }}>
     <header>
       <strong>{rowName}</strong>
       <span>{formatLongDate(item.attendance_date)}{item.non_working_day_name ? ` · ${item.non_working_day_name}` : ''}</span>
-      {(item.worked_minutes > 0 || source) && <small>{[item.worked_minutes > 0 ? `Ажилласан ${formatMinutes(item.worked_minutes)}` : null, times || null, source].filter(Boolean).join(' · ')}</small>}
+      {(item.worked_minutes > 0 || source) && <small>{[item.worked_minutes > 0 ? t('worktime.attendance.workedDuration', { duration: formatMinutes(item.worked_minutes) }) : null, times || null, source].filter(Boolean).join(' · ')}</small>}
     </header>
     {item.on_leave ? <div className="att-editor-note">
-      <p>{cell.kind === 'sick' ? 'Өвчний' : 'Батлагдсан'} чөлөө энэ өдрийг хамарна. Ирцийг чөлөөний хүсэлтээс засна.</p>
-      {onOpenLeave && <button type="button" role="menuitem" className="att-editor-link" onClick={() => { onClose(false); onOpenLeave() }}>Чөлөөний хүсэлт рүү очих</button>}
-    </div> : future ? <p className="att-editor-note">Ирээдүйн өдрийн ирцийг бүртгэх боломжгүй.</p>
+      <p>{cell.kind === 'sick' ? t('worktime.attendance.leaveCovers.sick') : t('worktime.attendance.leaveCovers.approved')}</p>
+      {onOpenLeave && <button type="button" role="menuitem" className="att-editor-link" onClick={() => { onClose(false); onOpenLeave() }}>{t('worktime.attendance.goToLeave')}</button>}
+    </div> : future ? <p className="att-editor-note">{t('worktime.attendance.futureLocked')}</p>
       : !cell.editable ? null
       : <>
-        {weekendOff && <p className="att-editor-note">Амралтын өдөр. Ажилласан бол илүү цагаар тэмдэглэнэ.</p>}
-        <div role="menu" aria-label="Ирцийн төлөв" className="att-editor-options">
+        {weekendOff && <p className="att-editor-note">{t('worktime.attendance.weekendHint')}</p>}
+        <div role="menu" aria-label={t('worktime.attendance.statusLabel')} className="att-editor-options">
           {options.map((status) => { const Icon = STATUS_ICONS[status]!; const current = item.confirmed && item.status === status; return <button key={status} type="button" role="menuitemradio" aria-checked={current} className={`att-editor-option att-editor-option--${status}`} onClick={() => onPick(status)}>
             <span className={`att-badge att-badge--${status}`} aria-hidden="true"><Icon size={13} strokeWidth={2.4} /></span>
-            <span>{STATUS_LABELS[status]}{weekendOff ? ' (илүү цаг)' : ''}</span>
+            <span>{STATUS_LABELS[status]}{weekendOff ? t('worktime.attendance.overtimeSuffix') : ''}</span>
             {current && <Check size={14} className="att-editor-current" aria-hidden="true" />}
           </button> })}
-          {item.confirmed && <button type="button" role="menuitem" className="att-editor-option att-editor-reset" onClick={onReset}><RotateCcw size={14} aria-hidden="true" /><span>{item.is_non_working_day ? 'Амралтын өдөр болгох' : 'Автомат төлөвт буцаах'}</span></button>}
+          {item.confirmed && <button type="button" role="menuitem" className="att-editor-option att-editor-reset" onClick={onReset}><RotateCcw size={14} aria-hidden="true" /><span>{item.is_non_working_day ? t('worktime.attendance.markWeekend') : t('worktime.attendance.resetAuto')}</span></button>}
         </div>
       </>}
   </div>, document.body)
 }
 
 function Legend() {
+  const { t } = useTranslation()
   return <HStack gap={3} wrap="wrap" vAlign="center">
     {(['present', 'remote', 'late', 'absent', 'leave', 'sick'] as const).map((kind) => <span key={kind} className="att-legend-item"><StatusBadge kind={kind} confirmed overtime={false} compact /><Text type="supporting">{STATUS_LABELS[kind]}</Text></span>)}
-    <span className="att-legend-item"><StatusBadge kind="present" confirmed overtime compact /><Text type="supporting">Амралтын өдөр ажилласан</Text></span>
-    <span className="att-legend-item"><StatusBadge kind="present" confirmed={false} overtime={false} compact /><Text type="supporting">Баталгаажаагүй (автомат)</Text></span>
-    <span className="att-legend-item"><span className="att-legend-off" aria-hidden="true" /><Text type="supporting">Амралтын өдөр</Text></span>
+    <span className="att-legend-item"><StatusBadge kind="present" confirmed overtime compact /><Text type="supporting">{t('worktime.attendance.csv.weekendWorked')}</Text></span>
+    <span className="att-legend-item"><StatusBadge kind="present" confirmed={false} overtime={false} compact /><Text type="supporting">{t('worktime.attendance.unconfirmedAuto')}</Text></span>
+    <span className="att-legend-item"><span className="att-legend-off" aria-hidden="true" /><Text type="supporting">{t('worktime.attendance.weekendOff')}</Text></span>
   </HStack>
 }
 
 export function AttendanceGrid({ canEdit, onOpenLeave }: { canEdit: boolean; onOpenLeave?: () => void }) {
+  const { t } = useTranslation()
   const today = toISODate(new Date())
   const [mode, setMode] = useState<PeriodMode>(readPeriod)
   const [anchorDate, setAnchorDate] = useState(today)
@@ -199,8 +205,8 @@ export function AttendanceGrid({ canEdit, onOpenLeave }: { canEdit: boolean; onO
   const visibleRows = useMemo(() => filterRows(rows, search, department), [rows, search, department])
   const departments = useMemo(() => {
     const seen = new Map<string, string>()
-    rows.forEach((row) => seen.set(row.departmentId === null ? NO_DEPARTMENT : String(row.departmentId), row.departmentName ?? 'Хэлтэсгүй'))
-    return [{ value: ALL_DEPARTMENTS, label: 'Бүх алба/нэгж' }, ...[...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], 'mn')).map(([value, label]) => ({ value, label }))]
+    rows.forEach((row) => seen.set(row.departmentId === null ? NO_DEPARTMENT : String(row.departmentId), row.departmentName ?? t('worktime.attendance.noDepartment')))
+    return [{ value: ALL_DEPARTMENTS, label: t('worktime.attendance.allDepartments') }, ...[...seen.entries()].sort((a, b) => a[1].localeCompare(b[1], intlLocale())).map(([value, label]) => ({ value, label }))]
   }, [rows])
   const weekendCols = useMemo(() => dates.map((date) => weekdayIndex(date) >= 5), [dates])
   const holidayCols = useMemo(() => dates.map((date) => visibleRows[0]?.cells.find((cell) => cell.item.attendance_date === date)?.item.non_working_day_name ?? null), [dates, visibleRows])
@@ -309,7 +315,7 @@ export function AttendanceGrid({ canEdit, onOpenLeave }: { canEdit: boolean; onO
 
   const batch = async (status: HRAttendanceStatus) => {
     const count = selectedCells.length
-    if (await applyStatus(selectedCells, status)) { setSelected(new Set()); toast.success(`${count} өдрийн ирц шинэчлэгдлээ`) }
+    if (await applyStatus(selectedCells, status)) { setSelected(new Set()); toast.success(t('worktime.attendance.updated', { n: count })) }
   }
 
   const toggleRow = useCallback((row: GridRow, on: boolean) => setSelected((current) => toggleKeys(current, row.cells.filter((cell) => cell.selectable).map((cell) => cell.key), on)), [])
@@ -381,7 +387,7 @@ export function AttendanceGrid({ canEdit, onOpenLeave }: { canEdit: boolean; onO
     if (event.key === 'Escape' && selected.size) { event.preventDefault(); setSelected(new Set()) }
   }
 
-  const exportCsv = () => saveCompanyBlob(new Blob([buildCsv(visibleRows, dates)], { type: 'text/csv;charset=utf-8' }), `ирц-${mode === 'month' ? start.slice(0, 7) : `${start}_${end}`}.csv`)
+  const exportCsv = () => saveCompanyBlob(new Blob([buildCsv(visibleRows, dates)], { type: 'text/csv;charset=utf-8' }), `${i18n.t('worktime.attendance.csvFilePrefix')}-${mode === 'month' ? start.slice(0, 7) : `${start}_${end}`}.csv`)
 
   const editorCell = cellAt(editor)
   const editorAnchor = editor ? scrollRef.current?.querySelector<HTMLElement>(`[data-cell="${editor.r}:${editor.c}"]`) : null
@@ -390,52 +396,52 @@ export function AttendanceGrid({ canEdit, onOpenLeave }: { canEdit: boolean; onO
   return <VStack gap={3}>
     <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
       <VStack gap={0.5}>
-        <Heading level={2}>Ирцийн бүртгэл</Heading>
-        <Text type="supporting">{visibleRows.length} ажилтан{canEdit ? ` · ${unconfirmed} баталгаажаагүй ажлын өдөр` : ''}</Text>
+        <Heading level={2}>{t('worktime.attendance.title')}</Heading>
+        <Text type="supporting">{t('worktime.attendance.employeeCount', { n: visibleRows.length })}{canEdit ? t('worktime.attendance.unconfirmedDays', { n: unconfirmed }) : ''}</Text>
       </VStack>
-      <SegmentedControl label="Хугацааны харагдац" size="sm" value={mode} onChange={(value) => { const next = value === 'month' ? 'month' : 'week'; setMode(next); writePeriod(next) }}>
-        <SegmentedControlItem value="week" label="7 хоног" />
-        <SegmentedControlItem value="month" label="Сар" />
+      <SegmentedControl label={t('worktime.attendance.viewMode')} size="sm" value={mode} onChange={(value) => { const next = value === 'month' ? 'month' : 'week'; setMode(next); writePeriod(next) }}>
+        <SegmentedControlItem value="week" label={t('worktime.attendance.week')} />
+        <SegmentedControlItem value="month" label={t('worktime.attendance.month')} />
       </SegmentedControl>
     </HStack>
 
     <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
       <HStack gap={1} vAlign="center">
-        <Button label={mode === 'week' ? 'Өмнөх 7 хоног' : 'Өмнөх сар'} isIconOnly icon={<ChevronLeft size={16} />} size="sm" variant="ghost" onClick={() => setAnchorDate(shiftPeriod(mode, anchorDate, -1))} />
+        <Button label={mode === 'week' ? t('worktime.attendance.prevWeek') : t('worktime.attendance.prevMonth')} isIconOnly icon={<ChevronLeft size={16} />} size="sm" variant="ghost" onClick={() => setAnchorDate(shiftPeriod(mode, anchorDate, -1))} />
         <Text weight="semibold" hasTabularNumbers>{periodLabel(mode, start, end)}</Text>
-        <Button label={mode === 'week' ? 'Дараагийн 7 хоног' : 'Дараагийн сар'} isIconOnly icon={<ChevronRight size={16} />} size="sm" variant="ghost" onClick={() => setAnchorDate(shiftPeriod(mode, anchorDate, 1))} />
-        <Button label={mode === 'week' ? 'Энэ 7 хоног' : 'Энэ сар'} size="sm" isDisabled={today >= start && today <= end} onClick={() => setAnchorDate(today)} />
+        <Button label={mode === 'week' ? t('worktime.attendance.nextWeek') : t('worktime.attendance.nextMonth')} isIconOnly icon={<ChevronRight size={16} />} size="sm" variant="ghost" onClick={() => setAnchorDate(shiftPeriod(mode, anchorDate, 1))} />
+        <Button label={mode === 'week' ? t('worktime.attendance.thisWeek') : t('worktime.export.thisMonth')} size="sm" isDisabled={today >= start && today <= end} onClick={() => setAnchorDate(today)} />
       </HStack>
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <TextInput label="Ажилтан хайх" isLabelHidden size="sm" placeholder="Нэр эсвэл ID…" value={searchInput} onChange={setSearchInput} hasClear width={220} />
-        <Selector label="Алба/нэгж" isLabelHidden size="sm" options={departments} value={department} onChange={(value) => setDepartment(value ?? ALL_DEPARTMENTS)} width={200} />
-        <Button label="CSV" size="sm" icon={<Download size={14} />} isDisabled={!visibleRows.length} onClick={exportCsv} tooltip="Шүүсэн жагсаалтыг татах" />
-        {canEdit && <Button label="Тайлан татах" size="sm" icon={<FileSpreadsheet size={14} />} onClick={() => setExportOpen(true)} tooltip="Ажлын цагийн дэлгэрэнгүй тайлан (CSV/Excel)" />}
+        <TextInput label={t('worktime.attendance.searchEmployee')} isLabelHidden size="sm" placeholder={t('worktime.attendance.searchPlaceholder')} value={searchInput} onChange={setSearchInput} hasClear width={220} />
+        <Selector label={t('worktime.attendance.department')} isLabelHidden size="sm" options={departments} value={department} onChange={(value) => setDepartment(value ?? ALL_DEPARTMENTS)} width={200} />
+        <Button label="CSV" size="sm" icon={<Download size={14} />} isDisabled={!visibleRows.length} onClick={exportCsv} tooltip={t('worktime.attendance.downloadFiltered')} />
+        {canEdit && <Button label={t('worktime.attendance.downloadReport')} size="sm" icon={<FileSpreadsheet size={14} />} onClick={() => setExportOpen(true)} tooltip={t('worktime.attendance.detailedReport')} />}
       </HStack>
     </HStack>
 
     {canEdit && <HStack gap={2} vAlign="center" wrap="wrap">
-      <Button label="Сонгосныг ирсэн болгох" size="sm" variant="primary" icon={<Check size={14} />} isDisabled={!count || busy} endContent={count ? <Badge label={count} /> : undefined} clickAction={() => batch('present')} />
-      <Button label="Сонгосныг remote болгох" size="sm" icon={<Laptop size={14} />} isDisabled={!count || busy} endContent={count ? <Badge label={count} /> : undefined} clickAction={() => batch('remote')} />
-      {count > 0 && <Button label="Сонголтыг цуцлах" size="sm" variant="ghost" onClick={() => setSelected(new Set())} />}
-      <Text type="supporting">Shift/Ctrl + товших эсвэл чирч олон нүд сонгоно</Text>
+      <Button label={t('worktime.attendance.bulkPresent')} size="sm" variant="primary" icon={<Check size={14} />} isDisabled={!count || busy} endContent={count ? <Badge label={count} /> : undefined} clickAction={() => batch('present')} />
+      <Button label={t('worktime.attendance.bulkRemote')} size="sm" icon={<Laptop size={14} />} isDisabled={!count || busy} endContent={count ? <Badge label={count} /> : undefined} clickAction={() => batch('remote')} />
+      {count > 0 && <Button label={t('worktime.attendance.clearSelection')} size="sm" variant="ghost" onClick={() => setSelected(new Set())} />}
+      <Text type="supporting">{t('worktime.attendance.selectHint')}</Text>
     </HStack>}
 
-    {attendance.isError ? <Banner status="error" title="Ирцийн мэдээлэл ачаалж чадсангүй" description="Сүлжээ эсвэл эрхээ шалгаад дахин оролдоно уу." collapsible={false} />
+    {attendance.isError ? <Banner status="error" title={t('worktime.attendance.loadFailed')} description={t('worktime.attendance.loadFailedBody')} collapsible={false} />
       : attendance.isLoading ? <Skeleton height={320} />
-      : !visibleRows.length ? <EmptyState title="Ажилтан олдсонгүй" description={rows.length ? 'Хайлт эсвэл алба/нэгжийн шүүлтүүрийг өөрчилнө үү.' : 'Энэ хугацаанд ирц бүртгэх ажилтан алга.'} isCompact />
+      : !visibleRows.length ? <EmptyState title={t('worktime.attendance.noEmployeesTitle')} description={rows.length ? t('worktime.attendance.noEmployeesFilter') : t('worktime.attendance.noEmployeesPeriod')} isCompact />
       : <div ref={scrollRef} className={`att-scroll${attendance.isFetching ? ' is-fetching' : ''}`} onScroll={onScroll}>
-        <table className={`att-grid att-grid--${mode}`} role="grid" aria-label={`Ирц · ${periodLabel(mode, start, end)}`} aria-rowcount={visibleRows.length + 1} aria-colcount={dates.length + 1} aria-multiselectable={canEdit || undefined}>
+        <table className={`att-grid att-grid--${mode}`} role="grid" aria-label={t('worktime.attendance.gridLabel', { period: periodLabel(mode, start, end) })} aria-rowcount={visibleRows.length + 1} aria-colcount={dates.length + 1} aria-multiselectable={canEdit || undefined}>
           <colgroup><col className="att-col-name" />{dates.map((date) => <col key={date} className="att-col-day" />)}</colgroup>
           <thead ref={headRef}>
             <tr role="row" aria-rowindex={1}>
               <th role="columnheader" scope="col" className="att-sticky att-corner"><span className="att-name-inner">
                 <span className="att-row-index">#</span>
-                {canEdit && <span className="att-row-check"><CheckboxInput label="Харагдаж буй бүх ажлын өдрийг сонгох" isLabelHidden size="sm" value={allState} isDisabled={!allSelectable.length} onChange={(checked) => setSelected(checked ? new Set(allSelectable) : new Set())} /></span>}
-                <span className="att-person"><strong>Нэр</strong></span>
+                {canEdit && <span className="att-row-check"><CheckboxInput label={t('worktime.attendance.selectAllDays')} isLabelHidden size="sm" value={allState} isDisabled={!allSelectable.length} onChange={(checked) => setSelected(checked ? new Set(allSelectable) : new Set())} /></span>}
+                <span className="att-person"><strong>{t('worktime.attendance.name')}</strong></span>
               </span></th>
               {dates.map((date, c) => <th key={date} role="columnheader" scope="col" className={['att-day-head', offCols[c] && 'is-weekend', c === todayCol && 'is-today'].filter(Boolean).join(' ')} title={holidayCols[c] ?? undefined}>
-                <span>{WEEKDAYS[weekdayIndex(date)]}</span><strong>{Number(date.slice(8))}</strong>
+                <span>{weekdayLabel(weekdayIndex(date))}</span><strong>{Number(date.slice(8))}</strong>
               </th>)}
             </tr>
           </thead>

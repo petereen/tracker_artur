@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { useTranslation } from 'react-i18next'
 import { Download, Search } from 'lucide-react'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
@@ -23,12 +24,12 @@ import {
   type AnalysisDimension, type AnalysisFilters, type AnalysisRow, type BudgetCapabilities, type BudgetKind, type BudgetLookups, type DrillFilters, type LedgerLine, type Measures,
   downloadBudgetAnalysis, useBudgetAnalysis, useBudgetTransactions, useBudgets,
 } from '../../api/budget'
-import { KIND_LABELS, ScenarioToken, VarianceDot, budgetErrorDetail, budgetErrorText, formatAmount, formatDate, formatMoney, formatPct, formatPeriod } from './shared'
+import { KIND_LABELS, ScenarioToken, VarianceDot, budgetErrorDetail, budgetErrorText, formatAmount, formatDate, formatMoney, formatPct, formatPeriod, labelMap } from './shared'
 
 type Measure = 'budgeted' | 'expected' | 'actual' | 'variance' | 'performance_pct'
-const DIMENSIONS: Record<AnalysisDimension, string> = { account: 'Төсөвт данс', group: 'Дансны бүлэг', kind: 'Төрөл', project: 'Төсөл', party_group: 'Харилцагчийн бүлэг', month: 'Сар', quarter: 'Улирал', year: 'Жил' }
+const DIMENSIONS = labelMap<AnalysisDimension>('budget.analysis.dim', ['account', 'group', 'kind', 'project', 'party_group', 'month', 'quarter', 'year'])
 const TIME: AnalysisDimension[] = ['month', 'quarter', 'year']
-const MEASURES: Record<Measure, string> = { budgeted: 'Төсөвлөсөн', expected: 'Байх ёстой', actual: 'Бодит', variance: 'Зөрүү', performance_pct: 'Гүйцэтгэл %' }
+const MEASURES = labelMap<Measure>('budget.analysis.measure', ['budgeted', 'expected', 'actual', 'variance', 'performance_pct'])
 const dimensionOptions = (exclude?: AnalysisDimension) => (Object.keys(DIMENSIONS) as AnalysisDimension[]).filter((dim) => dim !== exclude).map((value) => ({ value, label: DIMENSIONS[value] }))
 
 interface ListRow extends Record<string, unknown> { id: string; row: AnalysisRow }
@@ -56,52 +57,55 @@ function drillFilters(base: AnalysisFilters, key: AnalysisRow['key']): DrillFilt
 }
 
 function KpiCard({ title, values, currency, note }: { title: string; values: Measures; currency: string; note: string }) {
+  const { t } = useTranslation()
   const pct = values.performance_pct === null ? 0 : Number(values.performance_pct)
   return <Card padding={3}>
     <VStack gap={1.5}>
       <HStack gap={1} vAlign="center" hAlign="between"><Text type="supporting">{title}</Text><VarianceDot status={values.status} /></HStack>
       <Text type="large" weight="semibold" hasTabularNumbers>{formatMoney(values.actual, currency)}</Text>
-      <ProgressBar label={`${title} гүйцэтгэл`} isLabelHidden value={Math.max(0, Math.min(pct, 150))} max={150} hasValueLabel formatValueLabel={() => formatPct(values.performance_pct)}
+      <ProgressBar label={t('budget.analysis.kpiProgress', { title })} isLabelHidden value={Math.max(0, Math.min(pct, 150))} max={150} hasValueLabel formatValueLabel={() => formatPct(values.performance_pct)}
         variant={values.status === 'unfavorable' ? 'error' : values.status === 'favorable' ? 'success' : 'accent'} />
-      <Text type="supporting">Байх ёстой {formatMoney(values.expected, currency)} · Төсөв {formatMoney(values.budgeted, currency)}</Text>
+      <Text type="supporting">{t('budget.analysis.kpiNote', { expected: formatMoney(values.expected, currency), budgeted: formatMoney(values.budgeted, currency) })}</Text>
       <Text type="supporting">{note}</Text>
     </VStack>
   </Card>
 }
 
 function DrillDialog({ filters, title, currency, onClose }: { filters: DrillFilters; title: string; currency: string; onClose: () => void }) {
+  const { t } = useTranslation()
   const result = useBudgetTransactions(filters)
   const items: LedgerLine[] = result.data?.items ?? []
   return <Dialog isOpen onOpenChange={(open) => { if (!open) onClose() }} width={980} maxHeight="88dvh">
-    <DialogHeader title="Гүйлгээний жагсаалт" subtitle={title} onOpenChange={(open) => { if (!open) onClose() }} />
+    <DialogHeader title={t('budget.analysis.drillTitle')} subtitle={title} onOpenChange={(open) => { if (!open) onClose() }} />
     <VStack gap={3} padding={4}>
       {result.isLoading ? <Skeleton height={200} />
         : result.isError ? <Banner status="error" title={budgetErrorText(result.error)} collapsible={false} />
         : <>
           <HStack gap={3} wrap="wrap">
-            <Text>{result.data?.total_count ?? 0} гүйлгээ · Нийт <Text weight="semibold" hasTabularNumbers>{formatMoney(result.data?.total_amount, currency)}</Text></Text>
+            <Text>{t('budget.analysis.drillSummary', { n: result.data?.total_count ?? 0 })} <Text weight="semibold" hasTabularNumbers>{formatMoney(result.data?.total_amount, currency)}</Text></Text>
             <Text type="supporting">{formatPeriod(result.data?.window.date_from ?? '', result.data?.window.as_of ?? '')}</Text>
           </HStack>
-          {items.length === 0 ? <EmptyState title="Гүйлгээ алга" description="Энэ хугацаанд холбогдсон санхүүгийн дансанд бичилт хийгдээгүй байна." isCompact />
+          {items.length === 0 ? <EmptyState title={t('budget.analysis.drillEmpty')} description={t('budget.analysis.drillEmptyHint')} isCompact />
             : <Table<LedgerLine>
               data={items} idKey="id" density="compact" textOverflow="truncate"
               columns={[
-                { key: 'posting_date', header: 'Огноо', width: pixel(100), renderCell: (line) => formatDate(line.posting_date) },
-                { key: 'document_number', header: 'Баримт', width: pixel(150), renderCell: (line) => <VStack gap={0}><Text>{line.document_number}</Text><Text type="supporting">{line.document_type}</Text></VStack> },
-                { key: 'account_code', header: 'Данс', width: proportional(1), renderCell: (line) => <VStack gap={0}><Text>{line.account_code} · {line.account_name}</Text><Text type="supporting">{line.budget_account_code} · {line.budget_account_name}</Text></VStack> },
-                { key: 'party_name', header: 'Харилцагч / төсөл', width: proportional(1), renderCell: (line) => <VStack gap={0}><Text>{line.party_name || '—'}</Text><Text type="supporting">{line.project_name || ''}</Text></VStack> },
-                { key: 'memo', header: 'Гүйлгээний утга', width: proportional(1), renderCell: (line) => line.memo || '—' },
-                { key: 'debit', header: 'Дебет', align: 'end', width: pixel(110), renderCell: (line) => <Text hasTabularNumbers>{Number(line.debit) ? formatAmount(line.debit) : ''}</Text> },
-                { key: 'credit', header: 'Кредит', align: 'end', width: pixel(110), renderCell: (line) => <Text hasTabularNumbers>{Number(line.credit) ? formatAmount(line.credit) : ''}</Text> },
+                { key: 'posting_date', header: t('budget.analysis.colDate'), width: pixel(100), renderCell: (line) => formatDate(line.posting_date) },
+                { key: 'document_number', header: t('budget.analysis.colDocument'), width: pixel(150), renderCell: (line) => <VStack gap={0}><Text>{line.document_number}</Text><Text type="supporting">{line.document_type}</Text></VStack> },
+                { key: 'account_code', header: t('budget.analysis.colAccount'), width: proportional(1), renderCell: (line) => <VStack gap={0}><Text>{line.account_code} · {line.account_name}</Text><Text type="supporting">{line.budget_account_code} · {line.budget_account_name}</Text></VStack> },
+                { key: 'party_name', header: t('budget.analysis.colParty'), width: proportional(1), renderCell: (line) => <VStack gap={0}><Text>{line.party_name || '—'}</Text><Text type="supporting">{line.project_name || ''}</Text></VStack> },
+                { key: 'memo', header: t('budget.analysis.colMemo'), width: proportional(1), renderCell: (line) => line.memo || '—' },
+                { key: 'debit', header: t('budget.analysis.colDebit'), align: 'end', width: pixel(110), renderCell: (line) => <Text hasTabularNumbers>{Number(line.debit) ? formatAmount(line.debit) : ''}</Text> },
+                { key: 'credit', header: t('budget.analysis.colCredit'), align: 'end', width: pixel(110), renderCell: (line) => <Text hasTabularNumbers>{Number(line.credit) ? formatAmount(line.credit) : ''}</Text> },
               ]}
             />}
-          {(result.data?.total_count ?? 0) > items.length && <Text type="supporting">Сүүлийн {items.length} гүйлгээг харуулав.</Text>}
+          {(result.data?.total_count ?? 0) > items.length && <Text type="supporting">{t('budget.analysis.drillTruncated', { n: items.length })}</Text>}
         </>}
     </VStack>
   </Dialog>
 }
 
 export function AnalysisPanel({ capabilities, lookups }: { capabilities: BudgetCapabilities; lookups: BudgetLookups }) {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const budgetParam = Number(searchParams.get('budget')) || undefined
   const [view, setView] = useState<'list' | 'pivot'>('list')
@@ -149,37 +153,37 @@ export function AnalysisPanel({ capabilities, lookups }: { capabilities: BudgetC
   const drillFor = (row: AnalysisRow, dims: AnalysisDimension[]) => setDrill({ filters: drillFilters({ ...base, budget_id: data?.budget.id }, row.key), title: dims.map((dim) => row.labels[dim]).join(' · ') })
   const costTotals = data ? sumMeasures(data.totals.cogs, data.totals.expense) : null
 
-  if (noBudget) return <EmptyState title="Төсөв үүсгээгүй байна" description="Анализ хийхийн тулд эхлээд “Төсөв” хэсгээс төсөв үүсгэнэ үү." />
+  if (noBudget) return <EmptyState title={t('budget.analysis.noBudget')} description={t('budget.analysis.noBudgetHint')} />
 
   return <VStack gap={4}>
     <Card>
       <VStack gap={3}>
         <HStack gap={2} wrap="wrap" vAlign="end">
-          <Selector label="Төсөв" width={300} hasSearch value={String(data?.budget.id ?? budgetParam ?? '')} onChange={selectBudget}
+          <Selector label={t('budget.analysis.budget')} width={300} hasSearch value={String(data?.budget.id ?? budgetParam ?? '')} onChange={selectBudget}
             options={(budgets.data?.items ?? []).map((budget) => ({ value: String(budget.id), label: `${budget.is_primary ? '★ ' : ''}${budget.number} · ${budget.name}` }))} />
-          <DateInput label="Эхлэх" value={(range.date_from ?? data?.window.date_from) as ISODateString | undefined} onChange={(value) => setRange((current) => ({ ...current, date_from: value }))} format="system_date" width={150} />
-          <DateInput label="Дуусах" value={(range.date_to ?? data?.window.date_to) as ISODateString | undefined} onChange={(value) => setRange((current) => ({ ...current, date_to: value }))} format="system_date" width={150} />
-          <DateInput label="Байх ёстой (хүртэл)" value={(range.as_of ?? data?.window.as_of) as ISODateString | undefined} onChange={(value) => setRange((current) => ({ ...current, as_of: value }))} format="system_date" width={180}
-            labelTooltip="Төсвийг энэ өдөр хүртэл өдрөөр шугаман тооцож “байх ёстой” дүнг гаргана. Анхдагч: өнөөдөр." />
-          {(range.date_from || range.date_to || range.as_of) && <Button label="Хугацаа сэргээх" variant="ghost" size="sm" onClick={() => setRange({})} />}
+          <DateInput label={t('budget.analysis.from')} value={(range.date_from ?? data?.window.date_from) as ISODateString | undefined} onChange={(value) => setRange((current) => ({ ...current, date_from: value }))} format="system_date" width={150} />
+          <DateInput label={t('budget.analysis.to')} value={(range.date_to ?? data?.window.date_to) as ISODateString | undefined} onChange={(value) => setRange((current) => ({ ...current, date_to: value }))} format="system_date" width={150} />
+          <DateInput label={t('budget.analysis.asOf')} value={(range.as_of ?? data?.window.as_of) as ISODateString | undefined} onChange={(value) => setRange((current) => ({ ...current, as_of: value }))} format="system_date" width={180}
+            labelTooltip={t('budget.analysis.asOfHint')} />
+          {(range.date_from || range.date_to || range.as_of) && <Button label={t('budget.analysis.resetPeriod')} variant="ghost" size="sm" onClick={() => setRange({})} />}
         </HStack>
         <HStack gap={2} wrap="wrap" vAlign="end">
-          {!data?.budget.project_id && lookups.projects.length > 0 && <Selector label="Төсөл" width={200} hasSearch hasClear value={filters.project_id !== undefined ? String(filters.project_id) : null}
+          {!data?.budget.project_id && lookups.projects.length > 0 && <Selector label={t('budget.analysis.project')} width={200} hasSearch hasClear value={filters.project_id !== undefined ? String(filters.project_id) : null}
             onChange={(value) => setFilters((current) => ({ ...current, project_id: value ? Number(value) : undefined }))}
-            options={[{ value: '0', label: 'Төсөлгүй' }, ...lookups.projects.map((project) => ({ value: String(project.id), label: `${project.code} · ${project.name}` }))]} placeholder="Бүх төсөл" />}
-          {lookups.party_groups.length > 0 && <Selector label="Харилцагчийн бүлэг" width={200} hasSearch hasClear value={filters.party_group_id !== undefined ? String(filters.party_group_id) : null}
+            options={[{ value: '0', label: t('budget.analysis.noProject') }, ...lookups.projects.map((project) => ({ value: String(project.id), label: `${project.code} · ${project.name}` }))]} placeholder={t('budget.analysis.allProjects')} />}
+          {lookups.party_groups.length > 0 && <Selector label={t('budget.analysis.partyGroup')} width={200} hasSearch hasClear value={filters.party_group_id !== undefined ? String(filters.party_group_id) : null}
             onChange={(value) => setFilters((current) => ({ ...current, party_group_id: value ? Number(value) : undefined }))}
-            options={[{ value: '0', label: 'Бүлэггүй' }, ...lookups.party_groups.map((group) => ({ value: String(group.id), label: group.name }))]} placeholder="Бүх бүлэг" />}
-          <Selector label="Дансны бүлэг" width={200} hasClear value={filters.budget_group_id !== undefined ? String(filters.budget_group_id) : null}
+            options={[{ value: '0', label: t('budget.analysis.noGroup') }, ...lookups.party_groups.map((group) => ({ value: String(group.id), label: group.name }))]} placeholder={t('budget.analysis.allGroups')} />}
+          <Selector label={t('budget.analysis.accountGroup')} width={200} hasClear value={filters.budget_group_id !== undefined ? String(filters.budget_group_id) : null}
             onChange={(value) => setFilters((current) => ({ ...current, budget_group_id: value ? Number(value) : undefined }))}
-            options={lookups.groups.map((group) => ({ value: String(group.id), label: group.name }))} placeholder="Бүх бүлэг" />
-          <Selector label="Төрөл" width={150} hasClear value={filters.kind ?? null} onChange={(value) => setFilters((current) => ({ ...current, kind: (value || undefined) as BudgetKind | undefined }))}
-            options={(Object.keys(KIND_LABELS) as BudgetKind[]).map((kind) => ({ value: kind, label: KIND_LABELS[kind] }))} placeholder="Бүгд" />
+            options={lookups.groups.map((group) => ({ value: String(group.id), label: group.name }))} placeholder={t('budget.analysis.allGroups')} />
+          <Selector label={t('budget.analysis.kind')} width={150} hasClear value={filters.kind ?? null} onChange={(value) => setFilters((current) => ({ ...current, kind: (value || undefined) as BudgetKind | undefined }))}
+            options={(Object.keys(KIND_LABELS) as BudgetKind[]).map((kind) => ({ value: kind, label: KIND_LABELS[kind] }))} placeholder={t('budget.analysis.allKinds')} />
         </HStack>
       </VStack>
     </Card>
 
-    {analysis.isError && !noBudget && <Banner status="error" title="Анализ ачаалж чадсангүй" description={budgetErrorText(analysis.error)} collapsible={false} />}
+    {analysis.isError && !noBudget && <Banner status="error" title={t('budget.analysis.loadFailed')} description={budgetErrorText(analysis.error)} collapsible={false} />}
     {analysis.isLoading && <Skeleton height={260} />}
 
     {data && <>
@@ -187,39 +191,39 @@ export function AnalysisPanel({ capabilities, lookups }: { capabilities: BudgetC
         <HStack gap={1.5} vAlign="center" wrap="wrap">
           <Text weight="semibold">{data.budget.number} · {data.budget.name}</Text>
           <ScenarioToken scenario={data.budget.scenario} />
-          <Text type="supporting">{formatPeriod(data.window.date_from, data.window.date_to)} · байх ёстой: {formatDate(data.window.as_of)} хүртэл ({formatPct(data.window.elapsed_pct)} өнгөрсөн)</Text>
+          <Text type="supporting">{t('budget.analysis.windowLine', { period: formatPeriod(data.window.date_from, data.window.date_to), asOf: formatDate(data.window.as_of), elapsed: formatPct(data.window.elapsed_pct) })}</Text>
         </HStack>
-        {capabilities.budgets.export && <Button label="Excel татах" size="sm" icon={<Download size={14} />} clickAction={exportFile} />}
+        {capabilities.budgets.export && <Button label={t('budget.analysis.export')} size="sm" icon={<Download size={14} />} clickAction={exportFile} />}
       </HStack>
 
       <Grid columns={{ minWidth: 220 }} gap={3}>
-        <KpiCard title="Орлого" values={data.totals.income} currency={currency} note="Төлөвлөгөөнөөс давж байна уу?" />
-        {costTotals && <KpiCard title="Зардал (ББӨ + зардал)" values={costTotals} currency={currency} note="Төлөвлөснөөс хэтэрч байна уу?" />}
-        <KpiCard title="Ашиг" values={data.totals.profit} currency={currency} note="Төлөвлөсөн ашиг биелэх боломжтой юу?" />
+        <KpiCard title={t('budget.analysis.kpiIncome')} values={data.totals.income} currency={currency} note={t('budget.analysis.kpiIncomeNote')} />
+        {costTotals && <KpiCard title={t('budget.analysis.kpiCost')} values={costTotals} currency={currency} note={t('budget.analysis.kpiCostNote')} />}
+        <KpiCard title={t('budget.analysis.kpiProfit')} values={data.totals.profit} currency={currency} note={t('budget.analysis.kpiProfitNote')} />
       </Grid>
 
-      {data.unmapped.length > 0 && <Banner status="warning" title={`Төсөвт дансанд холбогдоогүй ${data.unmapped.length} санхүүгийн данс гүйлгээтэй байна`}
-        description="Эдгээр гүйлгээ анализд тусахгүй. “Төсөвт данс” хэсэгт холбоно уу.">
+      {data.unmapped.length > 0 && <Banner status="warning" title={t('budget.analysis.unmappedTitle', { n: data.unmapped.length })}
+        description={t('budget.analysis.unmappedHint')}>
         <VStack gap={1}>{data.unmapped.map((account) => <HStack key={account.erp_account_id} gap={2} hAlign="between">
           <Text>{account.code} · {account.name}</Text><Text hasTabularNumbers>{formatMoney(account.actual, currency)}</Text>
         </HStack>)}</VStack>
       </Banner>}
 
       <HStack gap={2} wrap="wrap" vAlign="end">
-        <SegmentedControl label="Харагдац" value={view} onChange={(value) => setView(value as 'list' | 'pivot')}>
-          <SegmentedControlItem value="list" label="Жагсаалт" />
-          <SegmentedControlItem value="pivot" label="Динамик" />
+        <SegmentedControl label={t('budget.analysis.view')} value={view} onChange={(value) => setView(value as 'list' | 'pivot')}>
+          <SegmentedControlItem value="list" label={t('budget.analysis.viewList')} />
+          <SegmentedControlItem value="pivot" label={t('budget.analysis.viewPivot')} />
         </SegmentedControl>
-        {view === 'list' ? <Selector label="Бүлэглэх" width={200} value={groupBy} onChange={(value) => setGroupBy(value as AnalysisDimension)} options={dimensionOptions()} />
+        {view === 'list' ? <Selector label={t('budget.analysis.groupBy')} width={200} value={groupBy} onChange={(value) => setGroupBy(value as AnalysisDimension)} options={dimensionOptions()} />
           : <>
-            <Selector label="Мөр" width={180} value={pivotRows} onChange={(value) => setPivotRows(value as AnalysisDimension)} options={dimensionOptions(pivotColumns).filter((option) => !(TIME.includes(option.value) && TIME.includes(pivotColumns)))} />
-            <Selector label="Багана" width={180} value={pivotColumns} onChange={(value) => setPivotColumns(value as AnalysisDimension)} options={dimensionOptions(pivotRows).filter((option) => !(TIME.includes(option.value) && TIME.includes(pivotRows)))} />
-            <Selector label="Үзүүлэлт" width={170} value={measure} onChange={(value) => setMeasure(value as Measure)} options={(Object.keys(MEASURES) as Measure[]).map((value) => ({ value, label: MEASURES[value] }))} />
+            <Selector label={t('budget.analysis.pivotRows')} width={180} value={pivotRows} onChange={(value) => setPivotRows(value as AnalysisDimension)} options={dimensionOptions(pivotColumns).filter((option) => !(TIME.includes(option.value) && TIME.includes(pivotColumns)))} />
+            <Selector label={t('budget.analysis.pivotColumns')} width={180} value={pivotColumns} onChange={(value) => setPivotColumns(value as AnalysisDimension)} options={dimensionOptions(pivotRows).filter((option) => !(TIME.includes(option.value) && TIME.includes(pivotRows)))} />
+            <Selector label={t('budget.analysis.measureLabel')} width={170} value={measure} onChange={(value) => setMeasure(value as Measure)} options={(Object.keys(MEASURES) as Measure[]).map((value) => ({ value, label: MEASURES[value] }))} />
           </>}
       </HStack>
 
       <Card padding={0}>
-        {view === 'list' ? (data.rows.length === 0 ? <EmptyState title="Мэдээлэл алга" description="Сонгосон хугацаа, шүүлтүүрт төсөв ч, бодит гүйлгээ ч байхгүй байна." />
+        {view === 'list' ? (data.rows.length === 0 ? <EmptyState title={t('budget.analysis.noData')} description={t('budget.analysis.noDataHint')} />
           : <Table<ListRow>
             data={data.rows.map((row, index) => ({ id: `${index}`, row }))}
             idKey="id" density="compact" hasHover
@@ -227,16 +231,16 @@ export function AnalysisPanel({ capabilities, lookups }: { capabilities: BudgetC
               { key: 'label', header: DIMENSIONS[groupBy], width: proportional(2, { minWidth: 220 }), renderCell: ({ row }) => <VStack gap={0}>
                 <Text weight="medium">{row.labels[groupBy]}</Text>{row.kind && groupBy !== 'kind' && <Text type="supporting">{KIND_LABELS[row.kind]}</Text>}
               </VStack> },
-              { key: 'budgeted', header: 'Төсөвлөсөн', align: 'end', width: pixel(140), renderCell: ({ row }) => <Text hasTabularNumbers>{formatAmount(row.budgeted)}</Text> },
-              { key: 'expected', header: 'Байх ёстой', align: 'end', width: pixel(140), renderCell: ({ row }) => <Text hasTabularNumbers>{formatAmount(row.expected)}</Text> },
-              { key: 'actual', header: 'Бодит', align: 'end', width: pixel(140), renderCell: ({ row }) => <Text hasTabularNumbers weight="semibold">{formatAmount(row.actual)}</Text> },
-              { key: 'variance', header: 'Зөрүү', align: 'end', width: pixel(130), renderCell: ({ row }) => <Text hasTabularNumbers>{formatAmount(row.variance)}</Text> },
-              { key: 'pct', header: 'Гүйцэтгэл', align: 'end', width: pixel(110), renderCell: ({ row }) => <Text hasTabularNumbers>{formatPct(row.performance_pct)}</Text> },
+              { key: 'budgeted', header: t('budget.analysis.colBudgeted'), align: 'end', width: pixel(140), renderCell: ({ row }) => <Text hasTabularNumbers>{formatAmount(row.budgeted)}</Text> },
+              { key: 'expected', header: t('budget.analysis.colExpected'), align: 'end', width: pixel(140), renderCell: ({ row }) => <Text hasTabularNumbers>{formatAmount(row.expected)}</Text> },
+              { key: 'actual', header: t('budget.analysis.colActual'), align: 'end', width: pixel(140), renderCell: ({ row }) => <Text hasTabularNumbers weight="semibold">{formatAmount(row.actual)}</Text> },
+              { key: 'variance', header: t('budget.analysis.colVariance'), align: 'end', width: pixel(130), renderCell: ({ row }) => <Text hasTabularNumbers>{formatAmount(row.variance)}</Text> },
+              { key: 'pct', header: t('budget.analysis.colPerformance'), align: 'end', width: pixel(110), renderCell: ({ row }) => <Text hasTabularNumbers>{formatPct(row.performance_pct)}</Text> },
               { key: 'status', header: '', width: pixel(44), renderCell: ({ row }) => <VarianceDot status={row.status} /> },
-              { key: 'drill', header: '', width: pixel(52), renderCell: ({ row }) => <IconButton label="Гүйлгээ харах" tooltip="Гүйлгээний жагсаалт" icon={<Search size={14} />} size="sm" variant="ghost" onClick={() => drillFor(row, [groupBy])} /> },
+              { key: 'drill', header: '', width: pixel(52), renderCell: ({ row }) => <IconButton label={t('budget.analysis.viewTransactions')} tooltip={t('budget.analysis.transactionList')} icon={<Search size={14} />} size="sm" variant="ghost" onClick={() => drillFor(row, [groupBy])} /> },
             ]}
           />)
-          : pivot && (pivot.rows.length === 0 ? <EmptyState title="Мэдээлэл алга" />
+          : pivot && (pivot.rows.length === 0 ? <EmptyState title={t('budget.analysis.noData')} />
             : <Table<PivotRow>
               data={pivot.rows} idKey="id" density="compact" dividers="grid" plugins={{ sticky }}
               columns={[
@@ -252,14 +256,14 @@ export function AnalysisPanel({ capabilities, lookups }: { capabilities: BudgetC
                     </HStack>
                   },
                 })),
-                { key: 'total', header: measure === 'performance_pct' ? 'Нийт %' : 'Нийт', align: 'end', width: pixel(140), renderCell: (row) => {
+                { key: 'total', header: measure === 'performance_pct' ? t('budget.analysis.totalPct') : t('budget.analysis.total'), align: 'end', width: pixel(140), renderCell: (row) => {
                   const total = sumMeasures(...Object.values(row.cells))
                   return <Text hasTabularNumbers weight="semibold">{measure === 'performance_pct' ? formatPct(total.performance_pct) : formatAmount(total[measure])}</Text>
                 } },
               ]}
             />)}
       </Card>
-      <Text type="supporting">🟢 Төлөвлөгөөг давсан (орлого их / зардал бага) · 🟡 ±5% дотор · 🔴 Хоцорсон эсвэл хэтэрсэн. Орлого эерэг, зардал сөрөг тул зөрүү эерэг бол таатай.</Text>
+      <Text type="supporting">{t('budget.analysis.legend')}</Text>
     </>}
 
     {drill && <DrillDialog filters={drill.filters} title={drill.title} currency={currency} onClose={() => setDrill(null)} />}

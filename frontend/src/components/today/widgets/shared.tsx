@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { LucideIcon } from 'lucide-react'
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
 import type { DateRange } from '../../../api/enterprise'
+import i18n from '../../../i18n'
+import { intlLocale } from '../../../utils/locale'
 
 /** One-line widget title: dense, icon + label, optional trailing actions. */
 export function WidgetHeader({ icon: Icon, title, meta, children }: { icon: LucideIcon; title: string; meta?: ReactNode; children?: ReactNode }) {
@@ -17,11 +20,6 @@ export function WidgetHeader({ icon: Icon, title, meta, children }: { icon: Luci
 // ---- week periods ----------------------------------------------------------
 
 export type WeekPeriod = 'this_week' | 'previous_week'
-
-export const WEEK_PERIOD_LABELS: Record<WeekPeriod, string> = {
-  this_week: 'Энэ долоо хоног',
-  previous_week: 'Өмнөх долоо хоног',
-}
 
 export function localDateKey(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
@@ -58,21 +56,23 @@ export function normalizePeriod(value: unknown): WeekPeriod {
 
 /** The [ This Week | Previous Week ] radio used by every period-aware widget. */
 export function WeekPeriodField({ value, onChange }: { value: WeekPeriod; onChange: (value: WeekPeriod) => void }) {
+  const { t } = useTranslation()
   return (
-    <RadioList label="Хугацаа" value={value} onChange={(next) => onChange(normalizePeriod(next))} orientation="horizontal" size="sm">
-      <RadioListItem value="this_week" label={WEEK_PERIOD_LABELS.this_week} />
-      <RadioListItem value="previous_week" label={WEEK_PERIOD_LABELS.previous_week} />
+    <RadioList label={t('today.period.label')} value={value} onChange={(next) => onChange(normalizePeriod(next))} orientation="horizontal" size="sm">
+      <RadioListItem value="this_week" label={t('today.period.thisWeek')} />
+      <RadioListItem value="previous_week" label={t('today.period.previousWeek')} />
     </RadioList>
   )
 }
 
 /** Compact [ This | Previous ] switch for a widget header: changes the period straight from the Today screen. */
 export function WeekPeriodToggle({ value, onChange }: { value: WeekPeriod; onChange: (value: WeekPeriod) => void }) {
+  const { t } = useTranslation()
   return (
-    <div className="today-period-toggle" role="radiogroup" aria-label="Хугацаа">
+    <div className="today-period-toggle" role="radiogroup" aria-label={t('today.period.label')}>
       {(['this_week', 'previous_week'] as const).map((key) => (
         <button key={key} type="button" role="radio" aria-checked={value === key} className={value === key ? 'is-active' : undefined} onClick={() => onChange(key)}>
-          {key === 'this_week' ? 'Энэ 7 хоног' : 'Өмнөх 7 хоног'}
+          {key === 'this_week' ? t('today.period.thisShort') : t('today.period.previousShort')}
         </button>
       ))}
     </div>
@@ -112,5 +112,5 @@ export function Sparkline({ points, format, label }: { points: SparkPoint[]; for
 
 export function formatHours(minutes: number) {
   const hours = Math.round((minutes / 60) * 10) / 10
-  return `${hours.toLocaleString('mn-MN')}ц`
+  return `${hours.toLocaleString(intlLocale())}${i18n.t('today.hoursUnit')}`
 }

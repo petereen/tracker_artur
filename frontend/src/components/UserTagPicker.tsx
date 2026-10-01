@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import { DropdownSelect } from './DropdownSelect'
 
@@ -12,7 +13,8 @@ type Props = {
   allLabel?: string
 }
 
-export function UserTagPicker({ label, value, users, onChange, emptyLabel = 'Хэрэглэгч сонгох…', allLabel }: Props) {
+export function UserTagPicker({ label, value, users, onChange, emptyLabel, allLabel }: Props) {
+  const { t } = useTranslation()
   const selected = value.map((id) => users.find((user) => user.id === id)).filter(Boolean) as UserOption[]
   const available = users.filter((user) => !value.includes(user.id))
   const add = (id: number) => onChange([...value, id])
@@ -20,11 +22,11 @@ export function UserTagPicker({ label, value, users, onChange, emptyLabel = 'Х�
   const selectValue = available.length ? '' : '__none__'
 
   return <div className="user-tag-picker">
-    <DropdownSelect label={label} value={selectValue} onChange={(next) => { if (next === '__all__') onChange(users.map((user) => user.id)); else if (next) add(Number(next)) }} disabled={!available.length} options={[{ value: '', label: available.length ? emptyLabel : 'Бүх хэрэглэгч сонгогдсон' }, ...(allLabel ? [{ value: '__all__', label: allLabel }] : []), ...available.map((user) => ({ value: String(user.id), label: user.name }))]} />
-    {selected.length > 0 && <div className="user-tag-list" aria-label={`${label} сонгосон хэрэглэгчид`}>
+    <DropdownSelect label={label} value={selectValue} onChange={(next) => { if (next === '__all__') onChange(users.map((user) => user.id)); else if (next) add(Number(next)) }} disabled={!available.length} options={[{ value: '', label: available.length ? emptyLabel ?? t('userTag.pick') : t('userTag.allSelected') }, ...(allLabel ? [{ value: '__all__', label: allLabel }] : []), ...available.map((user) => ({ value: String(user.id), label: user.name }))]} />
+    {selected.length > 0 && <div className="user-tag-list" aria-label={t('userTag.selectedLabel', { label })}>
       {selected.map((user) => <span className="user-tag" key={user.id}>
         <span>{user.name}</span>
-        <button type="button" onClick={() => remove(user.id)} aria-label={`${user.name} хасах`}><X size={13} /></button>
+        <button type="button" onClick={() => remove(user.id)} aria-label={t('userTag.remove', { name: user.name })}><X size={13} /></button>
       </span>)}
     </div>}
   </div>

@@ -1298,7 +1298,12 @@ body {
 .auth-form-wrap .telegram-login .native-telegram-action { margin-top: var(--spacing-0-5); }
 .auth-form-wrap .native-telegram-action { margin-top: var(--spacing-5); }
 .auth-form-wrap .login-divider { margin-top: var(--spacing-5); }
-.auth-form-wrap footer { display: flex; gap: var(--spacing-6); justify-content: center; margin-top: var(--spacing-8); }
+.auth-form-wrap footer { display: flex; gap: var(--spacing-6); justify-content: center; margin-top: var(--spacing-8); flex-wrap: wrap; align-items: center; }
+.language-switcher { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--color-border); border-radius: 999px; }
+.language-switcher button { min-width: 34px; padding: 3px 8px; border: 0; border-radius: 999px; background: transparent; color: var(--color-muted); font: inherit; font-size: var(--font-size-xs, 12px); font-weight: var(--font-weight-semibold); cursor: pointer; }
+.language-switcher button:hover { color: var(--color-text); }
+.language-switcher button[aria-pressed="true"] { background: var(--color-accent-soft); color: var(--color-accent); }
+.language-switcher button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .auth-form-wrap a:focus-visible,
 .auth-form-wrap button:focus-visible,
 .auth-form-wrap input:focus-visible {

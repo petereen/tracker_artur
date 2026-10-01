@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { Check, GripVertical, Plus, X } from 'lucide-react'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { WIDGET_CATEGORIES, type WidgetCategory, type WidgetDefinition } from './types'
+import { WIDGET_CATEGORIES, widgetDescriptionKey, widgetKeywordsKey, widgetTitleKey, type WidgetCategory, type WidgetDefinition } from './types'
 
 const DRAG_THRESHOLD = 5
 
@@ -24,6 +25,7 @@ type LibraryDrag = { definition: WidgetDefinition; pointerId: number; startX: nu
  * Cards can be dragged onto the canvas or added with "+".
  */
 export function WidgetLibrary({ widgets, placedTypes, onAdd, onDragMove, onDrop, onDragCancel, onClose }: WidgetLibraryProps) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<WidgetCategory | 'all'>('all')
   const [drag, setDrag] = useState<LibraryDrag | null>(null)
@@ -36,9 +38,9 @@ export function WidgetLibrary({ widgets, placedTypes, onAdd, onDragMove, onDrop,
     return widgets.filter((widget) => {
       if (category !== 'all' && widget.category !== category) return false
       if (!needle) return true
-      return [widget.title, widget.description, ...(widget.keywords ?? [])].join(' ').toLowerCase().includes(needle)
+      return [t(widgetTitleKey(widget.type)), t(widgetDescriptionKey(widget.type)), t(widgetKeywordsKey(widget.type)), ...(widget.keywords ?? [])].join(' ').toLowerCase().includes(needle)
     })
-  }, [category, query, widgets])
+  }, [category, query, t, widgets])
 
   useEffect(() => {
     const update = (next: LibraryDrag | null) => { dragRef.current = next; setDrag(next) }
@@ -86,22 +88,23 @@ export function WidgetLibrary({ widgets, placedTypes, onAdd, onDragMove, onDrop,
 
   return createPortal(
     <>
-      <aside className="today-library" role="complementary" aria-label="Виджетийн сан">
+      <aside className="today-library" role="complementary" aria-label={t('today.library.aria')}>
         <header className="today-library-header">
-          <div><strong>Виджет нэмэх</strong><small>Чирж байршуулах эсвэл + дарна уу</small></div>
-          <button type="button" onClick={onClose} aria-label="Виджетийн санг хаах"><X size={17} /></button>
+          <div><strong>{t('today.library.title')}</strong><small>{t('today.library.hint')}</small></div>
+          <button type="button" onClick={onClose} aria-label={t('today.library.close')}><X size={17} /></button>
         </header>
-        <TextInput label="Виджет хайх" isLabelHidden placeholder="Виджет хайх…" value={query} onChange={setQuery} hasClear size="sm" hasAutoFocus />
-        <div className="today-library-categories" role="group" aria-label="Ангилал">
-          {[{ key: 'all' as const, label: 'Бүгд' }, ...WIDGET_CATEGORIES].map((item) => (
-            <button type="button" key={item.key} className={category === item.key ? 'active' : ''} aria-pressed={category === item.key} onClick={() => setCategory(item.key)}>{item.label}</button>
+        <TextInput label={t('today.library.search')} isLabelHidden placeholder={t('today.library.searchPlaceholder')} value={query} onChange={setQuery} hasClear size="sm" hasAutoFocus />
+        <div className="today-library-categories" role="group" aria-label={t('today.library.categories')}>
+          {(['all', ...WIDGET_CATEGORIES] as const).map((item) => (
+            <button type="button" key={item} className={category === item ? 'active' : ''} aria-pressed={category === item} onClick={() => setCategory(item)}>{t(`today.category.${item}`)}</button>
           ))}
         </div>
         <div className="today-library-list">
-          {WIDGET_CATEGORIES.filter((group) => filtered.some((widget) => widget.category === group.key)).map((group) => (
-            <section key={group.key} aria-label={group.label}>
-              <h3>{group.label}</h3>
-              {filtered.filter((widget) => widget.category === group.key).map((widget) => {
+          {WIDGET_CATEGORIES.filter((group) => filtered.some((widget) => widget.category === group)).map((group) => (
+            <section key={group} aria-label={t(`today.category.${group}`)}>
+              <h3>{t(`today.category.${group}`)}</h3>
+              {filtered.filter((widget) => widget.category === group).map((widget) => {
+                const title = t(widgetTitleKey(widget.type))
                 const placed = !widget.allowMultiple && placedTypes.has(widget.type)
                 const Icon = widget.icon
                 return (
@@ -113,11 +116,11 @@ export function WidgetLibrary({ widgets, placedTypes, onAdd, onDragMove, onDrop,
                     {!placed && <GripVertical className="today-library-grip" size={14} aria-hidden />}
                     <span className="today-library-icon"><Icon size={17} aria-hidden /></span>
                     <span className="today-library-text">
-                      <strong>{widget.title}</strong>
-                      <small>{widget.description}</small>
+                      <strong>{title}</strong>
+                      <small>{t(widgetDescriptionKey(widget.type))}</small>
                     </span>
-                    <span className="today-library-size" aria-label={`Хэмжээ ${widget.defaultSize.w}×${widget.defaultSize.h}`}>{widget.defaultSize.w}×{widget.defaultSize.h}</span>
-                    <button type="button" className="today-library-add" onClick={() => onAdd(widget)} disabled={placed} aria-label={placed ? `${widget.title} нэмэгдсэн` : `${widget.title} нэмэх`} title={placed ? 'Нэмэгдсэн' : 'Нэмэх'}>
+                    <span className="today-library-size" aria-label={t('today.library.size', { w: widget.defaultSize.w, h: widget.defaultSize.h })}>{widget.defaultSize.w}×{widget.defaultSize.h}</span>
+                    <button type="button" className="today-library-add" onClick={() => onAdd(widget)} disabled={placed} aria-label={t(placed ? 'today.library.placedLabel' : 'today.library.addLabel', { title })} title={t(placed ? 'today.library.placed' : 'today.library.add')}>
                       {placed ? <Check size={15} /> : <Plus size={15} />}
                     </button>
                   </article>
@@ -125,12 +128,12 @@ export function WidgetLibrary({ widgets, placedTypes, onAdd, onDragMove, onDrop,
               })}
             </section>
           ))}
-          {filtered.length === 0 && <p className="today-library-empty">“{query}” гэсэн виджет олдсонгүй.</p>}
+          {filtered.length === 0 && <p className="today-library-empty">{t('today.library.empty', { query })}</p>}
         </div>
       </aside>
       {drag?.active && (
         <div className={`today-library-ghost${drag.overCanvas ? ' is-over' : ''}`} style={{ transform: `translate3d(${drag.x + 12}px, ${drag.y + 12}px, 0)` }} aria-hidden>
-          <drag.definition.icon size={15} />{drag.definition.title}
+          <drag.definition.icon size={15} />{t(widgetTitleKey(drag.definition.type))}
         </div>
       )}
     </>,

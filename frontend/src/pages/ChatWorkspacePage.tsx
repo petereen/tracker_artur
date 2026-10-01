@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -16,6 +17,7 @@ import { resolvePublicAssetUrl, safeLocalStorage } from '../platform/runtime'
 import { ChatCallHeader } from '../components/ChatCallHeader'
 import { AiGeneratingAnimation } from '../components/AiGeneratingAnimation'
 import { BorderBeam } from '../components/BorderBeam'
+import { intlLocale } from '../utils/locale'
 
 
 function useMobileLayout() {
@@ -58,8 +60,8 @@ function formatTimestamp(value?: string | null) {
   if (!value) return ''
   const date = new Date(value)
   const now = new Date()
-  if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' })
-  return date.toLocaleDateString('mn-MN', { month: 'short', day: 'numeric' })
+  if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString(intlLocale(), { hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleDateString(intlLocale(), { month: 'short', day: 'numeric' })
 }
 
 function Avatar({ identity, conversation, size = 'normal' }: { identity?: ChatIdentity | null; conversation?: ChatConversation; size?: 'normal' | 'large' }) {
@@ -73,30 +75,33 @@ function Avatar({ identity, conversation, size = 'normal' }: { identity?: ChatId
 }
 
 function PresenceDot({ online }: { online: boolean }) {
-  return <i className={`chat-presence ${online ? 'online' : 'offline'}`} title={online ? 'Онлайн' : 'Идэвхгүй'} aria-label={online ? 'Онлайн' : 'Идэвхгүй'} />
+  const { t } = useTranslation()
+  return <i className={`chat-presence ${online ? 'online' : 'offline'}`} title={online ? t('chat.presence.online') : t('chat.presence.offline')} aria-label={online ? t('chat.presence.online') : t('chat.presence.offline')} />
 }
 
 function ReceiptLabel({ message }: { message: ChatMessage }) {
+  const { t } = useTranslation()
   if (!message.is_mine || !message.status) return null
-  if (message.status === 'sending') return <span>Илгээж байна…</span>
-  if (message.status === 'failed') return <span className="failed">Илгээгдсэнгүй</span>
+  if (message.status === 'sending') return <span>{t('chat.status.sending')}</span>
+  if (message.status === 'failed') return <span className="failed">{t('chat.status.failed')}</span>
   if (message.receipts.total > 1) {
-    return <span><CheckCheck size={12} /> Уншсан {message.receipts.read}/{message.receipts.total} · Хүрсэн {message.receipts.delivered}/{message.receipts.total}</span>
+    return <span><CheckCheck size={12} /> {t('chat.receipt.read')} {message.receipts.read}/{message.receipts.total} {t('chat.receipt.deliveredSep')} {message.receipts.delivered}/{message.receipts.total}</span>
   }
-  if (message.status === 'read') return <span className="read"><CheckCheck size={12} /> Уншсан</span>
-  if (message.status === 'delivered') return <span><CheckCheck size={12} /> Хүрсэн</span>
-  return <span><Check size={12} /> Илгээсэн</span>
+  if (message.status === 'read') return <span className="read"><CheckCheck size={12} /> {t('chat.receipt.read')}</span>
+  if (message.status === 'delivered') return <span><CheckCheck size={12} /> {t('chat.receipt.delivered')}</span>
+  return <span><Check size={12} /> {t('chat.receipt.sent')}</span>
 }
 
 function CallHistoryMessage({ message }: { message: ChatMessage }) {
+  const { t } = useTranslation()
   const call = message.call
   if (!call) return null
-  let label = '📞 Дуудлага дууссан'
+  let label = t('chat.call.ended')
   if (call.outcome === 'completed') label += ` • ${formatDuration(call.duration_seconds)}`
-  else if (call.outcome === 'missed') label = call.direction === 'incoming' ? '📞 Аваагүй дуудлага' : '📞 Хариу өгөөгүй'
-  else if (call.outcome === 'declined') label = call.direction === 'incoming' ? '📞 Татгалзсан дуудлага' : '📞 Дуудлагаас татгалзлаа'
-  else if (call.outcome === 'canceled') label = '📞 Цуцалсан дуудлага'
-  else label = '📞 Холболт тасарсан'
+  else if (call.outcome === 'missed') label = call.direction === 'incoming' ? t('chat.call.missedIn') : t('chat.call.noAnswer')
+  else if (call.outcome === 'declined') label = call.direction === 'incoming' ? t('chat.call.declinedIn') : t('chat.call.declinedOut')
+  else if (call.outcome === 'canceled') label = t('chat.call.canceled')
+  else label = t('chat.call.lost')
   return <article id={`chat-message-${message.id}`} className="chat-call-history"><span>{label}</span><time>{formatTimestamp(message.created_at)}</time></article>
 }
 
@@ -107,31 +112,33 @@ function ConversationList({
   filter: ChatConversationFilter; onFilter: (value: ChatConversationFilter) => void;
   onSelect: (id: string) => void; onCreate: () => void; drawerRef: React.RefObject<HTMLElement>;
 }) {
+  const { t } = useTranslation()
   return (
-    <aside ref={drawerRef} className="chat-conversation-pane" aria-label="Чатын жагсаалт">
+    <aside ref={drawerRef} className="chat-conversation-pane" aria-label={t('chat.list.aria')}>
       <header className="chat-list-header">
-        <div><span className="eyebrow">OYUNS</span><h2>Чат</h2></div>
-        <button className="chat-icon-button primary" onClick={onCreate} aria-label="Шинэ чат"><Plus /></button>
+        <div><span className="eyebrow">OYUNS</span><h2>{t('chat.list.title')}</h2></div>
+        <button className="chat-icon-button primary" onClick={onCreate} aria-label={t('chat.new')}><Plus /></button>
       </header>
-      <label className="chat-search"><Search /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Хэрэглэгч, бүлэг хайх…" /></label>
-      <nav className="chat-list-filters" aria-label="Чатын шүүлтүүр">
-        {([['all', 'Бүгд'], ['unread', 'Уншаагүй'], ['groups', 'Бүлэг'], ['direct', 'Шууд'], ['archived', 'Архив']] as Array<[ChatConversationFilter, string]>).map(([value, label]) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => onFilter(value)} aria-pressed={filter === value}>{label}</button>)}
+      <label className="chat-search"><Search /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder={t('chat.list.searchPlaceholder')} /></label>
+      <nav className="chat-list-filters" aria-label={t('chat.list.filters')}>
+        {([['all', t('chat.filter.all')], ['unread', t('chat.filter.unread')], ['groups', t('chat.filter.groups')], ['direct', t('chat.filter.direct')], ['archived', t('chat.filter.archived')]] as Array<[ChatConversationFilter, string]>).map(([value, label]) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => onFilter(value)} aria-pressed={filter === value}>{label}</button>)}
       </nav>
       <div className="chat-conversation-list">
         {conversations.map((conversation) => (
           <button key={conversation.public_id} className={selectedId === conversation.public_id ? 'active' : ''} onClick={() => onSelect(conversation.public_id)}>
             <span className="chat-avatar-wrap"><Avatar conversation={conversation} />{conversation.kind === 'direct' && <PresenceDot online={conversation.presence === 'online'} />}</span>
-            <span className="chat-conversation-copy"><span><strong>{conversation.title}</strong>{conversation.is_pinned && <Pin size={12} fill="currentColor" />}{conversation.is_muted && <BellOff size={12} />}<time>{formatTimestamp(conversation.last_message?.created_at || conversation.updated_at)}</time></span><small>{conversation.last_message?.body || (conversation.kind === 'group' ? `${conversation.member_count} гишүүн` : 'Шинэ чат')}</small></span>
-            {conversation.unread_count > 0 && <b className="chat-unread-count" aria-label={`${conversation.unread_count} уншаагүй`}>{conversation.unread_count > 99 ? '99+' : conversation.unread_count}</b>}
+            <span className="chat-conversation-copy"><span><strong>{conversation.title}</strong>{conversation.is_pinned && <Pin size={12} fill="currentColor" />}{conversation.is_muted && <BellOff size={12} />}<time>{formatTimestamp(conversation.last_message?.created_at || conversation.updated_at)}</time></span><small>{conversation.last_message?.body || (conversation.kind === 'group' ? t('chat.members', { n: conversation.member_count }) : t('chat.new'))}</small></span>
+            {conversation.unread_count > 0 && <b className="chat-unread-count" aria-label={t('chat.unreadN', { n: conversation.unread_count })}>{conversation.unread_count > 99 ? '99+' : conversation.unread_count}</b>}
           </button>
         ))}
-        {!conversations.length && <div className="chat-list-empty"><MessageCircle /><strong>Чат олдсонгүй</strong><span>Шинэ чат бичиж эхлэнэ үү</span></div>}
+        {!conversations.length && <div className="chat-list-empty"><MessageCircle /><strong>{t('chat.list.emptyTitle')}</strong><span>{t('chat.list.emptyBody')}</span></div>}
       </div>
     </aside>
   )
 }
 
 function NewChatDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (conversation: ChatConversation) => void }) {
+  const { t } = useTranslation()
   const [mode, setMode] = useState<'direct' | 'group'>('direct')
   const [search, setSearch] = useState('')
   const [title, setTitle] = useState('')
@@ -143,32 +150,33 @@ function NewChatDialog({ open, onClose, onCreated }: { open: boolean; onClose: (
   useEffect(() => { if (!open) { setSearch(''); setTitle(''); setSelected([]); setMode('direct') } }, [open])
   if (!open) return null
   const chooseDirect = async (contact: ChatIdentity) => {
-    try { onCreated(await openDirect.mutateAsync(contact.is_agent ? { agent: true } : { account_id: contact.account_id })) } catch (error: any) { toast.error(error.response?.data?.detail || 'Чат нээж чадсангүй') }
+    try { onCreated(await openDirect.mutateAsync(contact.is_agent ? { agent: true } : { account_id: contact.account_id })) } catch (error: any) { toast.error(error.response?.data?.detail || t('chat.openFailed')) }
   }
   const create = async () => {
     if (!title.trim() || selected.length < 2) return
-    try { onCreated(await createGroup.mutateAsync({ title: title.trim(), member_account_ids: selected })) } catch (error: any) { toast.error(error.response?.data?.detail || 'Бүлэг үүссэнгүй') }
+    try { onCreated(await createGroup.mutateAsync({ title: title.trim(), member_account_ids: selected })) } catch (error: any) { toast.error(error.response?.data?.detail || t('chat.createGroupFailed')) }
   }
   return createPortal(<div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}>
     <section ref={modalRef} className="chat-modal" role="dialog" aria-modal="true" aria-labelledby="new-chat-title">
-      <header><div><span className="eyebrow">OYUNS CHAT</span><h2 id="new-chat-title">Шинэ чат</h2></div><button className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
-      <div className="chat-segments"><button className={mode === 'direct' ? 'active' : ''} onClick={() => setMode('direct')}>Шууд чат</button><button className={mode === 'group' ? 'active' : ''} onClick={() => setMode('group')}>Бүлэг</button></div>
-      {mode === 'group' && <label className="chat-field"><span>Бүлгийн нэр</span><input value={title} maxLength={80} onChange={(event) => setTitle(event.target.value)} placeholder="Жишээ: Маркетингийн баг" /></label>}
-      <label className="chat-search"><Search /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Хэрэглэгч хайх…" /></label>
+      <header><div><span className="eyebrow">{t('chat.eyebrow.chat')}</span><h2 id="new-chat-title">{t('chat.new')}</h2></div><button className="chat-icon-button" onClick={onClose} aria-label={t('chat.close')}><X /></button></header>
+      <div className="chat-segments"><button className={mode === 'direct' ? 'active' : ''} onClick={() => setMode('direct')}>{t('chat.mode.direct')}</button><button className={mode === 'group' ? 'active' : ''} onClick={() => setMode('group')}>{t('chat.filter.groups')}</button></div>
+      {mode === 'group' && <label className="chat-field"><span>{t('chat.groupName')}</span><input value={title} maxLength={80} onChange={(event) => setTitle(event.target.value)} placeholder={t('chat.groupNamePlaceholder')} /></label>}
+      <label className="chat-search"><Search /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('chat.userSearchPlaceholder')} /></label>
       <div className="chat-contact-list">
         {(contacts.data ?? []).map((contact) => {
           const checked = selected.includes(contact.account_id)
           return <button key={contact.account_id} className={contact.is_agent ? 'chat-agent-contact' : ''} onClick={() => mode === 'direct' ? chooseDirect(contact) : setSelected((current) => checked ? current.filter((id) => id !== contact.account_id) : [...current, contact.account_id])}>
-            <span className="chat-avatar-wrap"><Avatar identity={contact} />{contact.is_agent ? <i className="chat-agent-badge">AI</i> : <PresenceDot online={contact.is_online} />}</span><span><strong>{contact.name}</strong><small>{contact.is_agent ? 'Компанийн AI туслах' : contact.email}</small></span>{mode === 'group' && <i className={`chat-check ${checked ? 'selected' : ''}`}>{checked && <Check />}</i>}
+            <span className="chat-avatar-wrap"><Avatar identity={contact} />{contact.is_agent ? <i className="chat-agent-badge">AI</i> : <PresenceDot online={contact.is_online} />}</span><span><strong>{contact.name}</strong><small>{contact.is_agent ? t('chat.agentSubtitle') : contact.email}</small></span>{mode === 'group' && <i className={`chat-check ${checked ? 'selected' : ''}`}>{checked && <Check />}</i>}
           </button>
         })}
       </div>
-      {mode === 'group' && <footer><span>{selected.length} сонгосон · хамгийн багадаа 2</span><button className="chat-primary-button" disabled={!title.trim() || selected.length < 2 || createGroup.isPending} onClick={create}>Бүлэг үүсгэх</button></footer>}
+      {mode === 'group' && <footer><span>{t('chat.selectedMin2', { n: selected.length })}</span><button className="chat-primary-button" disabled={!title.trim() || selected.length < 2 || createGroup.isPending} onClick={create}>{t('chat.createGroup')}</button></footer>}
     </section>
   </div>, document.body)
 }
 
 function GroupManager({ conversation, onClose, onLeft }: { conversation: ChatConversation; onClose: () => void; onLeft: () => void }) {
+  const { t } = useTranslation()
   const [title, setTitle] = useState(conversation.title)
   const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
@@ -181,23 +189,24 @@ function GroupManager({ conversation, onClose, onLeft }: { conversation: ChatCon
   const memberIds = new Set(conversation.members.map((member) => member.account_id))
   const available = (contacts.data ?? []).filter((contact) => !memberIds.has(contact.account_id))
   const saveTitle = async () => { if (title.trim() && title.trim() !== conversation.title) await rename.mutateAsync(title.trim()) }
-  const leaveGroup = async () => { if (!window.confirm('Энэ бүлгээс гарах уу?')) return; await leave.mutateAsync(); onLeft() }
-  return createPortal(<div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section ref={modalRef} className="chat-modal chat-manage-modal" role="dialog" aria-modal="true" aria-label="Бүлгийн тохиргоо">
-    <header><div><span className="eyebrow">GROUP CHAT</span><h2>Бүлгийн тохиргоо</h2></div><button className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
-    {conversation.can_manage && <div className="chat-manage-title"><label className="chat-field"><span>Бүлгийн нэр</span><input value={title} maxLength={80} onChange={(event) => setTitle(event.target.value)} /></label><button className="chat-secondary-button" onClick={saveTitle} disabled={!title.trim() || rename.isPending}>Хадгалах</button></div>}
-    <div className="chat-member-heading"><strong>{conversation.member_count} гишүүн</strong>{conversation.can_manage && <button className="chat-secondary-button" onClick={() => setAdding((value) => !value)}><Plus /> Гишүүн нэмэх</button>}</div>
-    {adding && <><label className="chat-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Нэмэх хүн хайх…" /></label><div className="chat-contact-list compact">{available.map((contact) => <button key={contact.account_id} onClick={() => add.mutateAsync([contact.account_id])}><Avatar identity={contact} /><span><strong>{contact.name}</strong><small>{contact.email}</small></span><Plus /></button>)}</div></>}
-    <div className="chat-member-list">{conversation.members.map((member) => <div key={member.account_id}><span className="chat-avatar-wrap"><Avatar identity={member} /><PresenceDot online={member.is_online} /></span><span><strong>{member.name}</strong><small>{member.role === 'owner' ? 'Эзэмшигч' : member.email}</small></span>{conversation.can_manage && member.role !== 'owner' && <button className="chat-icon-button danger" onClick={() => remove.mutate(member.account_id)} aria-label={`${member.name}-г хасах`}><UserMinus /></button>}</div>)}</div>
-    <footer><button className="chat-danger-button" onClick={leaveGroup} disabled={leave.isPending}>Бүлгээс гарах</button></footer>
+  const leaveGroup = async () => { if (!window.confirm(t('chat.leaveConfirm'))) return; await leave.mutateAsync(); onLeft() }
+  return createPortal(<div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section ref={modalRef} className="chat-modal chat-manage-modal" role="dialog" aria-modal="true" aria-label={t('chat.groupSettings')}>
+    <header><div><span className="eyebrow">{t('chat.eyebrow.group')}</span><h2>{t('chat.groupSettings')}</h2></div><button className="chat-icon-button" onClick={onClose} aria-label={t('chat.close')}><X /></button></header>
+    {conversation.can_manage && <div className="chat-manage-title"><label className="chat-field"><span>{t('chat.groupName')}</span><input value={title} maxLength={80} onChange={(event) => setTitle(event.target.value)} /></label><button className="chat-secondary-button" onClick={saveTitle} disabled={!title.trim() || rename.isPending}>{t('chat.save')}</button></div>}
+    <div className="chat-member-heading"><strong>{t('chat.members', { n: conversation.member_count })}</strong>{conversation.can_manage && <button className="chat-secondary-button" onClick={() => setAdding((value) => !value)}><Plus /> {t('chat.addMember')}</button>}</div>
+    {adding && <><label className="chat-search"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('chat.addMemberSearch')} /></label><div className="chat-contact-list compact">{available.map((contact) => <button key={contact.account_id} onClick={() => add.mutateAsync([contact.account_id])}><Avatar identity={contact} /><span><strong>{contact.name}</strong><small>{contact.email}</small></span><Plus /></button>)}</div></>}
+    <div className="chat-member-list">{conversation.members.map((member) => <div key={member.account_id}><span className="chat-avatar-wrap"><Avatar identity={member} /><PresenceDot online={member.is_online} /></span><span><strong>{member.name}</strong><small>{member.role === 'owner' ? t('chat.owner') : member.email}</small></span>{conversation.can_manage && member.role !== 'owner' && <button className="chat-icon-button danger" onClick={() => remove.mutate(member.account_id)} aria-label={t('chat.removeMember', { name: member.name })}><UserMinus /></button>}</div>)}</div>
+    <footer><button className="chat-danger-button" onClick={leaveGroup} disabled={leave.isPending}>{t('chat.leaveGroup')}</button></footer>
   </section></div>, document.body)
 }
 
 function ReceiptDialog({ conversationId, messageId, onClose }: { conversationId: string; messageId: number; onClose: () => void }) {
+  const { t } = useTranslation()
   const receipts = useChatReceiptDetails(conversationId, messageId)
   const modalRef = useFocusTrap<HTMLElement>(true, onClose)
-  return createPortal(<div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section ref={modalRef} className="chat-modal receipt-modal" role="dialog" aria-modal="true" aria-label="Мессежийн төлөв">
-    <header><div><span className="eyebrow">MESSAGE INFO</span><h2>Мессежийн төлөв</h2></div><button className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
-    {receipts.isLoading ? <p className="chat-state">Ачаалж байна…</p> : <><div className="receipt-totals"><span><CheckCheck />Уншсан<strong>{receipts.data?.counts.read ?? 0}</strong></span><span><Check />Хүрсэн<strong>{receipts.data?.counts.delivered ?? 0}</strong></span><span><Send />Нийт<strong>{receipts.data?.counts.total ?? 0}</strong></span></div><div className="receipt-list">{receipts.data?.items.map((item) => <div key={item.account.account_id}><Avatar identity={item.account} /><span><strong>{item.account.name}</strong><small>{item.status === 'read' ? `Уншсан · ${formatTimestamp(item.read_at)}` : item.status === 'delivered' ? `Хүрсэн · ${formatTimestamp(item.delivered_at)}` : 'Илгээсэн'}</small></span></div>)}</div></>}
+  return createPortal(<div className="chat-modal-backdrop" onPointerDown={(event) => { if (event.currentTarget === event.target) onClose() }}><section ref={modalRef} className="chat-modal receipt-modal" role="dialog" aria-modal="true" aria-label={t('chat.receipt.title')}>
+    <header><div><span className="eyebrow">{t('chat.eyebrow.info')}</span><h2>{t('chat.receipt.title')}</h2></div><button className="chat-icon-button" onClick={onClose} aria-label={t('chat.close')}><X /></button></header>
+    {receipts.isLoading ? <p className="chat-state">{t('common.loading')}</p> : <><div className="receipt-totals"><span><CheckCheck />{t('chat.receipt.read')}<strong>{receipts.data?.counts.read ?? 0}</strong></span><span><Check />{t('chat.receipt.delivered')}<strong>{receipts.data?.counts.delivered ?? 0}</strong></span><span><Send />{t('chat.receipt.total')}<strong>{receipts.data?.counts.total ?? 0}</strong></span></div><div className="receipt-list">{receipts.data?.items.map((item) => <div key={item.account.account_id}><Avatar identity={item.account} /><span><strong>{item.account.name}</strong><small>{item.status === 'read' ? t('chat.readAt', { time: formatTimestamp(item.read_at) }) : item.status === 'delivered' ? t('chat.deliveredAt', { time: formatTimestamp(item.delivered_at) }) : t('chat.receipt.sent')}</small></span></div>)}</div></>}
   </section></div>, document.body)
 }
 
@@ -229,6 +238,7 @@ function WaveformBars({ values, progress = 0, recording = false }: { values: num
 }
 
 function RecordingVisualizer({ stream }: { stream: MediaStream | null }) {
+  const { t } = useTranslation()
   const [levels, setLevels] = useState<number[]>(() => Array.from({ length: 28 }, () => 0.18))
   useEffect(() => {
     if (!stream) return
@@ -247,10 +257,11 @@ function RecordingVisualizer({ stream }: { stream: MediaStream | null }) {
     update()
     return () => { cancelAnimationFrame(frame); source.disconnect(); analyser.disconnect(); void context.close() }
   }, [stream])
-  return <div className="chat-recording-visualizer" role="status" aria-label="Аудио бичиж байна"><WaveformBars values={levels} recording /><span>Бичиж байна…</span></div>
+  return <div className="chat-recording-visualizer" role="status" aria-label={t('chat.recording.aria')}><WaveformBars values={levels} recording /><span>{t('chat.recording.label')}</span></div>
 }
 
 function VoiceMessagePlayer({ conversationId, attachment }: { conversationId: string; attachment: ChatAttachment }) {
+  const { t } = useTranslation()
   const audioRef = useRef<HTMLAudioElement>(null)
   const waveformRef = useRef<HTMLButtonElement>(null)
   const [url, setUrl] = useState<string>()
@@ -318,14 +329,15 @@ function VoiceMessagePlayer({ conversationId, attachment }: { conversationId: st
   }
 
   return <div className="chat-voice-player">
-    <button className="chat-voice-toggle" onClick={toggle} disabled={!url} aria-label={playing ? 'Түр зогсоох' : 'Тоглуулах'}>{playing ? <Pause /> : <Play />}</button>
-    <div className="chat-voice-track"><button ref={waveformRef} className="chat-waveform-button" onPointerDown={seek} aria-label="Дууны байрлал сонгох"><WaveformBars values={waveform.length ? waveform : Array.from({ length: 44 }, () => 0.2)} progress={duration ? current / duration : 0} /></button><div className="chat-voice-meta"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div></div>
-    <button className="chat-voice-speed" onClick={() => setSpeed((value) => value >= 2 ? 1 : value + 0.5)} aria-label={`Хурд ${speed}x`}>{speed}x</button>
+    <button className="chat-voice-toggle" onClick={toggle} disabled={!url} aria-label={playing ? t('chat.voice.pause') : t('chat.voice.play')}>{playing ? <Pause /> : <Play />}</button>
+    <div className="chat-voice-track"><button ref={waveformRef} className="chat-waveform-button" onPointerDown={seek} aria-label={t('chat.voice.seek')}><WaveformBars values={waveform.length ? waveform : Array.from({ length: 44 }, () => 0.2)} progress={duration ? current / duration : 0} /></button><div className="chat-voice-meta"><span>{formatDuration(current)}</span><span>{formatDuration(duration)}</span></div></div>
+    <button className="chat-voice-speed" onClick={() => setSpeed((value) => value >= 2 ? 1 : value + 0.5)} aria-label={t('chat.speed', { speed })}>{speed}x</button>
     <audio ref={audioRef} src={url} preload="metadata" onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || duration)} onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); setCurrent(0) }} />
   </div>
 }
 
 function ChatAttachmentView({ conversationId, attachment }: { conversationId: string; attachment: ChatAttachment }) {
+  const { t } = useTranslation()
   const [url, setUrl] = useState<string>()
   const [loading, setLoading] = useState(false)
   useEffect(() => {
@@ -340,47 +352,50 @@ function ChatAttachmentView({ conversationId, attachment }: { conversationId: st
     try {
       const objectUrl = await downloadChatAttachment(conversationId, attachment)
       const anchor = document.createElement('a'); anchor.href = objectUrl; anchor.download = attachment.filename; anchor.click(); URL.revokeObjectURL(objectUrl)
-    } catch { toast.error('Файл татаж чадсангүй') } finally { setLoading(false) }
+    } catch { toast.error(t('chat.fileDownloadFailed')) } finally { setLoading(false) }
   }
-  if (attachment.media_kind === 'image') return <button className="chat-media-image" onClick={download} aria-label={`${attachment.filename} татах`}>{url ? <img src={url} alt={attachment.filename} /> : <span>Зураг ачаалж байна…</span>}</button>
-  if (attachment.media_kind === 'video') return <div className="chat-media-player">{url ? <video controls preload="metadata" src={url} /> : <span>Видео ачаалж байна…</span>}<small>{attachment.filename} · {formatBytes(attachment.size)}</small></div>
+  if (attachment.media_kind === 'image') return <button className="chat-media-image" onClick={download} aria-label={t('chat.download', { name: attachment.filename })}>{url ? <img src={url} alt={attachment.filename} /> : <span>{t('chat.imageLoading')}</span>}</button>
+  if (attachment.media_kind === 'video') return <div className="chat-media-player">{url ? <video controls preload="metadata" src={url} /> : <span>{t('chat.videoLoading')}</span>}<small>{attachment.filename} · {formatBytes(attachment.size)}</small></div>
   if (attachment.media_kind === 'audio') return <div className="chat-media-player audio"><VoiceMessagePlayer conversationId={conversationId} attachment={attachment} /><small>{attachment.filename} · {formatBytes(attachment.size)}</small></div>
   return <button className="chat-document-card" onClick={download} disabled={loading}><FileText /><span><strong>{attachment.filename}</strong><small>{formatBytes(attachment.size)} · {attachment.content_type}</small></span><Download /></button>
 }
 
 function CompanyFileAttachmentView({ attachment }: { attachment: CompanyFileChatAttachment }) {
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const download = async () => {
     setLoading(true)
     try {
       const objectUrl = await downloadCompanyFileChatAttachment(attachment)
       const anchor = document.createElement('a'); anchor.href = objectUrl; anchor.download = attachment.filename; anchor.click(); URL.revokeObjectURL(objectUrl)
-    } catch { toast.error('Компанийн файл татаж чадсангүй') } finally { setLoading(false) }
+    } catch { toast.error(t('chat.companyFileDownloadFailed')) } finally { setLoading(false) }
   }
   return <button className="chat-document-card" onClick={download} disabled={loading}><FileText /><span><strong>{attachment.filename}</strong><small>{attachment.size ? formatBytes(attachment.size) : ''} · {attachment.content_type}</small></span><Download /></button>
 }
 
 function ChatSearchPanel({ conversationId, onClose, onOpenResult }: { conversationId?: string; onClose: () => void; onOpenResult: (conversationId: string, messageId: number) => void }) {
+  const { t } = useTranslation()
   const [scope, setScope] = useState<'conversation' | 'global'>(conversationId ? 'conversation' : 'global')
   const [search, setSearch] = useState('')
   const results = useChatSearch(search, scope === 'conversation' ? conversationId : undefined, search.trim().length >= 2)
   const panelRef = useFocusTrap<HTMLElement>(true, onClose)
-  return <aside ref={panelRef} className="chat-side-panel chat-search-panel" role="dialog" aria-modal="true" aria-label="Мессеж хайх">
-    <header><div><span className="eyebrow">SEARCH</span><h2>Мессеж хайх</h2></div><button className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
-    <div className="chat-segments"><button className={scope === 'conversation' ? 'active' : ''} disabled={!conversationId} onClick={() => setScope('conversation')}>Энэ чат</button><button className={scope === 'global' ? 'active' : ''} onClick={() => setScope('global')}>Бүх чат</button></div>
-    <label className="chat-search"><Search /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Түүхээс хайх…" /></label>
-    <div className="chat-search-results">{results.isFetching && <p>Хайж байна…</p>}{results.data?.items.map((item) => <button key={`${item.conversation.public_id}-${item.message.id}`} onClick={() => onOpenResult(item.conversation.public_id, item.message.id)}><strong>{item.conversation.title}</strong><span>{item.message.sender?.name || 'Unknown'} · {formatTimestamp(item.message.created_at)}</span><p>{item.message.body || item.message.attachments?.map((file) => file.filename).join(', ')}</p></button>)}{search.trim().length >= 2 && !results.isFetching && !results.data?.items.length && <p>Илэрц олдсонгүй.</p>}</div>
+  return <aside ref={panelRef} className="chat-side-panel chat-search-panel" role="dialog" aria-modal="true" aria-label={t('chat.search.title')}>
+    <header><div><span className="eyebrow">{t('chat.eyebrow.search')}</span><h2>{t('chat.search.title')}</h2></div><button className="chat-icon-button" onClick={onClose} aria-label={t('chat.close')}><X /></button></header>
+    <div className="chat-segments"><button className={scope === 'conversation' ? 'active' : ''} disabled={!conversationId} onClick={() => setScope('conversation')}>{t('chat.search.thisChat')}</button><button className={scope === 'global' ? 'active' : ''} onClick={() => setScope('global')}>{t('chat.search.allChats')}</button></div>
+    <label className="chat-search"><Search /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('chat.search.placeholder')} /></label>
+    <div className="chat-search-results">{results.isFetching && <p>{t('chat.search.searching')}</p>}{results.data?.items.map((item) => <button key={`${item.conversation.public_id}-${item.message.id}`} onClick={() => onOpenResult(item.conversation.public_id, item.message.id)}><strong>{item.conversation.title}</strong><span>{item.message.sender?.name || 'Unknown'} · {formatTimestamp(item.message.created_at)}</span><p>{item.message.body || item.message.attachments?.map((file) => file.filename).join(', ')}</p></button>)}{search.trim().length >= 2 && !results.isFetching && !results.data?.items.length && <p>{t('chat.search.noResults')}</p>}</div>
   </aside>
 }
 
 function ThreadPanel({ conversationId, rootId, onClose, onReply }: { conversationId: string; rootId: number; onClose: () => void; onReply: (message: ChatMessage) => void }) {
+  const { t } = useTranslation()
   const thread = useChatThread(conversationId, rootId)
   const items = thread.data ? [thread.data.root, ...thread.data.items] : []
   const panelRef = useFocusTrap<HTMLElement>(true, onClose)
-  return <aside ref={panelRef} className="chat-side-panel chat-thread-panel" role="dialog" aria-modal="true" aria-label="Мессежийн thread">
-    <header><div><span className="eyebrow">THREAD</span><h2>Хариултууд</h2></div><button className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
-    <div>{thread.isLoading && <p>Ачаалж байна…</p>}{items.map((message) => <article key={message.id}><strong>{message.sender?.name}</strong><p>{message.is_deleted ? 'Энэ мессеж устгагдсан' : message.body || 'Хавсралт'}</p><small>{formatTimestamp(message.created_at)}</small></article>)}</div>
-    {thread.data?.root && <button className="chat-primary-button" onClick={() => onReply(thread.data!.root)}><Reply /> Thread-д хариулах</button>}
+  return <aside ref={panelRef} className="chat-side-panel chat-thread-panel" role="dialog" aria-modal="true" aria-label={t('chat.thread.aria')}>
+    <header><div><span className="eyebrow">{t('chat.eyebrow.thread')}</span><h2>{t('chat.thread.title')}</h2></div><button className="chat-icon-button" onClick={onClose} aria-label={t('chat.close')}><X /></button></header>
+    <div>{thread.isLoading && <p>{t('common.loading')}</p>}{items.map((message) => <article key={message.id}><strong>{message.sender?.name}</strong><p>{message.is_deleted ? t('chat.message.deleted') : message.body || t('chat.message.attachment')}</p><small>{formatTimestamp(message.created_at)}</small></article>)}</div>
+    {thread.data?.root && <button className="chat-primary-button" onClick={() => onReply(thread.data!.root)}><Reply /> {t('chat.thread.reply')}</button>}
   </aside>
 }
 
@@ -451,9 +466,10 @@ function ChatActionMenu({ anchorRef, boundsRef, onClose, children }: ChatActionM
 }
 
 function ForwardDialog({ message, conversations, onClose, onForward }: { message: ChatMessage; conversations: ChatConversation[]; onClose: () => void; onForward: (ids: string[]) => void }) {
+  const { t } = useTranslation()
   const [selected, setSelected] = useState<string[]>([])
   const modalRef = useFocusTrap<HTMLElement>(true, onClose)
-  return createPortal(<div className="chat-modal-backdrop"><section ref={modalRef} className="chat-modal" role="dialog" aria-modal="true" aria-label="Мессеж дамжуулах"><header><div><span className="eyebrow">FORWARD</span><h2>Мессеж дамжуулах</h2></div><button className="chat-icon-button" onClick={onClose}><X /></button></header><div className="chat-contact-list">{conversations.map((conversation) => <button key={conversation.public_id} onClick={() => setSelected((items) => items.includes(conversation.public_id) ? items.filter((id) => id !== conversation.public_id) : items.length < 10 ? [...items, conversation.public_id] : items)}><Avatar conversation={conversation} /><span><strong>{conversation.title}</strong><small>{conversation.kind === 'group' ? `${conversation.member_count} гишүүн` : 'Шууд чат'}</small></span><i className={`chat-check ${selected.includes(conversation.public_id) ? 'selected' : ''}`}>{selected.includes(conversation.public_id) && <Check />}</i></button>)}</div><footer><span>{selected.length} сонгосон</span><button className="chat-primary-button" disabled={!selected.length} onClick={() => onForward(selected)}><Forward /> Дамжуулах</button></footer></section></div>, document.body)
+  return createPortal(<div className="chat-modal-backdrop"><section ref={modalRef} className="chat-modal" role="dialog" aria-modal="true" aria-label={t('chat.forward.title')}><header><div><span className="eyebrow">{t('chat.eyebrow.forward')}</span><h2>{t('chat.forward.title')}</h2></div><button className="chat-icon-button" onClick={onClose}><X /></button></header><div className="chat-contact-list">{conversations.map((conversation) => <button key={conversation.public_id} onClick={() => setSelected((items) => items.includes(conversation.public_id) ? items.filter((id) => id !== conversation.public_id) : items.length < 10 ? [...items, conversation.public_id] : items)}><Avatar conversation={conversation} /><span><strong>{conversation.title}</strong><small>{conversation.kind === 'group' ? t('chat.members', { n: conversation.member_count }) : t('chat.mode.direct')}</small></span><i className={`chat-check ${selected.includes(conversation.public_id) ? 'selected' : ''}`}>{selected.includes(conversation.public_id) && <Check />}</i></button>)}</div><footer><span>{t('chat.selectedN', { n: selected.length })}</span><button className="chat-primary-button" disabled={!selected.length} onClick={() => onForward(selected)}><Forward /> {t('chat.forward.action')}</button></footer></section></div>, document.body)
 }
 
 const SHARE_GROUP_ICONS: Record<ChatShareGroup, typeof ListChecks> = { tasks: ListChecks, plans: CalendarRange, contracts: FileSignature, reports: BarChart3 }
@@ -478,13 +494,14 @@ function SlashShareMenu({ groups, loading, activeIndex, onHover, onPick, onClose
   onPick: (item: ChatShareItem) => void
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const listRef = useRef<HTMLDivElement>(null)
   useEffect(() => { listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' }) }, [activeIndex])
   const visible = groups.filter((group) => group.items.length)
   let index = -1
-  return <div className="chat-slash-menu" role="dialog" aria-label="Хуваалцах зүйл сонгох">
-    <header><span><Slash size={13} />Хуваалцах</span><small>↑↓ сонгох · Enter илгээх · Esc хаах</small><button type="button" className="chat-icon-button" onClick={onClose} aria-label="Хаах"><X /></button></header>
-    <div ref={listRef} id="chat-slash-listbox" role="listbox" aria-label="Хуваалцах боломжтой зүйлс">
+  return <div className="chat-slash-menu" role="dialog" aria-label={t('chat.share.pick')}>
+    <header><span><Slash size={13} />{t('chat.share.title')}</span><small>{t('chat.share.hint')}</small><button type="button" className="chat-icon-button" onClick={onClose} aria-label={t('chat.close')}><X /></button></header>
+    <div ref={listRef} id="chat-slash-listbox" role="listbox" aria-label={t('chat.share.items')}>
       {visible.map((group) => {
         const Icon = SHARE_GROUP_ICONS[group.key]
         return <section key={group.key} role="group" aria-label={group.label}>
@@ -499,22 +516,23 @@ function SlashShareMenu({ groups, loading, activeIndex, onHover, onPick, onClose
           })}
         </section>
       })}
-      {!visible.length && <p className="chat-slash-empty">{loading ? 'Хайж байна…' : 'Илэрц олдсонгүй. Өөр үг бичээд үзээрэй.'}</p>}
+      {!visible.length && <p className="chat-slash-empty">{loading ? t('chat.search.searching') : t('chat.share.empty')}</p>}
     </div>
   </div>
 }
 
 export function SharedItemCard({ card }: { card: ChatSharedCard }) {
+  const { t } = useTranslation()
   const Icon = SHARE_GROUP_ICONS[card.group] ?? FileText
   const openable = Boolean(card.can_open && card.target_url)
   const body = <>
     <header><span className="chat-shared-card-icon"><Icon /></span><span><small>{card.kind_label}</small><strong>{card.title}</strong></span>{card.status_label && <em className={`chat-share-status ${card.status ?? ''}`}>{card.status_label}</em>}</header>
     {card.fields.length > 0 && <dl>{card.fields.map((field) => <div key={field.label}><dt>{field.label}</dt><dd>{field.value}</dd></div>)}</dl>}
     {card.excerpt && <p>{card.excerpt}</p>}
-    <footer>{openable ? <span>Байршлыг нээх <ArrowUpRight size={13} /></span> : <span className="locked"><Lock size={12} /> Танд нээх эрх байхгүй</span>}</footer>
+    <footer>{openable ? <span>{t('chat.share.openPlace')} <ArrowUpRight size={13} /></span> : <span className="locked"><Lock size={12} /> {t('chat.share.noAccess')}</span>}</footer>
   </>
   return openable
-    ? <Link to={card.target_url!} className={`chat-shared-card group-${card.group} openable`} aria-label={`${card.kind_label}: ${card.title} — нээх`}>{body}</Link>
+    ? <Link to={card.target_url!} className={`chat-shared-card group-${card.group} openable`} aria-label={t('chat.sharedCardOpen', { kind: card.kind_label, title: card.title })}>{body}</Link>
     : <div className={`chat-shared-card group-${card.group}`}>{body}</div>
 }
 
@@ -533,23 +551,25 @@ function ChatTaskDraftActions({
   onReject: () => void
   onEdit: () => void
 }) {
-  if (status) return <div className={`chat-task-draft-status ${status}`}>{status === 'confirmed' ? '✅ Даалгавар үүслээ' : '❌ Ноорог цуцлагдлаа'}</div>
+  const { t } = useTranslation()
+  if (status) return <div className={`chat-task-draft-status ${status}`}>{status === 'confirmed' ? t('chat.draft.created') : t('chat.draft.canceled')}</div>
   const payload = action.payload
-  const title = payload.title || payload.task_id || 'Даалгавар'
-  const kind = payload.action_type === 'update_task' ? 'Даалгаврын өөрчлөлт' : payload.action_type === 'delegate_task' ? 'Өөр ажилтанд оноох шинэ даалгавар' : 'Шинэ даалгавар'
-  return <section className="chat-task-draft" aria-label="Даалгаврын ноорог үйлдлүүд">
-    <span>Баталгаажуулах ноорог</span>
+  const title = payload.title || payload.task_id || t('chat.draft.task')
+  const kind = payload.action_type === 'update_task' ? t('chat.draft.update') : payload.action_type === 'delegate_task' ? t('chat.draft.delegate') : t('chat.draft.new')
+  return <section className="chat-task-draft" aria-label={t('chat.draft.actions')}>
+    <span>{t('chat.draft.label')}</span>
     <strong>{title}</strong>
     <small>{kind}</small>
     <div>
-      <button type="button" className="confirm" onClick={onConfirm} disabled={busy}>✅ Баталгаажуулах</button>
-      <button type="button" className="reject" onClick={onReject} disabled={busy}>❌ Татгалзах</button>
-      <button type="button" className="edit" onClick={onEdit} disabled={busy}>✏️ Засах</button>
+      <button type="button" className="confirm" onClick={onConfirm} disabled={busy}>{t('chat.draft.confirm')}</button>
+      <button type="button" className="reject" onClick={onReject} disabled={busy}>{t('chat.draft.reject')}</button>
+      <button type="button" className="edit" onClick={onEdit} disabled={busy}>{t('chat.draft.edit')}</button>
     </div>
   </section>
 }
 
 export function ChatWorkspacePage() {
+  const { t } = useTranslation()
   const { conversationId } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -694,8 +714,8 @@ export function ChatWorkspacePage() {
     const available = Math.max(0, 10 - uploads.length)
     let totalBytes = uploads.reduce((total, item) => total + item.file.size, 0)
     files.slice(0, available).forEach((file) => {
-      if (file.size > 25 * 1024 * 1024) { toast.error(`${file.name}: 25 MB-аас их байна`); return }
-      if (totalBytes + file.size > 100 * 1024 * 1024) { toast.error('Нэг мессежийн хавсралт нийт 100 MB-аас их байж болохгүй'); return }
+      if (file.size > 25 * 1024 * 1024) { toast.error(t('chat.fileTooLarge', { name: file.name })); return }
+      if (totalBytes + file.size > 100 * 1024 * 1024) { toast.error(t('chat.attachmentsTooLarge')); return }
       totalBytes += file.size
       const controller = new AbortController()
       const localId = crypto.randomUUID()
@@ -715,12 +735,12 @@ export function ChatWorkspacePage() {
     setUploads((items) => items.filter((candidate) => candidate.localId !== item.localId))
   }
   const startRecording = async () => {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { toast.error('Энэ төхөөрөмж аудио бичлэг дэмжихгүй байна'); return }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { toast.error(t('chat.audioUnsupported')); return }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const chunks: Blob[] = []
       const selected = RECORDER_FORMATS.find(({ mime }) => MediaRecorder.isTypeSupported(mime)) || RECORDER_FORMATS.find(({ type }) => MediaRecorder.isTypeSupported(type))
-      if (!selected) { stream.getTracks().forEach((track) => track.stop()); toast.error('Дэмжигдсэн аудио формат олдсонгүй'); return }
+      if (!selected) { stream.getTracks().forEach((track) => track.stop()); toast.error(t('chat.audioFormatMissing')); return }
       const recorder = new MediaRecorder(stream, { mimeType: selected.mime })
       recorderRef.current = recorder
       recordingStreamRef.current = stream
@@ -740,7 +760,7 @@ export function ChatWorkspacePage() {
       recorder.start()
       setRecording(true)
       recordingTimerRef.current = window.setTimeout(() => recorder.state === 'recording' && recorder.stop(), 5 * 60_000)
-    } catch { toast.error('Микрофоны зөвшөөрөл шаардлагатай') }
+    } catch { toast.error(t('chat.micRequired')) }
   }
   const stopRecording = () => recorderRef.current?.state === 'recording' && recorderRef.current.stop()
   const submit = (body: string | null = draft, nonce: string = crypto.randomUUID()) => {
@@ -754,7 +774,7 @@ export function ChatWorkspacePage() {
     if (!conversationId || shareItem.isPending) return
     setDraft('')
     shareItem.mutate({ kind: item.kind, ref: item.ref, client_nonce: crypto.randomUUID() }, {
-      onError: (error) => { setDraft(`/${rawSlashQuery ?? ''}`); toast.error(error.response?.data?.detail || 'Хуваалцаж чадсангүй') },
+      onError: (error) => { setDraft(`/${rawSlashQuery ?? ''}`); toast.error(error.response?.data?.detail || t('chat.shareFailed')) },
     })
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
@@ -778,7 +798,7 @@ export function ChatWorkspacePage() {
   useEffect(() => { paneShellRef.current?.toggleAttribute('inert', !sidebarVisible) }, [sidebarVisible])
 
   const editMessage = (message: ChatMessage) => {
-    const body = window.prompt('Мессеж засах', message.body || '')
+    const body = window.prompt(t('chat.editPrompt'), message.body || '')
     if (body?.trim() && body.trim() !== message.body) edit.mutate({ messageId: message.id, body: body.trim() })
     setActionMessageId(undefined)
   }
@@ -788,76 +808,76 @@ export function ChatWorkspacePage() {
     if (!token) return
     try {
       const result = await confirmAssistantAction.mutateAsync(token)
-      if (result?.status !== 'ok') throw new Error(result?.data?.reason || 'Үйлдэл боломжгүй байна')
+      if (result?.status !== 'ok') throw new Error(result?.data?.reason || t('chat.actionUnavailable'))
       setResolvedDraftActions((current) => ({ ...current, [message.id]: 'confirmed' }))
-      toast.success('Даалгавар үүслээ')
-    } catch (error: any) { toast.error(error?.message || 'Даалгавар үүссэнгүй') }
+      toast.success(t('chat.taskCreatedToast'))
+    } catch (error: any) { toast.error(error?.message || t('chat.taskCreateFailed')) }
   }
   const rejectDraft = async (message: ChatMessage) => {
     const token = actionToken(message)
     if (!token) return
     try {
       const result = await rejectAssistantAction.mutateAsync(token)
-      if (result?.status !== 'ok') throw new Error(result?.data?.reason || 'Үйлдэл боломжгүй байна')
+      if (result?.status !== 'ok') throw new Error(result?.data?.reason || t('chat.actionUnavailable'))
       setResolvedDraftActions((current) => ({ ...current, [message.id]: 'rejected' }))
-      toast.success('Ноорог цуцлагдлаа')
-    } catch (error: any) { toast.error(error?.message || 'Ноорог цуцлагдсангүй') }
+      toast.success(t('chat.draftCanceledToast'))
+    } catch (error: any) { toast.error(error?.message || t('chat.draftCancelFailed')) }
   }
   const editDraft = (message: ChatMessage) => {
     const title = message.action?.type === 'task_action_preview' ? message.action.payload.title || '' : ''
     setReplyingTo(message)
-    setDraft(`Нооргийг засах${title ? `: “${title}”` : ''}. `)
+    setDraft(`${t('chat.editDraft')}${title ? `: “${title}”` : ''}. `)
     setActionMessageId(undefined)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
   const forwardTo = (ids: string[]) => {
     if (!forwardMessage) return
-    forward.mutate({ messageId: forwardMessage.id, destinations: ids.map((conversation_public_id) => ({ conversation_public_id, client_nonce: crypto.randomUUID() })) }, { onSuccess: () => { toast.success('Мессеж дамжууллаа'); setForwardMessage(undefined) } })
+    forward.mutate({ messageId: forwardMessage.id, destinations: ids.map((conversation_public_id) => ({ conversation_public_id, client_nonce: crypto.randomUUID() })) }, { onSuccess: () => { toast.success(t('chat.forwardedToast')); setForwardMessage(undefined) } })
   }
 
   const composerShell = <div className={`chat-composer-shell ${isAgentConversation ? 'agent-composer-shell' : ''}`}>
-    {isAgentConversation && !draft && !recording && !uploads.length && <div className="chat-agent-prompts" aria-label="OYUNS Agent-ийн санал болгох асуултууд">
-      {['Өнөөдрийн ажлыг нэгтгэ', 'Хугацаа хэтэрсэн даалгавар?', 'Компаний файлаас хайх'].map((prompt) => <button key={prompt} type="button" onClick={() => { setDraft(prompt); requestAnimationFrame(() => textareaRef.current?.focus()) }}>{prompt}</button>)}
+    {isAgentConversation && !draft && !recording && !uploads.length && <div className="chat-agent-prompts" aria-label={t('chat.agent.promptsAria')}>
+      {[t('chat.agent.prompt1'), t('chat.agent.prompt2'), t('chat.agent.prompt3')].map((prompt) => <button key={prompt} type="button" onClick={() => { setDraft(prompt); requestAnimationFrame(() => textareaRef.current?.focus()) }}>{prompt}</button>)}
     </div>}
     {slashOpen && <SlashShareMenu groups={shareItems.data?.groups ?? []} loading={shareItems.isFetching} activeIndex={slashIndex} onHover={setSlashIndex} onPick={pickShareItem} onClose={() => { setSlashDismissed(draft); textareaRef.current?.focus() }} />}
-    {recording && <RecordingVisualizer stream={recordingStream} />}{replyingTo && <div className="chat-composer-reply"><Reply /><span><strong>{replyingTo.sender?.name}</strong>{replyingTo.body || 'Хавсралт'}</span><button onClick={() => setReplyingTo(undefined)} aria-label="Хариултыг болих"><X /></button></div>}{uploads.length > 0 && <div className="chat-upload-queue">{uploads.map((item) => <div key={item.localId} className={item.status}><Paperclip /><span><strong>{item.file.name}</strong><small>{item.status === 'failed' ? item.error : item.status === 'ready' ? 'Бэлэн' : `${item.progress}%`}</small>{item.status === 'uploading' && <i style={{ width: `${item.progress}%` }} />}</span>{item.status === 'failed' && <button onClick={() => retryUpload(item)} aria-label={`${item.file.name} дахин upload хийх`}><RotateCcw /></button>}<button onClick={() => discardUpload(item)} aria-label={`${item.file.name} хасах`}><X /></button></div>)}</div>}<div className="chat-composer"><input ref={fileInputRef} type="file" hidden multiple accept="image/*,video/mp4,video/webm,video/quicktime,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md" onChange={(event) => { queueFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = '' }} /><button className="chat-composer-tool" onClick={() => fileInputRef.current?.click()} disabled={uploads.length >= 10} aria-label="Файл хавсаргах"><Paperclip /></button><textarea ref={textareaRef} rows={1} maxLength={4000} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onComposerKeyDown} placeholder={isAgentConversation ? 'OYUNS Agent-д асуултаа бичих…' : 'Мессеж бичих… “/” — даалгавар, төлөвлөгөө, гэрээ, тайлан хуваалцах'} aria-label="Мессеж" aria-expanded={slashOpen} aria-controls={slashOpen ? 'chat-slash-listbox' : undefined} aria-activedescendant={slashOpen && slashOptions.length ? `chat-slash-option-${slashIndex}` : undefined} aria-autocomplete="list" /><button className={`chat-composer-tool ${recording ? 'recording' : ''}`} onClick={recording ? stopRecording : startRecording} aria-label={recording ? 'Бичлэг дуусгах' : 'Аудио бичих'}>{recording ? <Square /> : <Mic />}</button><button className="chat-send-button" onClick={() => submit()} disabled={(!draft.trim() && !uploads.some((item) => item.status === 'ready')) || uploads.some((item) => item.status !== 'ready') || send.isPending} aria-label="Илгээх"><Send /></button></div>
+    {recording && <RecordingVisualizer stream={recordingStream} />}{replyingTo && <div className="chat-composer-reply"><Reply /><span><strong>{replyingTo.sender?.name}</strong>{replyingTo.body || t('chat.message.attachment')}</span><button onClick={() => setReplyingTo(undefined)} aria-label={t('chat.composer.stopReply')}><X /></button></div>}{uploads.length > 0 && <div className="chat-upload-queue">{uploads.map((item) => <div key={item.localId} className={item.status}><Paperclip /><span><strong>{item.file.name}</strong><small>{item.status === 'failed' ? item.error : item.status === 'ready' ? t('chat.upload.ready') : `${item.progress}%`}</small>{item.status === 'uploading' && <i style={{ width: `${item.progress}%` }} />}</span>{item.status === 'failed' && <button onClick={() => retryUpload(item)} aria-label={t('chat.retryUpload', { name: item.file.name })}><RotateCcw /></button>}<button onClick={() => discardUpload(item)} aria-label={t('chat.removeFile', { name: item.file.name })}><X /></button></div>)}</div>}<div className="chat-composer"><input ref={fileInputRef} type="file" hidden multiple accept="image/*,video/mp4,video/webm,video/quicktime,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md" onChange={(event) => { queueFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = '' }} /><button className="chat-composer-tool" onClick={() => fileInputRef.current?.click()} disabled={uploads.length >= 10} aria-label={t('chat.composer.attach')}><Paperclip /></button><textarea ref={textareaRef} rows={1} maxLength={4000} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onComposerKeyDown} placeholder={isAgentConversation ? t('chat.composer.agentPlaceholder') : t('chat.composer.placeholder')} aria-label={t('chat.composer.aria')} aria-expanded={slashOpen} aria-controls={slashOpen ? 'chat-slash-listbox' : undefined} aria-activedescendant={slashOpen && slashOptions.length ? `chat-slash-option-${slashIndex}` : undefined} aria-autocomplete="list" /><button className={`chat-composer-tool ${recording ? 'recording' : ''}`} onClick={recording ? stopRecording : startRecording} aria-label={recording ? t('chat.composer.stopRecording') : t('chat.composer.record')}>{recording ? <Square /> : <Mic />}</button><button className="chat-send-button" onClick={() => submit()} disabled={(!draft.trim() && !uploads.some((item) => item.status === 'ready')) || uploads.some((item) => item.status !== 'ready') || send.isPending} aria-label={t('chat.composer.send')}><Send /></button></div>
   </div>
 
   return <div className={`chat-workspace ${collapsed && !mobile ? 'sidebar-collapsed' : ''}`}>
-    {mobile && drawerOpen && <button className="chat-drawer-scrim" onClick={() => setDrawerOpen(false)} aria-label="Чатын жагсаалт хаах" />}
+    {mobile && drawerOpen && <button className="chat-drawer-scrim" onClick={() => setDrawerOpen(false)} aria-label={t('chat.drawer.close')} />}
     <div ref={paneShellRef} className={`chat-pane-shell ${sidebarVisible ? 'open' : ''}`} aria-hidden={!sidebarVisible}>
       <ConversationList drawerRef={drawerRef} conversations={conversationList.data?.items ?? []} selectedId={conversationId} search={search} filter={filter} onFilter={setFilter} onSearch={setSearch} onSelect={selectConversation} onCreate={() => setCreateOpen(true)} />
     </div>
     <section ref={threadPaneRef} className={`chat-thread-pane ${isAgentConversation ? 'agent-thread-pane' : ''}`}>
       {conversationId && conversation.data ? <>
         <header className="chat-thread-header">
-          <button ref={drawerTriggerRef} className="chat-icon-button" onClick={() => mobile ? setDrawerOpen(true) : setCollapsed((value) => !value)} aria-label={sidebarVisible ? 'Чатын жагсаалт нуух' : 'Чатын жагсаалт нээх'}>{mobile || collapsed ? <Menu /> : <ChevronLeft />}</button>
+          <button ref={drawerTriggerRef} className="chat-icon-button" onClick={() => mobile ? setDrawerOpen(true) : setCollapsed((value) => !value)} aria-label={sidebarVisible ? t('chat.drawer.hide') : t('chat.drawer.show')}>{mobile || collapsed ? <Menu /> : <ChevronLeft />}</button>
           <Avatar conversation={conversation.data} />
-          <div><strong>{conversation.data.title}</strong><small className={isAgentConversation ? 'chat-agent-subtitle' : ''}>{isAgentConversation ? <><i className="chat-agent-status-dot" /> OYUNS Agent · Онлайн</> : conversation.data.kind === 'direct' ? (conversation.data.presence === 'online' ? 'Онлайн' : 'Идэвхгүй') : `${conversation.data.member_count} гишүүн`}</small></div>
+          <div><strong>{conversation.data.title}</strong><small className={isAgentConversation ? 'chat-agent-subtitle' : ''}>{isAgentConversation ? <><i className="chat-agent-status-dot" /> {t('chat.agent.online')}</> : conversation.data.kind === 'direct' ? (conversation.data.presence === 'online' ? t('chat.presence.online') : t('chat.presence.offline')) : t('chat.members', { n: conversation.data.member_count })}</small></div>
           <ChatCallHeader conversation={conversation.data} />
-          <button className="chat-icon-button" onClick={() => setSearchOpen(true)} aria-label="Мессеж хайх"><Search /></button>
-          <div className="chat-header-menu-wrap"><button className="chat-icon-button" onClick={() => setConversationMenuOpen((value) => !value)} aria-label="Чатын тохиргоо"><MoreHorizontal /></button>{conversationMenuOpen && <div className="chat-popover-menu">
-            <button onClick={() => preferences.mutate({ pinned: !conversation.data!.is_pinned }, { onSuccess: () => setConversationMenuOpen(false) })}><Pin />{conversation.data.is_pinned ? 'Чат салгах' : 'Чат тогтоох'}</button>
-            <button onClick={() => preferences.mutate({ archived: !conversation.data!.is_archived }, { onSuccess: () => { setConversationMenuOpen(false); if (!conversation.data!.is_archived) navigate('/chat') } })}><Archive />{conversation.data.is_archived ? 'Архиваас гаргах' : 'Архивлах'}</button>
-            {conversation.data.is_muted ? <button onClick={() => preferences.mutate({ mute_for: 'off' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />Дууг нээх</button> : <><button onClick={() => preferences.mutate({ mute_for: '1h' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />1 цаг дуугүй</button><button onClick={() => preferences.mutate({ mute_for: '8h' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />8 цаг дуугүй</button><button onClick={() => preferences.mutate({ mute_for: '1w' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />1 долоо хоног дуугүй</button><button onClick={() => preferences.mutate({ mute_for: 'forever' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />Үргэлж дуугүй</button></>}
-            {conversation.data.kind === 'group' && <button onClick={() => { setManageOpen(true); setConversationMenuOpen(false) }}><Info />Бүлгийн тохиргоо</button>}
+          <button className="chat-icon-button" onClick={() => setSearchOpen(true)} aria-label={t('chat.search.title')}><Search /></button>
+          <div className="chat-header-menu-wrap"><button className="chat-icon-button" onClick={() => setConversationMenuOpen((value) => !value)} aria-label={t('chat.menu.aria')}><MoreHorizontal /></button>{conversationMenuOpen && <div className="chat-popover-menu">
+            <button onClick={() => preferences.mutate({ pinned: !conversation.data!.is_pinned }, { onSuccess: () => setConversationMenuOpen(false) })}><Pin />{conversation.data.is_pinned ? t('chat.menu.unpin') : t('chat.menu.pin')}</button>
+            <button onClick={() => preferences.mutate({ archived: !conversation.data!.is_archived }, { onSuccess: () => { setConversationMenuOpen(false); if (!conversation.data!.is_archived) navigate('/chat') } })}><Archive />{conversation.data.is_archived ? t('chat.menu.unarchive') : t('chat.menu.archive')}</button>
+            {conversation.data.is_muted ? <button onClick={() => preferences.mutate({ mute_for: 'off' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />{t('chat.menu.unmute')}</button> : <><button onClick={() => preferences.mutate({ mute_for: '1h' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />{t('chat.menu.mute1h')}</button><button onClick={() => preferences.mutate({ mute_for: '8h' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />{t('chat.menu.mute8h')}</button><button onClick={() => preferences.mutate({ mute_for: '1w' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />{t('chat.menu.mute1w')}</button><button onClick={() => preferences.mutate({ mute_for: 'forever' }, { onSuccess: () => setConversationMenuOpen(false) })}><BellOff />{t('chat.menu.muteForever')}</button></>}
+            {conversation.data.kind === 'group' && <button onClick={() => { setManageOpen(true); setConversationMenuOpen(false) }}><Info />{t('chat.groupSettings')}</button>}
           </div>}</div>
         </header>
-        <div ref={logRef} className="chat-message-log" role="log" aria-live="polite" aria-label={`${conversation.data.title} мессежүүд`}>
-          {messages.hasNextPage && <button className="chat-load-older" onClick={() => messages.fetchNextPage()} disabled={messages.isFetchingNextPage}>{messages.isFetchingNextPage ? 'Ачаалж байна…' : 'Өмнөх мессежүүд'}</button>}
-          {!orderedMessages.length && !messages.isLoading && <div className="chat-thread-empty"><MessageCircle /><strong>Чат бичиж харилцан яриагаа эхлүүлээрэй</strong><span>Энд илгээсэн мессежүүд зөвхөн оролцогчдод харагдана.</span></div>}
+        <div ref={logRef} className="chat-message-log" role="log" aria-live="polite" aria-label={t('chat.messagesOf', { title: conversation.data.title })}>
+          {messages.hasNextPage && <button className="chat-load-older" onClick={() => messages.fetchNextPage()} disabled={messages.isFetchingNextPage}>{messages.isFetchingNextPage ? t('common.loading') : t('chat.older')}</button>}
+          {!orderedMessages.length && !messages.isLoading && <div className="chat-thread-empty"><MessageCircle /><strong>{t('chat.emptyThreadTitle')}</strong><span>{t('chat.emptyThreadBody')}</span></div>}
           {orderedMessages.map((message, index) => message.kind === 'call' ? <CallHistoryMessage key={`${message.id}-${message.client_nonce}`} message={message} /> : <article id={message.id > 0 ? `chat-message-${message.id}` : undefined} key={`${message.id}-${message.client_nonce}`} className={`chat-message ${message.is_mine ? 'mine' : 'theirs'} ${message.status === 'failed' ? 'send-failed' : ''} ${highlightId === message.id ? 'highlighted' : ''}`} style={{ '--chat-message-delay': `${Math.min(index, 7) * 22}ms` } as React.CSSProperties} onContextMenu={(event) => { if (message.id > 0 && !message.is_deleted) { event.preventDefault(); setActionMessageId(message.id) } }}>
             {!message.is_mine && <Avatar identity={message.sender} />}
-            <div className="chat-message-content"><div className={`chat-bubble ${message.action?.type === 'shared_item' && !message.is_deleted ? 'has-shared-card' : ''}`}>{!message.is_mine && conversation.data.kind === 'group' && <strong>{message.sender?.name}</strong>}{message.forwarded_sender_name && <small className="chat-forwarded"><Forward /> {message.forwarded_sender_name}-с дамжуулсан</small>}{message.reply_preview && <button className="chat-reply-preview" onClick={() => setThreadRootId(message.thread_root_message_id || message.reply_preview!.id)}><strong>{message.reply_preview.sender_name}</strong><span>{message.reply_preview.is_deleted ? 'Устгасан мессеж' : message.reply_preview.body || 'Хавсралт'}</span></button>}{message.is_deleted ? <p className="chat-deleted-message">Энэ мессеж устгагдсан</p> : <>{message.action?.type === 'shared_item' ? <SharedItemCard card={message.action.payload} /> : message.body && <p>{message.body}</p>}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((attachment) => <ChatAttachmentView key={attachment.public_id} conversationId={conversationId} attachment={attachment} />)}</div> : null}{message.company_file_attachments?.length ? <div className="chat-attachments">{message.company_file_attachments.map((attachment) => <CompanyFileAttachmentView key={attachment.item_id} attachment={attachment} />)}</div> : null}{message.action?.type === 'task_action_preview' && <ChatTaskDraftActions action={message.action} status={resolvedDraftActions[message.id]} busy={confirmAssistantAction.isPending || rejectAssistantAction.isPending} onConfirm={() => void confirmDraft(message)} onReject={() => void rejectDraft(message)} onEdit={() => editDraft(message)} />}</>} </div>
+            <div className="chat-message-content"><div className={`chat-bubble ${message.action?.type === 'shared_item' && !message.is_deleted ? 'has-shared-card' : ''}`}>{!message.is_mine && conversation.data.kind === 'group' && <strong>{message.sender?.name}</strong>}{message.forwarded_sender_name && <small className="chat-forwarded"><Forward /> {t('chat.forwardedFrom', { name: message.forwarded_sender_name })}</small>}{message.reply_preview && <button className="chat-reply-preview" onClick={() => setThreadRootId(message.thread_root_message_id || message.reply_preview!.id)}><strong>{message.reply_preview.sender_name}</strong><span>{message.reply_preview.is_deleted ? t('chat.message.deletedLabel') : message.reply_preview.body || t('chat.message.attachment')}</span></button>}{message.is_deleted ? <p className="chat-deleted-message">{t('chat.message.deleted')}</p> : <>{message.action?.type === 'shared_item' ? <SharedItemCard card={message.action.payload} /> : message.body && <p>{message.body}</p>}{message.attachments?.length ? <div className="chat-attachments">{message.attachments.map((attachment) => <ChatAttachmentView key={attachment.public_id} conversationId={conversationId} attachment={attachment} />)}</div> : null}{message.company_file_attachments?.length ? <div className="chat-attachments">{message.company_file_attachments.map((attachment) => <CompanyFileAttachmentView key={attachment.item_id} attachment={attachment} />)}</div> : null}{message.action?.type === 'task_action_preview' && <ChatTaskDraftActions action={message.action} status={resolvedDraftActions[message.id]} busy={confirmAssistantAction.isPending || rejectAssistantAction.isPending} onConfirm={() => void confirmDraft(message)} onReject={() => void rejectDraft(message)} onEdit={() => editDraft(message)} />}</>} </div>
               {!!message.reactions?.length && <div className="chat-reaction-row">{message.reactions.map((reaction) => <button key={reaction.emoji} className={reaction.reacted ? 'active' : ''} onClick={() => react.mutate({ messageId: message.id, emoji: reaction.emoji, remove: reaction.reacted })}>{reaction.emoji} <span>{reaction.count}</span></button>)}</div>}
-              <footer><time>{formatTimestamp(message.created_at)}{message.edited_at ? ' · зассан' : ''}</time>{message.is_pinned && <Pin size={11} fill="currentColor" />}{message.is_starred && <Star size={11} fill="currentColor" />}{message.thread_reply_count > 0 && <button onClick={() => setThreadRootId(message.thread_root_message_id || message.id)}>{message.thread_reply_count} хариулт</button>}{message.is_mine && <button disabled={message.id < 1} onClick={() => message.id > 0 && setReceiptMessageId(message.id)}><ReceiptLabel message={message} /></button>}{message.status === 'failed' && message.body && <button className="chat-retry" onClick={() => submit(message.body, message.client_nonce)}>Дахин илгээх</button>}</footer>
-              {message.id > 0 && !message.is_deleted && <div className="chat-message-actions"><button ref={(element) => { actionButtonRefs.current[message.id] = element }} onClick={() => setActionMessageId(actionMessageId === message.id ? undefined : message.id)} aria-label="Мессежийн үйлдэл"><MoreHorizontal /></button>{actionMessageId === message.id && <ChatActionMenu anchorRef={{ current: actionButtonRefs.current[message.id] }} boundsRef={threadPaneRef} onClose={() => setActionMessageId(undefined)}><div className="chat-quick-reactions">{['👍', '❤️', '😂', '🎉', '😮', '😢'].map((emoji) => <button key={emoji} onClick={() => react.mutate({ messageId: message.id, emoji, remove: message.reactions?.some((item) => item.emoji === emoji && item.reacted) })}>{emoji}</button>)}</div><button onClick={() => { setReplyingTo(message); setActionMessageId(undefined); textareaRef.current?.focus() }}><Reply />Хариулах</button>{message.thread_root_message_id == null && <button onClick={() => { setThreadRootId(message.id); setActionMessageId(undefined) }}><MessageCircle />Thread нээх</button>}{message.capabilities?.can_edit && <button onClick={() => editMessage(message)}><Pencil />Засах</button>}<button onClick={() => { setForwardMessage(message); setActionMessageId(undefined) }}><Forward />Дамжуулах</button><button onClick={() => pinMessage.mutate({ messageId: message.id, pinned: !message.is_pinned }, { onSuccess: () => setActionMessageId(undefined) })}><Pin />{message.is_pinned ? 'Салгах' : 'Тогтоох'}</button><button onClick={() => star.mutate({ messageId: message.id, starred: !message.is_starred }, { onSuccess: () => setActionMessageId(undefined) })}><Star />{message.is_starred ? 'Star болиулах' : 'Star'}</button><button onClick={() => { setReceiptMessageId(message.id); setActionMessageId(undefined) }}><Info />Мэдээлэл</button><button className="danger" onClick={() => remove.mutate({ messageId: message.id, scope: 'self' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Өөрөөс устгах</button>{message.capabilities?.can_delete_everyone && <button className="danger" onClick={() => window.confirm('Бүх хүнээс устгах уу?') && remove.mutate({ messageId: message.id, scope: 'everyone' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />Бүгдээс устгах</button>}</ChatActionMenu>}</div>}
+              <footer><time>{formatTimestamp(message.created_at)}{message.edited_at ? t('chat.message.edited') : ''}</time>{message.is_pinned && <Pin size={11} fill="currentColor" />}{message.is_starred && <Star size={11} fill="currentColor" />}{message.thread_reply_count > 0 && <button onClick={() => setThreadRootId(message.thread_root_message_id || message.id)}>{t('chat.replyCount', { n: message.thread_reply_count })}</button>}{message.is_mine && <button disabled={message.id < 1} onClick={() => message.id > 0 && setReceiptMessageId(message.id)}><ReceiptLabel message={message} /></button>}{message.status === 'failed' && message.body && <button className="chat-retry" onClick={() => submit(message.body, message.client_nonce)}>{t('chat.message.resend')}</button>}</footer>
+              {message.id > 0 && !message.is_deleted && <div className="chat-message-actions"><button ref={(element) => { actionButtonRefs.current[message.id] = element }} onClick={() => setActionMessageId(actionMessageId === message.id ? undefined : message.id)} aria-label={t('chat.message.actions')}><MoreHorizontal /></button>{actionMessageId === message.id && <ChatActionMenu anchorRef={{ current: actionButtonRefs.current[message.id] }} boundsRef={threadPaneRef} onClose={() => setActionMessageId(undefined)}><div className="chat-quick-reactions">{['👍', '❤️', '😂', '🎉', '😮', '😢'].map((emoji) => <button key={emoji} onClick={() => react.mutate({ messageId: message.id, emoji, remove: message.reactions?.some((item) => item.emoji === emoji && item.reacted) })}>{emoji}</button>)}</div><button onClick={() => { setReplyingTo(message); setActionMessageId(undefined); textareaRef.current?.focus() }}><Reply />{t('chat.message.reply')}</button>{message.thread_root_message_id == null && <button onClick={() => { setThreadRootId(message.id); setActionMessageId(undefined) }}><MessageCircle />{t('chat.message.openThread')}</button>}{message.capabilities?.can_edit && <button onClick={() => editMessage(message)}><Pencil />{t('chat.message.edit')}</button>}<button onClick={() => { setForwardMessage(message); setActionMessageId(undefined) }}><Forward />{t('chat.forward.action')}</button><button onClick={() => pinMessage.mutate({ messageId: message.id, pinned: !message.is_pinned }, { onSuccess: () => setActionMessageId(undefined) })}><Pin />{message.is_pinned ? t('chat.message.unpin') : t('chat.message.pin')}</button><button onClick={() => star.mutate({ messageId: message.id, starred: !message.is_starred }, { onSuccess: () => setActionMessageId(undefined) })}><Star />{message.is_starred ? t('chat.message.unstar') : t('chat.message.star')}</button><button onClick={() => { setReceiptMessageId(message.id); setActionMessageId(undefined) }}><Info />{t('chat.message.info')}</button><button className="danger" onClick={() => remove.mutate({ messageId: message.id, scope: 'self' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />{t('chat.message.deleteForMe')}</button>{message.capabilities?.can_delete_everyone && <button className="danger" onClick={() => window.confirm(t('chat.message.deleteForAllConfirm')) && remove.mutate({ messageId: message.id, scope: 'everyone' }, { onSuccess: () => setActionMessageId(undefined) })}><Trash2 />{t('chat.message.deleteForAll')}</button>}</ChatActionMenu>}</div>}
             </div>
           </article>)}
           {isAgentConversation && send.isPending && <AiGeneratingAnimation className="chat-agent-generating" />}
         </div>
         {isAgentConversation ? <BorderBeam className="chat-agent-composer-beam" radius={18} size="md" strength={0.58} theme="light" active={!send.isPending}>{composerShell}</BorderBeam> : composerShell}
-      </> : <div className="chat-no-selection"><div><MessageCircle /><h2>OYUNS Chat</h2><p>Хамтран ажиллагсадтайгаа шууд эсвэл бүлгээр аюулгүй харилцана уу.</p><button className="chat-primary-button" onClick={() => mobile ? setDrawerOpen(true) : setCreateOpen(true)}>{mobile ? 'Чат сонгох' : 'Шинэ чат'}</button></div></div>}
+      </> : <div className="chat-no-selection"><div><MessageCircle /><h2>OYUNS Chat</h2><p>{t('chat.noSelection')}</p><button className="chat-primary-button" onClick={() => mobile ? setDrawerOpen(true) : setCreateOpen(true)}>{mobile ? t('chat.pickChat') : t('chat.new')}</button></div></div>}
     </section>
     {searchOpen && <ChatSearchPanel conversationId={conversationId} onClose={() => setSearchOpen(false)} onOpenResult={(id, messageId) => { setSearchOpen(false); navigate(`/chat/${id}?message=${messageId}`) }} />}
     {threadRootId && conversationId && <ThreadPanel conversationId={conversationId} rootId={threadRootId} onClose={() => setThreadRootId(undefined)} onReply={(message) => { setReplyingTo(message); setThreadRootId(undefined); textareaRef.current?.focus() }} />}

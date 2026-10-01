@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -13,6 +14,7 @@ export interface RichContractEditorProps {
 }
 
 export function RichContractEditor({ value, editable, onChange, onSelection }: RichContractEditorProps) {
+  const { t } = useTranslation()
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, link: false, underline: false }),
@@ -38,17 +40,17 @@ export function RichContractEditor({ value, editable, onChange, onSelection }: R
     if (JSON.stringify(editor.getJSON()) !== JSON.stringify(value)) editor.commands.setContent(value)
   }, [editor, value])
 
-  if (!editor) return <div className="contract-editor-loading">Редактор ачаалж байна…</div>
+  if (!editor) return <div className="contract-editor-loading">{t('contracts.editorLoading')}</div>
   return (
     <div className={`contract-editor ${editable ? '' : 'is-locked'}`}>
-      {editable && <div className="contract-editor-toolbar" role="toolbar" aria-label="Баримтын формат">
+      {editable && <div className="contract-editor-toolbar" role="toolbar" aria-label={t('contracts.editor.toolbar')}>
         <button type="button" onClick={() => editor.chain().focus().toggleBold().run()} className={editor.isActive('bold') ? 'is-active' : ''}>B</button>
         <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()} className={editor.isActive('italic') ? 'is-active' : ''}><em>I</em></button>
         <button type="button" onClick={() => editor.chain().focus().toggleUnderline().run()} className={editor.isActive('underline') ? 'is-active' : ''}><u>U</u></button>
-        <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()}>• жагсаалт</button>
-        <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()}>1. жагсаалт</button>
-        <button type="button" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>Гарчиг</button>
-        <button type="button" onClick={() => editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run()}>Хүснэгт</button>
+        <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()}>{t('contracts.editor.bullets')}</button>
+        <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()}>{t('contracts.editor.numbered')}</button>
+        <button type="button" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>{t('contracts.editor.heading')}</button>
+        <button type="button" onClick={() => editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run()}>{t('contracts.editor.table')}</button>
       </div>}
       <EditorContent editor={editor} />
     </div>

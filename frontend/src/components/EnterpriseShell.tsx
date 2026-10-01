@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import i18nInstance from '../i18n'
 import toast from 'react-hot-toast'
 import { api } from '../api/client'
 import {
@@ -47,31 +48,32 @@ const LazyOyunsAssistant = lazy(() => import('./OyunsAssistant').then((module) =
 const LazyGlobalCommandBar = lazy(() => import('./GlobalCommandBar').then((module) => ({ default: module.GlobalCommandBar })))
 const LazyNotificationCenter = lazy(() => import('./NotificationCenter').then((module) => ({ default: module.NotificationCenter })))
 
+/** Route → translation key of the page title. */
 const TITLES: Record<string, string> = {
-  '/': 'Өнөөдрийн ажлын орон зай', '/worktime': 'Ажлын цагийн бүртгэл', '/hr': 'Хүний нөөц', '/projects': 'Төслүүд', '/tasks': 'Даалгаврын самбар', '/calendar': 'Календарь',
-  '/reports': 'Тайлан ба зөвшөөрөл', '/capacity': 'Багийн ачаалал', '/plans': 'Төлөвлөгөө', '/contracts': 'Гэрээ',
-  '/chat': 'Чат',
-  '/analytics': 'Гүйцэтгэлийн үзүүлэлт', '/administration': 'Системийн тохиргоо', '/contracts/archive': 'Гэрээний архив',
-  '/erp/payroll': 'Цалингийн тооцоо',
-  '/erp/crm': 'CRM · Харилцаа холбоо',
-  '/erp/crm/customers': 'CRM · Харилцагч',
-  '/erp/crm/settings': 'CRM · Тохиргоо',
-  '/erp/accounts': 'Дансны төлөвлөгөө',
-  '/erp/budget': 'Төсөв, гүйцэтгэл',
-  '/erp/budget/analysis': 'Төсөв · Анализ',
-  '/erp/budget/accounts': 'Төсөв · Төсөвт данс',
-  '/erp/payroll/tax-benefits': 'Татвар ба хангамж',
-  '/administration/organization/profile': 'Байгууллагын профайл / Company Profile',
-  '/administration/organization/modules': 'Модуль ба боломжууд / Modules & Features',
-  '/administration/workflows/worktime': 'Ажлын цаг ба процесс / Worktime & Processes',
-  '/administration/workflows/reports': 'Тайлангийн тохиргоо / Report Settings',
-  '/administration/people/users': 'Ажилтан ба хэрэглэгч / Employees & Users',
-  '/administration/people/permissions': 'Үүрэг ба эрх / Roles & Permissions',
-  '/administration/integrations/overview': 'Интеграци ба төхөөрөмж / Integrations & Devices',
-  '/administration/security/authentication': 'Нэвтрэлт ба админ / Authentication & Admin',
-  '/administration/ai/knowledge': 'OYUNS AI ба сургалт / OYUNS AI & Knowledge',
-  '/profile': 'Миний профайл',
-  '/company-files': 'Компаний файлууд',
+  '/': 'shell.title.today', '/worktime': 'shell.title.worktime', '/hr': 'shell.title.hr', '/projects': 'shell.title.projects', '/tasks': 'shell.title.tasks', '/calendar': 'shell.title.calendar',
+  '/reports': 'shell.title.reports', '/capacity': 'shell.title.capacity', '/plans': 'shell.title.plans', '/contracts': 'shell.title.contracts',
+  '/chat': 'shell.title.chat',
+  '/analytics': 'shell.title.analytics', '/administration': 'shell.title.administration', '/contracts/archive': 'shell.title.contractArchive',
+  '/erp/payroll': 'shell.title.payroll',
+  '/erp/crm': 'shell.title.crm',
+  '/erp/crm/customers': 'shell.title.crmCustomers',
+  '/erp/crm/settings': 'shell.title.crmSettings',
+  '/erp/accounts': 'shell.title.accounts',
+  '/erp/budget': 'shell.title.budget',
+  '/erp/budget/analysis': 'shell.title.budgetAnalysis',
+  '/erp/budget/accounts': 'shell.title.budgetAccounts',
+  '/erp/payroll/tax-benefits': 'shell.title.taxBenefits',
+  '/administration/organization/profile': 'shell.title.orgProfile',
+  '/administration/organization/modules': 'shell.title.modules',
+  '/administration/workflows/worktime': 'shell.title.worktimeProcess',
+  '/administration/workflows/reports': 'shell.title.reportSettings',
+  '/administration/people/users': 'shell.title.users',
+  '/administration/people/permissions': 'shell.title.permissions',
+  '/administration/integrations/overview': 'shell.title.integrations',
+  '/administration/security/authentication': 'shell.title.authentication',
+  '/administration/ai/knowledge': 'shell.title.aiKnowledge',
+  '/profile': 'shell.title.profile',
+  '/company-files': 'shell.title.companyFiles',
 }
 
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
@@ -116,7 +118,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
               if (!preferences.desktop_alerts_enabled || conversation.is_muted) return
               return showDesktopChatAlert({
                 title: event.payload.conversation_title || event.payload.sender_name || 'OYUNS Chat',
-                body: event.payload.preview || 'Шинэ мессеж',
+                body: event.payload.preview || i18nInstance.t('shell.newMessage'),
                 targetUrl: event.payload.target_url || `/chat/${event.payload.conversation_public_id}`,
                 soundEnabled: preferences.sound_enabled,
               }, navigate)
@@ -278,16 +280,16 @@ export function EnterpriseShell() {
   }, [actorQuery.data?.locale, i18n])
   const nav = useMemo(() => {
     const hrItem = NAV.find((item) => item.to === '/hr')
-    const payrollItem = { to: '/erp/payroll', label: 'Цалин', icon: Calculator, roles: [] }
+    const payrollItem = { to: '/erp/payroll', label: 'nav.payroll', icon: Calculator, roles: [] }
     const base = NAV.filter((item) => item.to !== '/hr' && (item.to !== '/contracts' || contractsLicensed) && (!item.roles.length || item.roles.some((role) => roles.includes(role))))
     const showPayroll = Boolean(erp.data?.modules.payroll && roles.some((role) => PAYROLL_ROLES.includes(role)))
     const withHr = base.flatMap((item) => item.to === '/chat' && hrItem ? [hrItem, item] : [item])
     // CRM access comes from ERP capabilities, so sales staff without a
     // management role still see it; it sits just above Settings.
-    const crmItem = { to: '/erp/crm', label: 'CRM', icon: Handshake, roles: [] }
-    const budgetItem = { to: '/erp/budget', label: 'Төсөв', icon: PiggyBank, roles: [] }
+    const crmItem = { to: '/erp/crm', label: 'nav.crm', icon: Handshake, roles: [] }
+    const budgetItem = { to: '/erp/budget', label: 'nav.budget', icon: PiggyBank, roles: [] }
     // Chart of accounts: the one place to manage the accounts payroll and budget pick from.
-    const accountsItem = { to: '/erp/accounts', label: 'Данс', icon: BookText, roles: [] }
+    const accountsItem = { to: '/erp/accounts', label: 'nav.accounts', icon: BookText, roles: [] }
     const capabilityItems = [...(showCRM ? [crmItem] : []), ...(showAccounts ? [accountsItem] : []), ...(showBudget ? [budgetItem] : [])]
     const withCRM = (items: typeof withHr) => (capabilityItems.length ? [...items.slice(0, -1), ...capabilityItems, items[items.length - 1]] : items)
     // ERP modules have no hub page of their own: each enabled module gets its
@@ -299,23 +301,23 @@ export function EnterpriseShell() {
   const workerProfile = useWorkerProfile(selectedWorker)
   const visibleWorkers = useMemo(() => (workers.data ?? []).filter((worker) => worker.name.toLowerCase().includes(workerSearch.toLowerCase())), [workerSearch, workers.data])
   const title = useMemo(() => {
-    if (TITLES[location.pathname]) return TITLES[location.pathname]
+    if (TITLES[location.pathname]) return t(TITLES[location.pathname])
     const section = Object.keys(TITLES).filter((path) => path !== '/' && location.pathname.startsWith(`${path}/`)).sort((a, b) => b.length - a.length)[0]
-    return section ? TITLES[section] : 'OYUNS Workspace'
-  }, [location.pathname])
+    return t(section ? TITLES[section] : 'shell.title.default')
+  }, [location.pathname, t])
   const logo = theme === 'dark' ? branding.data?.dark_logo : branding.data?.light_logo
-  const commandChannels = useMemo(() => [...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }].map((item) => ({ id: item.to, type: 'channel' as const, title: 'settings' in item ? String(item.label) : t(item.label), subtitle: 'Workspace section', icon: item.icon, run: () => navigate(item.to) })), [nav, navigate, t])
+  const commandChannels = useMemo(() => [...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }].map((item) => ({ id: item.to, type: 'channel' as const, title: t(item.label), subtitle: t('shell.command.sectionSubtitle'), icon: item.icon, run: () => navigate(item.to) })), [nav, navigate, t])
   const commandFeatures = useMemo(() => [
-    { id: 'create-task', type: 'feature' as const, title: 'Create task', subtitle: 'Open a new task form', icon: CheckSquare2, run: () => navigate('/tasks?create=1') },
-    { id: 'create-contract', type: 'feature' as const, title: 'Create contract', subtitle: 'Open a new contract draft', icon: FileSignature, run: () => navigate('/contracts?create=1') },
-    { id: 'upload-file', type: 'feature' as const, title: 'Upload file', subtitle: 'Open the company file uploader', icon: Upload, run: () => navigate('/company-files?upload=1') },
+    { id: 'create-task', type: 'feature' as const, title: t('shell.command.createTask'), subtitle: t('shell.command.createTaskHint'), icon: CheckSquare2, run: () => navigate('/tasks?create=1') },
+    { id: 'create-contract', type: 'feature' as const, title: t('shell.command.createContract'), subtitle: t('shell.command.createContractHint'), icon: FileSignature, run: () => navigate('/contracts?create=1') },
+    { id: 'upload-file', type: 'feature' as const, title: t('shell.command.uploadFile'), subtitle: t('shell.command.uploadFileHint'), icon: Upload, run: () => navigate('/company-files?upload=1') },
     ...(roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role)) ? [
-      { id: 'workspace-settings', type: 'feature' as const, title: 'Байгууллага / Organization', subtitle: 'Профайл ба брэндинг / Profile & branding', icon: Settings2, run: () => navigate('/administration/organization/profile') },
-      { id: 'collaboration-settings', type: 'feature' as const, title: 'Ажлын цаг / Worktime', subtitle: 'Check-in ба процесс / Check-in & workflows', icon: Users2, run: () => navigate('/administration/workflows/worktime') },
-      ...(roles.includes('admin') ? [{ id: 'access-settings', type: 'feature' as const, title: 'Хэрэглэгч ба эрх / People & access', subtitle: 'Ажилтан, role ба эрх / Employees, roles & permissions', icon: Settings2, run: () => navigate('/administration/people/users') }] : []),
+      { id: 'workspace-settings', type: 'feature' as const, title: t('shell.command.organization'), subtitle: t('shell.command.organizationHint'), icon: Settings2, run: () => navigate('/administration/organization/profile') },
+      { id: 'collaboration-settings', type: 'feature' as const, title: t('shell.command.worktime'), subtitle: t('shell.command.worktimeHint'), icon: Users2, run: () => navigate('/administration/workflows/worktime') },
+      ...(roles.includes('admin') ? [{ id: 'access-settings', type: 'feature' as const, title: t('shell.command.access'), subtitle: t('shell.command.accessHint'), icon: Settings2, run: () => navigate('/administration/people/users') }] : []),
     ] : []),
-    { id: 'profile', type: 'feature' as const, title: 'Open profile', subtitle: 'Manage your account', icon: UserCircle2, run: () => navigate('/profile') },
-  ], [navigate, roles])
+    { id: 'profile', type: 'feature' as const, title: t('shell.command.profile'), subtitle: t('shell.command.profileHint'), icon: UserCircle2, run: () => navigate('/profile') },
+  ], [navigate, roles, t])
   const mobileNav = useMemo(() => ['/', '/calendar', '/tasks', '/chat'].map((to) => nav.find((item) => item.to === to)).filter(Boolean) as typeof nav, [nav])
   const moreNav = useMemo(() => nav.filter((item) => !mobileNav.includes(item)), [mobileNav, nav])
   const moreActive = !mobileNav.some((item) => item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to))
@@ -328,7 +330,7 @@ export function EnterpriseShell() {
       setWorkersOpen(false)
       navigate(`/chat/${conversation.public_id}`)
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Чат нээж чадсангүй')
+      toast.error(error.response?.data?.detail || t('shell.openChatFailed'))
     }
   }
 
@@ -373,11 +375,11 @@ export function EnterpriseShell() {
       <div className="workspace-shell">
         <aside className="workspace-sidebar">
           <div className="sidebar-brand">{branding.isPending ? null : <img src={logo || (theme === 'dark' ? '/oyuns-aio-logo.png' : '/favicon.png')} alt="OYUNS" />}</div>
-          <nav aria-label="Үндсэн цэс">
+          <nav aria-label={t('shell.mainNav')}>
             {nav.map(({ to, label, icon: Icon }) => (
               <div className={NAV_GROUP_BREAKS.has(to) ? 'nav-group nav-group-break' : 'nav-group'} key={to}>
                 <NavLink to={to} end={to === '/'} onMouseEnter={() => preloadRoute(to)} onFocus={() => preloadRoute(to)} className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                  <Icon size={18} strokeWidth={1.8} aria-hidden /><span>{t(label)}</span>{to === '/chat' && Boolean(unreadChat.data?.unread_count) && <b className="nav-unread-badge" aria-label={`${unreadChat.data?.unread_count} уншаагүй чат`}>{(unreadChat.data?.unread_count ?? 0) > 99 ? '99+' : unreadChat.data?.unread_count}</b>}
+                  <Icon size={18} strokeWidth={1.8} aria-hidden /><span>{t(label)}</span>{to === '/chat' && Boolean(unreadChat.data?.unread_count) && <b className="nav-unread-badge" aria-label={t('shell.unreadChat', { n: unreadChat.data?.unread_count })}>{(unreadChat.data?.unread_count ?? 0) > 99 ? '99+' : unreadChat.data?.unread_count}</b>}
                 </NavLink>
               </div>
             ))}
@@ -385,7 +387,7 @@ export function EnterpriseShell() {
           <div className="sidebar-footer">
             <NavLink to="/company-files" className={({ isActive }) => isActive ? 'sidebar-library-link active' : 'sidebar-library-link'}><FolderArchive size={17} /><span>{t('nav.companyFiles')}</span></NavLink>
             <div className="sidebar-profile">
-              <button className="avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{avatarContent}</button>
+              <button className="avatar" onClick={() => navigate('/profile')} aria-label={t('shell.openProfile')}>{avatarContent}</button>
               <button className="profile-identity" onClick={() => navigate('/profile')}><strong>{actorQuery.data?.name ?? actorQuery.data?.email ?? '…'}</strong><span>{roles[0] ?? 'member'}</span></button>
               <button onClick={() => logout.mutate()} aria-label={t('action.logout')}><LogOut size={17} /></button>
             </div>
@@ -393,12 +395,12 @@ export function EnterpriseShell() {
         </aside>
         <main className="workspace-main">
           <header className={`workspace-header ${headerScrolled ? 'is-scrolled' : ''}`}>
-            <button className="avatar header-avatar" onClick={() => navigate('/profile')} aria-label="Профайл нээх">{avatarContent}</button>
+            <button className="avatar header-avatar" onClick={() => navigate('/profile')} aria-label={t('shell.openProfile')}>{avatarContent}</button>
             <h1>{title}</h1>
             <div className="header-actions">
               <WorkspaceModeToggle />
               <Suspense fallback={null}><LazyNotificationCenter /></Suspense>
-              <button className="theme-toggle" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={theme === 'light' ? 'Dark mode идэвхжүүлэх' : 'Light mode идэвхжүүлэх'} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
+              <button className="theme-toggle" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={t(theme === 'light' ? 'shell.theme.enableDark' : 'shell.theme.enableLight')} title={t(theme === 'light' ? 'shell.theme.dark' : 'shell.theme.light')}>{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
               <button className="search-trigger" onClick={() => setCommandOpen(true)}><Search size={16} /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
               {assistantLicensed && <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>}
             </div>
@@ -406,16 +408,16 @@ export function EnterpriseShell() {
           <PullToRefresh enabled={!isChatRoute} />
           <div className={`workspace-content ${isChatRoute ? 'chat-route-content' : ''}`}><Suspense fallback={<WorkspaceRouteSkeleton pathname={location.pathname} />}><Outlet /></Suspense></div>
         </main>
-        <nav className="mobile-tabbar" aria-label="Шуурхай цэс">
+        <nav className="mobile-tabbar" aria-label={t('shell.quickNav')}>
           {mobileNav.map(({ to, label, icon: Icon }) => (
             <NavLink key={to} to={to} end={to === '/'} onTouchStart={() => preloadRoute(to)} onClick={() => { if (location.pathname === to) window.scrollTo({ top: 0, behavior: 'smooth' }) }} className={({ isActive }) => isActive ? 'active' : ''}>
-              <span className="mobile-tab-icon"><Icon size={20} strokeWidth={1.9} aria-hidden />{to === '/chat' && unreadCount > 0 && <b className="nav-unread-badge" aria-label={`${unreadCount} уншаагүй чат`}>{unreadCount > 99 ? '99+' : unreadCount}</b>}</span>
+              <span className="mobile-tab-icon"><Icon size={20} strokeWidth={1.9} aria-hidden />{to === '/chat' && unreadCount > 0 && <b className="nav-unread-badge" aria-label={t('shell.unreadChat', { n: unreadCount })}>{unreadCount > 99 ? '99+' : unreadCount}</b>}</span>
               <span>{t(label)}</span>
             </NavLink>
           ))}
-          <button className={mobileOpen || moreActive ? 'active' : ''} onClick={() => setMobileOpen(true)} aria-label="Бусад цэс нээх" aria-expanded={mobileOpen} aria-haspopup="dialog">
+          <button className={mobileOpen || moreActive ? 'active' : ''} onClick={() => setMobileOpen(true)} aria-label={t('shell.openMore')} aria-expanded={mobileOpen} aria-haspopup="dialog">
             <span className="mobile-tab-icon"><LayoutGrid size={20} strokeWidth={1.9} aria-hidden /></span>
-            <span>Бусад</span>
+            <span>{t('shell.more')}</span>
           </button>
         </nav>
         <MobileMoreSheet
@@ -431,8 +433,8 @@ export function EnterpriseShell() {
           onWorkers={() => setWorkersOpen(true)}
           onLogout={() => logout.mutate()}
         />
-        {workersOpen && <button type="button" className="workers-scrim" aria-label="Ажилтны жагсаалт хаах" onClick={() => setWorkersOpen(false)} />}
-        <aside ref={workersDrawerRef} className={`workers-drawer ${workersOpen ? 'open' : ''} ${workersDragging ? 'is-dragging' : ''}`} style={{ '--workers-toggle-y': `${workersToggleY}px` } as React.CSSProperties} aria-label="Ажилтны төлөв"><button ref={workersToggleRef} className="workers-toggle" onPointerDown={handleWorkersPointerDown} onPointerMove={handleWorkersPointerMove} onPointerUp={finishWorkersPointer} onPointerCancel={finishWorkersPointer} onClick={handleWorkersClick} aria-label="Ажилтны жагсаалт нээх"><ChevronLeft /><Users2 /></button><div className="workers-content"><header><div><span className="eyebrow">OYUNS</span><h2>Ажилтнууд</h2></div><button onClick={() => setWorkersOpen(false)} aria-label="Ажилтны жагсаалт хаах"><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder="Ажилтан хайх…" /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={resolvePublicAssetUrl(worker.avatar_url) || undefined} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{worker.presence === 'in_person' ? 'Оффис идэвхтэй' : worker.presence === 'remote' ? 'Remote идэвхтэй' : worker.presence === 'break' ? 'Завсарлага' : 'Offline'} · {worker.job_title || worker.telegram_username || 'Ажилтан'}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>Профайл ачаалж байна…</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || 'Утас оруулаагүй'}<br />{workerProfile.data?.work_direction || 'Чиглэл оруулаагүй'} · {workerProfile.data?.work_branch || 'Ажлын алба оруулаагүй'}</p><div className="worker-chat-actions"><button className="worker-inapp-chat" disabled={!workerProfile.data?.chat_available || openDirectChat.isPending} onClick={() => selectedWorker && openWorkerChat(selectedWorker)}>Чатлах</button>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer" aria-label="Telegram-аар чатлах" title="Telegram-аар чатлах"><Send size={17} /></a>}</div>{!workerProfile.data?.chat_available && <small className="worker-chat-hint">Workspace хандалт холбосны дараа чатлах боломжтой.</small>}{canReviewWorkers && <div><span>Ажилласан цаг<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}ц</strong></span><span>Даалгавар<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>Тайлан<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div></aside>
+        {workersOpen && <button type="button" className="workers-scrim" aria-label={t('shell.workers.close')} onClick={() => setWorkersOpen(false)} />}
+        <aside ref={workersDrawerRef} className={`workers-drawer ${workersOpen ? 'open' : ''} ${workersDragging ? 'is-dragging' : ''}`} style={{ '--workers-toggle-y': `${workersToggleY}px` } as React.CSSProperties} aria-label={t('shell.workers.status')}><button ref={workersToggleRef} className="workers-toggle" onPointerDown={handleWorkersPointerDown} onPointerMove={handleWorkersPointerMove} onPointerUp={finishWorkersPointer} onPointerCancel={finishWorkersPointer} onClick={handleWorkersClick} aria-label={t('shell.workers.open')}><ChevronLeft /><Users2 /></button><div className="workers-content"><header><div><span className="eyebrow">OYUNS</span><h2>{t('shell.workers.title')}</h2></div><button onClick={() => setWorkersOpen(false)} aria-label={t('shell.workers.close')}><X /></button></header><label className="worker-search"><Search size={15} /><input value={workerSearch} onChange={(event) => setWorkerSearch(event.target.value)} placeholder={t('shell.workers.search')} /></label><div className="worker-list">{visibleWorkers.map((worker) => <button key={worker.id} onClick={() => setSelectedWorker(worker.id)}><span className="worker-avatar">{worker.avatar_url ? <img src={resolvePublicAssetUrl(worker.avatar_url) || undefined} alt="" /> : worker.name[0]}</span><span><strong>{worker.name}</strong><small>{t(`shell.presence.${worker.presence}`)} · {worker.job_title || worker.telegram_username || t('shell.workers.defaultRole')}</small></span><i className={`presence ${worker.presence}`} title={worker.presence} /></button>)}</div>{selectedWorker && <section className="worker-performance">{workerProfile.isLoading ? <p>{t('shell.workers.profileLoading')}</p> : <><header><strong>{workerProfile.data?.name}</strong><button onClick={() => setSelectedWorker(undefined)}><X size={14} /></button></header><p>{workerProfile.data?.phone_number || t('shell.workers.noPhone')}<br />{workerProfile.data?.work_direction || t('shell.workers.noDirection')} · {workerProfile.data?.work_branch || t('shell.workers.noBranch')}</p><div className="worker-chat-actions"><button className="worker-inapp-chat" disabled={!workerProfile.data?.chat_available || openDirectChat.isPending} onClick={() => selectedWorker && openWorkerChat(selectedWorker)}>{t('shell.workers.chat')}</button>{workerProfile.data?.telegram_chat_url && <a className="telegram-chat-action" href={workerProfile.data.telegram_chat_url} target="_blank" rel="noreferrer" aria-label={t('shell.workers.telegramChat')} title={t('shell.workers.telegramChat')}><Send size={17} /></a>}</div>{!workerProfile.data?.chat_available && <small className="worker-chat-hint">{t('shell.workers.chatHint')}</small>}{canReviewWorkers && <div><span>{t('shell.workers.workedHours')}<strong>{Math.round((workerPerformance.data?.worked_minutes ?? 0) / 60)}{t('shell.workers.hoursUnit')}</strong></span><span>{t('shell.workers.tasks')}<strong>{workerPerformance.data?.completion_rate ?? 0}%</strong></span><span>{t('shell.workers.reports')}<strong>{workerPerformance.data?.report_submission_rate ?? 0}%</strong></span></div>}</>}</section>}</div></aside>
         {assistantOpen && <Suspense fallback={null}><LazyOyunsAssistant open onClose={() => setAssistantOpen(false)} /></Suspense>}
         {commandOpen && <Suspense fallback={null}><LazyGlobalCommandBar open onClose={() => setCommandOpen(false)} accountId={actorQuery.data?.id} channels={commandChannels} features={commandFeatures} onWorker={(id) => { setSelectedWorker(id); setWorkersOpen(true) }} /></Suspense>}
       </div>

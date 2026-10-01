@@ -1,18 +1,21 @@
+import i18n from '../i18n'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 import { useQuestions, useCreateQuestion, useDeleteQuestion, useEmployees, useReorderQuestions, useUpdateQuestion } from '../api/hooks'
 import { UserTagPicker } from '../components/UserTagPicker'
 
 const TYPE_OPTIONS = [
-  { value: 'integer', label: 'Бүхэл тоо' },
-  { value: 'decimal', label: 'Бутархай тоо' },
-  { value: 'boolean', label: 'Тийм / Үгүй' },
-  { value: 'choice',  label: 'Сонголт' },
-  { value: 'text',    label: 'Текст' },
+  { value: 'integer', get label() { return i18n.t('questions.type.integer') } },
+  { value: 'decimal', get label() { return i18n.t('questions.type.decimal') } },
+  { value: 'boolean', get label() { return i18n.t('questions.type.boolean') } },
+  { value: 'choice', get label() { return i18n.t('questions.type.choice') } },
+  { value: 'text', get label() { return i18n.t('questions.type.text') } },
 ]
 const typeColor: Record<string, any> = { integer: 'blue', decimal: 'blue', boolean: 'purple', choice: 'yellow', text: 'muted' }
 
 export function QuestionsPage() {
+  const { t } = useTranslation()
   const { data: questions = [] } = useQuestions()
   const { data: employees = [] } = useEmployees()
   const create = useCreateQuestion()
@@ -64,14 +67,14 @@ export function QuestionsPage() {
 
   return (
     <div>
-      <PageHeader title="Асуултууд">
-        <Btn variant="primary" onClick={openCreate}>+ Асуулт нэмэх</Btn>
+      <PageHeader title={t('questions.title')}>
+        <Btn variant="primary" onClick={openCreate}>{t('questions.add')}</Btn>
       </PageHeader>
 
       {required >= 5 && (
         <div className="bg-yellow-dim border border-[#5a4010] rounded-xl px-4 py-3 mb-5 flex items-center gap-2.5">
           <span className="text-base">⚠️</span>
-          <span className="text-[13px] text-yellow"><b>Заавал хариулах 5 асуулт</b> гэсэн дээд хязгаарт хүрлээ. 6-аас дээш бол бөглөлт 50%-иас доошилдог.</span>
+          <span className="text-[13px] text-yellow"><b>{t('questions.limitBold')}</b> {t('questions.limitRest')}</span>
         </div>
       )}
 
@@ -86,19 +89,19 @@ export function QuestionsPage() {
                   <Badge color={typeColor[q.answer_type] || 'muted'}>
                     {TYPE_OPTIONS.find((t) => t.value === q.answer_type)?.label}
                   </Badge>
-                  {q.is_required ? <Badge color="red">Заавал</Badge> : <Badge color="muted">Заавал биш</Badge>}
+                  {q.is_required ? <Badge color="red">{t('questions.required')}</Badge> : <Badge color="muted">{t('questions.optional')}</Badge>}
                   <Badge color="muted">
                     {q.employee_ids?.length
-                      ? `Зөвхөн: ${q.employee_ids.map((id: number) => employees.find((e: any) => e.id === id)?.name || id).join(', ')}`
-                      : 'Бүх ажилтан'}
+                      ? t('questions.onlyFor', { names: q.employee_ids.map((id: number) => employees.find((e: any) => e.id === id)?.name || id).join(', ') })
+                      : t('questions.allEmployees')}
                   </Badge>
                 </div>
               </div>
               <div className="flex gap-1.5 flex-shrink-0">
-                <Btn onClick={() => openEdit(q)}>Засах</Btn>
+                <Btn onClick={() => openEdit(q)}>{t('dev.edit')}</Btn>
                 <Btn variant="danger" onClick={() => {
-                  if (window.confirm('Энэ check-in асуултыг устгах уу?')) del.mutate(q.id)
-                }}>Устгах</Btn>
+                  if (window.confirm(t('questions.deleteConfirm'))) del.mutate(q.id)
+                }}>{t('dev.delete')}</Btn>
                 <div className="flex flex-col gap-0.5">
                   <button disabled={i === 0} onClick={() => move(i, -1)}
                     className="bg-surface3 border-none rounded text-muted text-[10px] px-1.5 py-0.5 cursor-pointer disabled:opacity-30">▲</button>
@@ -112,26 +115,26 @@ export function QuestionsPage() {
       </div>
 
       <div className="mt-5 px-4 py-3.5 bg-accent-dim border border-[#1c3a6b] rounded-xl text-[13px] text-accent">
-        <b>Үндсэн зарчим:</b> заавал хариулах асуулт 5 хүртэл байна. Текстэн хариултаас сонголтын товч илүү тохиромжтой.
+        <b>{t('questions.principle')}</b> {t('questions.principleRest')}
       </div>
 
       {showModal && (
-        <Modal title={editingQuestion ? 'Асуулт засах' : 'Шинэ асуулт'} onClose={() => { setShowModal(false); setEditingQuestion(null) }}>
+        <Modal title={editingQuestion ? t('questions.editTitle') : t('questions.newTitle')} onClose={() => { setShowModal(false); setEditingQuestion(null) }}>
           <div className="flex flex-col gap-3.5">
-            <Input label="Асуултын текст" value={form.text} onChange={(v) => setForm((f) => ({ ...f, text: v }))} placeholder="Хэдэн дуудлага хийсэн бэ?" fullWidth />
-            <Select label="Хариултын төрөл" value={form.answer_type} onChange={(v) => setForm((f) => ({ ...f, answer_type: v }))} options={TYPE_OPTIONS} fullWidth />
+            <Input label={t('questions.text')} value={form.text} onChange={(v) => setForm((f) => ({ ...f, text: v }))} placeholder={t('questions.textPlaceholder')} fullWidth />
+            <Select label={t('questions.answerType')} value={form.answer_type} onChange={(v) => setForm((f) => ({ ...f, answer_type: v }))} options={TYPE_OPTIONS} fullWidth />
             <div className="flex items-center gap-3">
               <input type="checkbox" id="req" checked={form.is_required} onChange={(e) => setForm((f) => ({ ...f, is_required: e.target.checked }))} className="accent-accent" />
-              <label htmlFor="req" className="text-[13px] text-muted cursor-pointer">Заавал хариулах</label>
+              <label htmlFor="req" className="text-[13px] text-muted cursor-pointer">{t('questions.requiredToggle')}</label>
             </div>
             <div className="flex flex-col gap-2">
-              <div className="text-xs text-muted font-medium">Хэн хариулах вэ?</div>
-              <div className="text-[12px] text-muted">Ажилтан сонгохгүй бол бүх ажилтанд асууна.</div>
-              <UserTagPicker label="Ажилтнууд" value={form.employee_ids} users={employees.filter((employee: any) => employee.is_active)} onChange={(employee_ids) => setForm((current) => ({ ...current, employee_ids }))} />
+              <div className="text-xs text-muted font-medium">{t('questions.whoAnswers')}</div>
+              <div className="text-[12px] text-muted">{t('questions.whoHint')}</div>
+              <UserTagPicker label={t('questions.employees')} value={form.employee_ids} users={employees.filter((employee: any) => employee.is_active)} onChange={(employee_ids) => setForm((current) => ({ ...current, employee_ids }))} />
             </div>
             <div className="flex gap-2.5 justify-end pt-1">
-              <Btn onClick={() => { setShowModal(false); setEditingQuestion(null) }}>Цуцлах</Btn>
-              <Btn variant="primary" onClick={submit} disabled={!form.text || create.isPending || update.isPending}>{editingQuestion ? 'Хадгалах' : 'Нэмэх'}</Btn>
+              <Btn onClick={() => { setShowModal(false); setEditingQuestion(null) }}>{t('dev.cancel')}</Btn>
+              <Btn variant="primary" onClick={submit} disabled={!form.text || create.isPending || update.isPending}>{editingQuestion ? t('dev.save') : t('questions.addBtn')}</Btn>
             </div>
           </div>
         </Modal>

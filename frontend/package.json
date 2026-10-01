@@ -11,6 +11,7 @@
     "performance:budget:strict": "PERF_STRICT_CSS=1 npm run performance:budget",
     "preview": "vite preview",
     "test": "vitest run",
+    "i18n:audit": "node scripts/i18n-audit.mjs",
     "test:e2e": "playwright test",
     "native:sync": "npm run build && ./scripts/with-java21.sh cap sync",
     "native:sync:ios": "npm run build && cap sync ios",

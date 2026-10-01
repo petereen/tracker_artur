@@ -21,7 +21,7 @@ vi.mock('./WorkspaceModeProvider', () => ({
 describe('WorkspaceModeToggle', () => {
   it('is an accessible switch and changes from Manager Mode to Member Mode', () => {
     render(<WorkspaceModeToggle />)
-    const toggle = screen.getByRole('switch', { name: 'Switch workspace mode' })
+    const toggle = screen.getByRole('switch', { name: 'Ажлын харагдац солих' })
     expect(toggle).toHaveAttribute('aria-checked', 'true')
     expect(toggle).toHaveTextContent('Менежер харагдац')
     fireEvent.click(toggle)

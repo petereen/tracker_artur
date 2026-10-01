@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   BarChart3, BriefcaseBusiness, Calculator, CalendarDays, CheckSquare2, FileCheck2, FileSignature, FolderArchive, Goal,
   Handshake, MessageCircle, PiggyBank, ScanLine, Search, Sparkles, UserRoundCog, Zap, type LucideIcon,
@@ -18,25 +19,25 @@ type ShortcutKey =
   | 'search' | 'assistant' | 'tasks' | 'calendar' | 'reports' | 'worktime' | 'chat' | 'projects' | 'plans'
   | 'contracts' | 'hr' | 'files' | 'analytics' | 'crm' | 'budget' | 'payroll'
 
-interface Shortcut { label: string; icon: LucideIcon; to?: string; run?: () => void }
+interface Shortcut { icon: LucideIcon; to?: string; run?: () => void }
 
 const SHORTCUTS: Record<ShortcutKey, Shortcut> = {
-  search: { label: 'Хайх', icon: Search, run: openGlobalSearch },
-  assistant: { label: 'OYUNS AI', icon: Sparkles, run: openAssistant },
-  tasks: { label: 'Даалгавар', icon: CheckSquare2, to: '/tasks' },
-  calendar: { label: 'Календарь', icon: CalendarDays, to: '/calendar' },
-  reports: { label: 'Тайлан', icon: FileCheck2, to: '/reports' },
-  worktime: { label: 'Ажлын цаг', icon: ScanLine, to: '/worktime' },
-  chat: { label: 'Чат', icon: MessageCircle, to: '/chat' },
-  projects: { label: 'Төсөл', icon: BriefcaseBusiness, to: '/projects' },
-  plans: { label: 'Төлөвлөгөө', icon: Goal, to: '/plans' },
-  contracts: { label: 'Гэрээ', icon: FileSignature, to: '/contracts' },
-  hr: { label: 'Хүний нөөц', icon: UserRoundCog, to: '/hr' },
-  files: { label: 'Файлууд', icon: FolderArchive, to: '/company-files' },
-  analytics: { label: 'Статистик', icon: BarChart3, to: '/analytics' },
-  crm: { label: 'CRM', icon: Handshake, to: '/erp/crm' },
-  budget: { label: 'Төсөв', icon: PiggyBank, to: '/erp/budget' },
-  payroll: { label: 'Цалин', icon: Calculator, to: '/erp/payroll' },
+  search: { icon: Search, run: openGlobalSearch },
+  assistant: { icon: Sparkles, run: openAssistant },
+  tasks: { icon: CheckSquare2, to: '/tasks' },
+  calendar: { icon: CalendarDays, to: '/calendar' },
+  reports: { icon: FileCheck2, to: '/reports' },
+  worktime: { icon: ScanLine, to: '/worktime' },
+  chat: { icon: MessageCircle, to: '/chat' },
+  projects: { icon: BriefcaseBusiness, to: '/projects' },
+  plans: { icon: Goal, to: '/plans' },
+  contracts: { icon: FileSignature, to: '/contracts' },
+  hr: { icon: UserRoundCog, to: '/hr' },
+  files: { icon: FolderArchive, to: '/company-files' },
+  analytics: { icon: BarChart3, to: '/analytics' },
+  crm: { icon: Handshake, to: '/erp/crm' },
+  budget: { icon: PiggyBank, to: '/erp/budget' },
+  payroll: { icon: Calculator, to: '/erp/payroll' },
 }
 const SHORTCUT_KEYS = Object.keys(SHORTCUTS) as ShortcutKey[]
 const PAYROLL_ROLES = ['admin', 'hr']
@@ -64,33 +65,35 @@ function useAvailableShortcuts(): ShortcutKey[] {
 }
 
 export function QuickActionsWidget({ settings }: WidgetProps<QuickActionsSettings>) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const available = useAvailableShortcuts()
   const chosen = (settings.shortcuts ?? DEFAULT_QUICK_ACTIONS_SETTINGS.shortcuts).filter((key) => available.includes(key))
   return (
-    <section className="today-widget today-quick-actions" aria-label="Шуурхай үйлдэл">
-      <WidgetHeader icon={Zap} title="Шуурхай үйлдэл" />
+    <section className="today-widget today-quick-actions" aria-label={t('today.widget.quick-actions.title')}>
+      <WidgetHeader icon={Zap} title={t('today.widget.quick-actions.title')} />
       {chosen.length ? (
-        <nav className="today-quick-grid" aria-label="Шуурхай үйлдлүүд">
+        <nav className="today-quick-grid" aria-label={t('today.quick.nav')}>
           {chosen.map((key) => {
-            const { label, icon: Icon, to, run } = SHORTCUTS[key]
+            const { icon: Icon, to, run } = SHORTCUTS[key]
             return (
               <button key={key} type="button" className="today-quick-action" onClick={() => (run ? run() : to && navigate(to))}>
-                <Icon size={17} aria-hidden /><span>{label}</span>
+                <Icon size={17} aria-hidden /><span>{t(`today.quick.${key}`)}</span>
               </button>
             )
           })}
         </nav>
-      ) : <p className="today-widget-empty">Тохиргооноос товчлол сонгоно уу.</p>}
+      ) : <p className="today-widget-empty">{t('today.quick.empty')}</p>}
     </section>
   )
 }
 
 export function QuickActionsSettingsForm({ settings, onChange }: WidgetSettingsProps<QuickActionsSettings>) {
+  const { t } = useTranslation()
   const available = useAvailableShortcuts()
   return (
-    <CheckboxList label="Товчлолууд" description="Хандах эрхтэй модулиуд л харагдана." density="compact" value={(settings.shortcuts ?? []).filter((key) => available.includes(key))} onChange={(values) => onChange({ shortcuts: SHORTCUT_KEYS.filter((key) => values.includes(key)) })}>
-      {available.map((key) => <CheckboxListItem key={key} value={key} label={SHORTCUTS[key].label} />)}
+    <CheckboxList label={t('today.quick.shortcuts')} description={t('today.quick.shortcutsHint')} density="compact" value={(settings.shortcuts ?? []).filter((key) => available.includes(key))} onChange={(values) => onChange({ shortcuts: SHORTCUT_KEYS.filter((key) => values.includes(key)) })}>
+      {available.map((key) => <CheckboxListItem key={key} value={key} label={t(`today.quick.${key}`)} />)}
     </CheckboxList>
   )
 }

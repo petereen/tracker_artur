@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
+import { useTranslation } from 'react-i18next'
 import { DownloadCloud, Plus, Trash2 } from 'lucide-react'
 import { lookupCRMTaxpayer, useSaveCRMParty, type CRMLookups, type CRMParty, type CRMPartyInput, type CRMPartyLink, type CRMTaxpayer } from '../../api/crm'
 import { Btn, Modal } from '../ui'
@@ -38,6 +39,7 @@ const num = (value: string) => (value === '' ? null : Number(value))
 const txt = (value: string) => value.trim() || null
 
 export function CustomerForm({ party, lookups, onClose, onSaved }: { party: CRMParty | null; lookups: CRMLookups; onClose: () => void; onSaved?: (party: CRMParty) => void }) {
+  const { t } = useTranslation()
   const [form, setForm] = useState<Form>(() => initial(party))
   const [duplicates, setDuplicates] = useState<CRMTaxpayer['duplicates'] | null>(null)
   const [lookingUp, setLookingUp] = useState(false)
@@ -45,15 +47,15 @@ export function CustomerForm({ party, lookups, onClose, onSaved }: { party: CRMP
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((current) => ({ ...current, [key]: value }))
 
   const lookup = async () => {
-    if (!form.registry_no.trim() && !form.tax_id.trim()) { toast.error('РД эсвэл ТТД оруулна уу'); return }
+    if (!form.registry_no.trim() && !form.tax_id.trim()) { toast.error(t('crm.party.lookupRequired')); return }
     setLookingUp(true)
     try {
       const info = await lookupCRMTaxpayer({ registry_no: form.registry_no.trim() || undefined, tin: form.registry_no.trim() ? undefined : form.tax_id.trim() })
       setForm((current) => ({ ...current, tax_id: info.tin, name: current.name || info.name || '', vat_payer: info.vat_payer, city_tax_payer: info.city_tax_payer }))
-      if (info.name && form.name && form.name !== info.name) toast(`Татварт бүртгэлтэй нэр: ${info.name}`)
+      if (info.name && form.name && form.name !== info.name) toast(t('crm.party.taxName', { name: info.name }))
       const others = info.duplicates.filter((row) => row.party_id !== party?.id)
       if (others.length) setDuplicates(others)
-      toast.success('Татварын мэдээлэл татагдлаа')
+      toast.success(t('crm.party.taxLoaded'))
     } catch (error) {
       toast.error(crmErrorText(error))
     } finally {
@@ -62,7 +64,7 @@ export function CustomerForm({ party, lookups, onClose, onSaved }: { party: CRMP
   }
 
   const submit = async (confirmDuplicate = false) => {
-    if (!form.name.trim()) { toast.error('Нэр оруулна уу'); return }
+    if (!form.name.trim()) { toast.error(t('crm.common.nameRequired')); return }
     const payload: CRMPartyInput = {
       code: txt(form.code) ?? undefined, name: form.name.trim(), name_en: txt(form.name_en), business_name: txt(form.business_name), registry_no: txt(form.registry_no), tax_id: txt(form.tax_id),
       group_id: num(form.group_id), is_customer: form.is_customer, is_supplier: form.is_supplier, is_individual: form.is_individual, is_foreign: form.is_foreign,
@@ -78,8 +80,8 @@ export function CustomerForm({ party, lookups, onClose, onSaved }: { party: CRMP
     }
     try {
       const saved = await save.mutateAsync(party ? { id: party.id, ...payload } : payload)
-      if (saved.duplicates?.length) toast(`Ижил нэртэй харилцагч байна: ${saved.duplicates.map((row) => row.code).join(', ')}`)
-      toast.success(party ? 'Хадгаллаа' : `${saved.code} кодтой харилцагч бүртгэгдлээ`)
+      if (saved.duplicates?.length) toast(t('crm.party.sameName', { codes: saved.duplicates.map((row) => row.code).join(', ') }))
+      toast.success(party ? t('crm.common.saved') : t('crm.party.createdWithCode', { code: saved.code }))
       onSaved?.(saved)
       onClose()
     } catch (error) {
@@ -93,89 +95,89 @@ export function CustomerForm({ party, lookups, onClose, onSaved }: { party: CRMP
 
   const options = <T extends { id: number; name: string; code?: string }>(rows: T[]) => rows.map((row) => ({ value: String(row.id), label: row.code ? `${row.code} ${row.name}` : row.name }))
 
-  return <Modal title={party ? `${party.code} — ${party.name}` : 'Шинэ харилцагч'} onClose={onClose} className="crm-modal">
+  return <Modal title={party ? `${party.code} — ${party.name}` : t('crm.party.titleNew')} onClose={onClose} className="crm-modal">
     <form onSubmit={(event) => { event.preventDefault(); void submit() }}>
-      <Section title="Үндсэн мэдээлэл">
-        <Field label="Код" hint={party ? undefined : 'Хоосон бол 10001-ээс эхлэн автоматаар олгоно'}><TextInput value={form.code} onChange={(value) => set('code', value)} /></Field>
-        <Field label="РД (регистр)">
-          <div className="crm-inline"><TextInput value={form.registry_no} onChange={(value) => set('registry_no', value.toUpperCase())} /><Btn onClick={() => void lookup()} disabled={lookingUp}><DownloadCloud size={14} />{lookingUp ? 'Татаж байна…' : 'Татвараас татах'}</Btn></div>
+      <Section title={t('crm.party.sectionBasic')}>
+        <Field label={t('crm.common.code')} hint={party ? undefined : t('crm.party.codeHint')}><TextInput value={form.code} onChange={(value) => set('code', value)} /></Field>
+        <Field label={t('crm.party.registry')}>
+          <div className="crm-inline"><TextInput value={form.registry_no} onChange={(value) => set('registry_no', value.toUpperCase())} /><Btn onClick={() => void lookup()} disabled={lookingUp}><DownloadCloud size={14} />{lookingUp ? t('crm.party.lookingUp') : t('crm.party.lookup')}</Btn></div>
         </Field>
-        <Field label="ТТД"><TextInput value={form.tax_id} onChange={(value) => set('tax_id', value)} /></Field>
-        <Field label="Нэр"><TextInput value={form.name} onChange={(value) => set('name', value)} required /></Field>
-        <Field label="Нэр /EN/"><TextInput value={form.name_en} onChange={(value) => set('name_en', value)} /></Field>
-        <Field label="Бизнес нэр"><TextInput value={form.business_name} onChange={(value) => set('business_name', value)} placeholder="Жишээ: Оргил супермаркет" /></Field>
+        <Field label={t('crm.common.taxId')}><TextInput value={form.tax_id} onChange={(value) => set('tax_id', value)} /></Field>
+        <Field label={t('crm.common.name')}><TextInput value={form.name} onChange={(value) => set('name', value)} required /></Field>
+        <Field label={t('crm.party.nameEn')}><TextInput value={form.name_en} onChange={(value) => set('name_en', value)} /></Field>
+        <Field label={t('crm.party.businessName')}><TextInput value={form.business_name} onChange={(value) => set('business_name', value)} placeholder={t('crm.party.businessPlaceholder')} /></Field>
       </Section>
       {duplicates && duplicates.length > 0 && <div className="crm-warning">
-        <strong>Энэ ТТД/РД-тай харилцагч бүртгэгдсэн байна:</strong>
+        <strong>{t('crm.party.dupTitle')}</strong>
         <ul>{duplicates.map((row) => <li key={row.party_id}>{row.code} — {row.name}</li>)}</ul>
-        <p>Олон салбартай байгууллагын салбарыг бүртгэж байгаа бол баталгаажуулж үргэлжлүүлнэ үү.</p>
-        <Btn onClick={() => void submit(true)} disabled={save.isPending}>Салбар гэж баталгаажуулж хадгалах</Btn>
+        <p>{t('crm.party.dupHint')}</p>
+        <Btn onClick={() => void submit(true)} disabled={save.isPending}>{t('crm.party.dupConfirm')}</Btn>
       </div>}
 
-      <Section title="Ангилал ба хариуцагч">
-        <Field label="Бүлэг"><NativeSelect value={form.group_id} onChange={(value) => set('group_id', value)} options={options(lookups.party_groups.filter((row) => row.is_active || String(row.id) === form.group_id))} placeholder="Үндсэн бүлэг" /></Field>
-        <Field label="Хариуцагч ажилтан"><NativeSelect value={form.responsible_employee_id} onChange={(value) => set('responsible_employee_id', value)} options={lookups.employees.map((row) => ({ value: String(row.id), label: row.name }))} /></Field>
-        <Field label="Толгой харилцагч"><PartyPicker value={form.parent_party_id} label={form.parent_label} excludeId={party?.id} onChange={(picked) => setForm((current) => ({ ...current, parent_party_id: picked?.id ?? null, parent_label: picked?.name ?? null }))} /></Field>
-        <Field label="Харилцагч болсон"><TextInput type="date" value={form.customer_since} onChange={(value) => set('customer_since', value)} /></Field>
+      <Section title={t('crm.party.sectionClass')}>
+        <Field label={t('crm.common.group')}><NativeSelect value={form.group_id} onChange={(value) => set('group_id', value)} options={options(lookups.party_groups.filter((row) => row.is_active || String(row.id) === form.group_id))} placeholder={t('crm.party.mainGroup')} /></Field>
+        <Field label={t('crm.party.responsibleEmployee')}><NativeSelect value={form.responsible_employee_id} onChange={(value) => set('responsible_employee_id', value)} options={lookups.employees.map((row) => ({ value: String(row.id), label: row.name }))} /></Field>
+        <Field label={t('crm.party.parent')}><PartyPicker value={form.parent_party_id} label={form.parent_label} excludeId={party?.id} onChange={(picked) => setForm((current) => ({ ...current, parent_party_id: picked?.id ?? null, parent_label: picked?.name ?? null }))} /></Field>
+        <Field label={t('crm.party.since')}><TextInput type="date" value={form.customer_since} onChange={(value) => set('customer_since', value)} /></Field>
         <div className="crm-checks hr-form-wide">
-          <CheckField label="Худалдан авагч" checked={form.is_customer} onChange={(value) => set('is_customer', value)} />
-          <CheckField label="Нийлүүлэгч" checked={form.is_supplier} onChange={(value) => set('is_supplier', value)} />
-          <CheckField label="Хувь хүн" checked={form.is_individual} onChange={(value) => set('is_individual', value)} />
-          <CheckField label="Гадаад" checked={form.is_foreign} onChange={(value) => set('is_foreign', value)} />
-          <CheckField label="Боломжит харилцагч (lead)" checked={form.prospect} onChange={(value) => set('prospect', value)} />
-          <CheckField label="Толгой харилцагчаар тооцоо үүснэ" checked={form.settle_via_parent} onChange={(value) => set('settle_via_parent', value)} />
+          <CheckField label={t('crm.common.customer')} checked={form.is_customer} onChange={(value) => set('is_customer', value)} />
+          <CheckField label={t('crm.common.supplier')} checked={form.is_supplier} onChange={(value) => set('is_supplier', value)} />
+          <CheckField label={t('crm.party.isIndividual')} checked={form.is_individual} onChange={(value) => set('is_individual', value)} />
+          <CheckField label={t('crm.common.foreign')} checked={form.is_foreign} onChange={(value) => set('is_foreign', value)} />
+          <CheckField label={t('crm.party.prospect')} checked={form.prospect} onChange={(value) => set('prospect', value)} />
+          <CheckField label={t('crm.party.settleViaParent')} checked={form.settle_via_parent} onChange={(value) => set('settle_via_parent', value)} />
         </div>
       </Section>
 
-      <Section title="Холбоо барих">
-        <Field label="Утас"><TextInput value={form.phone} onChange={(value) => set('phone', value)} /></Field>
-        <Field label="Mail"><TextInput type="email" value={form.email} onChange={(value) => set('email', value)} /></Field>
-        <Field label="Web"><TextInput value={form.website} onChange={(value) => set('website', value)} /></Field>
-        <Field label="Байршил"><TextInput value={form.location} onChange={(value) => set('location', value)} placeholder="Бүс нутаг, хот" /></Field>
-        <Field label="Хаяг (албан ёсны)" wide><TextInput value={form.legal_address} onChange={(value) => set('legal_address', value)} /></Field>
-        <Field label="Хаяг байршил" wide><TextInput value={form.informal_address} onChange={(value) => set('informal_address', value)} placeholder="Жишээ: Их дэлгүүрийн хойно" /></Field>
-        <Field label="Tags" wide hint="Таслалаар тусгаарлана"><TextInput value={form.tags} onChange={(value) => set('tags', value)} /></Field>
+      <Section title={t('crm.party.sectionContact')}>
+        <Field label={t('crm.common.phone')}><TextInput value={form.phone} onChange={(value) => set('phone', value)} /></Field>
+        <Field label={t('crm.common.mail')}><TextInput type="email" value={form.email} onChange={(value) => set('email', value)} /></Field>
+        <Field label={t('crm.common.web')}><TextInput value={form.website} onChange={(value) => set('website', value)} /></Field>
+        <Field label={t('crm.party.location')}><TextInput value={form.location} onChange={(value) => set('location', value)} placeholder={t('crm.party.locationPlaceholder')} /></Field>
+        <Field label={t('crm.party.legalAddress')} wide><TextInput value={form.legal_address} onChange={(value) => set('legal_address', value)} /></Field>
+        <Field label={t('crm.party.informalAddress')} wide><TextInput value={form.informal_address} onChange={(value) => set('informal_address', value)} placeholder={t('crm.party.informalPlaceholder')} /></Field>
+        <Field label={t('crm.party.tags')} wide hint={t('crm.party.tagsHint')}><TextInput value={form.tags} onChange={(value) => set('tags', value)} /></Field>
       </Section>
 
-      <Section title="Татварын тохиргоо">
+      <Section title={t('crm.party.sectionTax')}>
         <div className="crm-checks hr-form-wide">
-          <CheckField label="НӨАТ суутган төлөгч" checked={form.vat_payer} onChange={(value) => set('vat_payer', value)} />
-          <CheckField label="НХАТ суутган төлөгч" checked={form.city_tax_payer} onChange={(value) => set('city_tax_payer', value)} />
+          <CheckField label={t('crm.party.vatPayer')} checked={form.vat_payer} onChange={(value) => set('vat_payer', value)} />
+          <CheckField label={t('crm.party.cityTaxPayer')} checked={form.city_tax_payer} onChange={(value) => set('city_tax_payer', value)} />
         </div>
       </Section>
 
-      <Section title="Тооцоо ба нэмэлт тохиргоо">
-        <Field label="Тооцооны данс"><NativeSelect value={form.settlement_account_id} onChange={(value) => set('settlement_account_id', value)} options={options(lookups.settlement_accounts)} /></Field>
-        <Field label="Үнийн жагсаалт"><NativeSelect value={form.price_list_id} onChange={(value) => set('price_list_id', value)} options={options(lookups.price_lists)} /></Field>
-        <Field label="Тооцооны лимит"><TextInput type="number" min="0" value={form.credit_limit} onChange={(value) => set('credit_limit', value)} /></Field>
-        <Field label="Валют"><TextInput value={form.currency} onChange={(value) => set('currency', value.toUpperCase().slice(0, 3))} /></Field>
-        <Field label="Төлбөрийн нөхцөл"><NativeSelect value={form.payment_term_id} onChange={(value) => set('payment_term_id', value)} options={options(lookups.payment_terms.filter((row) => row.is_active || String(row.id) === form.payment_term_id))} /></Field>
-        <Field label="Тээвэр нөхцөл"><TextInput value={form.delivery_terms} onChange={(value) => set('delivery_terms', value)} /></Field>
-        <Field label="Борлуулалт хөнгөлөлт %"><TextInput type="number" min="0" step="0.01" value={form.sales_discount_pct} onChange={(value) => set('sales_discount_pct', value)} /></Field>
-        <Field label="Борлуулалт биелэх өдөр"><TextInput type="number" min="0" value={form.sales_lead_days} onChange={(value) => set('sales_lead_days', value)} /></Field>
-        <Field label="Борлуулалт тайлбар" wide><TextArea value={form.sales_note} onChange={(value) => set('sales_note', value)} rows={2} /></Field>
-        <Field label="Худалдан авалт хөнгөлөлт %"><TextInput type="number" min="0" step="0.01" value={form.purchase_discount_pct} onChange={(value) => set('purchase_discount_pct', value)} /></Field>
-        <Field label="Худалдан авалт биелэх өдөр"><TextInput type="number" min="0" value={form.purchase_lead_days} onChange={(value) => set('purchase_lead_days', value)} /></Field>
-        <Field label="Худалдан авалт тайлбар" wide><TextArea value={form.purchase_note} onChange={(value) => set('purchase_note', value)} rows={2} /></Field>
+      <Section title={t('crm.party.sectionSettlement')}>
+        <Field label={t('crm.party.settlementAccount')}><NativeSelect value={form.settlement_account_id} onChange={(value) => set('settlement_account_id', value)} options={options(lookups.settlement_accounts)} /></Field>
+        <Field label={t('crm.party.priceList')}><NativeSelect value={form.price_list_id} onChange={(value) => set('price_list_id', value)} options={options(lookups.price_lists)} /></Field>
+        <Field label={t('crm.party.creditLimit')}><TextInput type="number" min="0" value={form.credit_limit} onChange={(value) => set('credit_limit', value)} /></Field>
+        <Field label={t('crm.common.currency')}><TextInput value={form.currency} onChange={(value) => set('currency', value.toUpperCase().slice(0, 3))} /></Field>
+        <Field label={t('crm.party.paymentTerm')}><NativeSelect value={form.payment_term_id} onChange={(value) => set('payment_term_id', value)} options={options(lookups.payment_terms.filter((row) => row.is_active || String(row.id) === form.payment_term_id))} /></Field>
+        <Field label={t('crm.party.delivery')}><TextInput value={form.delivery_terms} onChange={(value) => set('delivery_terms', value)} /></Field>
+        <Field label={t('crm.party.salesDiscount')}><TextInput type="number" min="0" step="0.01" value={form.sales_discount_pct} onChange={(value) => set('sales_discount_pct', value)} /></Field>
+        <Field label={t('crm.party.salesLead')}><TextInput type="number" min="0" value={form.sales_lead_days} onChange={(value) => set('sales_lead_days', value)} /></Field>
+        <Field label={t('crm.party.salesNote')} wide><TextArea value={form.sales_note} onChange={(value) => set('sales_note', value)} rows={2} /></Field>
+        <Field label={t('crm.party.purchaseDiscount')}><TextInput type="number" min="0" step="0.01" value={form.purchase_discount_pct} onChange={(value) => set('purchase_discount_pct', value)} /></Field>
+        <Field label={t('crm.party.purchaseLead')}><TextInput type="number" min="0" value={form.purchase_lead_days} onChange={(value) => set('purchase_lead_days', value)} /></Field>
+        <Field label={t('crm.party.purchaseNote')} wide><TextArea value={form.purchase_note} onChange={(value) => set('purchase_note', value)} rows={2} /></Field>
       </Section>
 
-      <Section title="Файлын линк">
+      <Section title={t('crm.party.sectionLinks')}>
         <div className="crm-list hr-form-wide">
           {form.links.map((link, index) => <div className="crm-inline" key={index}>
-            <TextInput value={link.label} placeholder="Нэр" onChange={(value) => set('links', form.links.map((row, i) => (i === index ? { ...row, label: value } : row)))} />
-            <TextInput value={link.url} placeholder="https://… эсвэл \\server\folder" onChange={(value) => set('links', form.links.map((row, i) => (i === index ? { ...row, url: value } : row)))} />
+            <TextInput value={link.label} placeholder={t('crm.party.linkLabel')} onChange={(value) => set('links', form.links.map((row, i) => (i === index ? { ...row, label: value } : row)))} />
+            <TextInput value={link.url} placeholder={t('crm.party.linkUrlPlaceholder')} onChange={(value) => set('links', form.links.map((row, i) => (i === index ? { ...row, url: value } : row)))} />
             <Btn onClick={() => set('links', form.links.filter((_, i) => i !== index))}><Trash2 size={14} /></Btn>
           </div>)}
-          <div><Btn onClick={() => set('links', [...form.links, { label: '', url: '' }])}><Plus size={14} />Линк нэмэх</Btn></div>
+          <div><Btn onClick={() => set('links', [...form.links, { label: '', url: '' }])}><Plus size={14} />{t('crm.party.addLink')}</Btn></div>
         </div>
       </Section>
 
-      <Section title="Төлөв">
-        <div className="crm-checks"><CheckField label="Идэвхтэй" checked={form.is_active} onChange={(value) => set('is_active', value)} /></div>
-        {!form.is_active && <Field label="Идэвхгүй болсон"><TextInput type="date" value={form.inactive_since} onChange={(value) => set('inactive_since', value)} /></Field>}
+      <Section title={t('crm.party.sectionState')}>
+        <div className="crm-checks"><CheckField label={t('crm.common.active')} checked={form.is_active} onChange={(value) => set('is_active', value)} /></div>
+        {!form.is_active && <Field label={t('crm.party.inactiveSince')}><TextInput type="date" value={form.inactive_since} onChange={(value) => set('inactive_since', value)} /></Field>}
       </Section>
 
-      <div className="crm-actions"><div /><div><Btn onClick={onClose}>Болих</Btn><Btn variant="primary" type="submit" disabled={save.isPending}>{save.isPending ? 'Хадгалж байна…' : 'Хадгалах'}</Btn></div></div>
+      <div className="crm-actions"><div /><div><Btn onClick={onClose}>{t('crm.common.cancel')}</Btn><Btn variant="primary" type="submit" disabled={save.isPending}>{save.isPending ? t('crm.common.saving') : t('crm.common.save')}</Btn></div></div>
     </form>
   </Modal>
 }

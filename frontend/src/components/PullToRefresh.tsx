@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useQueryClient } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 
@@ -23,6 +24,7 @@ function overlayOpen() {
 // Touch-only pull-to-refresh for the phone layout: refetches the active queries instead of
 // reloading the page (the browser's own pull-to-refresh is disabled via overscroll-behavior).
 export function PullToRefresh({ enabled }: { enabled: boolean }) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [pull, setPull] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
@@ -98,7 +100,7 @@ export function PullToRefresh({ enabled }: { enabled: boolean }) {
       <span style={{ opacity: 0.35 + progress * 0.65 }}>
         <RefreshCw size={18} strokeWidth={2.2} style={refreshing ? undefined : { transform: `rotate(${progress * 270}deg)` }} aria-hidden />
       </span>
-      <span className="sr-only">{refreshing ? 'Шинэчилж байна' : progress >= 1 ? 'Суллаж шинэчлэх' : 'Татаж шинэчлэх'}</span>
+      <span className="sr-only">{refreshing ? t('pull.refreshing') : progress >= 1 ? t('pull.release') : t('pull.pull')}</span>
     </div>
   )
 }

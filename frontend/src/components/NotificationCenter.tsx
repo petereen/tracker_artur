@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bell, Bookmark, CheckCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { useNotifications, useReadAllNotifications, useReadNotification, useToggleNotificationPriority, UserNotification } from '../api/enterprise'
 import { InlinePending, QueryRegion, Skeleton, toQueryRegionState } from './Loading'
+import { intlLocale } from '../utils/locale'
 
-function relativeTime(value: string) {
+function relativeTime(value: string, t: TFunction) {
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000))
-  if (minutes < 1) return 'Одоо'
-  if (minutes < 60) return `${minutes} мин`
-  if (minutes < 1440) return `${Math.floor(minutes / 60)} цаг`
-  return new Date(value).toLocaleDateString('mn-MN', { month: 'short', day: 'numeric' })
+  if (minutes < 1) return t('notifications.now')
+  if (minutes < 60) return t('notifications.minutes', { n: minutes })
+  if (minutes < 1440) return t('notifications.hours', { n: Math.floor(minutes / 60) })
+  return new Date(value).toLocaleDateString(intlLocale(), { month: 'short', day: 'numeric' })
 }
 
 export function NotificationCenter({ initialOpen = false, standalone = false, onClose }: { initialOpen?: boolean; standalone?: boolean; onClose?: () => void } = {}) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(initialOpen)
   const [priorityOnly, setPriorityOnly] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -42,17 +46,17 @@ export function NotificationCenter({ initialOpen = false, standalone = false, on
   const items = notifications.data?.items ?? []
   const visibleItems = priorityOnly ? items.filter((item) => item.is_priority) : items
   return <div className={`notification-center${standalone ? ' notification-center-standalone' : ''}`} ref={root}>
-    {!standalone && <button className="notification-trigger" onClick={() => setOpen((value) => !value)} aria-label={`Мэдэгдэл${unread ? `, ${unread} уншаагүй` : ''}`} aria-expanded={open}>
+    {!standalone && <button className="notification-trigger" onClick={() => setOpen((value) => !value)} aria-label={unread ? t('notifications.triggerUnread', { n: unread }) : t('notifications.trigger')} aria-expanded={open}>
       <Bell size={17} />{unread > 0 && <span>{unread > 9 ? '9+' : unread}</span>}
     </button>}
-    {open && <section className="notification-popover" role="dialog" aria-label="Мэдэгдлүүд">
-      <header><div><span className="eyebrow">Activity</span><h2>Мэдэгдэл</h2></div>{unread > 0 && <button onClick={() => readAll.mutate()} disabled={readAll.isPending}><CheckCheck size={15} />Бүгдийг унших{readAll.isPending && <InlinePending label="Мэдэгдлүүдийг уншсан болгож байна…" />}</button>}</header>
-      <nav className="notification-filters" aria-label="Мэдэгдлийн шүүлтүүр"><button className={!priorityOnly ? 'active' : ''} onClick={() => setPriorityOnly(false)} aria-pressed={!priorityOnly}>Бүгд</button><button className={priorityOnly ? 'active' : ''} onClick={() => setPriorityOnly(true)} aria-pressed={priorityOnly}><Bookmark size={13} />Чухал</button></nav>
+    {open && <section className="notification-popover" role="dialog" aria-label={t('notifications.dialog')}>
+      <header><div><span className="eyebrow">{t('notifications.eyebrow')}</span><h2>{t('notifications.title')}</h2></div>{unread > 0 && <button onClick={() => readAll.mutate()} disabled={readAll.isPending}><CheckCheck size={15} />{t('notifications.readAll')}{readAll.isPending && <InlinePending label={t('notifications.readAllPending')} />}</button>}</header>
+      <nav className="notification-filters" aria-label={t('notifications.filters')}><button className={!priorityOnly ? 'active' : ''} onClick={() => setPriorityOnly(false)} aria-pressed={!priorityOnly}>{t('notifications.all')}</button><button className={priorityOnly ? 'active' : ''} onClick={() => setPriorityOnly(true)} aria-pressed={priorityOnly}><Bookmark size={13} />{t('notifications.priority')}</button></nav>
       <div className="notification-list">
-        <QueryRegion state={toQueryRegionState(notifications)} empty={Boolean(notifications.data && !visibleItems.length)} emptyFallback={<p>{priorityOnly ? 'Чухал мэдэгдэл алга.' : 'Шинэ мэдэгдэл алга.'}</p>} errorFallback={() => <p role="alert">Мэдэгдэл ачаалж чадсангүй.</p>} skeleton={<Skeleton variant="table-row" count={4} />}>
+        <QueryRegion state={toQueryRegionState(notifications)} empty={Boolean(notifications.data && !visibleItems.length)} emptyFallback={<p>{priorityOnly ? t('notifications.emptyPriority') : t('notifications.empty')}</p>} errorFallback={() => <p role="alert">{t('notifications.loadFailed')}</p>} skeleton={<Skeleton variant="table-row" count={4} />}>
           {visibleItems.length ? <>{visibleItems.map((item) => <div key={item.id} className={`notification-item ${item.read_at ? '' : 'unread'}`}>
-          <button className="notification-item-main" onClick={() => openItem(item)}><i aria-hidden /><span><strong>{item.title}</strong><p>{item.body}</p><small>{relativeTime(item.created_at)} · Telegram: {item.telegram_status === 'sent' ? 'илгээгдсэн' : item.telegram_status === 'queued' ? 'хүлээгдэж байна' : item.telegram_status === 'failed' ? 'алдаа' : 'холбогдоогүй'}</small></span></button>
-          <button className={`notification-priority ${item.is_priority ? 'active' : ''}`} onClick={() => togglePriority.mutate({ id: item.id, is_priority: !item.is_priority })} aria-label={item.is_priority ? 'Чухал төлөвийг болиулах' : 'Чухал гэж тэмдэглэх'} aria-pressed={item.is_priority}><Bookmark size={17} fill={item.is_priority ? 'currentColor' : 'none'} /></button>
+          <button className="notification-item-main" onClick={() => openItem(item)}><i aria-hidden /><span><strong>{item.title}</strong><p>{item.body}</p><small>{relativeTime(item.created_at, t)} · {t('notifications.telegram', { status: t(`notifications.telegramStatus.${['sent', 'queued', 'failed'].includes(item.telegram_status) ? item.telegram_status : 'none'}`) })}</small></span></button>
+          <button className={`notification-priority ${item.is_priority ? 'active' : ''}`} onClick={() => togglePriority.mutate({ id: item.id, is_priority: !item.is_priority })} aria-label={t(item.is_priority ? 'notifications.unmarkPriority' : 'notifications.markPriority')} aria-pressed={item.is_priority}><Bookmark size={17} fill={item.is_priority ? 'currentColor' : 'none'} /></button>
         </div>)}</> : null}
         </QueryRegion>
       </div>

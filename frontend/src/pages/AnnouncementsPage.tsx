@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
 import { Archive, Pencil, Pin, Plus, Send, Trash2 } from 'lucide-react'
 import { Banner } from '@astryxdesign/core/Banner'
@@ -21,20 +22,22 @@ import {
 } from '../api/announcements'
 import { useActor } from '../api/enterprise'
 import { AnnouncementEditorDialog } from '../components/announcements/AnnouncementEditorDialog'
+import { intlLocale } from '../utils/locale'
 
 type StatusFilter = AnnouncementStatus | 'all'
 interface Row extends Record<string, unknown> { id: number; announcement: ManagedAnnouncement }
 
-const STATUS: Record<AnnouncementStatus, { label: string; color: 'green' | 'gray' | 'orange' }> = {
-  published: { label: 'Нийтэлсэн', color: 'green' },
-  draft: { label: 'Ноорог', color: 'orange' },
-  archived: { label: 'Архивласан', color: 'gray' },
+const STATUS: Record<AnnouncementStatus, { color: 'green' | 'gray' | 'orange' }> = {
+  published: { color: 'green' },
+  draft: { color: 'orange' },
+  archived: { color: 'gray' },
 }
 
-const formatDate = (value: string | null) => (value ? new Date(value).toLocaleString('mn-MN', { dateStyle: 'medium', timeStyle: 'short' }) : '—')
+const formatDate = (value: string | null) => (value ? new Date(value).toLocaleString(intlLocale(), { dateStyle: 'medium', timeStyle: 'short' }) : '—')
 
 /** Authoring workspace for news & announcements (admins, managers, team leads). */
 export function AnnouncementsPage() {
+  const { t } = useTranslation()
   const actor = useActor()
   const announcements = useManagedAnnouncements()
   const save = useSaveAnnouncement()
@@ -59,67 +62,67 @@ export function AnnouncementsPage() {
   }, [all, filter, search])
 
   if (announcements.isLoading) return <Skeleton height={320} />
-  if (announcements.isError) return <Banner status="error" collapsible={false} title={announcementErrorText(announcements.error, 'Мэдээг ачаалж чадсангүй')} />
+  if (announcements.isError) return <Banner status="error" collapsible={false} title={announcementErrorText(announcements.error, t('announcements.loadFailed'))} />
 
   const setStatus = async (announcement: ManagedAnnouncement, status: AnnouncementStatus, done: string) => {
     try {
       await save.mutateAsync({ id: announcement.id, input: { status } })
       toast.success(done)
     } catch (error) {
-      toast.error(announcementErrorText(error, 'Төлөвийг өөрчилж чадсангүй'))
+      toast.error(announcementErrorText(error, t('announcements.statusChangeFailed')))
     }
   }
 
   const destroy = async (announcement: ManagedAnnouncement) => {
-    if (!window.confirm(`«${announcement.title}» мэдээг бүр мөсөн устгах уу?`)) return
+    if (!window.confirm(t('announcements.deleteConfirm', { title: announcement.title }))) return
     try {
       await remove.mutateAsync(announcement.id)
-      toast.success('Мэдээ устгагдлаа')
+      toast.success(t('announcements.deleted'))
     } catch (error) {
-      toast.error(announcementErrorText(error, 'Мэдээг устгаж чадсангүй'))
+      toast.error(announcementErrorText(error, t('announcements.deleteFailed')))
     }
   }
 
   return <VStack gap={4}>
     <VStack gap={1}>
-      <Heading level={1}>Мэдээ, мэдэгдэл</Heading>
-      <Text type="supporting">Байгууллагын мэдээ, зарлалыг бичиж нийтэлнэ. Нийтэлсэн мэдээг бүх ажилтан «Өнөөдөр» хуудаснаас уншина.</Text>
+      <Heading level={1}>{t('announcements.title')}</Heading>
+      <Text type="supporting">{t('announcements.subtitle')}</Text>
     </VStack>
 
     <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
       <HStack gap={3} vAlign="center" wrap="wrap">
-        <SegmentedControl label="Төлөв" value={filter} onChange={(value) => setFilter(value as StatusFilter)}>
-          <SegmentedControlItem value="all" label={`Бүгд (${all.length})`} />
-          {(Object.keys(STATUS) as AnnouncementStatus[]).map((key) => <SegmentedControlItem key={key} value={key} label={`${STATUS[key].label} (${counts[key]})`} />)}
+        <SegmentedControl label={t('announcements.statusLabel')} value={filter} onChange={(value) => setFilter(value as StatusFilter)}>
+          <SegmentedControlItem value="all" label={t('announcements.all', { n: all.length })} />
+          {(Object.keys(STATUS) as AnnouncementStatus[]).map((key) => <SegmentedControlItem key={key} value={key} label={t('announcements.statusCount', { status: t(`announcements.status.${key}`), n: counts[key] })} />)}
         </SegmentedControl>
-        <TextInput label="Хайх" isLabelHidden value={search} onChange={setSearch} placeholder="Гарчиг, ангилал, зохиогч…" hasClear width={260} />
+        <TextInput label={t('announcements.search')} isLabelHidden value={search} onChange={setSearch} placeholder={t('announcements.searchPlaceholder')} hasClear width={260} />
       </HStack>
-      <Button label="Мэдээ нэмэх" variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')} />
+      <Button label={t('announcements.add')} variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')} />
     </HStack>
 
     <Card padding={0}>
       {rows.length === 0
-        ? <EmptyState title={all.length ? 'Мэдээ олдсонгүй' : 'Мэдээ алга'} description={all.length ? 'Шүүлтүүрээ өөрчилнө үү.' : '“Мэдээ нэмэх”-ээр анхны мэдээгээ бичнэ үү.'} />
+        ? <EmptyState title={all.length ? t('announcements.notFound') : t('announcements.none')} description={all.length ? t('announcements.changeFilter') : t('announcements.createFirst')} />
         : <Table<Row>
           data={rows} idKey="id" density="compact" hasHover
           columns={[
-            { key: 'title', header: 'Гарчиг', width: proportional(4), renderCell: ({ announcement }) => <VStack gap={0}>
+            { key: 'title', header: t('announcements.col.title'), width: proportional(4), renderCell: ({ announcement }) => <VStack gap={0}>
               <HStack gap={1} vAlign="center">
-                {announcement.is_pinned && <Pin size={12} aria-label="Онцолсон" />}
+                {announcement.is_pinned && <Pin size={12} aria-label={t('announcements.pinned')} />}
                 <Text weight="medium" maxLines={1}>{announcement.title}</Text>
               </HStack>
               {announcement.summary && <Text type="supporting" maxLines={1}>{announcement.summary}</Text>}
             </VStack> },
-            { key: 'status', header: 'Төлөв', width: pixel(130), renderCell: ({ announcement }) => <Token size="sm" color={STATUS[announcement.status].color} label={STATUS[announcement.status].label} /> },
-            { key: 'category', header: 'Ангилал', width: proportional(1.5), renderCell: ({ announcement }) => <Text type="supporting" maxLines={1}>{announcement.category ?? '—'}</Text> },
-            { key: 'author', header: 'Зохиогч', width: proportional(1.5), renderCell: ({ announcement }) => <Text type="supporting" maxLines={1}>{announcement.author_name ?? '—'}</Text> },
-            { key: 'date', header: 'Нийтэлсэн', width: pixel(170), renderCell: ({ announcement }) => <Text type="supporting">{formatDate(announcement.published_at)}</Text> },
+            { key: 'status', header: t('announcements.col.status'), width: pixel(130), renderCell: ({ announcement }) => <Token size="sm" color={STATUS[announcement.status].color} label={t(`announcements.status.${announcement.status}`)} /> },
+            { key: 'category', header: t('announcements.col.category'), width: proportional(1.5), renderCell: ({ announcement }) => <Text type="supporting" maxLines={1}>{announcement.category ?? '—'}</Text> },
+            { key: 'author', header: t('announcements.col.author'), width: proportional(1.5), renderCell: ({ announcement }) => <Text type="supporting" maxLines={1}>{announcement.author_name ?? '—'}</Text> },
+            { key: 'date', header: t('announcements.col.published'), width: pixel(170), renderCell: ({ announcement }) => <Text type="supporting">{formatDate(announcement.published_at)}</Text> },
             { key: 'actions', header: '', width: pixel(120), renderCell: ({ announcement }) => announcement.can_edit ? <HStack gap={0.5} hAlign="end">
-              <IconButton label="Засах" tooltip="Засах" icon={<Pencil size={14} />} size="sm" variant="ghost" onClick={() => setEditing(announcement)} />
+              <IconButton label={t('announcements.edit')} tooltip={t('announcements.edit')} icon={<Pencil size={14} />} size="sm" variant="ghost" onClick={() => setEditing(announcement)} />
               {announcement.status === 'published'
-                ? <IconButton label="Архивлах" tooltip="Архивлах — мэдээний жагсаалтаас нуух" icon={<Archive size={14} />} size="sm" variant="ghost" clickAction={() => setStatus(announcement, 'archived', 'Мэдээ архивлагдлаа')} />
-                : <IconButton label="Нийтлэх" tooltip="Нийтлэх" icon={<Send size={14} />} size="sm" variant="ghost" clickAction={() => setStatus(announcement, 'published', 'Мэдээ нийтлэгдлээ')} />}
-              <IconButton label="Устгах" tooltip="Устгах" icon={<Trash2 size={14} />} size="sm" variant="ghost" clickAction={() => destroy(announcement)} />
+                ? <IconButton label={t('announcements.archive')} tooltip={t('announcements.archiveTooltip')} icon={<Archive size={14} />} size="sm" variant="ghost" clickAction={() => setStatus(announcement, 'archived', t('announcements.archived'))} />
+                : <IconButton label={t('announcements.publish')} tooltip={t('announcements.publish')} icon={<Send size={14} />} size="sm" variant="ghost" clickAction={() => setStatus(announcement, 'published', t('announcements.publishedToast'))} />}
+              <IconButton label={t('announcements.delete')} tooltip={t('announcements.delete')} icon={<Trash2 size={14} />} size="sm" variant="ghost" clickAction={() => destroy(announcement)} />
             </HStack> : null },
           ]}
         />}

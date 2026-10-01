@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ClipboardCheck } from 'lucide-react'
 import { useStartCheckin, useSubmitCheckin, useTodayCheckin } from '../../../api/enterprise'
 import { WidgetHeader } from './shared'
@@ -7,6 +8,7 @@ const DRAFT_KEY = 'oyuns-checkin-draft'
 
 /** Daily check-in: the first questions as a focus prompt, the full form inline. */
 export function CheckinWidget() {
+  const { t } = useTranslation()
   const todayCheckin = useTodayCheckin()
   const startCheckin = useStartCheckin()
   const submitCheckin = useSubmitCheckin()
@@ -44,21 +46,21 @@ export function CheckinWidget() {
   const setAnswer = (id: number, value: string) => setAnswers({ ...answers, [id]: value })
 
   return (
-    <section className="today-widget daily-focus" aria-label="Өдрийн check-in">
-      <WidgetHeader icon={ClipboardCheck} title="Өнөөдрийн төлөвлөгөө" />
-      <h2>Хамгийн чухал ажлаа тодорхой болго</h2>
+    <section className="today-widget daily-focus" aria-label={t('today.widget.checkin.title')}>
+      <WidgetHeader icon={ClipboardCheck} title={t('today.checkin.heading')} />
+      <h2>{t('today.checkin.focus')}</h2>
       {template?.questions?.slice(0, 2).map((question: any, index: number) => (
         <div className="focus-question" key={question.id}>
           <span>{index + 1}</span>
           <div>
             <strong>{question.prompt?.mn || question.prompt?.en}</strong>
-            <p>{question.is_required ? 'Заавал хариулна' : 'Сонголттой'}</p>
+            <p>{question.is_required ? t('today.checkin.required') : t('today.checkin.optional')}</p>
           </div>
         </div>
       ))}
-      {!template && <p>Check-in асуулт тохируулаагүй байна.</p>}
+      {!template && <p>{t('today.checkin.noTemplate')}</p>}
       <button className="secondary-action" onClick={openCheckin} disabled={!template || submitted}>
-        {submitted ? 'Өнөөдрийн check-in бөглөгдсөн' : 'Өдрийн check-in бөглөх'}
+        {submitted ? t('today.checkin.submitted') : t('today.checkin.fill')}
       </button>
       {open && template && (
         <form className="checkin-form" onSubmit={saveCheckin}>
@@ -67,14 +69,14 @@ export function CheckinWidget() {
               <strong>{question.prompt?.mn || question.prompt?.en}</strong>
               {question.choices?.length ? (
                 <select required={question.is_required} value={answers[question.id] || ''} onChange={(event) => setAnswer(question.id, event.target.value)}>
-                  <option value="">Сонгох</option>
+                  <option value="">{t('today.checkin.select')}</option>
                   {question.choices.map((choice: any) => <option key={String(choice)}>{String(choice)}</option>)}
                 </select>
               ) : ['integer', 'decimal', 'number'].includes(question.answer_type) ? (
                 <input type="number" step={question.answer_type === 'integer' ? '1' : 'any'} required={question.is_required} value={answers[question.id] || ''} onChange={(event) => setAnswer(question.id, event.target.value)} />
               ) : question.answer_type === 'boolean' ? (
                 <select required={question.is_required} value={answers[question.id] || ''} onChange={(event) => setAnswer(question.id, event.target.value)}>
-                  <option value="">Сонгох</option><option value="true">Тийм</option><option value="false">Үгүй</option>
+                  <option value="">{t('today.checkin.select')}</option><option value="true">{t('today.checkin.yes')}</option><option value="false">{t('today.checkin.no')}</option>
                 </select>
               ) : (
                 <textarea required={question.is_required} value={answers[question.id] || ''} onChange={(event) => setAnswer(question.id, event.target.value)} />
@@ -82,8 +84,8 @@ export function CheckinWidget() {
             </label>
           ))}
           <div>
-            <button type="button" className="secondary-action compact" onClick={() => setOpen(false)}>Цуцлах</button>
-            <button className="primary-action compact" disabled={submitCheckin.isPending}>Хадгалах</button>
+            <button type="button" className="secondary-action compact" onClick={() => setOpen(false)}>{t('today.checkin.cancel')}</button>
+            <button className="primary-action compact" disabled={submitCheckin.isPending}>{t('today.checkin.save')}</button>
           </div>
         </form>
       )}

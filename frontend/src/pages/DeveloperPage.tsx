@@ -1,3 +1,6 @@
+import i18n from '../i18n'
+import { intlLocale } from '../utils/locale'
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select, Toggle } from '../components/ui'
 import {
@@ -15,9 +18,9 @@ import {
 } from '../api/hooks'
 
 const INTENT_OPTIONS = [
-  { value: 'create_task_draft', label: 'Даалгаврын ноорог' },
-  { value: 'get_user_tasks', label: 'Миний даалгавар' },
-  { value: 'search_company_knowledge', label: 'Компаний өгөгдлийн сангаас хайх' },
+  { value: 'create_task_draft', get label() { return i18n.t('dev.intent.createTaskDraft') } },
+  { value: 'get_user_tasks', get label() { return i18n.t('dev.intent.getUserTasks') } },
+  { value: 'search_company_knowledge', get label() { return i18n.t('dev.intent.searchKnowledge') } },
 ]
 
 const EMPTY_CONTEXT: AssistantContextInput = {
@@ -32,10 +35,11 @@ function intentLabel(intent: AssistantContextIntent) {
 }
 
 function dateTime(value: string) {
-  return new Date(value).toLocaleString('mn-MN')
+  return new Date(value).toLocaleString(intlLocale())
 }
 
 export function DeveloperPage() {
+  const { t } = useTranslation()
   const { data: unknownRequests = [], isLoading: unknownLoading } = useUnknownAssistantRequests()
   const { data: contexts = [], isLoading: contextsLoading } = useAssistantContextExamples()
   const createContext = useCreateAssistantContextExample()
@@ -104,7 +108,7 @@ export function DeveloperPage() {
   }
 
   const deleteContext = (context: AssistantContextExample) => {
-    if (window.confirm(`“${context.phrase}” контекстийг устгах уу?`)) removeContext.mutate(context.id)
+    if (window.confirm(t('dev.deleteConfirm', { phrase: context.phrase }))) removeContext.mutate(context.id)
   }
 
   const busy = createContext.isPending || updateContext.isPending || promoteUnknown.isPending
@@ -112,23 +116,23 @@ export function DeveloperPage() {
   return (
     <div>
       <PageHeader
-        title="OYUNS хөгжүүлэлт"
+        title={t('dev.title')}
       >
-        <Btn variant="primary" onClick={openCreate}>+ Контекст нэмэх</Btn>
+        <Btn variant="primary" onClick={openCreate}>{t('dev.addContext')}</Btn>
       </PageHeader>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
         <section>
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h2 className="text-base font-semibold">Танигдаагүй хүсэлтүүд</h2>
-              <p className="text-xs text-muted mt-0.5">Давтагдсан хэллэгүүд автоматаар нэгтгэгдэнэ.</p>
+              <h2 className="text-base font-semibold">{t('dev.unknownTitle')}</h2>
+              <p className="text-xs text-muted mt-0.5">{t('dev.unknownHint')}</p>
             </div>
-            <Badge color="yellow">{unknownRequests.filter((item) => item.status === 'pending').length} хүлээгдэж байна</Badge>
+            <Badge color="yellow">{t('dev.pendingCount', { n: unknownRequests.filter((item) => item.status === 'pending').length })}</Badge>
           </div>
-          {unknownLoading && <div className="text-sm text-muted">Ачаалж байна...</div>}
+          {unknownLoading && <div className="text-sm text-muted">{t('dev.loading')}</div>}
           {!unknownLoading && unknownRequests.length === 0 && (
-            <Card className="text-center text-sm text-muted">Одоогоор хянах танигдаагүй хүсэлт алга.</Card>
+            <Card className="text-center text-sm text-muted">{t('dev.noUnknown')}</Card>
           )}
           <div className="flex flex-col gap-3">
             {unknownRequests.map((request) => (
@@ -138,10 +142,10 @@ export function DeveloperPage() {
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{request.text}</p>
                     <div className="flex flex-wrap gap-1.5 mt-3">
                       <Badge color={request.status === 'pending' ? 'yellow' : request.status === 'reviewed' ? 'green' : 'muted'}>
-                        {request.status === 'pending' ? 'Хянах' : request.status === 'reviewed' ? 'Хянасан' : 'Хэрэгсэхгүй'}
+                        {request.status === 'pending' ? t('dev.status.pending') : request.status === 'reviewed' ? t('dev.status.reviewed') : t('dev.dismiss')}
                       </Badge>
                       <Badge color="muted">{request.language.toUpperCase()} · {request.channel}</Badge>
-                      <Badge color="purple">{request.occurrence_count} удаа</Badge>
+                      <Badge color="purple">{t('dev.occurrences', { n: request.occurrence_count })}</Badge>
                       <Badge color="red">{request.reason}</Badge>
                     </div>
                     {request.terms.length > 0 && (
@@ -149,12 +153,12 @@ export function DeveloperPage() {
                         {request.terms.map((term) => <Badge key={term} color="blue">{term}</Badge>)}
                       </div>
                     )}
-                    <div className="text-[11px] text-muted mt-3">Сүүлд: {dateTime(request.last_seen_at)}</div>
+                    <div className="text-[11px] text-muted mt-3">{t('dev.lastSeen', { date: dateTime(request.last_seen_at) })}</div>
                   </div>
                   <div className="flex flex-col gap-2 flex-shrink-0">
-                    <Btn variant="primary" onClick={() => openPromote(request)}>Тольд нэмэх</Btn>
+                    <Btn variant="primary" onClick={() => openPromote(request)}>{t('dev.promote')}</Btn>
                     {request.status !== 'dismissed' && (
-                      <Btn onClick={() => updateUnknown.mutate({ id: request.id, status: 'dismissed' })} disabled={updateUnknown.isPending}>Хэрэгсэхгүй</Btn>
+                      <Btn onClick={() => updateUnknown.mutate({ id: request.id, status: 'dismissed' })} disabled={updateUnknown.isPending}>{t('dev.dismiss')}</Btn>
                     )}
                   </div>
                 </div>
@@ -166,14 +170,14 @@ export function DeveloperPage() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h2 className="text-base font-semibold">Контекстийн толь бичиг</h2>
-              <p className="text-xs text-muted mt-0.5">Зөвхөн идэвхтэй, админаар баталгаажсан жишээ router-д орно.</p>
+              <h2 className="text-base font-semibold">{t('dev.dictTitle')}</h2>
+              <p className="text-xs text-muted mt-0.5">{t('dev.dictHint')}</p>
             </div>
-            <Badge color="green">{contexts.filter((item) => item.is_active).length} идэвхтэй</Badge>
+            <Badge color="green">{t('dev.activeCount', { n: contexts.filter((item) => item.is_active).length })}</Badge>
           </div>
-          {contextsLoading && <div className="text-sm text-muted">Ачаалж байна...</div>}
+          {contextsLoading && <div className="text-sm text-muted">{t('dev.loading')}</div>}
           {!contextsLoading && contexts.length === 0 && (
-            <Card className="text-center text-sm text-muted">Контекстийн толь бичиг хоосон байна.</Card>
+            <Card className="text-center text-sm text-muted">{t('dev.dictEmpty')}</Card>
           )}
           <div className="flex flex-col gap-3">
             {contexts.map((context) => (
@@ -183,12 +187,12 @@ export function DeveloperPage() {
                     <div className="font-medium text-sm">{context.phrase}</div>
                     <div className="mt-2"><Badge color="blue">{intentLabel(context.intent)}</Badge></div>
                     <p className="text-[13px] text-muted leading-relaxed mt-2 whitespace-pre-wrap">{context.meaning}</p>
-                    <div className="text-[11px] text-muted mt-3">Шинэчилсэн: {dateTime(context.updated_at)}</div>
+                    <div className="text-[11px] text-muted mt-3">{t('dev.updated', { date: dateTime(context.updated_at) })}</div>
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <Toggle checked={context.is_active} onChange={(value) => toggleContext(context, value)} />
-                    <Btn onClick={() => openEdit(context)}>Засах</Btn>
-                    <Btn variant="danger" onClick={() => deleteContext(context)} disabled={removeContext.isPending}>Устгах</Btn>
+                    <Btn onClick={() => openEdit(context)}>{t('dev.edit')}</Btn>
+                    <Btn variant="danger" onClick={() => deleteContext(context)} disabled={removeContext.isPending}>{t('dev.delete')}</Btn>
                   </div>
                 </div>
               </Card>
@@ -198,38 +202,38 @@ export function DeveloperPage() {
       </div>
 
       {editorOpen && (
-        <Modal title={promoting ? 'Танигдаагүй хүсэлтийг тольд нэмэх' : editing ? 'Контекст засах' : 'Шинэ контекст'} onClose={closeModal}>
+        <Modal title={promoting ? t('dev.promoteTitle') : editing ? t('dev.editTitle') : t('dev.newTitle')} onClose={closeModal}>
           <div className="flex flex-col gap-3.5">
-            {promoting && <p className="text-xs text-muted">Хүсэлтийг “Хянасан” төлөвт оруулж, доорх жишээг router-д ашиглана.</p>}
-            <Input label="Хэллэг / жишээ" value={form.phrase} onChange={(phrase) => setForm((current) => ({ ...current, phrase }))} fullWidth />
+            {promoting && <p className="text-xs text-muted">{t('dev.promoteHint')}</p>}
+            <Input label={t('dev.phrase')} value={form.phrase} onChange={(phrase) => setForm((current) => ({ ...current, phrase }))} fullWidth />
             <Select
-              label="Зорилтот үйлдэл"
+              label={t('dev.intent')}
               value={form.intent}
               onChange={(intent) => setForm((current) => ({ ...current, intent: intent as AssistantContextIntent }))}
               options={INTENT_OPTIONS}
               fullWidth
             />
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-muted font-medium">Энэ хэллэгийн утга</label>
+              <label className="text-xs text-muted font-medium">{t('dev.meaning')}</label>
               <textarea
                 value={form.meaning}
                 onChange={(event) => setForm((current) => ({ ...current, meaning: event.target.value }))}
                 rows={4}
                 maxLength={1000}
-                placeholder="Жишээ: Бүх ажилтанд уулзалтын даалгаврын ноорог бэлтгэ."
+                placeholder={t('dev.meaningPlaceholder')}
                 className="w-full bg-surface2 border border-border rounded-lg p-3 text-text text-sm leading-relaxed resize-y outline-none focus:border-accent"
               />
             </div>
             <div className="flex items-center justify-between rounded-lg bg-surface2 px-3 py-2">
               <div>
-                <div className="text-[13px] font-medium">Router-д ашиглуулах</div>
-                <div className="text-[11px] text-muted">Идэвхгүй бичлэг OYUNS-ийн контекстэд орохгүй.</div>
+                <div className="text-[13px] font-medium">{t('dev.useInRouter')}</div>
+                <div className="text-[11px] text-muted">{t('dev.inactiveHint')}</div>
               </div>
               <Toggle checked={form.is_active} onChange={(is_active) => setForm((current) => ({ ...current, is_active }))} />
             </div>
             <div className="flex justify-end gap-2.5">
-              <Btn onClick={closeModal}>Цуцлах</Btn>
-              <Btn variant="primary" onClick={saveContext} disabled={!form.phrase.trim() || !form.meaning.trim() || busy}>Хадгалах</Btn>
+              <Btn onClick={closeModal}>{t('dev.cancel')}</Btn>
+              <Btn variant="primary" onClick={saveContext} disabled={!form.phrase.trim() || !form.meaning.trim() || busy}>{t('dev.save')}</Btn>
             </div>
           </div>
         </Modal>

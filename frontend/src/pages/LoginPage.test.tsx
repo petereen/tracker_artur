@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import * as axe from 'axe-core'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '../i18n'
 import { LoginPage } from './LoginPage'
 
 const mutateAsync = vi.fn()
@@ -18,6 +19,7 @@ function renderLogin() {
 
 describe('enterprise login', () => {
   beforeEach(() => mutateAsync.mockReset())
+  afterEach(async () => { await i18n.changeLanguage('mn') })
 
   it('shows the browser Telegram login button', () => {
     renderLogin()
@@ -30,6 +32,17 @@ describe('enterprise login', () => {
     expect(screen.getByLabelText('Нэвтрэх нэр')).toHaveAttribute('autocomplete', 'username')
     expect(screen.getByLabelText('Нууц үг')).toHaveAttribute('autocomplete', 'current-password')
     expect(screen.getByRole('button', { name: /Нэвтрэх/ })).toBeEnabled()
+  })
+
+  it('switches the page to Russian and remembers the choice', async () => {
+    renderLogin()
+    fireEvent.click(screen.getByRole('button', { name: 'Русский' }))
+    expect(await screen.findByLabelText('Логин')).toHaveAttribute('autocomplete', 'username')
+    expect(screen.getByLabelText('Пароль')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Войти через Telegram/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Русский' })).toHaveAttribute('aria-pressed', 'true')
+    expect(document.documentElement.lang).toBe('ru')
+    expect(window.localStorage.getItem('oyuns.language')).toBe('ru')
   })
 
   it('has no automatically detectable accessibility violations', async () => {

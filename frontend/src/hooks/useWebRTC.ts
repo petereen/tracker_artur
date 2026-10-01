@@ -7,6 +7,7 @@ import type {
 import { useAuthStore } from '../store/auth'
 import { setCallAudioRoute, type AudioRoute } from '../platform/audio-route'
 import { createIncomingRingtone, createOutgoingRingback, SoundEffect } from '../utils/soundEffects'
+import i18n from '../i18n'
 
 export interface CallPeer { userId: string; name: string; avatar?: string | null; conversationId: string }
 export interface ActiveCall extends CallPeer { callId: string; callType: CallType; incoming: boolean }
@@ -20,10 +21,10 @@ const rtcConfiguration = (): RTCConfiguration => {
 
 export function mediaErrorMessage(error: unknown) {
   const name = error instanceof DOMException ? error.name : (error as { name?: string })?.name
-  if (name === 'NotAllowedError' || name === 'SecurityError') return 'Камер эсвэл микрофоны зөвшөөрөл хаалттай байна. Browser settings-ээс зөвшөөрнө үү.'
-  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'Камер эсвэл микрофон олдсонгүй. Төхөөрөмжөө холбоод дахин оролдоно уу.'
-  if (name === 'NotReadableError' || name === 'TrackStartError') return 'Камер эсвэл микрофоныг өөр програм ашиглаж байна.'
-  return 'Дуудлагын медиа эхлүүлж чадсангүй.'
+  if (name === 'NotAllowedError' || name === 'SecurityError') return i18n.t('chat.call.error.denied')
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return i18n.t('chat.call.error.notFound')
+  if (name === 'NotReadableError' || name === 'TrackStartError') return i18n.t('chat.call.error.busy')
+  return i18n.t('chat.call.error.media')
 }
 
 export function useWebRTC() {
@@ -97,7 +98,7 @@ export function useWebRTC() {
       if (peer.signalingState !== 'stable') return
       await peer.setLocalDescription(offer)
       await emitDescription('offer', peer.localDescription!)
-    } catch { setError('Дуудлагын холболтыг тохируулж чадсангүй.') }
+    } catch { setError(i18n.t('chat.call.error.setup')) }
     finally { makingOffer.current = false }
   }, [emitDescription])
 
@@ -206,7 +207,7 @@ export function useWebRTC() {
           await peer.setLocalDescription(await peer.createAnswer())
           await emitDescription('answer', peer.localDescription!)
         }
-      } catch { setError('Нөгөө талын холболтын мэдээллийг боловсруулж чадсангүй.') }
+      } catch { setError(i18n.t('chat.call.error.signal')) }
     }
     socket.on('call:offer', ({ sdp }) => void receiveDescription(sdp))
     socket.on('call:answer', ({ sdp }) => void receiveDescription(sdp))
@@ -215,7 +216,7 @@ export function useWebRTC() {
       if (!peer?.remoteDescription) candidateQueue.current.push(candidate)
       else await peer.addIceCandidate(candidate).catch(() => undefined)
     })
-    socket.on('call:reject', ({ reason }) => { setError(reason === 'busy' ? 'Хэрэглэгч өөр дуудлагатай байна.' : reason === 'offline' ? 'Хэрэглэгч офлайн байна.' : 'Дуудлагаас татгалзлаа.'); finishLocally() })
+    socket.on('call:reject', ({ reason }) => { setError(reason === 'busy' ? i18n.t('chat.call.error.peerBusy') : reason === 'offline' ? i18n.t('chat.call.error.offline') : i18n.t('chat.call.error.declined')); finishLocally() })
     socket.on('call:ended', () => finishLocally())
     socket.on('call:error', ({ message }) => setError(message))
     return () => { socket.removeAllListeners(); socket.disconnect(); socketRef.current = null; setSignalingConnected(false); teardown('idle') }
@@ -266,7 +267,7 @@ export function useWebRTC() {
   const toggleMuteAudio = useCallback(() => { const track = localRef.current?.getAudioTracks()[0]; if (track) { track.enabled = !track.enabled; setAudioMuted(!track.enabled) } }, [])
   const switchAudioRoute = useCallback(async () => {
     const nextRoute: AudioRoute = audioRoute === 'speaker' ? 'default' : 'speaker'
-    try { await setCallAudioRoute(nextRoute); setAudioRoute(nextRoute) } catch { setError('Дууны гаралтыг өөрчилж чадсангүй.') }
+    try { await setCallAudioRoute(nextRoute); setAudioRoute(nextRoute) } catch { setError(i18n.t('chat.call.error.route')) }
   }, [audioRoute])
   const toggleMuteVideo = useCallback(async () => {
     const current = localRef.current?.getVideoTracks()[0]

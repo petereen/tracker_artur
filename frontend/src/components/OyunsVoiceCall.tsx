@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { Hand, Mic, MicOff, PhoneOff, X } from 'lucide-react'
 import { api } from '../api/client'
 import i18n from '../i18n'
@@ -47,41 +48,25 @@ function storedProvider(): VoiceProvider | undefined {
 
 interface FunctionCallItem { type: string; name?: string; arguments?: string; call_id?: string }
 
-const PHASE_LABELS: Record<CallPhase, string> = {
-  connecting: 'Холбогдож байна…',
-  listening: 'Сонсож байна',
-  thinking: 'Бодож байна…',
-  speaking: 'OYUNS ярьж байна',
-  ended: 'Дуудлага дууслаа',
-  error: 'Холболт амжилтгүй',
-}
+// Labels are resolved when shown so they follow the current UI language.
+const phaseLabel = (phase: CallPhase) => i18n.t(`assistant.voice.phase.${phase}`)
 
-const ERROR_LABELS: Record<string, string> = {
-  not_configured: 'OpenAI API түлхүүр тохируулаагүй байна. Админ “OYUNS AI” тохиргооноос оруулна.',
-  voice_disabled: 'Дуут дуудлага админ тохиргоонд идэвхгүй байна.',
-  rate_limited: 'Хэт олон дуудлага эхлүүллээ. Хэдэн минутын дараа дахин оролдоно уу.',
-  invalid_key: 'OpenAI API түлхүүр буруу байна.',
-  model_not_found: 'Тохируулсан realtime загвар олдсонгүй.',
-  network: 'OpenAI-тай холбогдож чадсангүй.',
-  microphone: 'Микрофон ашиглах зөвшөөрөл олгоно уу.',
-  unsupported: 'Энэ төхөөрөмж дуут дуудлагыг дэмжихгүй байна.',
-  call_ended: 'Дуудлагын хугацаа дууссан. Дахин залгана уу.',
-  elevenlabs_invalid_key: 'ElevenLabs API түлхүүр буруу байна.',
-  elevenlabs_rate_limited: 'ElevenLabs-ийн лимит хүрсэн байна. Хэдэн минутын дараа дахин оролдоно уу.',
-  elevenlabs_forbidden: 'ElevenLabs түлхүүрт дуу үүсгэх эрх алга.',
-  elevenlabs_network: 'ElevenLabs-тай холбогдож чадсангүй.',
-  elevenlabs_not_configured: 'ElevenLabs тохируулаагүй байна.',
-}
+const ERROR_CODES = [
+  'not_configured', 'voice_disabled', 'rate_limited', 'invalid_key', 'model_not_found', 'network', 'microphone', 'unsupported', 'call_ended',
+  'elevenlabs_invalid_key', 'elevenlabs_rate_limited', 'elevenlabs_forbidden', 'elevenlabs_network', 'elevenlabs_not_configured',
+]
+
+const errorLabel = (code: string | null | undefined) => (code && ERROR_CODES.includes(code) ? i18n.t(`assistant.voice.error.${code}`) : undefined)
 
 // Short spoken-lookup labels for the tool trace in the transcript.
 const TOOL_LABELS: [RegExp, string][] = [
-  [/task/, 'даалгавар'], [/report/, 'тайлан'], [/worktime|attendance/, 'ажлын цаг'], [/hr|leave/, 'HR'],
-  [/crm/, 'CRM'], [/contract/, 'гэрээ'], [/payroll/, 'цалин'], [/knowledge|file/, 'мэдлэгийн сан'],
-  [/project|plan/, 'төсөл, төлөвлөгөө'], [/calendar/, 'календарь'], [/exchange/, 'ханш'], [/employee|directory|people/, 'ажилтан'],
+  [/task/, 'task'], [/report/, 'report'], [/worktime|attendance/, 'worktime'], [/hr|leave/, 'hr'],
+  [/crm/, 'crm'], [/contract/, 'contract'], [/payroll/, 'payroll'], [/knowledge|file/, 'knowledge'],
+  [/project|plan/, 'project'], [/calendar/, 'calendar'], [/exchange/, 'exchange'], [/employee|directory|people/, 'employee'],
 ]
 
 function toolLabel(name: string) {
-  return TOOL_LABELS.find(([pattern]) => pattern.test(name))?.[1] ?? 'компанийн мэдээлэл'
+  return i18n.t(`assistant.voice.tool.${TOOL_LABELS.find(([pattern]) => pattern.test(name))?.[1] ?? 'company'}`)
 }
 
 function formatDuration(seconds: number) {
@@ -98,6 +83,7 @@ function formatDuration(seconds: number) {
  * caller can switch engines; the call restarts on the chosen one.
  */
 export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation()
   const [phase, setPhase] = useState<CallPhase>('connecting')
   const [error, setError] = useState<string>()
   const [muted, setMuted] = useState(false)
@@ -151,7 +137,7 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
   const runTools = useCallback(async (calls: FunctionCallItem[]) => {
     setPhase('thinking')
     await Promise.all(calls.map(async (call) => {
-      addLine('tool', `${toolLabel(call.name || '')} шалгаж байна…`)
+      addLine('tool', i18n.t('assistant.voice.checking', { tool: toolLabel(call.name || '') }))
       let output: string
       try {
         const { data } = await api.post('/v1/assistant/voice/tool', { name: call.name, arguments: call.arguments ?? '{}', call_id: call.call_id })
@@ -242,7 +228,7 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
       if (cancelled) { stream.getTracks().forEach((track) => track.stop()); return }
       setProviders(session.providers ?? [])
       setProvider(session.provider ?? (session.mode === 'chimege' ? 'chimege' : 'openai'))
-      if (session.notice) addLine('tool', `${ERROR_LABELS[session.notice] ?? 'Сонгосон хөдөлгүүр ажиллахгүй байна.'} ${PROVIDER_LABELS[session.provider ?? 'openai']} ашиглав.`)
+      if (session.notice) addLine('tool', `${errorLabel(session.notice) ?? i18n.t('assistant.voice.engineFallback')} ${i18n.t('assistant.voice.usedProvider', { provider: PROVIDER_LABELS[session.provider ?? 'openai'] })}`)
       if (session.mode === 'chimege' || session.mode === 'elevenlabs') {
         const callbacks = {
           onPhase: setPhase,
@@ -255,7 +241,7 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
           : new ChimegeCall(session.session_id, stream, callbacks)
         chimegeRef.current = call
         setPhase('listening')
-        await call.start(session.greeting_text || 'Сайн байна уу! Танд юугаар туслах вэ?')
+        await call.start(session.greeting_text || i18n.t('assistant.voice.greeting', { lng: session.language ?? i18n.language }))
         return
       }
       const pc = new RTCPeerConnection()
@@ -350,23 +336,23 @@ export function OyunsVoiceCall({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  return createPortal(<div className="oyuns-voice-overlay" role="dialog" aria-modal="true" aria-label="OYUNS Agent дуудлага">
+  return createPortal(<div className="oyuns-voice-overlay" role="dialog" aria-modal="true" aria-label={t('assistant.call.agentAria')}>
     <section className="oyuns-voice-card">
       <header>
-        <div><strong>OYUNS Agent</strong><small>{phase === 'error' ? PHASE_LABELS.error : `Дуут дуудлага${provider ? ` · ${PROVIDER_LABELS[provider]}` : ''}${provider === 'chimege' ? ' · Монгол горим' : ''} · ${formatDuration(elapsed)}`}</small></div>
-        <button type="button" className="chat-icon-button" onClick={hangUp} aria-label="Хаах"><X /></button>
+        <div><strong>OYUNS Agent</strong><small>{phase === 'error' ? phaseLabel('error') : `${t('assistant.voice.title')}${provider ? ` · ${PROVIDER_LABELS[provider]}` : ''}${provider === 'chimege' ? ` · ${t('assistant.voice.mongolianMode')}` : ''} · ${formatDuration(elapsed)}`}</small></div>
+        <button type="button" className="chat-icon-button" onClick={hangUp} aria-label={t('chat.close')}><X /></button>
       </header>
-      {providers.length > 1 && <div className="oyuns-voice-engines" role="radiogroup" aria-label="Дуудлагын хөдөлгүүр">
+      {providers.length > 1 && <div className="oyuns-voice-engines" role="radiogroup" aria-label={t('assistant.voice.engine')}>
         {providers.map((item) => <button key={item} type="button" role="radio" aria-checked={item === provider} disabled={phase === 'connecting'} onClick={() => switchProvider(item)}>{PROVIDER_LABELS[item]}</button>)}
       </div>}
       <div ref={orbRef} className={`oyuns-voice-orb ${phase}`} aria-hidden="true" />
-      <p className="oyuns-voice-status" aria-live="polite">{muted && phase !== 'error' ? 'Микрофон хаалттай' : PHASE_LABELS[phase]}</p>
-      {error && <p className="oyuns-voice-error" role="alert">{ERROR_LABELS[error] ?? 'Дуудлага холбогдсонгүй. Дахин оролдоно уу.'}</p>}
-      {lines.length > 0 && <div ref={transcriptRef} className="oyuns-voice-transcript" aria-label="Ярианы бичвэр">{lines.map((line) => <p key={line.id} className={line.role}>{line.role === 'user' ? 'Та: ' : line.role === 'assistant' ? 'OYUNS: ' : ''}{line.text}</p>)}</div>}
+      <p className="oyuns-voice-status" aria-live="polite">{muted && phase !== 'error' ? t('assistant.voice.muted') : phaseLabel(phase)}</p>
+      {error && <p className="oyuns-voice-error" role="alert">{errorLabel(error) ?? t('assistant.voice.error.default')}</p>}
+      {lines.length > 0 && <div ref={transcriptRef} className="oyuns-voice-transcript" aria-label={t('assistant.voice.transcript')}>{lines.map((line) => <p key={line.id} className={line.role}>{line.role === 'user' ? t('assistant.voice.you') : line.role === 'assistant' ? 'OYUNS: ' : ''}{line.text}</p>)}</div>}
       <div className="oyuns-voice-controls">
-        <button type="button" className={`mute ${muted ? 'active' : ''}`} onClick={() => setMuted((value) => !value)} disabled={phase === 'error'} aria-pressed={muted} aria-label={muted ? 'Микрофон нээх' : 'Микрофон хаах'}>{muted ? <MicOff /> : <Mic />}</button>
-        {turnBased && phase === 'speaking' && <button type="button" className="mute" onClick={() => chimegeRef.current?.interrupt()} aria-label="Яриаг таслах" title="Яриаг таслах"><Hand /></button>}
-        <button type="button" className="hangup" onClick={hangUp} aria-label="Дуудлага дуусгах"><PhoneOff /></button>
+        <button type="button" className={`mute ${muted ? 'active' : ''}`} onClick={() => setMuted((value) => !value)} disabled={phase === 'error'} aria-pressed={muted} aria-label={muted ? t('assistant.voice.unmute') : t('assistant.voice.mute')}>{muted ? <MicOff /> : <Mic />}</button>
+        {turnBased && phase === 'speaking' && <button type="button" className="mute" onClick={() => chimegeRef.current?.interrupt()} aria-label={t('assistant.voice.interrupt')} title={t('assistant.voice.interrupt')}><Hand /></button>}
+        <button type="button" className="hangup" onClick={hangUp} aria-label={t('assistant.voice.hangup')}><PhoneOff /></button>
       </div>
     </section>
   </div>, document.body)

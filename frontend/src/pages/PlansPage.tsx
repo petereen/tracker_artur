@@ -1,3 +1,6 @@
+import i18n from '../i18n'
+import { intlLocale } from '../utils/locale'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CalendarClock, ChevronLeft, ChevronRight, GitMerge, Lightbulb, Plus, Target, UserRound } from 'lucide-react'
@@ -36,16 +39,16 @@ type PlanTab = 'company' | 'ideas'
 type IdeaFilter = 'pending' | 'all'
 
 const HORIZONS: { id: PlanHorizon; label: string; hint: string; color: 'orange' | 'blue' | 'green' }[] = [
-  { id: 'long_term', label: 'Урт хугацааны', hint: 'Стратегийн зорилт', color: 'orange' },
-  { id: 'mid_term', label: 'Дунд хугацааны', hint: 'Улирлын зорилт', color: 'blue' },
-  { id: 'short_term', label: 'Богино хугацааны', hint: 'Энэ сарын ажил', color: 'green' },
+  { id: 'long_term', get label() { return i18n.t('plans.horizon.long') }, get hint() { return i18n.t('plans.horizon.longHint') }, color: 'orange' },
+  { id: 'mid_term', get label() { return i18n.t('plans.horizon.mid') }, get hint() { return i18n.t('plans.horizon.midHint') }, color: 'blue' },
+  { id: 'short_term', get label() { return i18n.t('plans.horizon.short') }, get hint() { return i18n.t('plans.horizon.shortHint') }, color: 'green' },
 ]
 const HORIZON_OPTIONS = HORIZONS.map((horizon) => ({ value: horizon.id, label: horizon.label }))
 const IDEA_STATUS: Record<PlanIdea['status'], { label: string; color: 'blue' | 'green' | 'purple' | 'gray' }> = {
-  pending: { label: 'Хүлээгдэж буй', color: 'blue' },
-  approved: { label: 'Баталсан', color: 'green' },
-  merged: { label: 'Төлөвлөгөөнд орсон', color: 'purple' },
-  rejected: { label: 'Татгалзсан', color: 'gray' },
+  pending: { get label() { return i18n.t('plans.status.pending') }, color: 'blue' },
+  approved: { get label() { return i18n.t('plans.status.approved') }, color: 'green' },
+  merged: { get label() { return i18n.t('plans.status.merged') }, color: 'purple' },
+  rejected: { get label() { return i18n.t('plans.status.rejected') }, color: 'gray' },
 }
 
 const currentMonth = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` }
@@ -55,10 +58,11 @@ const shiftMonth = (value: string, delta: number) => {
   const next = new Date(year, month - 1 + delta, 1)
   return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`
 }
-const monthLabel = (value: string) => new Date(`${value}-01T12:00:00`).toLocaleDateString('mn-MN', { year: 'numeric', month: 'long' })
-const dateLabel = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString('mn-MN', { month: 'short', day: 'numeric' })
+const monthLabel = (value: string) => new Date(`${value}-01T12:00:00`).toLocaleDateString(intlLocale(), { year: 'numeric', month: 'long' })
+const dateLabel = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString(intlLocale(), { month: 'short', day: 'numeric' })
 
 export function PlansPage() {
+  const { t } = useTranslation()
   // Deep links from shared chat cards: /plans?month=YYYY-MM&item=ID | &idea=ID
   const [searchParams] = useSearchParams()
   const linkedItemId = Number(searchParams.get('item')) || undefined
@@ -121,25 +125,25 @@ export function PlansPage() {
   return <VStack gap={4}>
     <HStack gap={3} vAlign="end" hAlign="between" wrap="wrap">
       <TabList value={tab} onChange={(value) => setTab(value as PlanTab)}>
-        <Tab value="company" label="Компаний төлөвлөгөө" icon={<Target size={15} />} endContent={companyPlan.data?.length ? <Badge label={companyPlan.data.length} /> : undefined} />
-        <Tab value="ideas" label="Ажилтнуудын санал" icon={<Lightbulb size={15} />} endContent={pending.length ? <Badge label={pending.length} /> : undefined} />
+        <Tab value="company" label={t('plans.tab.company')} icon={<Target size={15} />} endContent={companyPlan.data?.length ? <Badge label={companyPlan.data.length} /> : undefined} />
+        <Tab value="ideas" label={t('plans.tab.ideas')} icon={<Lightbulb size={15} />} endContent={pending.length ? <Badge label={pending.length} /> : undefined} />
       </TabList>
       <HStack gap={3} vAlign="center" wrap="wrap">
         <HStack gap={1} vAlign="center">
-          <IconButton label="Өмнөх сар" tooltip="Өмнөх сар" icon={<ChevronLeft size={16} />} variant="ghost" size="sm" onClick={() => setMonth(shiftMonth(month, -1))} />
+          <IconButton label={t('plans.prevMonth')} tooltip={t('plans.prevMonth')} icon={<ChevronLeft size={16} />} variant="ghost" size="sm" onClick={() => setMonth(shiftMonth(month, -1))} />
           <Text weight="semibold" hasTabularNumbers>{monthLabel(month)}</Text>
-          <IconButton label="Дараагийн сар" tooltip="Дараагийн сар" icon={<ChevronRight size={16} />} variant="ghost" size="sm" onClick={() => setMonth(shiftMonth(month, 1))} />
-          {month !== currentMonth() && <Button label="Энэ сар" variant="ghost" size="sm" onClick={() => setMonth(currentMonth())} />}
+          <IconButton label={t('plans.nextMonth')} tooltip={t('plans.nextMonth')} icon={<ChevronRight size={16} />} variant="ghost" size="sm" onClick={() => setMonth(shiftMonth(month, 1))} />
+          {month !== currentMonth() && <Button label={t('plans.thisMonth')} variant="ghost" size="sm" onClick={() => setMonth(currentMonth())} />}
         </HStack>
-        {tab === 'company' && canReview && <Button label="Төлөвлөгөө нэмэх" variant="primary" icon={<Plus size={15} />} onClick={() => setEditingItem({ horizon: 'short_term' })} />}
-        {tab === 'ideas' && <Button label="Санал илгээх" variant="primary" icon={<Plus size={15} />} onClick={() => setEditingIdea('new')} />}
+        {tab === 'company' && canReview && <Button label={t('plans.addPlan')} variant="primary" icon={<Plus size={15} />} onClick={() => setEditingItem({ horizon: 'short_term' })} />}
+        {tab === 'ideas' && <Button label={t('plans.sendIdea')} variant="primary" icon={<Plus size={15} />} onClick={() => setEditingIdea('new')} />}
       </HStack>
     </HStack>
 
     {tab === 'company' && (companyPlan.isLoading
       ? <Skeleton height={360} />
       : companyPlan.isError
-        ? <Banner status="error" collapsible={false} title="Компаний төлөвлөгөөг ачаалж чадсангүй. Дахин оролдоно уу." />
+        ? <Banner status="error" collapsible={false} title={t('plans.loadFailed')} />
         : <Grid columns={{ minWidth: 280, max: 3 }} gap={3} align="start">
           {HORIZONS.map((horizon) => (
             <section key={horizon.id} aria-label={horizon.label} onDragOver={(event) => event.preventDefault()} onDrop={() => moveItem(draggedId, horizon.id)}>
@@ -152,7 +156,7 @@ export function PlansPage() {
                     </VStack>
                     <HStack gap={1} vAlign="center">
                       <Badge label={columns[horizon.id].length} />
-                      {canReview && <IconButton label={`${horizon.label} төлөвлөгөө нэмэх`} tooltip="Нэмэх" icon={<Plus size={15} />} variant="ghost" size="sm" onClick={() => setEditingItem({ horizon: horizon.id })} />}
+                      {canReview && <IconButton label={t('plans.addToHorizon', { horizon: horizon.label })} tooltip={t('plans.add')} icon={<Plus size={15} />} variant="ghost" size="sm" onClick={() => setEditingItem({ horizon: horizon.id })} />}
                     </HStack>
                   </HStack>
                   {columns[horizon.id].map((item, index) => (
@@ -169,24 +173,24 @@ export function PlansPage() {
                         <VStack gap={2}>
                           <HStack gap={2} vAlign="start" hAlign="between">
                             <Text weight="semibold">{item.title}</Text>
-                            {canReview && <MoreMenu label={`${item.title} үйлдэл`} size="sm" alignment="end" items={[
-                              { label: 'Засах', onClick: () => setEditingItem(item) },
-                              { type: 'section', title: 'Шилжүүлэх', items: HORIZONS.filter((target) => target.id !== horizon.id).map((target) => ({ label: target.label, onClick: () => moveItem(item.id, target.id) })) },
+                            {canReview && <MoreMenu label={t('plans.itemActions', { title: item.title })} size="sm" alignment="end" items={[
+                              { label: t('plans.edit'), onClick: () => setEditingItem(item) },
+                              { type: 'section', title: t('plans.move'), items: HORIZONS.filter((target) => target.id !== horizon.id).map((target) => ({ label: target.label, onClick: () => moveItem(item.id, target.id) })) },
                               { type: 'divider' },
-                              { label: 'Архивлах', variant: 'destructive', onClick: () => { if (window.confirm(`«${item.title}» төлөвлөгөөг архивлах уу?`)) deleteItem.mutate(item.id) } },
+                              { label: t('plans.archive'), variant: 'destructive', onClick: () => { if (window.confirm(t('plans.archiveConfirm', { title: item.title }))) deleteItem.mutate(item.id) } },
                             ]} />}
                           </HStack>
                           {item.content && <Text type="supporting" maxLines={4}>{item.content}</Text>}
                           <HStack gap={2} vAlign="center" wrap="wrap">
-                            <Token size="sm" color={item.due_date ? 'default' : 'gray'} icon={<CalendarClock size={12} />} label={item.due_date ? dateLabel(item.due_date) : 'Хугацаагүй'} />
-                            {item.source_idea_ids.length > 0 && <Token size="sm" color="purple" icon={<Lightbulb size={12} />} label={`${item.source_idea_ids.length} санал`} />}
+                            <Token size="sm" color={item.due_date ? 'default' : 'gray'} icon={<CalendarClock size={12} />} label={item.due_date ? dateLabel(item.due_date) : t('plans.noDeadline')} />
+                            {item.source_idea_ids.length > 0 && <Token size="sm" color="purple" icon={<Lightbulb size={12} />} label={t('plans.ideaCount', { n: item.source_idea_ids.length })} />}
                             {item.source_employee_name && <Token size="sm" icon={<UserRound size={12} />} label={item.source_employee_name} />}
                           </HStack>
                         </VStack>
                       </Card>
                     </article>
                   ))}
-                  {columns[horizon.id].length === 0 && <EmptyState isCompact title="Төлөвлөгөө алга" description={canReview ? 'Шинээр нэмэх эсвэл ажилтнуудын саналаас батална уу.' : 'Энэ түвшинд батлагдсан төлөвлөгөө алга.'} />}
+                  {columns[horizon.id].length === 0 && <EmptyState isCompact title={t('plans.empty')} description={canReview ? t('plans.emptyHintManager') : t('plans.emptyHintViewer')} />}
                 </VStack>
               </Card>
             </section>
@@ -196,30 +200,30 @@ export function PlansPage() {
     {tab === 'ideas' && (ideas.isLoading
       ? <Skeleton height={320} />
       : ideas.isError
-        ? <Banner status="error" collapsible={false} title="Саналуудыг ачаалж чадсангүй. Дахин оролдоно уу." />
+        ? <Banner status="error" collapsible={false} title={t('plans.ideasLoadFailed')} />
         : <VStack gap={3}>
           <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
-            <SegmentedControl label="Саналын төлөв" value={ideaFilter} onChange={(value) => setIdeaFilter(value as IdeaFilter)}>
-              <SegmentedControlItem value="pending" label={`Хүлээгдэж буй (${pending.length})`} />
-              <SegmentedControlItem value="all" label={`Бүгд (${allIdeas.length})`} />
+            <SegmentedControl label={t('plans.ideaStatus')} value={ideaFilter} onChange={(value) => setIdeaFilter(value as IdeaFilter)}>
+              <SegmentedControlItem value="pending" label={t('plans.filter.pending', { n: pending.length })} />
+              <SegmentedControlItem value="all" label={t('plans.filter.all', { n: allIdeas.length })} />
             </SegmentedControl>
             {canReview && selected.length > 0 && <HStack gap={2} vAlign="center">
-              <Text type="supporting">{selected.length} санал сонгосон</Text>
-              <Button label="Цуцлах" variant="ghost" size="sm" onClick={() => setSelected([])} />
-              <Button label={selected.length > 1 ? 'Нэгтгэж батлах' : 'Батлах'} variant="primary" size="sm" icon={<GitMerge size={14} />} onClick={() => setApproving(selected)} />
+              <Text type="supporting">{t('plans.selectedCount', { n: selected.length })}</Text>
+              <Button label={t('plans.cancel')} variant="ghost" size="sm" onClick={() => setSelected([])} />
+              <Button label={selected.length > 1 ? t('plans.mergeApprove') : t('plans.approve')} variant="primary" size="sm" icon={<GitMerge size={14} />} onClick={() => setApproving(selected)} />
             </HStack>}
           </HStack>
           <Card padding={0}>
             {visibleIdeas.length === 0
-              ? <EmptyState icon={<Lightbulb size={28} />} title={allIdeas.length ? 'Хүлээгдэж буй санал алга' : 'Энэ сарын санал алга'} description="Ажилтнууд дараа сарын төлөвлөгөөнд оруулах саналаа эндээс илгээнэ."
-                actions={<Button label="Санал илгээх" variant="secondary" icon={<Plus size={15} />} onClick={() => setEditingIdea('new')} />} />
+              ? <EmptyState icon={<Lightbulb size={28} />} title={allIdeas.length ? t('plans.noPending') : t('plans.noIdeasMonth')} description={t('plans.noIdeasHint')}
+                actions={<Button label={t('plans.sendIdea')} variant="secondary" icon={<Plus size={15} />} onClick={() => setEditingIdea('new')} />} />
               : visibleIdeas.map((idea, index) => {
                 const reviewable = canReview && idea.status === 'pending'
                 return <article key={idea.id} id={`plan-idea-${idea.id}`}>
                   {index > 0 && <Divider />}
                   <Card variant={linkedIdeaId === idea.id ? 'blue' : 'transparent'} padding={4}>
                     <HStack gap={3} vAlign="start">
-                      {reviewable && <CheckboxInput label={`${idea.title} сонгох`} isLabelHidden value={selected.includes(idea.id)} onChange={() => toggleIdea(idea.id)} />}
+                      {reviewable && <CheckboxInput label={t('plans.selectIdea', { title: idea.title })} isLabelHidden value={selected.includes(idea.id)} onChange={() => toggleIdea(idea.id)} />}
                       <VStack gap={1.5} width="100%">
                         <HStack gap={2} vAlign="center" wrap="wrap">
                           <Text weight="semibold" color={idea.status === 'rejected' ? 'secondary' : 'primary'}>{idea.title}</Text>
@@ -227,15 +231,15 @@ export function PlansPage() {
                         </HStack>
                         {idea.content && <Text type="supporting" as="p">{idea.content}</Text>}
                         <HStack gap={3} vAlign="center" wrap="wrap">
-                          <HStack gap={1} vAlign="center"><UserRound size={13} aria-hidden /><Text type="supporting">{idea.submitted_by_name || 'Гишүүн'}</Text></HStack>
-                          {idea.suggested_due_date && <HStack gap={1} vAlign="center"><CalendarClock size={13} aria-hidden /><Text type="supporting">{dateLabel(idea.suggested_due_date)} хүртэл</Text></HStack>}
+                          <HStack gap={1} vAlign="center"><UserRound size={13} aria-hidden /><Text type="supporting">{idea.submitted_by_name || t('plans.member')}</Text></HStack>
+                          {idea.suggested_due_date && <HStack gap={1} vAlign="center"><CalendarClock size={13} aria-hidden /><Text type="supporting">{t('plans.until', { date: dateLabel(idea.suggested_due_date) })}</Text></HStack>}
                         </HStack>
                       </VStack>
                       {reviewable && <HStack gap={1} vAlign="center">
-                        <Button label="Батлах" variant="secondary" size="sm" onClick={() => setApproving([idea.id])} />
-                        <MoreMenu label={`${idea.title} үйлдэл`} size="sm" alignment="end" items={[
-                          { label: 'Засах', onClick: () => setEditingIdea(idea) },
-                          { label: 'Татгалзах', variant: 'destructive', onClick: () => { if (window.confirm(`«${idea.title}» саналаас татгалзах уу?`)) { deleteIdea.mutate(idea.id); setSelected((ids) => ids.filter((id) => id !== idea.id)) } } },
+                        <Button label={t('plans.approve')} variant="secondary" size="sm" onClick={() => setApproving([idea.id])} />
+                        <MoreMenu label={t('plans.itemActions', { title: idea.title })} size="sm" alignment="end" items={[
+                          { label: t('plans.edit'), onClick: () => setEditingIdea(idea) },
+                          { label: t('plans.reject'), variant: 'destructive', onClick: () => { if (window.confirm(t('plans.rejectConfirm', { title: idea.title }))) { deleteIdea.mutate(idea.id); setSelected((ids) => ids.filter((id) => id !== idea.id)) } } },
                         ]} />
                       </HStack>}
                     </HStack>
@@ -254,6 +258,7 @@ export function PlansPage() {
 
 /** Create or edit a company plan item (management only). */
 function PlanItemDialog({ item, month, onClose }: { item: CompanyPlanItem | { horizon: PlanHorizon }; month: string; onClose: () => void }) {
+  const { t } = useTranslation()
   const existing = 'id' in item ? item : null
   const create = useCreateCompanyPlanItem()
   const update = useUpdateCompanyPlanItem()
@@ -269,16 +274,16 @@ function PlanItemDialog({ item, month, onClose }: { item: CompanyPlanItem | { ho
     onClose()
   }
   return <Dialog isOpen onOpenChange={close} width={560} purpose="form" maxHeight="92dvh">
-    <DialogHeader title={existing ? 'Төлөвлөгөө засах' : 'Төлөвлөгөө нэмэх'} subtitle="Компаний төлөвлөгөөг бүх ажилтан харна." onOpenChange={close} />
-    <DialogScrollBody label="Төлөвлөгөөний маягт" actions={<>
-      <Button label="Цуцлах" variant="ghost" onClick={onClose} />
-      <Button label={existing ? 'Хадгалах' : 'Нэмэх'} variant="primary" isDisabled={!title.trim()} clickAction={save} />
+    <DialogHeader title={existing ? t('plans.editPlanTitle') : t('plans.addPlan')} subtitle={t('plans.visibleToAll')} onOpenChange={close} />
+    <DialogScrollBody label={t('plans.planForm')} actions={<>
+      <Button label={t('plans.cancel')} variant="ghost" onClick={onClose} />
+      <Button label={existing ? t('plans.save') : t('plans.add')} variant="primary" isDisabled={!title.trim()} clickAction={save} />
     </>}>
-      <TextInput label="Гарчиг" isRequired value={title} onChange={setTitle} hasAutoFocus width="100%" />
-      <TextArea label="Тайлбар" isOptional value={content} onChange={setContent} rows={5} placeholder="Ямар үр дүнд, ямар арга замаар хүрэх вэ?" width="100%" />
+      <TextInput label={t('plans.titleField')} isRequired value={title} onChange={setTitle} hasAutoFocus width="100%" />
+      <TextArea label={t('plans.description')} isOptional value={content} onChange={setContent} rows={5} placeholder={t('plans.contentPlaceholder')} width="100%" />
       <Grid columns={{ minWidth: 200 }} gap={3}>
-        <Selector label="Хугацааны түвшин" options={HORIZON_OPTIONS} value={horizon} onChange={(value) => setHorizon(value as PlanHorizon)} />
-        <DateInput label="Дуусах хугацаа" isOptional hasClear weekStartsOn="mon" value={(due || undefined) as ISODateString | undefined} onChange={(value) => setDue(value ?? '')} />
+        <Selector label={t('plans.horizon')} options={HORIZON_OPTIONS} value={horizon} onChange={(value) => setHorizon(value as PlanHorizon)} />
+        <DateInput label={t('plans.dueDate')} isOptional hasClear weekStartsOn="mon" value={(due || undefined) as ISODateString | undefined} onChange={(value) => setDue(value ?? '')} />
       </Grid>
     </DialogScrollBody>
   </Dialog>
@@ -286,6 +291,7 @@ function PlanItemDialog({ item, month, onClose }: { item: CompanyPlanItem | { ho
 
 /** Submit a new idea, or let a reviewer tidy a pending one before approving it. */
 function IdeaDialog({ idea, month, onClose }: { idea: PlanIdea | null; month: string; onClose: () => void }) {
+  const { t } = useTranslation()
   const create = useCreatePlanIdea()
   const update = useUpdatePlanIdea()
   const [title, setTitle] = useState(idea?.title ?? '')
@@ -299,20 +305,21 @@ function IdeaDialog({ idea, month, onClose }: { idea: PlanIdea | null; month: st
     onClose()
   }
   return <Dialog isOpen onOpenChange={close} width={520} purpose="form" maxHeight="92dvh">
-    <DialogHeader title={idea ? 'Санал засах' : 'Санал илгээх'} subtitle={`${monthLabel(month.slice(0, 7))}-ын төлөвлөгөөнд оруулах санал. Удирдлага хянаад баталсны дараа компаний төлөвлөгөөнд орно.`} onOpenChange={close} />
-    <DialogScrollBody label="Саналын маягт" actions={<>
-      <Button label="Цуцлах" variant="ghost" onClick={onClose} />
-      <Button label={idea ? 'Хадгалах' : 'Илгээх'} variant="primary" isDisabled={!title.trim()} clickAction={save} />
+    <DialogHeader title={idea ? t('plans.editIdeaTitle') : t('plans.sendIdea')} subtitle={t('plans.ideaSubtitle', { month: monthLabel(month.slice(0, 7)) })} onOpenChange={close} />
+    <DialogScrollBody label={t('plans.ideaForm')} actions={<>
+      <Button label={t('plans.cancel')} variant="ghost" onClick={onClose} />
+      <Button label={idea ? t('plans.save') : t('plans.send')} variant="primary" isDisabled={!title.trim()} clickAction={save} />
     </>}>
-      <TextInput label="Товч гарчиг" isRequired value={title} onChange={setTitle} hasAutoFocus width="100%" />
-      <TextArea label="Тайлбар" isOptional value={content} onChange={setContent} rows={5} placeholder="Ямар үр дүнд, ямар арга замаар хүрэх вэ?" width="100%" />
-      <DateInput label="Санал болгох хугацаа" isOptional hasClear weekStartsOn="mon" value={(due || undefined) as ISODateString | undefined} onChange={(value) => setDue(value ?? '')} />
+      <TextInput label={t('plans.shortTitle')} isRequired value={title} onChange={setTitle} hasAutoFocus width="100%" />
+      <TextArea label={t('plans.description')} isOptional value={content} onChange={setContent} rows={5} placeholder={t('plans.contentPlaceholder')} width="100%" />
+      <DateInput label={t('plans.proposedDue')} isOptional hasClear weekStartsOn="mon" value={(due || undefined) as ISODateString | undefined} onChange={(value) => setDue(value ?? '')} />
     </DialogScrollBody>
   </Dialog>
 }
 
 /** Turn one or several pending ideas into a single company plan item. */
 function ApproveIdeasDialog({ ideas, month, onClose }: { ideas: PlanIdea[]; month: string; onClose: (done: boolean) => void }) {
+  const { t } = useTranslation()
   const merge = useMergePlanIdeas()
   const single = ideas.length === 1 ? ideas[0] : null
   const [title, setTitle] = useState(single?.title ?? '')
@@ -325,17 +332,17 @@ function ApproveIdeasDialog({ ideas, month, onClose }: { ideas: PlanIdea[]; mont
     onClose(true)
   }
   return <Dialog isOpen onOpenChange={close} width={600} purpose="form" maxHeight="92dvh">
-    <DialogHeader title={single ? 'Саналыг батлах' : `${ideas.length} саналыг нэгтгэх`} subtitle="Батлагдсан санал компаний төлөвлөгөөний нэг мөр болно." onOpenChange={close} />
-    <DialogScrollBody label="Батлах маягт" actions={<>
-      <Button label="Цуцлах" variant="ghost" onClick={() => onClose(false)} />
-      <Button label="Төлөвлөгөөнд оруулах" variant="primary" isDisabled={!title.trim() || ideas.length === 0} clickAction={save} />
+    <DialogHeader title={single ? t('plans.approveIdeaTitle') : t('plans.mergeTitle', { n: ideas.length })} subtitle={t('plans.approveHint')} onOpenChange={close} />
+    <DialogScrollBody label={t('plans.approveForm')} actions={<>
+      <Button label={t('plans.cancel')} variant="ghost" onClick={() => onClose(false)} />
+      <Button label={t('plans.addToPlan')} variant="primary" isDisabled={!title.trim() || ideas.length === 0} clickAction={save} />
     </>}>
       {!single && <HStack gap={1.5} wrap="wrap">{ideas.map((idea) => <Token key={idea.id} size="sm" color="blue" label={idea.title} />)}</HStack>}
-      <TextInput label="Төлөвлөгөөний гарчиг" isRequired value={title} onChange={setTitle} hasAutoFocus width="100%" />
-      <TextArea label="Тайлбар" isOptional value={content} onChange={setContent} rows={7} width="100%" />
+      <TextInput label={t('plans.planTitle')} isRequired value={title} onChange={setTitle} hasAutoFocus width="100%" />
+      <TextArea label={t('plans.description')} isOptional value={content} onChange={setContent} rows={7} width="100%" />
       <Grid columns={{ minWidth: 200 }} gap={3}>
-        <Selector label="Хугацааны түвшин" options={HORIZON_OPTIONS} value={horizon} onChange={(value) => setHorizon(value as PlanHorizon)} />
-        <DateInput label="Дуусах хугацаа" isOptional hasClear weekStartsOn="mon" value={(due || undefined) as ISODateString | undefined} onChange={(value) => setDue(value ?? '')} />
+        <Selector label={t('plans.horizon')} options={HORIZON_OPTIONS} value={horizon} onChange={(value) => setHorizon(value as PlanHorizon)} />
+        <DateInput label={t('plans.dueDate')} isOptional hasClear weekStartsOn="mon" value={(due || undefined) as ISODateString | undefined} onChange={(value) => setDue(value ?? '')} />
       </Grid>
     </DialogScrollBody>
   </Dialog>

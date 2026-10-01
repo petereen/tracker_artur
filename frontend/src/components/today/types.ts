@@ -4,12 +4,13 @@ import type { SizeLimits } from './gridEngine'
 
 export type WidgetCategory = 'modules' | 'functions' | 'productivity' | 'stats'
 
-export const WIDGET_CATEGORIES: { key: WidgetCategory; label: string }[] = [
-  { key: 'modules', label: 'Модулиуд' },
-  { key: 'functions', label: 'Функцүүд' },
-  { key: 'productivity', label: 'Бүтээмж' },
-  { key: 'stats', label: 'Статистик' },
-]
+/** Display order of the library groups; labels live in `today.category.<key>`. */
+export const WIDGET_CATEGORIES: WidgetCategory[] = ['modules', 'functions', 'productivity', 'stats']
+
+/** Titles and descriptions are resolved at render time so they follow the UI language. */
+export const widgetTitleKey = (type: string) => `today.widget.${type}.title`
+export const widgetDescriptionKey = (type: string) => `today.widget.${type}.description`
+export const widgetKeywordsKey = (type: string) => `today.widget.${type}.keywords`
 
 /** Who is looking at the canvas: widgets use it to decide whether they apply. */
 export interface WidgetContext {
@@ -33,10 +34,9 @@ export interface WidgetSettingsProps<S> {
 
 export interface WidgetDefinition<S = any> {
   type: string
-  title: string
-  description: string
   category: WidgetCategory
   icon: LucideIcon
+  /** Extra English search terms; localized ones come from `today.widget.<type>.keywords`. */
   keywords?: string[]
   defaultSize: { w: number; h: number }
   limits: SizeLimits

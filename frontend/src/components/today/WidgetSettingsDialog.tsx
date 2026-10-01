@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Button } from '@astryxdesign/core/Button'
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog'
 import { Divider } from '@astryxdesign/core/Divider'
@@ -8,7 +9,7 @@ import type { TodayWidgetState } from '../../api/today'
 import { DialogScrollBody } from '../DialogScrollBody'
 import { clampSize } from './gridEngine'
 import { GRID_COLUMNS } from './TodayCanvas'
-import type { WidgetDefinition } from './types'
+import { widgetTitleKey, type WidgetDefinition } from './types'
 
 interface WidgetSettingsDialogProps {
   widget: TodayWidgetState
@@ -19,6 +20,7 @@ interface WidgetSettingsDialogProps {
 
 /** Edits one widget: its own settings form plus its size in grid cells. */
 export function WidgetSettingsDialog({ widget, definition, onSave, onClose }: WidgetSettingsDialogProps) {
+  const { t } = useTranslation()
   const [settings, setSettings] = useState<Record<string, unknown>>({ ...definition.defaultSettings, ...widget.settings })
   const [size, setSize] = useState({ w: widget.w, h: widget.h })
   const { limits } = definition
@@ -32,19 +34,19 @@ export function WidgetSettingsDialog({ widget, definition, onSave, onClose }: Wi
 
   return (
     <Dialog isOpen onOpenChange={close} width={460} purpose="form" maxHeight="85dvh">
-      <DialogHeader title={definition.title} subtitle="Виджетийн тохиргоо" onOpenChange={close} />
+      <DialogHeader title={t(widgetTitleKey(definition.type))} subtitle={t('today.settings.subtitle')} onOpenChange={close} />
       <DialogScrollBody
-        label="Виджетийн тохиргоо"
+        label={t('today.settings.subtitle')}
         actions={<>
-          <Button label="Болих" variant="ghost" onClick={onClose} />
-          <Button label="Хадгалах" variant="primary" onClick={save} />
+          <Button label={t('today.settings.cancel')} variant="ghost" onClick={onClose} />
+          <Button label={t('today.settings.save')} variant="primary" onClick={save} />
         </>}
       >
         {Form && <Form settings={settings} onChange={setSettings} />}
         {Form && <Divider />}
         <HStack gap={3}>
-          <NumberInput label="Өргөн (нүд)" value={size.w} min={limits.minW} max={maxW} isIntegerOnly hasNumberSteppers onChange={(w) => setSize({ ...size, w })} description={`${limits.minW}–${maxW}`} />
-          <NumberInput label="Өндөр (нүд)" value={size.h} min={limits.minH} max={limits.maxH} isIntegerOnly hasNumberSteppers onChange={(h) => setSize({ ...size, h })} description={`${limits.minH}–${limits.maxH}`} />
+          <NumberInput label={t('today.settings.width')} value={size.w} min={limits.minW} max={maxW} isIntegerOnly hasNumberSteppers onChange={(w) => setSize({ ...size, w })} description={`${limits.minW}–${maxW}`} />
+          <NumberInput label={t('today.settings.height')} value={size.h} min={limits.minH} max={limits.maxH} isIntegerOnly hasNumberSteppers onChange={(h) => setSize({ ...size, h })} description={`${limits.minH}–${limits.maxH}`} />
         </HStack>
       </DialogScrollBody>
     </Dialog>

@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useTranslation } from "react-i18next";
 import { isNativePlatform, requireWebCapability } from "../platform/runtime";
 import {
   ContractDetail,
@@ -56,11 +57,14 @@ import {
   registryPayload,
 } from "../components/ContractRegistryFields";
 import { CreateButton } from "../components/CreateButton";
+import { labelMap } from "../utils/labelMap";
+import { intlLocale } from "../utils/locale";
 const LazyRichContractEditor = lazy(() => import('../components/RichContractEditor').then((module) => ({ default: module.RichContractEditor })))
 const LazyQRCodeSVG = lazy(() => import('qrcode.react').then((module) => ({ default: module.QRCodeSVG })))
 
 function RichContractEditor(props: ComponentProps<typeof LazyRichContractEditor>) {
-  return <Suspense fallback={<div className="contract-editor-loading">Редактор ачаалж байна…</div>}><LazyRichContractEditor {...props} /></Suspense>
+  const { t } = useTranslation();
+  return <Suspense fallback={<div className="contract-editor-loading">{t('contracts.editorLoading')}</div>}><LazyRichContractEditor {...props} /></Suspense>
 }
 
 function ContractQrCode({ value }: { value: string }) {
@@ -76,32 +80,20 @@ type ContractView =
   | "signed"
   | "returned";
 const EMPTY_BODY = { type: "doc", content: [{ type: "paragraph" }] };
-const tabs: Array<{ key: ContractView; label: string }> = [
-  { key: "all", label: "Бүгд" },
-  { key: "drafts", label: "Ноорог" },
-  { key: "pending_my_approval", label: "Хянагдаж буй" },
-  { key: "submitted_by_me", label: "Илгээсэн" },
-  { key: "approved", label: "Баталгаажсан" },
-  { key: "returned", label: "Буцаагдсан" },
-];
-const typeLabels: Record<ContractDocumentType, string> = {
-  contract: "Гэрээ",
-  agreement: "Хэлэлцээр",
-  official_letter: "Албан бичиг",
-  other: "Бусад",
-};
-const statusLabels: Record<ContractStatus, string> = {
-  DRAFT: "Ноорог",
-  PENDING_REVIEW: "Хянагдаж байна",
-  CHANGES_REQUESTED: "Засвар шаардлагатай",
-  APPROVED: "Баталгаажсан",
-  REJECTED: "Буцаагдсан",
-  SIGNED_AND_STAMPED: "Гарын үсэг зурсан",
-};
+const VIEW_KEYS: ContractView[] = ["all", "drafts", "pending_my_approval", "submitted_by_me", "approved", "returned"];
+const typeLabels = labelMap<ContractDocumentType>("contracts.type", ["contract", "agreement", "official_letter", "other"]);
+const statusLabels = labelMap<ContractStatus>("contracts.status", ["DRAFT", "PENDING_REVIEW", "CHANGES_REQUESTED", "APPROVED", "REJECTED", "SIGNED_AND_STAMPED"]);
+
+function ContractSectionTabs({ active }: { active: "drafts" | "archive" }) {
+  const { t } = useTranslation();
+  return (
+    <nav className="page-tabs" aria-label={t("contracts.nav.aria")}><div className="page-tabs-list"><a href="/contracts" className={active === "drafts" ? "active" : undefined} aria-current={active === "drafts" ? "page" : undefined}><FileText size={15} />{t("contracts.nav.drafts")}</a><a href="/contracts/archive"><Archive size={15} />{t("contracts.nav.archive")}</a></div></nav>
+  );
+}
 
 function formatDate(value?: string | null) {
   return value
-    ? new Intl.DateTimeFormat("mn-MN", { dateStyle: "medium" }).format(
+    ? new Intl.DateTimeFormat(intlLocale(), { dateStyle: "medium" }).format(
         new Date(value),
       )
     : "—";
@@ -119,6 +111,7 @@ function ContractComposer({
   onDone: (id: string) => void;
   onCancel?: () => void;
 }) {
+  const { t } = useTranslation();
   const candidates = useContractReviewerCandidates();
   const projects = useProjects();
   const create = useCreateContract();
@@ -156,8 +149,8 @@ function ContractComposer({
   const taskOptions = Array.isArray(tasks.data) ? tasks.data : [];
   const reviewerOptions = Array.isArray(candidates.data) ? candidates.data : [];
   const save = async () => {
-    if (!title.trim()) return toast.error("Гарчиг оруулна уу");
-    if (!end) return toast.error("Гэрээний дуусах огноо оруулна уу");
+    if (!title.trim()) return toast.error(t("contracts.composer.titleRequired"));
+    if (!end) return toast.error(t("contracts.composer.endRequired"));
     try {
       const result = initial
         ? await update.mutateAsync({
@@ -200,12 +193,12 @@ function ContractComposer({
           }
         }
         if (failedUploads)
-          toast.error(`${failedUploads} хавсралтыг байршуулж чадсангүй`);
+          toast.error(t("contracts.composer.uploadsFailed", { n: failedUploads }));
       }
-      toast.success("Ноорог хадгалагдлаа");
+      toast.success(t("contracts.composer.saved"));
       onDone(result.public_id);
     } catch (error: any) {
-      toast.error(contractErrorMessage(error, "Ноорог хадгалсангүй"));
+      toast.error(contractErrorMessage(error, t("contracts.composer.saveFailed")));
     }
   };
   const addSupportingFiles = (fileList: FileList | null) => {
@@ -216,9 +209,9 @@ function ContractComposer({
         upload.mutate(
           { publicId: initial.public_id, purpose: "supporting", file },
           {
-            onSuccess: () => toast.success("Хавсралт нэмэгдлээ"),
+            onSuccess: () => toast.success(t("contracts.composer.attachmentAdded")),
             onError: (error: any) =>
-              toast.error(error.response?.data?.detail || "Файл нэмэгдсэнгүй"),
+              toast.error(error.response?.data?.detail || t("contracts.composer.attachmentFailed")),
           },
         ),
       );
@@ -229,17 +222,17 @@ function ContractComposer({
       <header className="contract-panel-header">
         <div>
           <span className="eyebrow">
-            ГЭРЭЭ / {initial ? "ЗАСАХ" : "ШИНЭ НООРОГ"}
+            {initial ? t("contracts.composer.eyebrowEdit") : t("contracts.composer.eyebrowNew")}
           </span>
-          <h2>{initial ? "Баримтыг засах" : "Шинэ гэрээ, баримт бичиг"}</h2>
+          <h2>{initial ? t("contracts.composer.headingEdit") : t("contracts.composer.headingNew")}</h2>
         </div>
         {onCancel && (
           <button
             type="button"
             className="contract-icon-button contract-icon-button-danger"
             onClick={onCancel}
-            aria-label="Болих"
-            title="Болих"
+            aria-label={t("contracts.cancel")}
+            title={t("contracts.cancel")}
           >
             <X size={19} />
           </button>
@@ -247,22 +240,21 @@ function ContractComposer({
       </header>
       {!editable && (
         <div className="contract-lock-note">
-          <LockKeyhole size={16} /> Энэ хувилбар баталгаажсан тул засварлах
-          боломжгүй.
+          <LockKeyhole size={16} /> {t("contracts.composer.lockNote")}
         </div>
       )}
       <div className="contract-form-grid">
         <label>
-          Гарчиг / сэдэв
+          {t("contracts.composer.title")}
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             disabled={!editable}
-            placeholder="Жишээ: Үйлчилгээ үзүүлэх гэрээ"
+            placeholder={t("contracts.composer.titlePlaceholder")}
           />
         </label>
         <label>
-          Баримтын төрөл
+          {t("contracts.composer.docType")}
           <select
             value={type}
             onChange={(event) =>
@@ -278,7 +270,7 @@ function ContractComposer({
           </select>
         </label>
         <label>
-          Төсөл (сонголтоор)
+          {t("contracts.composer.project")}
           <select
             value={projectId}
             onChange={(event) => {
@@ -287,7 +279,7 @@ function ContractComposer({
             }}
             disabled={!editable}
           >
-            <option value="">Төсөл сонгохгүй</option>
+            <option value="">{t("contracts.composer.noProject")}</option>
             {projectOptions.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.code} · {project.name}
@@ -296,13 +288,13 @@ function ContractComposer({
           </select>
         </label>
         <label>
-          Даалгавар (сонголтоор)
+          {t("contracts.composer.task")}
           <select
             value={taskId}
             onChange={(event) => setTaskId(event.target.value)}
             disabled={!editable || !projectId}
           >
-            <option value="">Даалгавар сонгохгүй</option>
+            <option value="">{t("contracts.composer.noTask")}</option>
             {taskOptions.map((task) => (
               <option key={task.id} value={task.id}>
                 {task.title}
@@ -311,7 +303,7 @@ function ContractComposer({
           </select>
         </label>
         <label>
-          Хүчин төгөлдөр эхлэх огноо
+          {t("contracts.composer.start")}
           <input
             type="date"
             value={start}
@@ -320,7 +312,7 @@ function ContractComposer({
           />
         </label>
         <label>
-          Дуусах / хугацаа дуусах огноо *
+          {t("contracts.composer.end")}
           <input
             type="date"
             value={end}
@@ -330,11 +322,11 @@ function ContractComposer({
           />
         </label>
         <fieldset className="contract-expiry-reminders" disabled={!editable}>
-          <legend>Хугацаа дуусахаас өмнө хуульчид сануулах</legend>
+          <legend>{t("contracts.composer.reminders")}</legend>
           {[1, 3, 7, 14, 30, 60, 90].map((days) => (
             <label key={days}>
               <input type="checkbox" checked={expiryReminderDays.includes(days)} onChange={(event) => setExpiryReminderDays((current) => event.target.checked ? [...current, days].sort((a, b) => a - b) : current.filter((value) => value !== days))} />
-              {days} хоногийн өмнө
+              {t("contracts.daysBefore", { n: days })}
             </label>
           ))}
         </fieldset>
@@ -353,15 +345,15 @@ function ContractComposer({
           onClose={() => setGroupManagerOpen(false)}
         />
       )}
-      <label className="contract-editor-label">Агуулга / нөхцөл</label>
+      <label className="contract-editor-label">{t("contracts.composer.content")}</label>
       <RichContractEditor value={body} editable={editable} onChange={setBody} />
       <div className="contract-form-section">
-        <div className="section-label">Хянагч, ахлагч сонгох</div>
+        <div className="section-label">{t("contracts.composer.reviewers")}</div>
         <details className="reviewer-dropdown">
           <summary>
             {reviewers.length
-              ? `${reviewers.length} хянагч сонгосон`
-              : "Хянагч сонгох"}
+              ? t("contracts.composer.reviewersCount", { n: reviewers.length })
+              : t("contracts.composer.pickReviewers")}
           </summary>
           <div className="reviewer-picker">
             {reviewerOptions.map((candidate) => (
@@ -380,26 +372,26 @@ function ContractComposer({
                 />
                 <span>
                   <strong>{candidate.name}</strong>
-                  <small>{candidate.job_title || "Ажилтан"}</small>
+                  <small>{candidate.job_title || t("contracts.composer.employee")}</small>
                 </span>
               </label>
             ))}
           </div>
         </details>
         <small className="field-help">
-          Сонгосон бүх хянагч баталсны дараа баримт баталгаажна.
+          {t("contracts.composer.reviewersHint")}
         </small>
       </div>
       <div className="contract-form-section">
-        <div className="section-label">Хавсралт</div>
+        <div className="section-label">{t("contracts.composer.attachments")}</div>
         <div className="contract-upload-inline">
           <label
             className="contract-icon-button contract-icon-button-attachment"
-            title="Файл хавсаргах"
+            title={t("contracts.composer.attach")}
           >
             <Paperclip size={18} />
             <input
-              aria-label="Файл хавсаргах"
+              aria-label={t("contracts.composer.attach")}
               type="file"
               hidden
               multiple
@@ -411,7 +403,7 @@ function ContractComposer({
               disabled={!editable || upload.isPending}
             />
           </label>
-          <span>PDF, DOCX, зураг</span>
+          <span>{t("contracts.composer.attachFormats")}</span>
         </div>
         <div className="contract-file-list">
           {initial?.files
@@ -429,8 +421,8 @@ function ContractComposer({
           type="button"
           className="contract-icon-button contract-icon-button-danger"
           onClick={onCancel}
-          aria-label="Болих"
-          title="Болих"
+          aria-label={t("contracts.cancel")}
+          title={t("contracts.cancel")}
         >
           <X size={19} />
         </button>
@@ -444,8 +436,8 @@ function ContractComposer({
             update.isPending ||
             upload.isPending
           }
-          aria-label="Ноорог хадгалах"
-          title="Ноорог хадгалах"
+          aria-label={t("contracts.composer.saveDraft")}
+          title={t("contracts.composer.saveDraft")}
         >
           <Save size={19} />
         </button>
@@ -461,6 +453,7 @@ function ContractDetailView({
   detail: ContractDetail;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   const actor = useActor();
   const navigate = useNavigate();
   const submit = useSubmitContract();
@@ -524,17 +517,17 @@ function ContractDetailView({
       {
         onSuccess: () => {
           setRemark("");
-          toast.success(path || "Үйлдэл амжилттай");
+          toast.success(path || t("contracts.done"));
         },
         onError: (error: any) =>
           toast.error(
-            error.response?.data?.detail || "Үйлдэл амжилтгүй боллоо",
+            error.response?.data?.detail || t("contracts.failed"),
           ),
       },
     );
   const openPrint = () => {
     if (isNativePlatform()) {
-      toast.error("Хэвлэх үйлдлийг одоогоор вэб хувилбараас ашиглана уу");
+      toast.error(t("contracts.detail.printWebOnly"));
       return;
     }
     print.mutate(detail.public_id);
@@ -549,10 +542,10 @@ function ContractDetailView({
   );
   return (
     <section className="contract-detail">
-      <nav className="page-tabs" aria-label="Гэрээний хэсгүүд"><div className="page-tabs-list"><a href="/contracts" className="active" aria-current="page"><FileText size={15} />Гэрээний төсөл</a><a href="/contracts/archive"><Archive size={15} />Архив</a></div></nav>
+      <ContractSectionTabs active="drafts" />
       <div className="workspace-toolbar contract-detail-toolbar">
         <button className="back-link" onClick={onBack}>
-          ← Гэрээний жагсаалт
+          {t("contracts.detail.back")}
         </button>
         <span className={statusClass(detail.status)}>
           {statusLabels[detail.status]}
@@ -569,8 +562,7 @@ function ContractDetailView({
               </span>
               <h2>{detail.title}</h2>
               <p>
-                Хүчинтэй хугацаа: {formatDate(detail.effective_start_on)} —{" "}
-                {formatDate(detail.effective_end_on)}
+                {t("contracts.detail.validity", { from: formatDate(detail.effective_start_on), to: formatDate(detail.effective_end_on) })}
                 {detail.party ? ` · ${detail.party.name}` : ""}
               </p>
             </div>
@@ -579,7 +571,7 @@ function ContractDetailView({
                 className="button button-secondary"
                 onClick={() => setEditing(true)}
               >
-                Засах
+                {t("contracts.detail.edit")}
               </button>
             )}
           </header>
@@ -587,11 +579,8 @@ function ContractDetailView({
             <div className="contract-approved-banner">
               <ShieldCheck size={21} />
               <div>
-                <strong>Гэрээ батлагдлаа.</strong>
-                <span>
-                  Хэвлэх → гарын үсэг зурах → тамга дарах → эцсийн хувийг
-                  хавсаргах.
-                </span>
+                <strong>{t("contracts.detail.approvedBanner")}</strong>
+                <span>{t("contracts.detail.approvedSteps")}</span>
               </div>
             </div>
           )}
@@ -607,8 +596,8 @@ function ContractDetailView({
             onSelection={setAnchor}
           />
           <div className="contract-document-footer">
-            <span>Нийтэлсэн: {formatDate(detail.created_at)}</span>
-            <span>Сүүлийн хувилбар: v{detail.version}</span>
+            <span>{t("contracts.detail.published", { date: formatDate(detail.created_at) })}</span>
+            <span>{t("contracts.detail.lastVersion", { n: detail.version })}</span>
           </div>
         </article>
         <aside className="contract-detail-rail">
@@ -621,21 +610,21 @@ function ContractDetailView({
             }
           />
           <div className="contract-rail-card">
-            <div className="section-label">Үйлдэл</div>
+            <div className="section-label">{t("contracts.detail.actions")}</div>
             {detail.status === "DRAFT" && editable && (
               <button
                 className="button button-primary button-wide"
-                onClick={() => run(submit, "Хянагчдад илгээгдлээ")}
+                onClick={() => run(submit, t("contracts.detail.submitted"))}
               >
-                <Send size={16} /> Хянагчдад илгээх
+                <Send size={16} /> {t("contracts.detail.submit")}
               </button>
             )}
             {detail.status === "CHANGES_REQUESTED" && editable && (
               <button
                 className="button button-primary button-wide"
-                onClick={() => run(resubmit, "Дахин илгээгдлээ")}
+                onClick={() => run(resubmit, t("contracts.detail.resubmitted"))}
               >
-                <Send size={16} /> Дахин илгээх
+                <Send size={16} /> {t("contracts.detail.resubmit")}
               </button>
             )}
             {detail.status === "PENDING_REVIEW" &&
@@ -647,9 +636,9 @@ function ContractDetailView({
               ).length === 0 && (
                 <button
                   className="button button-secondary button-wide"
-                  onClick={() => run(recall, "Илгээлт буцаагдлаа")}
+                  onClick={() => run(recall, t("contracts.detail.recalled"))}
                 >
-                  Буцаах
+                  {t("contracts.detail.recall")}
                 </button>
               )}
             {detail.status === "REJECTED" && (
@@ -662,7 +651,7 @@ function ContractDetailView({
                   })
                 }
               >
-                Ноорог болгон хувилах
+                {t("contracts.detail.duplicate")}
               </button>
             )}
             {canExecute && (
@@ -671,23 +660,22 @@ function ContractDetailView({
                   className="button button-primary button-wide"
                   onClick={openPrint}
                 >
-                  <Printer size={16} /> Хэвлэх / PDF татах
+                  <Printer size={16} /> {t("contracts.detail.print")}
                 </button>
                 <div className="execution-card">
-                  <strong>Гүйцэтгэлийн алхмууд</strong>
+                  <strong>{t("contracts.detail.steps")}</strong>
                   <div className="execution-step done">
                     <b>1</b>
-                    <span>Хэвлэх</span>
+                    <span>{t("contracts.detail.step1")}</span>
                   </div>
                   <div className="execution-step">
                     <b>2</b>
-                    <span>Талууд гарын үсэг зурж, тамга дарна</span>
+                    <span>{t("contracts.detail.step2")}</span>
                   </div>
                   <div className="execution-step">
                     <b>3</b>
                     <label>
-                      <Upload size={15} /> Тамгатай, гарын үсэгтэй эцсийн хувийг
-                      хуулах
+                      <Upload size={15} /> {t("contracts.detail.step3")}
                       <input
                         type="file"
                         hidden
@@ -703,7 +691,7 @@ function ContractDetailView({
                               },
                               {
                                 onSuccess: () =>
-                                  toast.success("Эцсийн хувилбар хавсаргалаа"),
+                                  toast.success(t("contracts.detail.finalAttached")),
                               },
                             );
                         }}
@@ -715,16 +703,16 @@ function ContractDetailView({
                       className="button button-primary button-wide"
                       onClick={() =>
                         confirmFinal.mutate(detail.public_id, {
-                          onSuccess: () => toast.success("Гэрээ архивлагдлаа"),
+                          onSuccess: () => toast.success(t("contracts.detail.archived")),
                           onError: (error: any) =>
                             toast.error(
                               error.response?.data?.detail ||
-                                "Архивлаж чадсангүй",
+                                t("contracts.detail.archiveFailed"),
                             ),
                         })
                       }
                     >
-                      Эцсийн хувийг баталгаажуулах
+                      {t("contracts.detail.confirmFinal")}
                     </button>
                   )}
                 </div>
@@ -733,57 +721,57 @@ function ContractDetailView({
           </div>
             {canReview && (
             <div className="contract-rail-card review-action-card">
-              <div className="section-label">Таны хяналт</div>
+              <div className="section-label">{t("contracts.detail.yourReview")}</div>
               <textarea
                 value={remark}
                 onChange={(event) => setRemark(event.target.value)}
-                placeholder="Тайлбар / санал (засвар, буцаалтад заавал)"
+                placeholder={t("contracts.detail.remarkPlaceholder")}
               />
               <label className="contract-approval-expiry">
-                Дуусах огноог баталгаажуулах *
+                {t("contracts.detail.confirmExpiry")}
                 <input type="date" value={approvalExpiry} onChange={(event) => setApprovalExpiry(event.target.value)} />
               </label>
               <fieldset className="contract-expiry-reminders" >
-                <legend>Хуульчид сануулах өдрүүд</legend>
+                <legend>{t("contracts.detail.reminderDays")}</legend>
                 {[1, 3, 7, 14, 30, 60, 90].map((days) => (
                   <label key={days}>
                     <input type="checkbox" checked={approvalReminderDays.includes(days)} onChange={(event) => setApprovalReminderDays((current) => event.target.checked ? [...current, days].sort((a, b) => a - b) : current.filter((value) => value !== days))} />
-                    {days} хоногийн өмнө
+                    {t("contracts.daysBefore", { n: days })}
                   </label>
                 ))}
               </fieldset>
               <div className="review-actions">
                 <button
                   className="button button-primary"
-                  onClick={() => approvalExpiry ? approve.mutate({ publicId: detail.public_id, remark: remark.trim() || undefined, effective_end_on: approvalExpiry, expiry_reminder_days: approvalReminderDays }, { onSuccess: () => toast.success("Зөвшөөрөл бүртгэгдлээ"), onError: (error: any) => toast.error(error.response?.data?.detail || "Зөвшөөрөл бүртгэж чадсангүй") }) : toast.error("Дуусах огноо оруулна уу")}
+                  onClick={() => approvalExpiry ? approve.mutate({ publicId: detail.public_id, remark: remark.trim() || undefined, effective_end_on: approvalExpiry, expiry_reminder_days: approvalReminderDays }, { onSuccess: () => toast.success(t("contracts.detail.approvalRecorded")), onError: (error: any) => toast.error(error.response?.data?.detail || t("contracts.detail.approvalFailed")) }) : toast.error(t("contracts.detail.expiryRequired"))}
                 >
-                  Зөвшөөрөх
+                  {t("contracts.detail.approve")}
                 </button>
                 <button
                   className="button button-warning"
                   onClick={() =>
                     remark.trim()
-                      ? run(changes, "Засварын санал илгээгдлээ")
-                      : toast.error("Засварын тайлбар оруулна уу")
+                      ? run(changes, t("contracts.detail.changesSent"))
+                      : toast.error(t("contracts.detail.changesRequired"))
                   }
                 >
-                  Засвар хүсэх
+                  {t("contracts.detail.requestChanges")}
                 </button>
                 <button
                   className="button button-danger"
                   onClick={() =>
                     remark.trim()
-                      ? run(reject, "Баримт буцаагдлаа")
-                      : toast.error("Буцаалтын шалтгаан оруулна уу")
+                      ? run(reject, t("contracts.detail.rejected"))
+                      : toast.error(t("contracts.detail.rejectRequired"))
                   }
                 >
-                  Буцаах
+                  {t("contracts.detail.reject")}
                 </button>
               </div>
             </div>
           )}
           <div className="contract-rail-card">
-            <div className="section-label">Хянагчид</div>
+            <div className="section-label">{t("contracts.detail.reviewers")}</div>
             {detail.reviews
               .filter((row) => row.round_number === detail.submission_round)
               .map((row) => (
@@ -792,20 +780,14 @@ function ContractDetailView({
                   <span>
                     <strong>{row.reviewer_name}</strong>
                     <small>
-                      {row.decision === "pending"
-                        ? "Хүлээж байна"
-                        : row.decision === "approved"
-                          ? "Зөвшөөрсөн"
-                          : row.decision === "changes_requested"
-                            ? "Засвар хүссэн"
-                            : "Буцаасан"}
+                      {t(`contracts.detail.decision.${row.decision}`)}
                     </small>
                   </span>
                 </div>
               ))}
           </div>
           <div className="contract-rail-card">
-            <div className="section-label">Хавсралтууд</div>
+            <div className="section-label">{t("contracts.detail.files")}</div>
             {detail.files.map((file) => (
               <button
                 className="contract-file-row"
@@ -824,7 +806,7 @@ function ContractDetailView({
                     link.click();
                     URL.revokeObjectURL(url);
                   } catch (error: any) {
-                    toast.error(error.message || "Файл татаж чадсангүй");
+                    toast.error(error.message || t("contracts.detail.downloadFailed"));
                   }
                 }}
               >
@@ -838,8 +820,8 @@ function ContractDetailView({
       <section className="contract-comments-card">
         <div className="contract-section-heading">
           <div>
-            <span className="eyebrow">INLINE REVIEW</span>
-            <h3>Санал, тайлбар</h3>
+            <span className="eyebrow">{t("contracts.detail.commentsEyebrow")}</span>
+            <h3>{t("contracts.detail.comments")}</h3>
           </div>
           <MessageSquare size={19} />
         </div>
@@ -870,7 +852,7 @@ function ContractDetailView({
                     })
                   }
                 >
-                  {item.is_resolved ? "Дахин нээх" : "Шийдсэн"}
+                  {item.is_resolved ? t("contracts.detail.reopen") : t("contracts.detail.resolved")}
                 </button>
               )}
             </div>
@@ -883,7 +865,7 @@ function ContractDetailView({
             <textarea
               value={comment}
               onChange={(event) => setComment(event.target.value)}
-              placeholder="Сонгосон хэсэгт тайлбар үлдээх…"
+              placeholder={t("contracts.detail.commentPlaceholder")}
             />
             <button
               className="button button-secondary"
@@ -905,7 +887,7 @@ function ContractDetailView({
                 )
               }
             >
-              Сэтгэгдэл нэмэх
+              {t("contracts.detail.addComment")}
             </button>
           </div>
         )}
@@ -920,11 +902,8 @@ function ContractDetailView({
               <X size={18} />
             </button>
             <ShieldCheck size={42} className="modal-success-icon" />
-            <h3>Гэрээ батлагдлаа</h3>
-            <p>
-              Хэвлэж, гарын үсэг зурж, тамга дараад эцсийн хувийг системд
-              хавсаргана уу.
-            </p>
+            <h3>{t("contracts.detail.approvedTitle")}</h3>
+            <p>{t("contracts.detail.approvedText")}</p>
             <button
               className="button button-primary button-wide"
               onClick={() => {
@@ -932,7 +911,7 @@ function ContractDetailView({
                 openPrint();
               }}
             >
-              Хэвлэх / PDF татах
+              {t("contracts.detail.print")}
             </button>
           </div>
         </div>,
@@ -943,6 +922,7 @@ function ContractDetailView({
 }
 
 export function ContractsWorkspacePage() {
+  const { t } = useTranslation();
   const { publicId } = useParams<{ publicId?: string }>();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -990,26 +970,26 @@ export function ContractsWorkspacePage() {
     );
   return (
     <section className="contracts-workspace">
-      <nav className="page-tabs" aria-label="Гэрээний хэсгүүд"><div className="page-tabs-list"><a href="/contracts" className="active" aria-current="page"><FileText size={15} />Гэрээний төсөл</a><a href="/contracts/archive"><Archive size={15} />Архив</a></div></nav>
+      <ContractSectionTabs active="drafts" />
       <div className="workspace-toolbar contracts-toolbar">
         <div className="toolbar-start">
           <div className="contract-tabs" role="tablist">
-            {tabs.map((tab) => (
+            {VIEW_KEYS.map((key) => (
               <button
-                key={tab.key}
+                key={key}
                 role="tab"
-                aria-selected={view === tab.key}
-                className={view === tab.key ? "active" : ""}
-                onClick={() => setView(tab.key)}
+                aria-selected={view === key}
+                className={view === key ? "active" : ""}
+                onClick={() => setView(key)}
               >
-                {tab.label}
-                <span>{list.data?.counts?.[tab.key] ?? 0}</span>
+                {t(`contracts.view.${key}`)}
+                <span>{list.data?.counts?.[key] ?? 0}</span>
               </button>
             ))}
           </div>
         </div>
         <CreateButton
-          label="Шинэ баримт бичиг"
+          label={t("contracts.list.new")}
           onClick={() => {
             setCreateMode(true);
             setParams({ create: "1" });
@@ -1033,38 +1013,38 @@ export function ContractsWorkspacePage() {
         <div className="contract-filters" role="search">
           <input
             type="search"
-            aria-label="Гэрээ хайх"
-            placeholder="Хайх: нэр, код, дугаар, харилцагч"
+            aria-label={t("contracts.list.searchAria")}
+            placeholder={t("contracts.list.searchPlaceholder")}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
           <ContractGroupSelect
-            aria-label="Бүлгээр шүүх"
+            aria-label={t("contracts.list.byGroup")}
             value={groupFilter}
             onChange={setGroupFilter}
             groups={registryOptions.data?.groups ?? []}
-            emptyLabel="Бүх бүлэг"
+            emptyLabel={t("contracts.list.allGroups")}
             includeInactive
           />
           <select
-            aria-label="Идэвхээр шүүх"
+            aria-label={t("contracts.list.byActive")}
             value={activeFilter}
             onChange={(event) => setActiveFilter(event.target.value as "" | "true" | "false")}
           >
-            <option value="">Идэвхтэй ба идэвхгүй</option>
-            <option value="true">Идэвхтэй</option>
-            <option value="false">Идэвхгүй</option>
+            <option value="">{t("contracts.list.activeAny")}</option>
+            <option value="true">{t("contracts.list.active")}</option>
+            <option value="false">{t("contracts.list.inactive")}</option>
           </select>
-          <input type="date" aria-label="Хугацаа эхлэх" title="Хугацаа (эхлэх)" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-          <input type="date" aria-label="Хугацаа дуусах" title="Хугацаа (дуусах)" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+          <input type="date" aria-label={t("contracts.list.dateFromAria")} title={t("contracts.list.dateFromTitle")} value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          <input type="date" aria-label={t("contracts.list.dateToAria")} title={t("contracts.list.dateToTitle")} value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
         </div>
       )}
       {!createMode && partyFilter && (
         <span className="contract-filter-chip">
-          Харилцагч: {partyName || `#${partyFilter}`}
+          {t("contracts.list.party", { name: partyName || `#${partyFilter}` })}
           <button
             type="button"
-            aria-label="Харилцагчийн шүүлтүүр арилгах"
+            aria-label={t("contracts.list.clearParty")}
             onClick={() => {
               const next = new URLSearchParams(params);
               next.delete("party");
@@ -1078,7 +1058,7 @@ export function ContractsWorkspacePage() {
       {!createMode && (
         <div className="contract-list-card">
           {list.isLoading ? (
-            <div className="contract-empty">Гэрээнүүдийг ачаалж байна…</div>
+            <div className="contract-empty">{t("contracts.list.loading")}</div>
           ) : list.data?.items.length ? (
             list.data.items.map((item) => (
               <button
@@ -1101,9 +1081,9 @@ export function ContractsWorkspacePage() {
                       item.amount !== null && item.amount !== undefined
                         ? formatContractMoney(item.amount, item.currency)
                         : null,
-                      item.overdue_days ? `${item.overdue_days} хоног хэтэрсэн` : null,
-                      item.is_active === false ? "Идэвхгүй" : null,
-                      item.excerpt || "Агуулгагүй",
+                      item.overdue_days ? t("contracts.list.overdue", { n: item.overdue_days }) : null,
+                      item.is_active === false ? t("contracts.list.inactive") : null,
+                      item.excerpt || t("contracts.list.noExcerpt"),
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -1118,9 +1098,9 @@ export function ContractsWorkspacePage() {
           ) : (
             <div className="contract-empty">
               <FileCheck2 size={32} />
-              <h3>Одоогоор ямар нэг үүсгэсэн баримт бичиг алга</h3>
+              <h3>{t("contracts.list.empty")}</h3>
               <CreateButton
-                label="Шинэ баримт бичиг"
+                label={t("contracts.list.new")}
                 onClick={() => setCreateMode(true)}
               />
             </div>
@@ -1132,6 +1112,7 @@ export function ContractsWorkspacePage() {
 }
 
 export function ContractPrintPage() {
+  const { t } = useTranslation();
   const { publicId } = useParams<{ publicId: string }>();
   const detail = useContractDetail(publicId);
   const editorValue =
@@ -1141,13 +1122,13 @@ export function ContractPrintPage() {
   }, [detail.data]);
   if (!detail.data)
     return (
-      <div className="contract-print-loading">Баримтыг бэлтгэж байна…</div>
+      <div className="contract-print-loading">{t("contracts.print.preparing")}</div>
     );
   return (
     <main className="contract-print-page">
       <div className="contract-print-header">
         <div>
-          <span className="eyebrow">OYUNS / ГЭРЭЭ</span>
+          <span className="eyebrow">{t("contracts.print.eyebrow")}</span>
           <h1>{detail.data.title}</h1>
           <p>
             {[
@@ -1164,10 +1145,10 @@ export function ContractPrintPage() {
       </div>
       <RichContractEditor value={editorValue} editable={false} />
       <footer className="contract-print-footer">
-        <span>Баримтын ID: {detail.data.public_id}</span>
-        <span>Баталсан: {formatDate(detail.data.approved_at)}</span>
-        <span>Хувилбар: v{detail.data.version}</span>
-        <span>Эцсийн хувийн QR нь нэвтэрсэн хэрэглэгчдэд харагдана.</span>
+        <span>{t("contracts.print.docId", { id: detail.data.public_id })}</span>
+        <span>{t("contracts.print.approvedOn", { date: formatDate(detail.data.approved_at) })}</span>
+        <span>{t("contracts.print.version", { n: detail.data.version })}</span>
+        <span>{t("contracts.print.qrNote")}</span>
       </footer>
     </main>
   );
