@@ -84,6 +84,13 @@ A token from tenant A presented on tenant B's host gets **403 `tenant_mismatch`*
 |---|---|---|
 | **Superadmin** | `platform_operators.role = superadmin`. It has its own login (`/v1/platform/auth/login`), a token with `kind=platform` and `aud=oyuns-platform`, signed with `PLATFORM_TOKEN_SECRET` (derived from `SECRET_KEY` when empty). | Everything under `/v1/platform`: tenants, plans, licences, domains, operators. Everything is audited in `platform_audit_logs`. |
 | **Support operator** | `platform_operators.role = support` | Console read-only. |
+
+**Two-factor login (operators).** The password step (`POST /v1/platform/auth/login`) never returns a session. It returns `two_factor: "setup" | "verify"` and a 10-minute `mfa_token` that opens only `/v1/platform/auth/2fa/*`:
+
+- `setup` (no enrolment yet): `POST /auth/2fa/setup` returns the TOTP secret and `otpauth://` URI (the console shows the QR code and steps), `POST /auth/2fa/enable` confirms the first code and returns the session plus 10 one-time recovery codes (shown once, stored hashed).
+- `verify`: `POST /auth/2fa/verify` accepts an authenticator code or a recovery code and returns the session.
+
+Standard TOTP (SHA-1, 6 digits, 30 s, ±1 step), so Google Authenticator, Microsoft Authenticator, Authy, 1Password and similar apps work. The secret is encrypted with `secret_box` (`SECRET_KEY`); a used code can't be replayed (`totp_last_step`); wrong codes count towards the same 5-attempt / 15-minute lockout as wrong passwords. Operator sessions are refused while no second factor is enrolled. Lost phone: a superadmin resets it in Console → Операторууд → «Шинэчлэх» (`PATCH /operators/{id}` with `reset_two_factor`), or `python -m scripts.platform_admin reset-2fa --email …`; the operator enrols again on the next login. Migration `5b7f1d3e9c26`.
 | **Tenant Admin** | `role_assignments.role = admin` inside one tenant | Workspace settings, users up to the seat quota, licence activation, branding. |
 | **Tenant User** | Other tenant roles (`member`, `manager`, `hr`, …) | Only its own tenant, narrowed further by existing role rules. |
 

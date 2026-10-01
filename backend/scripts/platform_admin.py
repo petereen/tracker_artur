@@ -2,6 +2,7 @@
 
     python -m scripts.platform_admin generate-license-keys [--kid oyuns-license-2]
     python -m scripts.platform_admin create-operator --email ops@oyuns.mn --role superadmin
+    python -m scripts.platform_admin reset-2fa --email ops@oyuns.mn
     python -m scripts.platform_admin tenants
     python -m scripts.platform_admin rls-status
 
@@ -63,6 +64,27 @@ def create_operator(args) -> int:
     return 0
 
 
+def reset_2fa(args) -> int:
+    from app.models.platform import PlatformOperator
+
+    email = args.email.strip().lower()
+    with Session(_engine()) as session:
+        session.execute(text("SELECT set_config('app.system_context', 'on', true)"))
+        operator = session.scalar(select(PlatformOperator).where(func.lower(PlatformOperator.email) == email))
+        if operator is None:
+            print(f"Operator {email} not found", file=sys.stderr)
+            return 1
+        operator.totp_secret_enc = None
+        operator.totp_enabled_at = None
+        operator.totp_last_step = None
+        operator.totp_recovery_codes = []
+        operator.failed_login_count = 0
+        operator.locked_until = None
+        session.commit()
+    print(f"Two-factor authentication reset for {email}; it is set up again on the next login")
+    return 0
+
+
 def tenants(_args) -> int:
     with Session(_engine()) as session:
         session.execute(text("SELECT set_config('app.system_context', 'on', true)"))
@@ -105,6 +127,9 @@ def main(argv: list[str] | None = None) -> int:
     operator.add_argument("--name")
     operator.add_argument("--role", choices=("superadmin", "support"), default="superadmin")
     operator.set_defaults(handler=create_operator)
+    reset = commands.add_parser("reset-2fa")
+    reset.add_argument("--email", required=True)
+    reset.set_defaults(handler=reset_2fa)
     commands.add_parser("tenants").set_defaults(handler=tenants)
     commands.add_parser("rls-status").set_defaults(handler=rls_status)
     args = parser.parse_args(argv)

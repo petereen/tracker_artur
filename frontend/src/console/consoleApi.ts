@@ -17,6 +17,31 @@ export interface Operator {
   status: 'active' | 'disabled'
   last_login_at: string | null
   created_at?: string
+  two_factor_enabled?: boolean
+}
+
+/** The password step never returns a session — the second factor does. */
+export interface TwoFactorChallenge {
+  two_factor: 'setup' | 'verify'
+  mfa_token: string
+  expires_in: number
+}
+
+export interface TwoFactorEnrolment {
+  secret: string
+  otpauth_uri: string
+  issuer: string
+  account: string
+  digits: number
+  period: number
+}
+
+export interface OperatorSession {
+  access_token: string
+  expires_in: number
+  operator: Operator
+  recovery_codes?: string[]
+  recovery_codes_left?: number
 }
 
 interface ConsoleSessionState {
@@ -214,11 +239,27 @@ export interface ConsoleSystem {
 const get = <T,>(url: string, params?: Record<string, unknown>) => consoleApi.get<T>(url, { params }).then((response) => response.data)
 
 export function useOperatorLogin() {
-  const setSession = useConsoleSession((state) => state.setSession)
   return useMutation({
-    mutationFn: (input: { email: string; password: string }) => consoleApi.post('/v1/platform/auth/login', input).then((response) => response.data as { access_token: string; expires_in: number; operator: Operator }),
-    onSuccess: (data) => setSession(data.access_token, data.operator, data.expires_in),
+    mutationFn: (input: { email: string; password: string }) => consoleApi.post('/v1/platform/auth/login', input).then((response) => response.data as TwoFactorChallenge),
   })
+}
+
+export const useTwoFactorEnrolment = (mfaToken: string) => useQuery({
+  queryKey: ['console-2fa', 'setup', mfaToken],
+  queryFn: () => consoleApi.post('/v1/platform/auth/2fa/setup', { mfa_token: mfaToken }).then((response) => response.data as TwoFactorEnrolment),
+  staleTime: Infinity, gcTime: 0, retry: false, refetchOnWindowFocus: false,
+})
+
+/** `enable` finishes first-time enrolment, `verify` an ordinary login. */
+export function useTwoFactorCode(step: 'enable' | 'verify') {
+  return useMutation({
+    mutationFn: (input: { mfa_token: string; code: string }) => consoleApi.post(`/v1/platform/auth/2fa/${step}`, input).then((response) => response.data as OperatorSession),
+  })
+}
+
+export function consoleErrorCode(error: unknown): string | null {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  return detail && typeof detail === 'object' && !Array.isArray(detail) ? (detail as { code?: string }).code ?? null : null
 }
 
 export const useFeatureCatalog = () => useQuery({ queryKey: ['console', 'features'], queryFn: () => get<Array<{ code: TenantFeatureCode; label: string }>>('/v1/platform/features'), staleTime: Infinity })
@@ -254,4 +295,4 @@ export const useRemoveDomain = () => useConsoleMutation(({ tenantId, domainId }:
 export const useSavePlan = () => useConsoleMutation(({ isNew, ...input }: Partial<ConsolePlan> & { code: string; isNew: boolean }) =>
   (isNew ? send<ConsolePlan>('post', '/v1/platform/plans', input) : send<ConsolePlan>('patch', `/v1/platform/plans/${input.code}`, { ...input, code: undefined })))
 export const useCreateOperator = () => useConsoleMutation((input: { email: string; password: string; display_name?: string; role: Operator['role'] }) => send<Operator>('post', '/v1/platform/operators', input))
-export const useUpdateOperator = () => useConsoleMutation(({ id, ...input }: { id: number; role?: Operator['role']; status?: Operator['status']; password?: string }) => send<Operator>('patch', `/v1/platform/operators/${id}`, input))
+export const useUpdateOperator = () => useConsoleMutation(({ id, ...input }: { id: number; role?: Operator['role']; status?: Operator['status']; password?: string; reset_two_factor?: boolean }) => send<Operator>('patch', `/v1/platform/operators/${id}`, input))

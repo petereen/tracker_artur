@@ -139,11 +139,43 @@ async def _scenario(monkeypatch, app_url: str | None) -> None:
                 return {"Authorization": f"Bearer {token}", "host": host}
 
             # ── operator console ────────────────────────────────────────────
-            operator_login = await client.post("/v1/platform/auth/login", json={"email": "ops@oyuns.test", "password": "operator-password-1"})
-            assert operator_login.status_code == 200, operator_login.text
-            ops = {"Authorization": f"Bearer {operator_login.json()['access_token']}"}
-            support_login = await client.post("/v1/platform/auth/login", json={"email": "support@oyuns.test", "password": "support-password-1"})
-            support = {"Authorization": f"Bearer {support_login.json()['access_token']}"}
+            async def operator_session(email: str, password: str) -> dict:
+                """Password, then first-login two-factor enrolment."""
+                from app.services import totp
+
+                first = await client.post("/v1/platform/auth/login", json={"email": email, "password": password})
+                assert first.status_code == 200, first.text
+                assert first.json()["two_factor"] == "setup" and "access_token" not in first.json()
+                challenge = {"mfa_token": first.json()["mfa_token"]}
+                setup = (await client.post("/v1/platform/auth/2fa/setup", json=challenge)).json()
+                assert setup["otpauth_uri"].startswith("otpauth://totp/") and setup["account"] == email
+                code = totp.code_at(setup["secret"], totp.current_step())
+                valid = {totp.code_at(setup["secret"], totp.current_step() + offset) for offset in (-2, -1, 0, 1, 2)}
+                wrong = next(candidate for candidate in ("000000", "111111", "222222", "333333", "444444", "555555") if candidate not in valid)
+                assert (await client.post("/v1/platform/auth/2fa/enable", json={**challenge, "code": wrong})).status_code == 400
+                enabled = await client.post("/v1/platform/auth/2fa/enable", json={**challenge, "code": code})
+                assert enabled.status_code == 200, enabled.text
+                assert len(enabled.json()["recovery_codes"]) == 10 and enabled.json()["operator"]["two_factor_enabled"]
+                return {"secret": setup["secret"], **enabled.json()}
+
+            ops_session = await operator_session("ops@oyuns.test", "operator-password-1")
+            ops = {"Authorization": f"Bearer {ops_session['access_token']}"}
+            support = {"Authorization": f"Bearer {(await operator_session('support@oyuns.test', 'support-password-1'))['access_token']}"}
+
+            # Enrolled: the password alone yields no session, the used code
+            # cannot be replayed, a recovery code works exactly once.
+            again = (await client.post("/v1/platform/auth/login", json={"email": "ops@oyuns.test", "password": "operator-password-1"})).json()
+            assert again["two_factor"] == "verify" and "access_token" not in again
+            challenge = {"mfa_token": again["mfa_token"]}
+            assert (await client.get("/v1/platform/plans", headers={"Authorization": f"Bearer {again['mfa_token']}"})).status_code == 401
+            assert (await client.post("/v1/platform/auth/2fa/setup", json=challenge)).status_code == 409
+            from app.services import totp as _totp
+            replay = await client.post("/v1/platform/auth/2fa/verify", json={**challenge, "code": _totp.code_at(ops_session["secret"], _totp.current_step())})
+            assert replay.status_code == 400 and replay.json()["detail"]["code"] == "invalid_code"
+            recovery = ops_session["recovery_codes"][0]
+            recovered = await client.post("/v1/platform/auth/2fa/verify", json={**challenge, "code": recovery})
+            assert recovered.status_code == 200 and recovered.json()["recovery_codes_left"] == 9
+            assert (await client.post("/v1/platform/auth/2fa/verify", json={**challenge, "code": recovery})).status_code == 400
 
             plans = (await client.get("/v1/platform/plans", headers=ops)).json()
             assert [plan["code"] for plan in plans] == ["starter", "professional", "enterprise"]

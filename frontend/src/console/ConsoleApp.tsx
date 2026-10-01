@@ -14,24 +14,35 @@ import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { VStack } from '@astryxdesign/core/VStack'
 import { RouterLink } from '../components/budget/shared'
-import { consoleError, useConsoleSession, useOperatorLogin } from './consoleApi'
+import { type OperatorSession, type TwoFactorChallenge, consoleError, useConsoleSession, useOperatorLogin } from './consoleApi'
+import { TwoFactorSetup, TwoFactorVerify } from './ConsoleTwoFactor'
 import { TenantDetailPage, TenantsPage } from './ConsoleTenants'
 import { AuditPage, OperatorsPage, PlansPage, SystemPage } from './ConsoleCatalog'
 
 function ConsoleLogin() {
   const login = useOperatorLogin()
+  const setSession = useConsoleSession((state) => state.setSession)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  // The password alone opens nothing: the second factor issues the session.
+  const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null)
   const submit = async () => {
     try {
-      await login.mutateAsync({ email, password })
+      const result = await login.mutateAsync({ email, password })
+      if (result?.mfa_token) {
+        setPassword('')
+        setChallenge(result)
+      }
     } catch (error) {
       toast.error(consoleError(error, 'Нэвтэрч чадсангүй'))
     }
   }
+  const openConsole = (session: OperatorSession) => setSession(session.access_token, session.operator, session.expires_in)
   return <Center minHeight="100dvh" padding={6}>
-    <Card padding={6} width="100%" maxWidth={420}>
-      <form onSubmit={(event) => { event.preventDefault(); void submit() }}>
+    <Card padding={6} width="100%" maxWidth={challenge?.two_factor === 'setup' ? 520 : 420}>
+      {challenge?.two_factor === 'setup' && <TwoFactorSetup mfaToken={challenge.mfa_token} onSession={openConsole} onRestart={() => setChallenge(null)} />}
+      {challenge?.two_factor === 'verify' && <TwoFactorVerify mfaToken={challenge.mfa_token} onSession={openConsole} onRestart={() => setChallenge(null)} />}
+      {!challenge && <form onSubmit={(event) => { event.preventDefault(); void submit() }}>
         <VStack gap={4}>
           <VStack gap={1}>
             <Heading level={1}>OYUNS ERP · Операторын консол</Heading>
@@ -43,7 +54,7 @@ function ConsoleLogin() {
           </FormLayout>
           <Button label="Нэвтрэх" variant="primary" type="submit" isDisabled={!email || !password || login.isPending} />
         </VStack>
-      </form>
+      </form>}
     </Card>
   </Center>
 }

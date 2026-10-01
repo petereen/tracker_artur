@@ -188,6 +188,14 @@ class PlatformOperator(Base):
     failed_login_count = Column(Integer, nullable=False, server_default="0", default=0)
     locked_until = Column(DateTime(timezone=True))
     last_login_at = Column(DateTime(timezone=True))
+    # Two-factor login (TOTP). The secret is encrypted with ``secret_box``; it
+    # is only a pending enrolment until ``totp_enabled_at`` is set.
+    totp_secret_enc = Column(Text)
+    totp_enabled_at = Column(DateTime(timezone=True))
+    # Last accepted time step: a code cannot be used twice.
+    totp_last_step = Column(BigInteger)
+    # SHA-256 of the unused one-time recovery codes.
+    totp_recovery_codes = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

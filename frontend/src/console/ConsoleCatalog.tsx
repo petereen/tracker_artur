@@ -183,6 +183,10 @@ export function OperatorsPage() {
   const change = async (operator: Operator, patch: { role?: Operator['role']; status?: Operator['status'] }) => {
     try { await update.mutateAsync({ id: operator.id, ...patch }); toast.success('Хадгалагдлаа') } catch (error) { toast.error(consoleError(error, 'Хадгалж чадсангүй')) }
   }
+  const resetTwoFactor = async (operator: Operator) => {
+    if (!window.confirm(`${operator.email} — 2 шатлалт нэвтрэлтийг шинэчлэх үү? Идэвхтэй сесс дуусаж, дараагийн нэвтрэлтээр баталгаажуулах аппаа дахин холбоно.`)) return
+    try { await update.mutateAsync({ id: operator.id, reset_two_factor: true }); toast.success('2 шатлалт нэвтрэлт шинэчлэгдлээ') } catch (error) { toast.error(consoleError(error, 'Шинэчилж чадсангүй')) }
+  }
   const rows: OperatorRow[] = (operators.data ?? []).map((operator) => ({ id: operator.id, operator }))
   return <VStack gap={4}>
     <VStack gap={0}><Heading level={1}>Операторууд</Heading><Text type="supporting">Superadmin — бүх өөрчлөлт; Support — зөвхөн харах.</Text></VStack>
@@ -205,6 +209,10 @@ export function OperatorsPage() {
         { key: 'role', header: 'Эрх', width: pixel(200), renderCell: ({ operator }) => <Selector label="Эрх" isLabelHidden value={operator.role} isDisabled={operator.id === me?.id}
           onChange={(role) => { if (role && role !== operator.role) void change(operator, { role: role as Operator['role'] }) }}
           options={[{ value: 'support', label: 'Support' }, { value: 'superadmin', label: 'Superadmin' }]} /> },
+        { key: 'twoFactor', header: '2 шатлалт нэвтрэлт', width: pixel(230), renderCell: ({ operator }) => <HStack gap={2} vAlign="center">
+          <Token size="sm" label={operator.two_factor_enabled ? 'Идэвхтэй' : 'Тохируулаагүй'} />
+          {operator.two_factor_enabled && <Button label="Шинэчлэх" size="sm" variant="ghost" clickAction={() => resetTwoFactor(operator)} />}
+        </HStack> },
         { key: 'last', header: 'Сүүлд нэвтэрсэн', width: proportional(2), renderCell: ({ operator }) => <Text type="supporting">{operator.last_login_at ? new Date(operator.last_login_at).toLocaleString('mn-MN') : '—'}</Text> },
         { key: 'status', header: '', width: pixel(160), renderCell: ({ operator }) => operator.id === me?.id ? <Token size="sm" label="Та" />
           : <Button label={operator.status === 'active' ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'} size="sm" variant="ghost" clickAction={() => change(operator, { status: operator.status === 'active' ? 'disabled' : 'active' })} /> },

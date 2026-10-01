@@ -133,6 +133,35 @@ def decode_platform_access_token(token: str) -> dict | None:
     return payload if payload.get("kind") == "platform" and payload.get("sub") else None
 
 
+PLATFORM_MFA_TOKEN_AUDIENCE = "oyuns-platform-mfa"
+PLATFORM_MFA_TOKEN_SECONDS = 10 * 60
+
+
+def create_platform_mfa_token(operator_id: int) -> str:
+    """Password accepted, second factor pending: opens only ``/auth/2fa/*``."""
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "sub": str(operator_id),
+            "kind": "platform_mfa",
+            "aud": PLATFORM_MFA_TOKEN_AUDIENCE,
+            "jti": secrets.token_urlsafe(12),
+            "iat": now,
+            "exp": now + PLATFORM_MFA_TOKEN_SECONDS,
+        },
+        _platform_token_secret(),
+        algorithm=ALGORITHM,
+    )
+
+
+def decode_platform_mfa_token(token: str) -> dict | None:
+    try:
+        payload = jwt.decode(token, _platform_token_secret(), algorithms=[ALGORITHM], audience=PLATFORM_MFA_TOKEN_AUDIENCE)
+    except JWTError:
+        return None
+    return payload if payload.get("kind") == "platform_mfa" and payload.get("sub") else None
+
+
 def new_refresh_token() -> tuple[str, str]:
     token = secrets.token_urlsafe(48)
     return token, hashlib.sha256(token.encode()).hexdigest()

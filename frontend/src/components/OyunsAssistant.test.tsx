@@ -32,11 +32,11 @@ describe('OYUNS assistant actions', () => {
     confirm.mockResolvedValue({ status: 'ok', data: { created: { title: 'Prepare access review' } } })
 
     render(<OyunsAssistant open onClose={vi.fn()} />)
-    fireEvent.change(screen.getByPlaceholderText('Компаний журам, миний ажил, эсвэл даалгаврын талаар асуу…'), { target: { value: 'Create an access review task' } })
+    fireEvent.change(screen.getByPlaceholderText('Асуултаа бичнэ үү…'), { target: { value: 'Create an access review task' } })
     fireEvent.submit(screen.getByRole('button', { name: 'Илгээх' }).parentElement!)
 
-    expect(await screen.findByRole('button', { name: '❌ Татгалзах' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '✏️ Засах' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Татгалзах' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Засах' })).toBeInTheDocument()
     const confirmButton = await screen.findByRole('button', { name: 'ERP-д үүсгэх' })
     fireEvent.click(confirmButton)
 
@@ -52,7 +52,7 @@ describe('OYUNS assistant actions', () => {
     })
 
     render(<OyunsAssistant open onClose={vi.fn()} />)
-    fireEvent.change(screen.getByPlaceholderText('Компаний журам, миний ажил, эсвэл даалгаврын талаар асуу…'), { target: { value: 'Надад leave policy файлыг хавсарга' } })
+    fireEvent.change(screen.getByPlaceholderText('Асуултаа бичнэ үү…'), { target: { value: 'Надад leave policy файлыг хавсарга' } })
     fireEvent.submit(screen.getByRole('button', { name: 'Илгээх' }).parentElement!)
 
     const fileButton = await screen.findByRole('button', { name: 'leave-policy.pdf' })
@@ -65,7 +65,7 @@ describe('OYUNS assistant actions', () => {
     chat.mockResolvedValue({ conversation_id: 9, message: { content: 'Хариу', sources: [] } })
 
     render(<OyunsAssistant open onClose={vi.fn()} />)
-    const input = screen.getByPlaceholderText('Компаний журам, миний ажил, эсвэл даалгаврын талаар асуу…')
+    const input = screen.getByPlaceholderText('Асуултаа бичнэ үү…')
     fireEvent.change(input, { target: { value: 'Сайн байна уу' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 

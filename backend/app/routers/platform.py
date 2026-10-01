@@ -25,13 +25,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import create_platform_access_token, decode_platform_access_token, hash_account_password, verify_account_password
+from app.core.security import (
+    PLATFORM_MFA_TOKEN_SECONDS,
+    create_platform_access_token,
+    create_platform_mfa_token,
+    decode_platform_access_token,
+    decode_platform_mfa_token,
+    hash_account_password,
+    verify_account_password,
+)
 from app.core.tenancy import TENANT_FEATURES, _csv, current_tenant_id, normalize_features, tenant_directory
 from app.models.models import Organization, RefreshSession, RoleAssignment, UserAccount
 from app.models.platform import PlatformAuditLog, PlatformOperator, SubscriptionPlan, TenantDomain, TenantLicense
 from app.routers.tenant import license_status, license_view
-from app.services import custom_domains, licensing
+from app.services import custom_domains, licensing, totp
 from app.services.licensing import LicenseError
+from app.services.secret_box import decrypt_secret, encrypt_secret
 from app.services.tenant_branding import BrandingInput, merge_branding, public_branding
 from app.services.tenant_service import (
     CYCLE_MONTHS,
@@ -52,6 +61,8 @@ HOSTNAME_RE = re.compile(r"^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?
 BillingCycle = Literal["monthly", "quarterly", "yearly", "custom"]
 MAX_FAILED_LOGINS = 5
 LOCKOUT = timedelta(minutes=15)
+# Shown in the authenticator app next to the operator e-mail.
+TWO_FACTOR_ISSUER = "OYUNS ERP Console"
 
 
 # ── auth ────────────────────────────────────────────────────────────────────
@@ -67,6 +78,9 @@ async def get_operator(
     operator = await db.get(PlatformOperator, int(claims["sub"]))
     if operator is None or operator.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Operator unavailable")
+    # A session exists only behind the second factor; resetting it ends them.
+    if operator.totp_enabled_at is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Two-factor authentication required")
     return operator
 
 
@@ -102,11 +116,36 @@ def operator_view(operator: PlatformOperator) -> dict:
         "status": operator.status,
         "last_login_at": operator.last_login_at,
         "created_at": operator.created_at,
+        "two_factor_enabled": operator.totp_enabled_at is not None,
     }
+
+
+def _session(operator: PlatformOperator) -> dict:
+    return {
+        "access_token": create_platform_access_token(operator.id, operator.role),
+        "token_type": "bearer",
+        "expires_in": settings.PLATFORM_ACCESS_TOKEN_MINUTES * 60,
+        "operator": operator_view(operator),
+    }
+
+
+def _register_failure(operator: PlatformOperator, now: datetime) -> None:
+    operator.failed_login_count = (operator.failed_login_count or 0) + 1
+    if operator.failed_login_count >= MAX_FAILED_LOGINS:
+        operator.locked_until = now + LOCKOUT
+
+
+def _complete_login(db: AsyncSession, operator: PlatformOperator, request: Request, now: datetime, *, method: str) -> None:
+    operator.failed_login_count = 0
+    operator.locked_until = None
+    operator.last_login_at = now
+    audit(db, "operator.login", organization_id=None, operator_id=operator.id, details={"second_factor": method}, ip_address=_ip(request))
 
 
 @router.post("/auth/login")
 async def operator_login(data: OperatorLogin, request: Request, db: AsyncSession = Depends(get_db)):
+    """Step one: the password. No session is issued until the second factor
+    passes — ``two_factor`` says whether to verify a code or enrol first."""
     now = datetime.now(timezone.utc)
     operator = await db.scalar(select(PlatformOperator).where(func.lower(PlatformOperator.email) == data.email))
     if operator is None or operator.status != "active":
@@ -115,25 +154,129 @@ async def operator_login(data: OperatorLogin, request: Request, db: AsyncSession
         raise HTTPException(status_code=423, detail="Account is temporarily locked")
     valid, needs_rehash = verify_account_password(data.password, operator.password_hash)
     if not valid:
-        operator.failed_login_count = (operator.failed_login_count or 0) + 1
-        if operator.failed_login_count >= MAX_FAILED_LOGINS:
-            operator.locked_until = now + LOCKOUT
+        _register_failure(operator, now)
         audit(db, "operator.login_failed", organization_id=None, operator_id=operator.id, ip_address=_ip(request))
         await db.commit()
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if needs_rehash:
         operator.password_hash = hash_account_password(data.password)
-    operator.failed_login_count = 0
-    operator.locked_until = None
-    operator.last_login_at = now
-    audit(db, "operator.login", organization_id=None, operator_id=operator.id, ip_address=_ip(request))
+    enrolled = operator.totp_enabled_at is not None
+    if not enrolled:
+        # With a second factor the counter keeps running until the code is
+        # accepted, otherwise re-entering the password would reset code guesses.
+        operator.failed_login_count = 0
+        operator.locked_until = None
     await db.commit()
     return {
-        "access_token": create_platform_access_token(operator.id, operator.role),
-        "token_type": "bearer",
-        "expires_in": settings.PLATFORM_ACCESS_TOKEN_MINUTES * 60,
-        "operator": operator_view(operator),
+        "two_factor": "verify" if enrolled else "setup",
+        "mfa_token": create_platform_mfa_token(operator.id),
+        "expires_in": PLATFORM_MFA_TOKEN_SECONDS,
     }
+
+
+class TwoFactorChallenge(BaseModel):
+    mfa_token: str = Field(min_length=1, max_length=2048)
+
+
+class TwoFactorCode(TwoFactorChallenge):
+    code: str = Field(min_length=6, max_length=32)
+
+
+async def _challenged_operator(db: AsyncSession, mfa_token: str, now: datetime) -> PlatformOperator:
+    if current_tenant_id() is not None:
+        raise HTTPException(status_code=403, detail="Operator console is not available inside a tenant workspace")
+    claims = decode_platform_mfa_token(mfa_token)
+    if not claims:
+        raise HTTPException(status_code=401, detail={"code": "mfa_token_expired", "message": "Sign in again"})
+    operator = await db.get(PlatformOperator, int(claims["sub"]), with_for_update=True)
+    if operator is None or operator.status != "active":
+        raise HTTPException(status_code=401, detail="Operator unavailable")
+    if operator.locked_until and operator.locked_until > now:
+        raise HTTPException(status_code=423, detail="Account is temporarily locked")
+    return operator
+
+
+@router.post("/auth/2fa/setup")
+async def two_factor_setup(data: TwoFactorChallenge, db: AsyncSession = Depends(get_db)):
+    """Start (or resume) enrolment: the secret for the authenticator app."""
+    operator = await _challenged_operator(db, data.mfa_token, datetime.now(timezone.utc))
+    if operator.totp_enabled_at is not None:
+        raise HTTPException(status_code=409, detail={"code": "two_factor_already_enabled", "message": "Two-factor authentication is already set up"})
+    secret = None
+    if operator.totp_secret_enc:
+        try:
+            secret = decrypt_secret(operator.totp_secret_enc)
+        except ValueError:
+            secret = None
+    if secret is None:
+        secret = totp.generate_secret()
+        operator.totp_secret_enc = encrypt_secret(secret)
+    await db.commit()
+    return {
+        "secret": secret,
+        "otpauth_uri": totp.provisioning_uri(secret, operator.email, TWO_FACTOR_ISSUER),
+        "issuer": TWO_FACTOR_ISSUER,
+        "account": operator.email,
+        "digits": totp.DIGITS,
+        "period": totp.PERIOD,
+    }
+
+
+@router.post("/auth/2fa/enable")
+async def two_factor_enable(data: TwoFactorCode, request: Request, db: AsyncSession = Depends(get_db)):
+    """Confirm enrolment with the first code; returns the session and the
+    recovery codes (shown once)."""
+    now = datetime.now(timezone.utc)
+    operator = await _challenged_operator(db, data.mfa_token, now)
+    if operator.totp_enabled_at is not None:
+        raise HTTPException(status_code=409, detail={"code": "two_factor_already_enabled", "message": "Two-factor authentication is already set up"})
+    if not operator.totp_secret_enc:
+        raise HTTPException(status_code=409, detail={"code": "two_factor_setup_not_started", "message": "Start the setup first"})
+    step = totp.verify(decrypt_secret(operator.totp_secret_enc), data.code)
+    if step is None:
+        raise HTTPException(status_code=400, detail={"code": "invalid_code", "message": "The code is not valid"})
+    recovery_codes = totp.generate_recovery_codes()
+    operator.totp_enabled_at = now
+    operator.totp_last_step = step
+    operator.totp_recovery_codes = [totp.hash_recovery_code(code) for code in recovery_codes]
+    audit(db, "operator.two_factor_enabled", organization_id=None, operator_id=operator.id, ip_address=_ip(request))
+    _complete_login(db, operator, request, now, method="totp")
+    await db.commit()
+    return {**_session(operator), "recovery_codes": recovery_codes}
+
+
+@router.post("/auth/2fa/verify")
+async def two_factor_verify(data: TwoFactorCode, request: Request, db: AsyncSession = Depends(get_db)):
+    """Step two: an authenticator code, or a one-time recovery code."""
+    now = datetime.now(timezone.utc)
+    operator = await _challenged_operator(db, data.mfa_token, now)
+    if operator.totp_enabled_at is None or not operator.totp_secret_enc:
+        raise HTTPException(status_code=409, detail={"code": "two_factor_not_enabled", "message": "Two-factor authentication is not set up"})
+    method = "totp"
+    step = totp.verify(decrypt_secret(operator.totp_secret_enc), data.code, last_step=operator.totp_last_step)
+    if step is not None:
+        operator.totp_last_step = step
+    else:
+        remaining = totp.consume_recovery_code(list(operator.totp_recovery_codes or []), data.code)
+        if remaining is None:
+            _register_failure(operator, now)
+            audit(db, "operator.two_factor_failed", organization_id=None, operator_id=operator.id, ip_address=_ip(request))
+            await db.commit()
+            raise HTTPException(status_code=400, detail={"code": "invalid_code", "message": "The code is not valid"})
+        operator.totp_recovery_codes = remaining
+        method = "recovery_code"
+    _complete_login(db, operator, request, now, method=method)
+    await db.commit()
+    return {**_session(operator), "recovery_codes_left": len(operator.totp_recovery_codes or [])}
+
+
+def reset_two_factor(operator: PlatformOperator) -> None:
+    operator.totp_secret_enc = None
+    operator.totp_enabled_at = None
+    operator.totp_last_step = None
+    operator.totp_recovery_codes = []
+    operator.failed_login_count = 0
+    operator.locked_until = None
 
 
 @router.get("/auth/me")
@@ -822,6 +965,8 @@ class OperatorPatch(BaseModel):
     role: Literal["superadmin", "support"] | None = None
     status: Literal["active", "disabled"] | None = None
     password: str | None = Field(default=None, min_length=12, max_length=128)
+    # Lost phone: clears the enrolment, the operator sets it up again on login.
+    reset_two_factor: bool = False
 
 
 @router.get("/operators")
@@ -858,6 +1003,8 @@ async def update_operator(operator_id: int, data: OperatorPatch, request: Reques
         row.password_hash = hash_account_password(data.password)
         row.failed_login_count = 0
         row.locked_until = None
+    if data.reset_two_factor:
+        reset_two_factor(row)
     audit(db, "operator.updated", organization_id=None, operator_id=operator.id, target_type="operator", target_id=row.id,
           details=data.model_dump(exclude_unset=True, exclude={"password"}), ip_address=_ip(request))
     await db.commit()

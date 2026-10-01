@@ -143,6 +143,22 @@ function WorkerAvailabilityPopover({ worker, scope, onClose }: { worker: { id: n
     <div className="calendar-availability-preview"><small>{new Date(`${previewDate}T12:00:00`).toLocaleDateString('mn-MN', { month: 'long', day: 'numeric', weekday: 'long' })}</small>{events.isLoading ? <p>Ачаалж байна…</p> : previewItems.length ? <ul>{previewItems.slice(0, 4).map((item) => <li key={`${item.kind}-${item.id || item.plan_id}`}><span className={`availability-dot ${item.kind}`} /><span><strong>{item.title}</strong><small>{availabilityTypeLabel(item)} · {availabilityItemTime(item)}</small></span></li>)}{previewItems.length > 4 && <li className="availability-more">+{previewItems.length - 4} өөр хуваарь</li>}</ul> : <p>Энэ өдөрт хуваарь алга.</p>}</div>
   </motion.div>
 }
+// Month grid geometry (px). The same values drive the CSS lanes through
+// custom properties, so bars and row heights never drift apart.
+const CALENDAR_DAY_HEAD = 38
+const CALENDAR_LANE = 26
+const CALENDAR_ROW_PAD = 8
+const CALENDAR_ROW_MIN = 128
+const CALENDAR_GRID_VARS = { '--calendar-day-head': `${CALENDAR_DAY_HEAD}px`, '--calendar-lane': `${CALENDAR_LANE}px` } as React.CSSProperties
+
+/** Start time of a timed event/reminder; all-day and date-only items have none. */
+function calendarItemTime(item: any) {
+  if (item.kind !== 'event' && item.kind !== 'reminder') return null
+  const value = item.starts_at || item.start_at
+  if (typeof value !== 'string' || /^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit' })
+}
 type CalendarRangeSegment = { item: any; key: string; start: number; end: number; first: boolean; last: boolean; lane: number; week: number }
 type CalendarRangeLayout = { segments: CalendarRangeSegment[]; weekLanes: number[] }
 
@@ -328,7 +344,7 @@ export function CalendarWorkspacePage() {
   const all = useMemo(() => uniqueCalendarItems([...(events.data?.tasks ?? []), ...(events.data?.projects ?? []), ...(events.data?.plans ?? []), ...(events.data?.entries ?? []), ...(events.data?.holidays ?? []), ...(events.data?.time_blocks ?? [])]), [events.data])
   const visibleAll = useMemo(() => all.filter((item) => { const filter = calendarFilterKey(item); return !filter || filters[filter] }), [all, filters])
   const rangeLayout = useMemo(() => calendarRangeSegments(visibleAll, days), [visibleAll, days])
-  const calendarGridRows = useMemo(() => rangeLayout.weekLanes.map((laneCount) => `${Math.max(150, 35 + laneCount * 26 + 12)}px`).join(' '), [rangeLayout.weekLanes])
+  const calendarGridRows = useMemo(() => rangeLayout.weekLanes.map((laneCount) => `${Math.max(CALENDAR_ROW_MIN, CALENDAR_DAY_HEAD + laneCount * CALENDAR_LANE + CALENDAR_ROW_PAD)}px`).join(' '), [rangeLayout.weekLanes])
   const mobileItemsByDate = useMemo(() => {
     const result = new Map<string, any[]>()
     visibleAll.forEach((item) => itemDates(item).forEach((date) => result.set(date, [...(result.get(date) ?? []), item])))
@@ -352,13 +368,19 @@ export function CalendarWorkspacePage() {
     <div className="calendar-month-nav"><strong>{anchor.toLocaleDateString('mn-MN', { year: 'numeric', month: 'long' })}</strong></div>
     {events.isError && <div className="panel calendar-status error">Календарийн мэдээлэл ачаалагдсангүй. Дахин оролдоно уу.</div>}
     <QueryRegion state={toQueryRegionState(events)} skeleton={<CalendarSkeleton />}><>
-      <div className="planning-calendar panel" style={{ gridTemplateRows: calendarGridRows }}>{days.map((day) => {
-        const key = localDate(day)
-        const redDay = day.getDay() === 0 || day.getDay() === 6 || holidayKeys.has(key)
-        return <section key={key} role="button" tabIndex={0} aria-label={`${key} өдөрт зүйл үүсгэх`} onClick={() => openCreate(day)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openCreate(day) }} className={`${day.getMonth() === anchor.getMonth() ? '' : 'outside'} ${redDay ? 'red-day' : ''} ${key === todayKey ? 'today' : ''}`}>
-          <header><strong>{day.getDate()}</strong><span>{day.toLocaleDateString('mn-MN', { weekday: 'short' })}</span></header>
-        </section>
-      })}<div className="calendar-range-layer" aria-label="Календарийн хуваарь" style={{ gridTemplateRows: calendarGridRows }}>{rangeLayout.segments.map((segment) => <button className={`calendar-item calendar-range ${segment.item.kind || 'item'} ${segment.first ? 'range-start' : ''} ${segment.last ? 'range-end' : ''}`} title={segment.item.title} key={`${segment.key}-${segment.week}`} style={{ gridColumn: `${segment.start + 1} / ${segment.end + 2}`, gridRow: `${segment.week + 1}`, '--range-lane': segment.lane } as React.CSSProperties} onClick={(event) => { event.stopPropagation(); setSelected(segment.item) }}><i className="calendar-item-dot" aria-hidden /><strong>{segment.item.title}</strong><small>{calendarItemSubtitle(segment.item)}</small></button>)}</div></div>
+      <div className="planning-calendar calendar-month panel">
+        <div className="calendar-weekdays" aria-hidden>{days.slice(0, 7).map((day) => <span key={day.getDay()} className={day.getDay() === 0 || day.getDay() === 6 ? 'weekend' : ''}>{day.toLocaleDateString('mn-MN', { weekday: 'short' })}</span>)}</div>
+        <div className="calendar-month-grid" style={{ gridTemplateRows: calendarGridRows, ...CALENDAR_GRID_VARS }}>{days.map((day) => {
+          const key = localDate(day)
+          const redDay = day.getDay() === 0 || day.getDay() === 6 || holidayKeys.has(key)
+          return <section key={key} role="button" tabIndex={0} aria-label={`${key} өдөрт зүйл үүсгэх`} onClick={() => openCreate(day)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openCreate(day) }} className={`calendar-day ${day.getMonth() === anchor.getMonth() ? '' : 'outside'} ${redDay ? 'red-day' : ''} ${key === todayKey ? 'today' : ''}`}>
+            <header><strong>{day.getDate()}</strong>{day.getDate() === 1 && <span>{day.toLocaleDateString('mn-MN', { month: 'short' })}</span>}</header>
+          </section>
+        })}<div className="calendar-range-layer" aria-label="Календарийн хуваарь" style={{ gridTemplateRows: calendarGridRows }}>{rangeLayout.segments.map((segment) => {
+          const time = segment.first ? calendarItemTime(segment.item) : null
+          return <button className={`calendar-item calendar-range ${segment.item.kind || 'item'} ${segment.first ? 'range-start' : ''} ${segment.last ? 'range-end' : ''} ${time && segment.last && segment.start === segment.end ? 'timed' : ''}`} title={`${segment.item.title} · ${calendarItemSubtitle(segment.item)}`} key={`${segment.key}-${segment.week}`} style={{ gridColumn: `${segment.start + 1} / ${segment.end + 2}`, gridRow: `${segment.week + 1}`, '--range-lane': segment.lane } as React.CSSProperties} onClick={(event) => { event.stopPropagation(); setSelected(segment.item) }}><i className="calendar-item-dot" aria-hidden />{time && <time>{time}</time>}<strong>{segment.item.title}</strong></button>
+        })}</div></div>
+      </div>
       <MobileCalendarView itemsByDate={mobileItemsByDate} holidayKeys={holidayKeys} onSelectItem={setSelected} onCreate={openCreate} onMonthChange={followMobileMonth}
         filters={<div className="mcal-filter-list">{CALENDAR_FILTERS.map((filter) => <button type="button" key={filter.key} className={`calendar-filter-chip ${filter.key} ${filters[filter.key] ? 'active' : ''}`} aria-pressed={filters[filter.key]} onClick={() => toggleFilter(filter.key)}><i aria-hidden />{filter.label}</button>)}<button type="button" className="calendar-filter-all" onClick={setAllFilters}>{allFiltersSelected ? 'Бүгдийг цуцлах' : 'Бүгдийг сонгох'}</button></div>}
         menu={<div className="mcal-menu"><span className="calendar-scope-badge">{isManagerMode ? 'Компаний харагдац' : 'Хувийн харагдац'}</span><GoogleCalendarSyncControl /></div>} />
