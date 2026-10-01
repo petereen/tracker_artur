@@ -6046,7 +6046,7 @@ html, body, #root { min-width: 0; }
 .chat-message > .chat-avatar { flex: 0 0 auto; height: 28px; width: 28px; }
 .chat-message > div { min-width: 0; }
 .chat-bubble { background: var(--color-surface); border: 1px solid var(--color-border-soft); border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-inner); box-shadow: var(--shadow-sm); padding: var(--spacing-2) var(--spacing-3); }
-.chat-message.mine .chat-bubble { background: var(--color-accent); border-color: var(--color-accent); border-radius: var(--radius-lg) var(--radius-lg) var(--radius-inner) var(--radius-lg); color: var(--color-on-accent); }
+.chat-message.mine .chat-bubble { background: var(--color-accent); border-color: var(--color-accent); border-radius: var(--radius-lg) var(--radius-lg) var(--radius-inner) var(--radius-lg); color: #fff; }
 .chat-bubble strong { color: var(--color-accent); display: block; font-size: var(--font-size-xs); margin-bottom: var(--spacing-1); }
 .chat-bubble p { font-size: var(--font-size-sm); line-height: 1.5; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .chat-task-draft { background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface)); border: 1px solid color-mix(in srgb, var(--color-accent) 26%, var(--color-border-soft)); border-radius: var(--radius-control); display: grid; gap: var(--spacing-1-5); margin-top: var(--spacing-2); padding: var(--spacing-2); }

@@ -805,6 +805,7 @@ Collaboration
 - [x] Expand the project task drawer with a dedicated task list and full task-creation mode (`frontend/src/pages/ProjectsWorkspacePage.tsx`, `frontend/src/index.css`)
 
 ## Completed Tasks
+- [x] Set sent chat message text to white on the blue bubble (`frontend/src/index.css`)
 - [x] Add Payroll Settings account CRUD, permission-aware role mapping, referenced-account archiving, seed deletion tombstones, and regression checks (`backend/app/erp`, `backend/app/payroll`, `frontend/src`, `backend/tests`) — frontend production build, Python compilation, migration graph, and whitespace checks passed; backend pytest could not collect because FastAPI is not installed in the local Python environment
 - [x] Redesign the authentication screen using the supplied auth-09 reference while preserving OYUNS colors, design tokens, and login behavior (frontend/src/pages/LoginPage.tsx, frontend/src/index.css)
 - [x] Expose edit controls for all statutory profiles; editing a published profile uses the existing version-bump API, while tier rows can be added, changed, or removed in the profile editor (`frontend/src/pages/PayrollSetupHub.tsx`)
