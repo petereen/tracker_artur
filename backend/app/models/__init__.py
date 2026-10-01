@@ -117,3 +117,4 @@ from app.models.platform import (  # noqa: F401
     TenantLicense,
     TenantTelegramBot,
 )
+from app.models.announcements import Announcement  # noqa: F401

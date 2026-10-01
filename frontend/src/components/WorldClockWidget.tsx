@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronDown,
   ChevronUp,
@@ -209,7 +210,7 @@ function SortableClockRow({ timezone, index, total, onMove, onEdit, onRemove }: 
   );
 }
 
-function WorldClockEditor({ draft, onChange, onClose, onSave, saving }: { draft: WorldClockPreferences; onChange: (value: WorldClockPreferences) => void; onClose: () => void; onSave: () => void; saving: boolean }) {
+function WorldClockEditor({ draft, onChange, onClose, onSave, saving, style }: { draft: WorldClockPreferences; onChange: (value: WorldClockPreferences) => void; onClose: () => void; onSave: () => void; saving: boolean; style?: CSSProperties }) {
   const [query, setQuery] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -251,7 +252,7 @@ function WorldClockEditor({ draft, onChange, onClose, onSave, saving }: { draft:
   };
   useEffect(() => { panelRef.current?.querySelector<HTMLElement>("input")?.focus(); }, []);
   return (
-    <section ref={panelRef} className="world-clock-settings" role="dialog" aria-modal="true" aria-labelledby="world-clock-settings-title" onMouseDown={(event) => event.stopPropagation()}>
+    <section ref={panelRef} className="world-clock-settings" style={style} role="dialog" aria-modal="true" aria-labelledby="world-clock-settings-title" onMouseDown={(event) => event.stopPropagation()}>
       <header><div><span className="eyebrow">World clock</span><h3 id="world-clock-settings-title">Цагийн тохиргоо</h3></div><button type="button" onClick={onClose} aria-label="Хаах"><X size={17} /></button></header>
       <div className="world-clock-setting-toggles">
         <fieldset><legend>Дэлгэц</legend><button type="button" className={draft.display_mode === "digital" ? "active" : ""} onClick={() => onChange({ ...draft, display_mode: "digital" })}>Digital</button><button type="button" className={draft.display_mode === "analog" ? "active" : ""} onClick={() => onChange({ ...draft, display_mode: "analog" })}>Analog</button></fieldset>
@@ -309,6 +310,90 @@ export function WorldClockWidget() {
         {visibleClocks.map((timezone) => saved.display_mode === "analog" ? <AnalogClock key={timezone} timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /> : <article className="world-clock-tile" key={timezone}><div className="world-clock-tile-city"><strong>{timezoneLabel(timezone)}</strong></div><DigitalClock timezone={timezone} hourFormat={saved.hour_format} now={now} localTimezone={localTimezone} /></article>)}
       </div> : <div className="world-clock-empty"><Clock3 size={25} /><strong>Цаг нэмээгүй байна</strong><span>Ажлынхаа хотуудын цагийг нэг дор хараарай.</span><button type="button" className="secondary-action compact" onClick={openEditor}><Plus size={14} />Цаг нэмэх</button></div>}
       {open && <div className="world-clock-settings-layer" onMouseDown={() => setOpen(false)}><WorldClockEditor draft={draft || clonePreferences(saved)} onChange={setDraft} onClose={() => setOpen(false)} onSave={save} saving={update.isPending} /></div>}
+    </section>
+  );
+}
+
+function stripOffsetLabel(timezone: string, localTimezone: string, now: Date) {
+  const minutes = timezoneOffsetMinutes(timezone, now) - timezoneOffsetMinutes(localTimezone, now);
+  if (!minutes) return "";
+  const sign = minutes < 0 ? "−" : "+";
+  const absolute = Math.abs(minutes);
+  return `${sign}${Math.floor(absolute / 60)}${absolute % 60 ? `:${String(absolute % 60).padStart(2, "0")}` : ""}ц`;
+}
+
+/**
+ * Compact world clock for the Today canvas: one row of city/time chips, no
+ * title bar. Shares preferences and the editor with WorldClockWidget; the
+ * editor floats over the page because the strip is only one row tall.
+ */
+export function WorldClockStrip() {
+  const preferences = useWorldClockPreferences();
+  const update = useUpdateWorldClockPreferences();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  const [draft, setDraft] = useState<WorldClockPreferences | null>(null);
+  const [now, setNow] = useState(() => new Date());
+  const localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const saved = preferences.data || DEFAULT_PREFERENCES;
+  const clocks = saved.clocks.slice(0, MAX_CLOCKS);
+
+  useEffect(() => {
+    // Minute precision is enough for chips; align ticks to the minute boundary.
+    let interval: number | undefined;
+    const timeout = window.setTimeout(() => {
+      setNow(new Date());
+      interval = window.setInterval(() => setNow(new Date()), 60_000);
+    }, 60_000 - (Date.now() % 60_000));
+    return () => { window.clearTimeout(timeout); if (interval) window.clearInterval(interval); };
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [open]);
+  const openEditor = () => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    // On phones the editor is a bottom sheet (CSS), so it is only anchored on wider screens.
+    setAnchor(rect && window.innerWidth > 800 ? { top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) } : null);
+    setDraft(clonePreferences(saved));
+    setOpen(true);
+  };
+  const close = () => { setOpen(false); triggerRef.current?.focus(); };
+  const save = async () => { if (!draft) return; await update.mutateAsync(draft); close(); };
+
+  return (
+    <section className="world-clock-strip" aria-label="Дэлхийн цаг">
+      {preferences.isLoading ? (
+        <span className="world-clock-strip-chips"><span className="skeleton world-clock-strip-skeleton" /><span className="skeleton world-clock-strip-skeleton" /></span>
+      ) : preferences.isError ? (
+        <span className="world-clock-strip-chips"><button type="button" className="world-clock-chip is-action" onClick={() => preferences.refetch()}>Цаг ачаалагдсангүй · дахин оролдох</button></span>
+      ) : (
+        <span className="world-clock-strip-chips">
+          {clocks.map((timezone) => {
+            const time = new Intl.DateTimeFormat(undefined, { timeZone: timezone, hour: "numeric", minute: "2-digit", hour12: saved.hour_format === "12" }).format(now);
+            const offset = stripOffsetLabel(timezone, localTimezone, now);
+            const delta = dayDifference(localTimezone, timezone, now);
+            return (
+              <span className="world-clock-chip" key={timezone} title={`${timezone} · ${relativeDayLabel(delta)}`}>
+                <span className="world-clock-chip-city">{timezoneLabel(timezone)}</span>
+                <time className="world-clock-chip-time">{time}</time>
+                {(offset || delta !== 0) && <small>{[offset, delta !== 0 ? relativeDayLabel(delta) : ""].filter(Boolean).join(" · ")}</small>}
+              </span>
+            );
+          })}
+          {clocks.length === 0 && <button type="button" className="world-clock-chip is-action" onClick={openEditor}><Plus size={13} />Цаг нэмэх</button>}
+        </span>
+      )}
+      <button ref={triggerRef} type="button" className="world-clock-strip-settings" onClick={openEditor} aria-expanded={open} aria-label="Цагийн тохиргоо" title="Цагийн тохиргоо"><Settings2 size={14} /></button>
+      {open && createPortal(
+        <div className="world-clock-settings-layer is-floating" onMouseDown={close}>
+          <WorldClockEditor draft={draft || clonePreferences(saved)} onChange={setDraft} onClose={close} onSave={save} saving={update.isPending} style={anchor ? { top: anchor.top, right: anchor.right } : undefined} />
+        </div>,
+        document.body,
+      )}
     </section>
   );
 }

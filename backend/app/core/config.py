@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     AVATAR_UPLOAD_DIR: str = "/app/uploads/avatars"
     AVATAR_MAX_BYTES: int = 2 * 1024 * 1024
     AVATAR_MAX_PIXELS: int = 256
+    # Inside the attachment volume, so news images survive a redeploy.
+    ANNOUNCEMENT_IMAGE_DIR: str = "/app/uploads/attachments/announcements"
+    ANNOUNCEMENT_IMAGE_MAX_BYTES: int = 8 * 1024 * 1024
+    ANNOUNCEMENT_IMAGE_MAX_PIXELS: int = 2400
     CLAMAV_ENABLED: bool = False
     CLAMAV_HOST: str = "clamav"
     CLAMAV_PORT: int = 3310

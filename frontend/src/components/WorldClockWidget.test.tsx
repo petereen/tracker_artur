@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WorldClockWidget } from "./WorldClockWidget";
+import { WorldClockStrip, WorldClockWidget } from "./WorldClockWidget";
 
 const mocks = vi.hoisted(() => ({
   preferences: { data: { clocks: ["Asia/Ulaanbaatar"], display_mode: "digital", hour_format: "24" }, isLoading: false, isError: false, refetch: vi.fn() },
@@ -78,5 +78,15 @@ describe("WorldClockWidget", () => {
     render(<WorldClockWidget />);
     expect(screen.getByText("өнөөдөр")).toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it("renders the compact strip without a title bar and opens the shared editor", () => {
+    mocks.preferences.data = { clocks: ["Asia/Ulaanbaatar", "Asia/Tokyo"], display_mode: "digital", hour_format: "24" };
+    render(<WorldClockStrip />);
+    expect(document.querySelectorAll(".world-clock-chip")).toHaveLength(2);
+    expect(screen.queryByText("Дэлхийн цаг")).not.toBeInTheDocument();
+    expect(screen.queryByText("WORLD CLOCK")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Цагийн тохиргоо" }));
+    expect(screen.getByRole("dialog", { name: "Цагийн тохиргоо" }).closest(".world-clock-settings-layer")).toHaveClass("is-floating");
   });
 });

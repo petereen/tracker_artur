@@ -16,7 +16,7 @@ from app.core.security import hash_password
 from app.core.tenancy import TENANT_FEATURES, TenantBoundaryViolation, install_tenant_guards
 from app.core.tenant_middleware import TenantContextMiddleware
 from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssignment, UserAccount
-from app.routers import ai_settings, assistant_learning, assistant_voice, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, notification_settings, onboarding, platform, questions, realtime, report_insights, schedules, tasks, tenant, work_reports, worktime_qr, worktime_reports
+from app.routers import ai_settings, announcements, assistant_learning, assistant_voice, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, notification_settings, onboarding, platform, questions, realtime, report_insights, schedules, tasks, tenant, work_reports, worktime_qr, worktime_reports
 from app.services.tenant_service import is_seat_limit_error
 from app.erp import router as erp
 from app import mcp_executor
@@ -180,6 +180,7 @@ app.include_router(notification_settings.router, prefix="/v1", tags=["v1-notific
 app.include_router(mobile.router, prefix="/v1/mobile", tags=["v1-mobile"])
 app.include_router(mobile_updates.router, prefix="/v1/mobile-updates", tags=["v1-mobile-updates"])
 app.include_router(realtime.router, prefix="/v1", tags=["v1-realtime"])
+app.include_router(announcements.router, prefix="/v1/announcements", tags=["v1-announcements"])
 app.include_router(chat.router, prefix="/v1/chat", tags=["v1-chat"])
 app.include_router(calls.router, prefix="/v1/calls", tags=["v1-calls"])
 app.include_router(company_files.router, prefix="/v1/company-files", tags=["v1-company-files"])

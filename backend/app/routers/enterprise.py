@@ -1393,7 +1393,7 @@ async def list_tasks(
     project_id: int | None = None,
     workflow_status: str | None = None,
     priority: int | None = Query(default=None, ge=1, le=3),
-    scope: Literal["mine", "organization", "project", "delegated"] = "mine",
+    scope: Literal["mine", "organization", "project", "delegated", "oversight"] = "mine",
     kind: Literal["all", "standalone", "project", "subtask"] = "all",
     overdue: bool = False,
     date_from: date | None = None,
@@ -1438,6 +1438,17 @@ async def list_tasks(
         if not actor.employee_id:
             return []
         query = query.where(Task.created_by_id == actor.employee_id)
+    elif scope == "oversight":
+        if not actor.has_any_role(*MANAGEMENT_ROLES):
+            raise HTTPException(status_code=403, detail="Oversight task scope requires management access")
+        if not actor.has_any_role("admin", "manager"):
+            if not actor.employee_id:
+                return []
+            query = query.where(or_(
+                Task.created_by_id == actor.employee_id,
+                Task.reviewer_id == actor.employee_id,
+                Task.id.in_(select(TaskReviewer.task_id).where(TaskReviewer.employee_id == actor.employee_id)),
+            ))
     elif scope == "organization" and not actor.has_any_role(*MANAGEMENT_ROLES):
         raise HTTPException(status_code=403, detail="Organization task scope requires management access")
     elif scope == "project":

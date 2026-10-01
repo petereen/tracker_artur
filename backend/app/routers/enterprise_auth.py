@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import secrets
 import hmac
@@ -8,9 +9,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import RedirectResponse
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -205,6 +206,55 @@ class WorldClockPreferences(BaseModel):
         if len(normalized) != len(set(normalized)):
             raise ValueError("World clocks must use unique timezones")
         return normalized
+
+
+TODAY_LAYOUT_COLUMNS = 12
+TODAY_LAYOUT_MAX_WIDGETS = 40
+TODAY_LAYOUT_MAX_ROW = 400
+TODAY_WIDGET_SETTINGS_MAX_BYTES = 16_000
+
+
+class TodayWidget(BaseModel):
+    """One widget on the "Today" canvas: grid cell position plus its own settings."""
+
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    type: str = Field(min_length=1, max_length=48, pattern=r"^[a-z0-9-]+$")
+    x: int = Field(ge=0, lt=TODAY_LAYOUT_COLUMNS)
+    y: int = Field(ge=0, le=TODAY_LAYOUT_MAX_ROW)
+    w: int = Field(ge=1, le=TODAY_LAYOUT_COLUMNS)
+    h: int = Field(ge=1, le=40)
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("settings")
+    @classmethod
+    def validate_settings_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(value, ensure_ascii=False)) > TODAY_WIDGET_SETTINGS_MAX_BYTES:
+            raise ValueError("Widget settings are too large")
+        return value
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "TodayWidget":
+        if self.x + self.w > TODAY_LAYOUT_COLUMNS:
+            raise ValueError("Widget does not fit in the grid")
+        return self
+
+
+class TodayLayoutPreferences(BaseModel):
+    # None = the user never customised the canvas; the client shows its default.
+    widgets: list[TodayWidget] | None = None
+    # Client clock (ms) of the last edit, so a device can tell whose copy is newer.
+    updated_at: int | None = Field(default=None, ge=0)
+
+    @field_validator("widgets")
+    @classmethod
+    def validate_widgets(cls, value: list[TodayWidget] | None) -> list[TodayWidget] | None:
+        if value is None:
+            return None
+        if len(value) > TODAY_LAYOUT_MAX_WIDGETS:
+            raise ValueError(f"At most {TODAY_LAYOUT_MAX_WIDGETS} widgets are supported")
+        if len({widget.id for widget in value}) != len(value):
+            raise ValueError("Widget ids must be unique")
+        return value
 
 
 class ChatNotificationPreferences(BaseModel):
@@ -915,6 +965,39 @@ async def update_world_clock_preferences(
     account.preferences = {
         **(account.preferences or {}),
         "world_clock": data.model_dump(),
+    }
+    await db.commit()
+    return data
+
+
+@router.get("/preferences/today-layout", response_model=TodayLayoutPreferences)
+async def today_layout_preferences(
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    account = await db.get(UserAccount, actor.account_id)
+    saved = (account.preferences or {}).get("today_layout") if account else None
+    if not isinstance(saved, dict):
+        return TodayLayoutPreferences()
+    try:
+        return TodayLayoutPreferences.model_validate(saved)
+    except ValueError:
+        logging.getLogger(__name__).warning("Ignoring invalid saved Today layout for account %s", actor.account_id)
+        return TodayLayoutPreferences()
+
+
+@router.put("/preferences/today-layout", response_model=TodayLayoutPreferences)
+async def update_today_layout_preferences(
+    data: TodayLayoutPreferences,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(get_actor),
+):
+    account = await db.get(UserAccount, actor.account_id, with_for_update=True)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    account.preferences = {
+        **(account.preferences or {}),
+        "today_layout": data.model_dump(),
     }
     await db.commit()
     return data

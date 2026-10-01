@@ -300,7 +300,11 @@ async def csv_report(db: AsyncSession, filters: ReportFilters, scope: ReportScop
         ])
         writer.writerow(["Date", "Total Daily Hours", "Shift Intervals / Breakdown"])
         for day in block["days"]:
-            writer.writerow([day["date"], _hours(day["total_minutes"]), _sheet_value(", ".join(day["intervals"]))])
+            for position, interval in enumerate(day["intervals"] or [""]):
+                writer.writerow([
+                    day["date"] if position == 0 else "", _hours(day["total_minutes"]) if position == 0 else "",
+                    _sheet_value(interval),
+                ])
         writer.writerow([])
         yield output.getvalue().encode("utf-8")
 
@@ -312,28 +316,30 @@ async def xlsx_report(db: AsyncSession, filters: ReportFilters, scope: ReportSco
 
     workbook = Workbook(write_only=True)
     sheet = workbook.create_sheet("Worktime Report")
-    sheet.freeze_panes = "A5"
-    widths = [0, 0, 0, 0]
+    column_widths = [40, 28, 28, 28]
+    row_height = 22
     title_fill = PatternFill("solid", fgColor="0B172A")
     worker_fill = PatternFill("solid", fgColor="DCE6FF")
     daily_fill = PatternFill("solid", fgColor="EAF2FF")
-    title_font = Font(name="Montserrat", bold=True, color="FFFFFF")
-    header_font = Font(name="Montserrat", bold=True, color="231F20")
-    body_font = Font(name="Montserrat", color="231F20")
+    title_font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    header_font = Font(name="Arial", size=12, bold=True, color="231F20")
+    body_font = Font(name="Arial", size=12, color="231F20")
 
-    def cell(value: Any, *, fill=None, font=None, wrap=False):
+    def cell(value: Any, *, fill=None, font=None):
         item = WriteOnlyCell(sheet, value=_sheet_value(value))
         item.fill = fill or PatternFill(fill_type=None)
         item.font = font or body_font
-        item.alignment = Alignment(vertical="top", wrap_text=wrap)
+        item.alignment = Alignment(vertical="center", horizontal="left", shrink_to_fit=True)
         return item
 
-    def append(values: list[Any], *, fill=None, font=None, wrap_columns: set[int] | None = None):
-        wrap_columns = wrap_columns or set()
-        sheet.append([cell(value, fill=fill, font=font, wrap=index in wrap_columns) for index, value in enumerate(values)])
-        for index, value in enumerate(values):
-            text = "" if value is None else str(value)
-            widths[index] = min(80 if index == 2 else 42, max(widths[index], max((len(line) for line in text.splitlines()), default=0) + 2))
+    def append(values: list[Any], *, fill=None, font=None):
+        row = [cell(value, fill=fill, font=font) for value in values]
+        sheet.append(row)
+
+    for index, width in enumerate(column_widths):
+        sheet.column_dimensions[chr(65 + index)].width = width
+    sheet.sheet_format.defaultRowHeight = row_height
+    sheet.sheet_format.customHeight = True
 
     append(["Selected Date Range", f"{filters.date_from.isoformat()} - {filters.date_to.isoformat()}", "", ""], fill=title_fill, font=title_font)
     append(["Total Accumulated Hours", _hours(summary["total_minutes"]), "", ""], fill=title_fill, font=title_font)
@@ -345,12 +351,14 @@ async def xlsx_report(db: AsyncSession, filters: ReportFilters, scope: ReportSco
             f"{block['worker_name']} / #{block['worker_id']}", block["department"],
             _hours(block["period_total_minutes"]), _hours(block["workday_average_minutes"]),
         ], fill=worker_fill)
-        append(["Date", "Total Daily Hours", "Shift Intervals / Breakdown", ""], fill=daily_fill, font=header_font, wrap_columns={2})
+        append(["Date", "Total Daily Hours", "Shift Intervals / Breakdown", ""], fill=daily_fill, font=header_font)
         for day in block["days"]:
-            append([day["date"], _hours(day["total_minutes"]), ", ".join(day["intervals"]), ""], wrap_columns={2})
+            for position, interval in enumerate(day["intervals"] or [""]):
+                append([
+                    day["date"] if position == 0 else "", _hours(day["total_minutes"]) if position == 0 else "",
+                    interval, "",
+                ])
         sheet.append([])
-    for index, width in enumerate(widths, start=1):
-        sheet.column_dimensions[chr(64 + index)].width = max(12, width)
     buffer = SpooledTemporaryFile(max_size=2 * 1024 * 1024, mode="w+b")
     workbook.save(buffer)
     buffer.seek(0)

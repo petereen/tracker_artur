@@ -16,6 +16,7 @@ import { tenancyError, useTenantContext } from './api/tenancy'
 import { LicenseRequiredScreen, WorkspaceUnavailableScreen, isWorkspaceUnavailable, useLicenseGraceNotice } from './components/TenantGate'
 
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
+const AnnouncementsPage = lazy(() => import('./pages/AnnouncementsPage').then((module) => ({ default: module.AnnouncementsPage })))
 const WorktimePage = lazy(() => import('./pages/WorktimePage').then((module) => ({ default: module.WorktimePage })))
 const WorktimeQrPage = lazy(() => import('./pages/WorktimeQrPage').then((module) => ({ default: module.WorktimeQrPage })))
 const HRWorkspacePage = lazy(() => import('./pages/HRWorkspacePage'))
@@ -182,6 +183,7 @@ function AuthenticatedApp() {
           <Route path="erp/payroll/reports/bank-remittance" element={<PayrollWorkspacePage />} />
         </Route>
         <Route element={<RequireRoles allowedRoles={MANAGEMENT_ROLES} />}>
+          <Route path="announcements" element={<AnnouncementsPage />} />
           <Route path="administration" element={<AdministrationHubPage />} />
           <Route path="administration/organization/profile" element={<WorkspaceIdentitySettingsPage />} />
           <Route path="administration/workflows/worktime" element={<CollaborationSettingsPage />} />

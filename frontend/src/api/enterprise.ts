@@ -906,9 +906,9 @@ export function useArchiveProject() {
   return useMutation({ mutationFn: (id: number) => api.delete(`/v1/projects/${id}`), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл архивлагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл архивлагдсангүй') })
 }
 
-export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; priority?: 1 | 2 | 3; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' | 'delegated' }
-export function useEnterpriseTasks(projectId?: number, period?: Partial<DateRange>, filters: TaskFilters = {}) {
-  return useQuery<EnterpriseTask[]>({ queryKey: ['v1', 'tasks', projectId, period, filters], queryFn: ({ signal }) => api.get('/v1/tasks', { signal, params: { ...(projectId ? { project_id: projectId } : {}), ...period, ...filters } }).then((response) => response.data) })
+export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; priority?: 1 | 2 | 3; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' | 'delegated' | 'oversight' }
+export function useEnterpriseTasks(projectId?: number, period?: Partial<DateRange>, filters: TaskFilters = {}, options: { enabled?: boolean } = {}) {
+  return useQuery<EnterpriseTask[]>({ enabled: options.enabled ?? true, queryKey: ['v1', 'tasks', projectId, period, filters], queryFn: ({ signal }) => api.get('/v1/tasks', { signal, params: { ...(projectId ? { project_id: projectId } : {}), ...period, ...filters } }).then((response) => response.data) })
 }
 export function useEnterpriseTask(id?: number) {
   return useQuery<EnterpriseTask>({ queryKey: ['v1', 'tasks', id], queryFn: () => api.get(`/v1/tasks/${id}`).then((response) => response.data), enabled: Boolean(id) })

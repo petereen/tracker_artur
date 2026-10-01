@@ -1,1025 +1,182 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { createPortal } from "react-dom";
-import { motion } from "motion/react";
-import {
-  Archive,
-  ArrowUpRight,
-  BriefcaseBusiness,
-  Check,
-  CheckCircle2,
-  Coffee,
-  House,
-  Laptop2,
-  MoreHorizontal,
-  Pause,
-  Play,
-  Save,
-  Trash2,
-  X,
-} from "lucide-react";
-import {
-  EnterpriseTask,
-  useClock,
-  useClockAction,
-  useCalendarEvents,
-  useDeleteEnterpriseTask,
-  useEnterpriseSummary,
-  useEnterpriseTasks,
-  useStartCheckin,
-  useSubmitCheckin,
-  useTodayAgenda,
-  useTodayCheckin,
-  useUpdateEnterpriseTask,
-  useWorkerDirectory,
-  WorkflowStatus,
-} from "../api/enterprise";
-import {
-  PeriodPreset,
-  periodFromPreset,
-  TimePeriodFilter,
-} from "../components/TimePeriodFilter";
-import { useAuthStore } from "../store/auth";
-import { UserTagPicker } from "../components/UserTagPicker";
-import { WorldClockWidget } from "../components/WorldClockWidget";
-import { WorkdayStartButton } from "../components/WorkdayStartButton";
-import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
+import { Component, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Check, LayoutGrid, Plus, RotateCcw } from 'lucide-react'
+import { Button } from '@astryxdesign/core/Button'
+import { EmptyState } from '@astryxdesign/core/EmptyState'
+import type { TodayWidgetState } from '../api/today'
+import { useWorkspaceMode } from '../components/WorkspaceModeProvider'
+import { findFreeSpot, normalizeLayout, placeItem, type GridItem } from '../components/today/gridEngine'
+import { createWidgetId, defaultTodayWidgets, WIDGETS, WIDGETS_BY_TYPE } from '../components/today/registry'
+import { GRID_COLUMNS, TodayCanvas, type TodayCanvasHandle } from '../components/today/TodayCanvas'
+import type { WidgetContext, WidgetDefinition } from '../components/today/types'
+import { useTodayLayout } from '../components/today/useTodayLayout'
+import { EMPTY_ROLES, useAuthStore } from '../store/auth'
+import '../components/today/today.css'
 
-function formatDuration(seconds: number) {
-  seconds = Math.max(0, Math.floor(seconds));
-  return [
-    Math.floor(seconds / 3600),
-    Math.floor((seconds % 3600) / 60),
-    seconds % 60,
-  ]
-    .map((value) => String(value).padStart(2, "0"))
-    .join(":");
-}
+// Only needed while arranging the canvas.
+const WidgetLibrary = lazy(() => import('../components/today/WidgetLibrary').then((module) => ({ default: module.WidgetLibrary })))
+const WidgetSettingsDialog = lazy(() => import('../components/today/WidgetSettingsDialog').then((module) => ({ default: module.WidgetSettingsDialog })))
 
-function formatLocalTime(value: string, timezone: string) {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-      timeZone: timezone,
-    }).format(new Date(value));
-  } catch {
-    return new Date(value).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+/** Keeps one broken widget from taking the whole canvas down. */
+class WidgetErrorBoundary extends Component<{ title: string; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  render() {
+    if (!this.state.failed) return this.props.children
+    return <section className="today-widget today-widget-error" role="alert"><strong>{this.props.title}</strong><span>Виджет ачаалагдсангүй.</span><button type="button" className="today-widget-link" onClick={() => this.setState({ failed: false })}>Дахин оролдох</button></section>
   }
 }
 
-const toInputDateTime = (value: string | null) =>
-  value ? new Date(value).toISOString().slice(0, 16) : "";
-
-type MiniCalendarRange = {
-  id: string;
-  title: string;
-  week: number;
-  start: number;
-  end: number;
-  lane: number;
-  laneCount: number;
-  isStart: boolean;
-  isEnd: boolean;
-};
-
-function localDateKey(value: Date) {
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-}
-
-function calendarDayKey(value: string | null | undefined) {
-  if (!value) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : localDateKey(parsed);
-}
-
-function DelegatedTaskSheet({
-  task,
-  workers,
-  onClose,
-}: {
-  task: EnterpriseTask;
-  workers: ReturnType<typeof useWorkerDirectory>["data"];
-  onClose: () => void;
+const WidgetHost = memo(function WidgetHost({ widget, definition, isEditing, onUpdateSettings }: {
+  widget: TodayWidgetState
+  definition: WidgetDefinition
+  isEditing: boolean
+  onUpdateSettings: (id: string, patch: Record<string, unknown>) => void
 }) {
-  const update = useUpdateEnterpriseTask();
-  const remove = useDeleteEnterpriseTask();
-  const [form, setForm] = useState({
-    title: task.title,
-    description: task.description || "",
-    workflow_status: task.workflow_status,
-    priority: String(task.priority),
-    primary_owner_id: task.primary_owner_id
-      ? String(task.primary_owner_id)
-      : "",
-    assignee_ids: task.assignee_ids,
-    start_at: toInputDateTime(task.start_at),
-    deadline_at: toInputDateTime(task.deadline_at),
-    work_location: task.work_location || "",
-  });
-  const save = async (event: React.FormEvent) => {
-    event.preventDefault();
-    await update.mutateAsync({
-      id: task.id,
-      version: task.version,
-      title: form.title,
-      description: form.description || null,
-      workflow_status: form.workflow_status,
-      priority: Number(form.priority),
-      primary_owner_id: form.primary_owner_id
-        ? Number(form.primary_owner_id)
-        : null,
-      assignee_ids: form.assignee_ids,
-      start_at: form.start_at ? new Date(form.start_at).toISOString() : null,
-      deadline_at: form.deadline_at
-        ? new Date(form.deadline_at).toISOString()
-        : null,
-      work_location: form.work_location || null,
-    });
-    onClose();
-  };
-  const archive = async () => {
-    await update.mutateAsync({
-      id: task.id,
-      version: task.version,
-      is_archived: true,
-    });
-    onClose();
-  };
-  const deleteTask = async () => {
-    if (window.confirm(`“${task.title}” даалгаврыг бүрмөсөн устгах уу?`)) {
-      await remove.mutateAsync(task.id);
-      onClose();
-    }
-  };
-  return createPortal(
-    <div
-      className="sheet-backdrop delegated-task-backdrop"
-      onMouseDown={onClose}
-    >
-      <aside
-        className="detail-sheet delegated-task-sheet"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="sheet-header">
-          <div>
-            <span className="eyebrow">Миний өгсөн даалгавар</span>
-            <h2>{task.title}</h2>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Хаах">
-            <X />
-          </button>
-        </div>
-        <form className="sheet-form" onSubmit={save}>
-          <label>
-            Гарчиг
-            <input
-              required
-              value={form.title}
-              onChange={(event) =>
-                setForm({ ...form, title: event.target.value })
-              }
-            />
-          </label>
-          <label>
-            Тайлбар
-            <textarea
-              rows={4}
-              value={form.description}
-              onChange={(event) =>
-                setForm({ ...form, description: event.target.value })
-              }
-            />
-          </label>
-          <div className="form-row">
-            <label>
-              Төлөв
-              <select
-                value={form.workflow_status}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    workflow_status: event.target.value as WorkflowStatus,
-                  })
-                }
-              >
-                {[
-                  ["backlog", "Backlog"],
-                  ["to_do", "Хийх"],
-                  ["in_progress", "Хийгдэж буй"],
-                  ["review", "Хянах"],
-                  ["done", "Дууссан"],
-                  ["cancelled", "Цуцлагдсан"],
-                ].map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Эрэмбэ
-              <select
-                value={form.priority}
-                onChange={(event) =>
-                  setForm({ ...form, priority: event.target.value })
-                }
-              >
-                <option value="1">Яаралтай</option>
-                <option value="2">Энгийн</option>
-                <option value="3">Бага</option>
-                <option value="4">Маш бага</option>
-              </select>
-            </label>
-          </div>
-          <div className="form-row">
-            <label>
-              Эхлэх
-              <input
-                type="datetime-local"
-                value={form.start_at}
-                onChange={(event) =>
-                  setForm({ ...form, start_at: event.target.value })
-                }
-              />
-            </label>
-            <label>
-              Хугацаа
-              <input
-                type="datetime-local"
-                value={form.deadline_at}
-                onChange={(event) =>
-                  setForm({ ...form, deadline_at: event.target.value })
-                }
-              />
-            </label>
-          </div>
-          <label>
-            Үндсэн хариуцагч
-            <select
-              value={form.primary_owner_id}
-              onChange={(event) =>
-                setForm({ ...form, primary_owner_id: event.target.value })
-              }
-            >
-              <option value="">Сонгоогүй</option>
-              {workers?.map((worker) => (
-                <option key={worker.id} value={worker.id}>
-                  {worker.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <UserTagPicker label="Хариуцагчид" value={form.assignee_ids} users={workers || []} allLabel="Бүгдийг сонгох" onChange={(assignee_ids) => setForm({ ...form, assignee_ids })} />
-          <label>
-            Байршил
-            <input
-              value={form.work_location}
-              onChange={(event) =>
-                setForm({ ...form, work_location: event.target.value })
-              }
-              placeholder="Оффис, remote эсвэл тодорхой газар"
-            />
-          </label>
-          <div className="delegated-task-actions">
-            <button
-              className="primary-action"
-              disabled={update.isPending || remove.isPending}
-            >
-              <Save size={16} />
-              Хадгалах
-            </button>
-            <button
-              type="button"
-              className="secondary-action"
-              onClick={archive}
-              disabled={update.isPending || remove.isPending}
-            >
-              <Archive size={16} />
-              Архивлах
-            </button>
-            <button
-              type="button"
-              className="danger-action"
-              onClick={deleteTask}
-              disabled={update.isPending || remove.isPending}
-            >
-              <Trash2 size={16} />
-              Устгах
-            </button>
-          </div>
-        </form>
-      </aside>
-    </div>,
-    document.body
-  );
-}
+  const settings = useMemo(() => ({ ...definition.defaultSettings, ...widget.settings }), [definition.defaultSettings, widget.settings])
+  const updateSettings = useCallback((patch: Record<string, unknown>) => onUpdateSettings(widget.id, patch), [onUpdateSettings, widget.id])
+  const Widget = definition.Component
+  return (
+    <WidgetErrorBoundary title={definition.title}>
+      <Widget id={widget.id} settings={settings} updateSettings={updateSettings} isEditing={isEditing} size={{ w: widget.w, h: widget.h }} />
+    </WidgetErrorBoundary>
+  )
+})
 
+const sameRect = (a: GridItem, b: GridItem) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+
+/**
+ * "Today": a customizable widget canvas. Long-press a widget or press
+ * "Засварлах" to arrange (drag, resize, remove), add widgets from the
+ * library, and open per-widget settings. The layout is saved per account.
+ */
 export function EnterpriseDashboardPage() {
-  const [periodPreset, setPeriodPreset] = useState<PeriodPreset | "custom">(
-    "week",
-  );
-  const [period, setPeriod] = useState(() => periodFromPreset("week"));
-  const employeeId = useAuthStore((state) => state.actor?.employee_id);
-  const { isManagerMode } = useWorkspaceMode();
-  const summary = useEnterpriseSummary(period, isManagerMode ? undefined : employeeId ?? undefined);
-  const clock = useClock(employeeId != null);
-  const action = useClockAction();
-  const todayCheckin = useTodayCheckin();
-  const startCheckin = useStartCheckin();
-  const submitCheckin = useSubmitCheckin();
-  const [checkinOpen, setCheckinOpen] = useState(false);
-  const [answers, setAnswers] = useState<Record<number, string>>(() => {
-    try { return JSON.parse(localStorage.getItem("oyuns-checkin-draft") || "{}"); } catch { return {}; }
-  });
-  const today = new Date().toISOString().slice(0, 10);
-  const todayTasks = useEnterpriseTasks(undefined, {
-    date_from: today,
-    date_to: today,
-  }, { scope: isManagerMode ? "organization" : "mine" });
-  const delegatedTasks = useEnterpriseTasks(undefined, undefined, {
-    scope: "delegated",
-  });
-  const workers = useWorkerDirectory();
-  const updateTask = useUpdateEnterpriseTask();
-  const deleteTask = useDeleteEnterpriseTask();
-  const [taskTab, setTaskTab] = useState<"today" | "delegated">("today");
-  const [selectedDelegatedTask, setSelectedDelegatedTask] =
-    useState<EnterpriseTask | null>(null);
-  const agenda = useTodayAgenda();
-  const monthDays = useMemo(() => {
-    const now = new Date();
-    const first = new Date(now.getFullYear(), now.getMonth(), 1);
-    first.setDate(first.getDate() - ((first.getDay() + 6) % 7));
-    return Array.from({ length: 42 }, (_, index) => {
-      const day = new Date(first);
-      day.setDate(day.getDate() + index);
-      return day;
-    });
-  }, []);
-  const miniCalendarTasks = useEnterpriseTasks(undefined, {
-    date_from: localDateKey(monthDays[0]),
-    date_to: localDateKey(monthDays[monthDays.length - 1]),
-  }, { scope: isManagerMode ? "organization" : "mine" });
-  const calendarScope = isManagerMode ? "corporate" : "private";
-  const miniCalendarEvents = useCalendarEvents(calendarScope, monthDays[20]);
-  const miniCalendarVisibleTasks = useMemo(() => {
-    const tasks = new Map<number, EnterpriseTask>();
-    [...(miniCalendarEvents.data?.tasks ?? []), ...(miniCalendarTasks.data ?? []), ...(todayTasks.data ?? []), ...(isManagerMode ? delegatedTasks.data ?? [] : []), ...(!isManagerMode ? agenda.data?.tasks ?? [] : [])].forEach((task: EnterpriseTask) => tasks.set(task.id, task));
-    return [...tasks.values()];
-  }, [agenda.data?.tasks, delegatedTasks.data, isManagerMode, miniCalendarEvents.data?.tasks, miniCalendarTasks.data, todayTasks.data]);
-  const miniCalendarMarkers = useMemo(() => {
-    type MarkerKind = "task" | "event" | "reminder" | "time-block";
-    const dates = new Map<string, Set<MarkerKind>>();
-    const add = (value: string | null | undefined, kind: MarkerKind) => {
-      const key = calendarDayKey(value);
-      if (!key) return;
-      if (!dates.has(key)) dates.set(key, new Set());
-      dates.get(key)!.add(kind);
-    };
-    miniCalendarVisibleTasks.forEach((task) => {
-      if (task.start_at && task.deadline_at) return;
-      add(task.start_at || task.deadline_at, "task");
-    });
-    [...(miniCalendarEvents.data?.entries ?? []), ...(!isManagerMode ? agenda.data?.entries ?? [] : [])].forEach((item: any) => add(item.remind_at || item.starts_at || item.start_at, item.kind === "reminder" ? "reminder" : "event"));
-    [...(miniCalendarEvents.data?.time_blocks ?? [])].forEach((item: any) => add(item.starts_at || item.start_at, "time-block"));
-    return dates;
-  }, [agenda.data?.entries, isManagerMode, miniCalendarEvents.data?.entries, miniCalendarEvents.data?.time_blocks, miniCalendarVisibleTasks]);
-  const miniCalendarRanges = useMemo(() => {
-    const visibleStart = localDateKey(monthDays[0]);
-    const visibleEnd = localDateKey(monthDays[monthDays.length - 1]);
-    const dayIndex = new Map(monthDays.map((day, index) => [localDateKey(day), index]));
-    const segments: MiniCalendarRange[] = [];
+  const { isManagerMode } = useWorkspaceMode()
+  const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
+  const context: WidgetContext = useMemo(() => ({ isManagerMode, roles }), [isManagerMode, roles])
+  const layout = useTodayLayout(defaultTodayWidgets)
+  const [isEditing, setEditing] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [settingsId, setSettingsId] = useState<string | null>(null)
+  const canvasRef = useRef<TodayCanvasHandle>(null)
+  const widgetsRef = useRef(layout.widgets)
+  widgetsRef.current = layout.widgets
+  const setWidgets = layout.setWidgets
 
-    miniCalendarVisibleTasks.forEach((task) => {
-      if (!task.start_at || !task.deadline_at) return;
-      let taskStart = calendarDayKey(task.start_at)!;
-      let taskEnd = calendarDayKey(task.deadline_at)!;
-      if (taskEnd < taskStart) [taskStart, taskEnd] = [taskEnd, taskStart];
-      if (taskEnd < visibleStart || taskStart > visibleEnd) return;
-      const start = Math.max(0, dayIndex.get(taskStart) ?? (taskStart < visibleStart ? 0 : -1));
-      const end = Math.min(monthDays.length - 1, dayIndex.get(taskEnd) ?? (taskEnd > visibleEnd ? monthDays.length - 1 : -1));
-      if (start < 0 || end < start) return;
-      for (let week = Math.floor(start / 7); week <= Math.floor(end / 7); week += 1) {
-        const segmentStart = Math.max(start, week * 7);
-        const segmentEnd = Math.min(end, week * 7 + 6);
-        const overlapping = segments.filter((segment) => segment.week === week && segment.start <= segmentEnd && segment.end >= segmentStart);
-        let lane = 0;
-        while (overlapping.some((segment) => segment.lane === lane)) lane += 1;
-        segments.push({
-          id: `${task.id}-${week}`,
-          title: task.title,
-          week,
-          start: segmentStart % 7,
-          end: segmentEnd % 7,
-          lane,
-          laneCount: 0,
-          isStart: segmentStart === start && taskStart >= visibleStart,
-          isEnd: segmentEnd === end && taskEnd <= visibleEnd,
-        });
-      }
-    });
+  const isShown = useCallback((widget: TodayWidgetState) => {
+    const definition = WIDGETS_BY_TYPE.get(widget.type)
+    return Boolean(definition && (!definition.isAvailable || definition.isAvailable(context)))
+  }, [context])
+  const shown = useMemo(() => layout.widgets.filter(isShown), [isShown, layout.widgets])
+  const items = useMemo(() => normalizeLayout(shown.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })), GRID_COLUMNS), [shown])
+  const byId = useMemo(() => new Map(layout.widgets.map((widget) => [widget.id, widget])), [layout.widgets])
+  const library = useMemo(() => WIDGETS.filter((definition) => !definition.isAvailable || definition.isAvailable(context)), [context])
+  const placedTypes = useMemo(() => new Set(shown.map((widget) => widget.type)), [shown])
 
-    for (let week = 0; week < 6; week += 1) {
-      const weekSegments = segments.filter((segment) => segment.week === week);
-      const laneCount = Math.max(1, ...weekSegments.map((segment) => segment.lane + 1));
-      weekSegments.forEach((segment) => { segment.laneCount = laneCount; });
-    }
-    return segments;
-  }, [miniCalendarVisibleTasks, monthDays]);
-  const isSupervisor = isManagerMode;
+  /** Writes canvas positions back, keeping hidden widgets and untouched objects as they are. */
+  const commitPositions = useCallback((next: GridItem[], extra: TodayWidgetState[] = []) => {
+    const positions = new Map(next.map((item) => [item.id, item]))
+    setWidgets([...widgetsRef.current.map((widget) => {
+      const position = positions.get(widget.id)
+      return position && !sameRect(widget, position) ? { ...widget, x: position.x, y: position.y, w: position.w, h: position.h } : widget
+    }), ...extra.map((widget) => ({ ...widget, ...positions.get(widget.id) }))])
+  }, [setWidgets])
+
+  const updateSettings = useCallback((id: string, patch: Record<string, unknown>) => {
+    setWidgets(widgetsRef.current.map((widget) => (widget.id === id ? { ...widget, settings: { ...widget.settings, ...patch } } : widget)))
+  }, [setWidgets])
+
+  const removeWidget = useCallback((id: string) => {
+    setWidgets(widgetsRef.current.filter((widget) => widget.id !== id))
+  }, [setWidgets])
+
+  const addWidget = useCallback((definition: WidgetDefinition, cell?: { x: number; y: number }) => {
+    const { w, h } = definition.defaultSize
+    const spot = cell ?? findFreeSpot(items, w, h, GRID_COLUMNS)
+    const widget: TodayWidgetState = { id: createWidgetId(definition.type), type: definition.type, ...spot, w, h, settings: { ...definition.defaultSettings } }
+    commitPositions(placeItem(items, { id: widget.id, x: widget.x, y: widget.y, w, h }), [widget])
+    window.requestAnimationFrame(() => document.querySelector(`[data-widget-id="${widget.id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+  }, [commitPositions, items])
+
+  const startEditing = useCallback(() => setEditing(true), [])
+  const finishEditing = useCallback(() => { setEditing(false); setLibraryOpen(false) }, [])
   useEffect(() => {
-    if (!isManagerMode) setTaskTab("today");
-  }, [isManagerMode]);
-  const active = clock.data?.active;
-  const clockReady = Boolean(clock.data);
-  const [clientNow, setClientNow] = useState(() => Date.now());
-  const serverClockRef = useRef<{ serverTimeMs: number; clientTimeMs: number } | null>(null);
-  const clockRefetchRef = useRef(clock.refetch);
-  clockRefetchRef.current = clock.refetch;
-  const clockEnabledRef = useRef(employeeId != null);
-  clockEnabledRef.current = employeeId != null;
-  const serverTime = clock.data?.server_time;
-  useEffect(() => {
-    if (!serverTime) return;
-    const serverTimeMs = new Date(serverTime).getTime();
-    if (Number.isFinite(serverTimeMs)) {
-      serverClockRef.current = { serverTimeMs, clientTimeMs: Date.now() };
-    }
-  }, [serverTime]);
-  const activeTimerKey = active
-    ? `${active.id}:${active.entry_type}:${active.started_at}`
-    : null;
-  useEffect(() => {
-    let timer: number | undefined;
-    const syncNow = () => setClientNow(Date.now());
-    const clearTimer = () => {
-      if (timer !== undefined) {
-        window.clearInterval(timer);
-        timer = undefined;
-      }
-    };
-    const startTimer = () => {
-      if (
-        activeTimerKey &&
-        document.visibilityState === "visible" &&
-        timer === undefined
-      ) {
-        timer = window.setInterval(syncNow, 1000);
-      }
-    };
-    const handleVisibilityChange = () => {
-      syncNow();
-      if (document.visibilityState === "visible") {
-        if (clockEnabledRef.current) {
-          void clockRefetchRef.current();
-        }
-        startTimer();
-      } else {
-        clearTimer();
-      }
-    };
+    if (!isEditing || libraryOpen || settingsId) return
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') finishEditing() }
+    window.addEventListener('keydown', escape)
+    return () => window.removeEventListener('keydown', escape)
+  }, [finishEditing, isEditing, libraryOpen, settingsId])
 
-    syncNow();
-    startTimer();
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      clearTimer();
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [activeTimerKey]);
-  const serverClock = serverClockRef.current;
-  const initialServerTime = serverTime ? new Date(serverTime).getTime() : NaN;
-  const clockNow = serverClock
-    ? serverClock.serverTimeMs + (clientNow - serverClock.clientTimeMs)
-    : Number.isFinite(initialServerTime)
-      ? initialServerTime
-      : clientNow;
-  const recoveredClock = Boolean(active && (active.local_work_date !== today || clockNow - new Date(active.started_at).getTime() > 16 * 60 * 60 * 1000));
-  const working = active?.entry_type === "work";
-  const onBreak = active?.entry_type === "break";
-  const todayEntries = clock.data?.today_entries ?? [];
-  const todayWorkSeconds = todayEntries.reduce((total, entry) => {
-    if (entry.entry_type !== "work") return total;
-    return (
-      total +
-      Math.max(
-        0,
-        ((entry.ended_at ? new Date(entry.ended_at).getTime() : clockNow) -
-          new Date(entry.started_at).getTime()) /
-          1000,
-      )
-    );
-  }, 0);
-  const activeTasks = isManagerMode ? (todayTasks.data ?? []) : (todayTasks.data ?? []).filter((task) => task.assignee_ids.includes(employeeId ?? -1));
-  const delegated = delegatedTasks.data ?? [];
-  const completeDelegatedTask = (task: EnterpriseTask) =>
-    updateTask.mutate({
-      id: task.id,
-      version: task.version,
-      workflow_status: "done",
-    });
-  const deleteDelegatedTask = (task: EnterpriseTask) => {
-    if (window.confirm(`“${task.title}” даалгаврыг бүрмөсөн устгах уу?`))
-      deleteTask.mutate(task.id);
-  };
+  const limitsFor = useCallback((id: string) => WIDGETS_BY_TYPE.get(byId.get(id)?.type ?? '')?.limits ?? { minW: 1, minH: 1, maxW: GRID_COLUMNS, maxH: 40 }, [byId])
+  const labelFor = useCallback((id: string) => WIDGETS_BY_TYPE.get(byId.get(id)?.type ?? '')?.title ?? 'Виджет', [byId])
+  const hasSettings = useCallback(() => true, [])
+  const renderItem = useCallback((id: string) => {
+    const widget = byId.get(id)
+    const definition = widget && WIDGETS_BY_TYPE.get(widget.type)
+    return widget && definition ? <WidgetHost widget={widget} definition={definition} isEditing={isEditing} onUpdateSettings={updateSettings} /> : null
+  }, [byId, isEditing, updateSettings])
 
-  const cards = [
-    {
-      label: "Идэвхтэй төсөл",
-      value: summary.data?.active_projects ?? "—",
-      icon: BriefcaseBusiness,
-      tone: "blue",
-    },
-    {
-      label: "Дууссан даалгавар",
-      value: summary.data?.completed_tasks ?? "—",
-      icon: CheckCircle2,
-      tone: "green",
-    },
-    {
-      label: "Гүйцэтгэл",
-      value: summary.data ? `${summary.data.completion_rate}%` : "—",
-      icon: ArrowUpRight,
-      tone: "purple",
-    },
-    {
-      label: "Ажилласан цаг",
-      value: summary.data
-        ? `${Math.round((summary.data.worked_minutes / 60) * 10) / 10}ц`
-        : "—",
-      icon: Coffee,
-      tone: "amber",
-    },
-  ];
-
-  const openCheckin = async () => {
-    if (todayCheckin.data?.checkin?.status === "submitted") return;
-    if (!todayCheckin.data?.checkin && todayCheckin.data?.template?.id)
-      await startCheckin.mutateAsync(todayCheckin.data.template.id);
-    setCheckinOpen(true);
-  };
-  const saveCheckin = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const current =
-      todayCheckin.data?.checkin ||
-      (await startCheckin.mutateAsync(todayCheckin.data.template.id));
-    const questions = todayCheckin.data?.template?.questions ?? [];
-    await submitCheckin.mutateAsync({
-      id: current.id,
-      answers: questions.map((question: any) =>
-        question.answer_type === "integer" || question.answer_type === "decimal"
-          ? {
-              question_id: question.id,
-              value_numeric: Number(answers[question.id]),
-            }
-          : { question_id: question.id, value_text: answers[question.id] },
-      ),
-    });
-    localStorage.removeItem("oyuns-checkin-draft");
-    setAnswers({});
-    setCheckinOpen(false);
-  };
-
-  useEffect(() => {
-    if (Object.keys(answers).length) localStorage.setItem("oyuns-checkin-draft", JSON.stringify(answers));
-  }, [answers]);
+  const settingsWidget = settingsId ? byId.get(settingsId) : undefined
+  const settingsDefinition = settingsWidget ? WIDGETS_BY_TYPE.get(settingsWidget.type) : undefined
 
   return (
-    <div className="dashboard-grid">
-      <div className="dashboard-period">
-        <div>
-          <span className="eyebrow">
-            {isSupervisor ? "Байгууллагын тойм" : "Хувийн тойм"}
-          </span>
-          <h2>
-            {isSupervisor
-              ? "Нийт гүйцэтгэлийн үзүүлэлт"
-              : "Таны гүйцэтгэлийн үзүүлэлт"}
-          </h2>
-        </div>
-        <TimePeriodFilter
-          preset={periodPreset}
-          period={period}
-          onChange={(nextPreset, nextPeriod) => {
-            setPeriodPreset(nextPreset);
-            setPeriod(nextPeriod);
-          }}
-        />
-      </div>
-      <section className="clock-panel panel">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">ЦАГИЙН БҮРТГЭЛ</span>
-            <h2>Өнөөдрийн ажлын цаг</h2>
-          </div>
-          <span className={`live-indicator ${active ? "online" : ""}`}>
-            {active ? "АЖИЛЛАЖ БАЙНА" : "АМАРЧ БАЙНА"}
-          </span>
-        </div>
-        {clockReady ? (
-          <div className="clock-summary">
-            <div className="clock-time" aria-live="polite">
-              {formatDuration(todayWorkSeconds)}
-            </div>
-            <p>
-              {working
-                ? `${active?.mode === "remote" ? "Remote" : "Оффис"} горимоор ажиллаж байна.`
-                : onBreak
-                  ? "Завсарлагын хугацаа ажилласан цагт орохгүй."
-                  : "Telegram болон вэбийн цагийн төлөв үргэлж ижил байна."}
-            </p>
-            <div
-              className="clock-details"
-              aria-label="Өнөөдрийн цагийн дэлгэрэнгүй"
-            >
-              {todayEntries.map((entry) => {
-                const seconds = Math.max(
-                  0,
-                  ((entry.ended_at
-                    ? new Date(entry.ended_at).getTime()
-                    : clockNow) -
-                    new Date(entry.started_at).getTime()) /
-                    1000,
-                );
-                return (
-                  <div key={entry.id}>
-                    {entry.entry_type === "break"
-                      ? "Завсарлага"
-                      : entry.mode === "remote"
-                        ? "Remote"
-                        : "Оффис"}
-                    :{" "}
-                    {formatLocalTime(
-                      entry.started_at,
-                      clock.data?.timezone ?? "Asia/Ulaanbaatar",
-                    )}
-                    –
-                    {entry.ended_at
-                      ? formatLocalTime(
-                          entry.ended_at,
-                          clock.data?.timezone ?? "Asia/Ulaanbaatar",
-                        )
-                      : "одоо"}{" "}
-                    ({formatDuration(seconds)})
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          <div className="clock-summary clock-summary-skeleton" aria-label="Цагийн төлөв ачаалж байна">
-            <span className="skeleton clock-time-skeleton" />
-            <span className="skeleton clock-copy-skeleton" />
-          </div>
+    <div className={`today-page${libraryOpen ? ' has-library' : ''}`}>
+      <div className="today-toolbar" role="toolbar" aria-label="Нүүр хуудасны байршил">
+        {isEditing ? <>
+          <span className="today-toolbar-hint">Виджетийг чирж зөөх, буланг нь чирж хэмжээг өөрчилнө</span>
+          <Button label="Анхны байдал" size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={() => { if (window.confirm('Нүүр хуудсыг анхны байдалд нь буцаах уу?')) layout.resetToDefault() }} isDisabled={!layout.isCustomized} />
+          <Button label="Виджет нэмэх" size="sm" icon={<Plus size={14} />} onClick={() => setLibraryOpen(true)} />
+          <Button label="Болсон" size="sm" variant="primary" icon={<Check size={14} />} onClick={finishEditing} />
+        </> : (
+          <Button label="Засварлах" size="sm" variant="ghost" icon={<LayoutGrid size={14} />} onClick={startEditing} tooltip="Виджет нэмэх, зөөх, хэмжээ өөрчлөх" />
         )}
-        {recoveredClock && <div className="clock-recovery" role="alert"><strong>Өмнөх сесс сэргээгдлээ.</strong><span>Энэ цагийн бүртгэл удаан нээлттэй эсвэл өөр өдрөөс үргэлжилж байна. Одоогийн төлөвөө шалгаад үргэлжлүүлэх эсвэл дуусгана уу.</span></div>}
-        <div className="clock-actions">
-          {!active && (
-            <>
-              <WorkdayStartButton className="clock-button office">
-                <House />
-                Оффис эхлэх
-              </WorkdayStartButton>
-              <button
-                className="clock-button remote"
-                onClick={() =>
-                  action.mutate({ action: "start", mode: "remote" })
-                }
-              >
-                <Laptop2 />
-                Remote эхлэх
-              </button>
-            </>
-          )}
-          {working && (
-            <>
-              <button
-                className="clock-button break"
-                onClick={() => action.mutate({ action: "break" })}
-              >
-                <Coffee />
-                Завсарлага
-              </button>
-              <button
-                className="clock-button stop"
-                onClick={() => action.mutate({ action: "stop" })}
-              >
-                <Pause />
-                Өдөр дуусгах
-              </button>
-            </>
-          )}
-          {onBreak && (
-            <>
-              <button
-                className="clock-button office"
-                onClick={() => action.mutate({ action: "resume" })}
-              >
-                <Play />
-                Үргэлжлүүлэх
-              </button>
-              <button
-                className="clock-button stop"
-                onClick={() => action.mutate({ action: "stop" })}
-              >
-                <Pause />
-                Өдөр дуусгах
-              </button>
-            </>
-          )}
-        </div>
-      </section>
-      <WorldClockWidget />
-      <section className="metrics-grid" aria-label="Гүйцэтгэлийн үзүүлэлт">
-        {cards.map(({ label, value, icon: Icon, tone }, index) => (
-          <motion.article
-            className={`metric-card ${tone}`}
-            key={label}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              delay: index * 0.04,
-              type: "spring",
-              bounce: 0,
-              duration: 0.35,
-            }}
-          >
-            <Icon />
-            <span>{label}</span>
-            <strong>{value}</strong>
-          </motion.article>
-        ))}
-      </section>
-      <section className="panel productivity-panel">
-        <div className="today-task-column">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">Өнөөдрийн ажил</span>
-              <h2>Хийх даалгаврууд</h2>
-            </div>
-          </div>
-          <div
-            className="today-task-tabs"
-            role="tablist"
-            aria-label="Даалгаврын жагсаалт"
-          >
-            <button
-              className={taskTab === "today" ? "active" : ""}
-              onClick={() => setTaskTab("today")}
-              role="tab"
-              aria-selected={taskTab === "today"}
-            >
-              Надад өгсөн
-            </button>
-            {isManagerMode && <button
-              className={taskTab === "delegated" ? "active" : ""}
-              onClick={() => setTaskTab("delegated")}
-              role="tab"
-              aria-selected={taskTab === "delegated"}
-            >
-              Миний өгсөн даалгаврууд
-            </button>}
-          </div>
-          <div className="today-task-list">
-          {taskTab === "today" ? (
-            activeTasks.length ? (
-              activeTasks.map((task) => (
-                <article className="today-task-row" key={task.id}>
-                  <div>
-                    <strong>{task.title}</strong>
-                    <span>{task.primary_owner_name || "Хариуцагчгүй"}</span>
-                  </div>
-                  <time>
-                    {task.deadline_at
-                      ? new Date(task.deadline_at).toLocaleTimeString("mn-MN", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "Хугацаагүй"}
-                  </time>
-                </article>
-              ))
-            ) : (
-              <p>Өнөөдөр төлөвлөсөн даалгавар байхгүй байна.</p>
-            )
-          ) : delegated.length ? (
-            delegated.map((task) => (
-              <article
-                className="today-task-row delegated-task-row"
-                key={task.id}
-              >
-                <div>
-                  <strong>{task.title}</strong>
-                  <span>
-                    {task.assignee_names.length
-                      ? task.assignee_names.join(", ")
-                      : "Хариуцагчгүй"}{" "}
-                    ·{" "}
-                    {task.workflow_status === "done"
-                      ? "Дууссан"
-                      : "Явагдаж байна"}
-                  </span>
-                </div>
-                <div className="today-task-controls">
-                  <button
-                    onClick={() => completeDelegatedTask(task)}
-                    disabled={
-                      task.workflow_status === "done" || updateTask.isPending
-                    }
-                    aria-label={`${task.title} дууссан гэж тэмдэглэх`}
-                    title="Дууссан"
-                  >
-                    <Check size={16} />
-                  </button>
-                  <button
-                    onClick={() => deleteDelegatedTask(task)}
-                    disabled={deleteTask.isPending}
-                    aria-label={`${task.title} устгах`}
-                    title="Устгах"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                  <button
-                    onClick={() => setSelectedDelegatedTask(task)}
-                    aria-label={`${task.title} дэлгэрэнгүй`}
-                    title="Дэлгэрэнгүй"
-                  >
-                    <MoreHorizontal size={17} />
-                  </button>
-                </div>
-              </article>
-            ))
-          ) : (
-            <p>Таны өгсөн идэвхтэй даалгавар алга.</p>
-          )}
-          </div>
-        </div>
-        <section className="daily-focus panel">
-          <span className="eyebrow">Өнөөдрийн төлөвлөгөө</span>
-          <h2>Хамгийн чухал ажлаа тодорхой болго</h2>
-          {todayCheckin.data?.template?.questions
-            ?.slice(0, 2)
-            .map((question: any, index: number) => (
-              <div className="focus-question" key={question.id}>
-                <span>{index + 1}</span>
-                <div>
-                  <strong>{question.prompt?.mn || question.prompt?.en}</strong>
-                  <p>{question.is_required ? "Заавал хариулна" : "Сонголттой"}</p>
-                </div>
-              </div>
-            ))}
-          {!todayCheckin.data?.template && (
-            <p>Check-in асуулт тохируулаагүй байна.</p>
-          )}
-          <button
-            className="secondary-action"
-            onClick={openCheckin}
-            disabled={
-              !todayCheckin.data?.template ||
-              todayCheckin.data?.checkin?.status === "submitted"
-            }
-          >
-            {todayCheckin.data?.checkin?.status === "submitted"
-              ? "Өнөөдрийн check-in бөглөгдсөн"
-              : "Өдрийн check-in бөглөх"}
-          </button>
-          {checkinOpen && (
-            <form className="checkin-form" onSubmit={saveCheckin}>
-              {todayCheckin.data.template.questions.map((question: any) => (
-                <label key={question.id}>
-                  <strong>{question.prompt?.mn || question.prompt?.en}</strong>
-                  {question.choices?.length ? (
-                    <select
-                      required={question.is_required}
-                      value={answers[question.id] || ""}
-                      onChange={(event) =>
-                        setAnswers({
-                          ...answers,
-                          [question.id]: event.target.value,
-                        })
-                      }
-                    >
-                      <option value="">Сонгох</option>
-                      {question.choices.map((choice: any) => (
-                        <option key={String(choice)}>{String(choice)}</option>
-                      ))}
-                    </select>
-                  ) : ["integer", "decimal", "number"].includes(question.answer_type) ? (
-                    <input
-                      type="number"
-                      step={question.answer_type === "integer" ? "1" : "any"}
-                      required={question.is_required}
-                      value={answers[question.id] || ""}
-                      onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
-                    />
-                  ) : question.answer_type === "boolean" ? (
-                    <select required={question.is_required} value={answers[question.id] || ""} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}>
-                      <option value="">Сонгох</option><option value="true">Тийм</option><option value="false">Үгүй</option>
-                    </select>
-                  ) : (
-                    <textarea
-                      required={question.is_required}
-                      value={answers[question.id] || ""}
-                      onChange={(event) =>
-                        setAnswers({
-                          ...answers,
-                          [question.id]: event.target.value,
-                        })
-                      }
-                    />
-                  )}
-                </label>
-              ))}
-              <div>
-                <button
-                  type="button"
-                  className="secondary-action compact"
-                  onClick={() => setCheckinOpen(false)}
-                >
-                  Цуцлах
-                </button>
-                <button
-                  className="primary-action compact"
-                  disabled={submitCheckin.isPending}
-                >
-                  Хадгалах
-                </button>
-              </div>
-            </form>
-          )}
-        </section>
-        <aside className="today-mini-calendar">
-          <strong>
-            {new Date().toLocaleDateString("mn-MN", {
-              month: "long",
-              year: "numeric",
-            })}
-          </strong>
-          <div className="mini-weekdays">
-            {["Да", "Мя", "Лх", "Пү", "Ба", "Бя", "Ня"].map((day) => (
-              <b key={day}>{day}</b>
-            ))}
-          </div>
-          <div className="mini-month-grid">
-            {monthDays.map((day, dayIndex) => {
-              const local = new Date(
-                day.getTime() - day.getTimezoneOffset() * 60_000,
-              )
-                .toISOString()
-                .slice(0, 10);
-              const todayKey = new Date(
-                Date.now() - new Date().getTimezoneOffset() * 60_000,
-              )
-                .toISOString()
-                .slice(0, 10);
-              const markers = [...(miniCalendarMarkers.get(local) ?? [])];
-              const week = Math.floor(dayIndex / 7);
-              const column = dayIndex % 7;
-              const rangeFragments = miniCalendarRanges.filter(
-                (range) => range.week === week && range.start <= column && range.end >= column,
-              );
-              return (
-                <span
-                  key={local}
-                  className={`${local === todayKey ? "today" : ""} ${day.getMonth() !== new Date().getMonth() ? "outside" : ""}`}
-                >
-                  <i>{day.getDate()}</i>
-                  {rangeFragments.map((range) => {
-                    const isStart = range.isStart && column === range.start;
-                    const isEnd = range.isEnd && column === range.end;
-                    return (
-                      <u
-                        className={`mini-range-fragment${isStart ? " range-start" : ""}${isEnd ? " range-end" : ""}`}
-                        key={range.id}
-                        title={range.title}
-                        style={{ "--mini-lane": range.lane } as CSSProperties}
-                      />
-                    );
-                  })}
-                  {markers.length > 0 && (
-                    <em className="mini-day-markers" aria-label={`${markers.length} төрлийн календарийн item`}>
-                      {markers.map((marker) => <b className={`mini-day-marker ${marker}`} key={marker} />)}
-                    </em>
-                  )}
-                </span>
-              );
-            })}
-          </div>
-        </aside>
-      </section>
-      {selectedDelegatedTask && (
-        <DelegatedTaskSheet
-          task={selectedDelegatedTask}
-          workers={workers.data}
-          onClose={() => setSelectedDelegatedTask(null)}
+      </div>
+      {layout.isLoading ? (
+        <div className="today-canvas-loading" aria-label="Нүүр хуудас ачаалж байна"><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /></div>
+      ) : items.length === 0 && !isEditing ? (
+        <EmptyState title="Нүүр хуудас хоосон байна" description="Өдөр тутмын ажилдаа хэрэгтэй виджетүүдээ нэмээрэй." actions={<Button label="Виджет нэмэх" variant="primary" icon={<Plus size={14} />} onClick={() => { setEditing(true); setLibraryOpen(true) }} />} />
+      ) : (
+        <TodayCanvas
+          ref={canvasRef}
+          items={items}
+          isEditing={isEditing}
+          onRequestEdit={startEditing}
+          onLayoutChange={commitPositions}
+          onRemove={removeWidget}
+          onOpenSettings={setSettingsId}
+          hasSettings={hasSettings}
+          limitsFor={limitsFor}
+          labelFor={labelFor}
+          renderItem={renderItem}
         />
       )}
+      {libraryOpen && <Suspense fallback={null}>
+        <WidgetLibrary
+          widgets={library}
+          placedTypes={placedTypes}
+          onAdd={(definition) => addWidget(definition)}
+          onDragMove={(x, y, definition) => canvasRef.current?.previewExternal(x, y, definition.defaultSize) ?? false}
+          onDrop={(x, y, definition) => { const cell = canvasRef.current?.dropExternal(x, y, definition.defaultSize); if (cell) addWidget(definition, cell) }}
+          onDragCancel={() => canvasRef.current?.clearExternal()}
+          onClose={() => setLibraryOpen(false)}
+        />
+      </Suspense>}
+      {settingsWidget && settingsDefinition && <Suspense fallback={null}>
+        <WidgetSettingsDialog
+          widget={settingsWidget}
+          definition={settingsDefinition}
+          onClose={() => setSettingsId(null)}
+          onSave={({ settings, w, h }) => {
+            const resized = { id: settingsWidget.id, x: Math.min(settingsWidget.x, GRID_COLUMNS - w), y: settingsWidget.y, w, h }
+            const next = placeItem(items, resized)
+            setWidgets(widgetsRef.current.map((widget) => {
+              const position = next.find((item) => item.id === widget.id)
+              const placed = position ? { ...widget, x: position.x, y: position.y, w: position.w, h: position.h } : widget
+              return widget.id === settingsWidget.id ? { ...placed, settings } : placed
+            }))
+            setSettingsId(null)
+          }}
+        />
+      </Suspense>}
     </div>
-  );
+  )
 }

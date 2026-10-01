@@ -24,6 +24,7 @@ import { useColorThemeStore } from '../store/colorTheme'
 import { showDesktopChatAlert } from '../platform/chat-notifications'
 import { setTelemetryTag } from '../platform/telemetry'
 import { preloadRoute } from '../platform/route-preload'
+import { OPEN_ASSISTANT_EVENT, OPEN_SEARCH_EVENT } from '../platform/app-events'
 
 const NAV = [
   { to: '/', label: 'nav.today', icon: LayoutDashboard, roles: [] },
@@ -40,7 +41,7 @@ const NAV = [
   { to: '/administration', label: 'nav.settings', icon: Settings2, roles: ['admin', 'manager', 'team_lead'] },
 ]
 
-const NAV_GROUP_BREAKS = new Set(['/calendar', '/reports', '/analytics', '/administration'])
+const NAV_GROUP_BREAKS =new Set(['/calendar', '/reports', '/analytics', '/administration'])
 const PAYROLL_ROLES = ['admin', 'hr']
 const LazyOyunsAssistant = lazy(() => import('./OyunsAssistant').then((module) => ({ default: module.OyunsAssistant })))
 const LazyGlobalCommandBar = lazy(() => import('./GlobalCommandBar').then((module) => ({ default: module.GlobalCommandBar })))
@@ -257,6 +258,17 @@ export function EnterpriseShell() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+  // Pages (e.g. Today quick actions) open search / the assistant without prop drilling.
+  useEffect(() => {
+    const openSearch = () => setCommandOpen(true)
+    const openAssistant = () => { if (assistantLicensed) setAssistantOpen(true) }
+    window.addEventListener(OPEN_SEARCH_EVENT, openSearch)
+    window.addEventListener(OPEN_ASSISTANT_EVENT, openAssistant)
+    return () => {
+      window.removeEventListener(OPEN_SEARCH_EVENT, openSearch)
+      window.removeEventListener(OPEN_ASSISTANT_EVENT, openAssistant)
+    }
+  }, [assistantLicensed])
 
   useEffect(() => {
     if (actorQuery.data) setActor(actorQuery.data)
