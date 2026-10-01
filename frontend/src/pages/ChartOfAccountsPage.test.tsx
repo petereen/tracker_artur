@@ -35,6 +35,11 @@ const usage = [
 ]
 
 vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() }))
+vi.mock('../api/budget', () => ({
+  useBudgetCapabilities: () => ({ data: { module_enabled: true, budgets: {}, settings: { view: true, create: true, edit: true, archive: true } } }),
+  useBudgetLookups: () => ({ data: { accounts: [], erp_accounts: accounts.map((row) => ({ id: row.id, budget_account_id: null })) } }),
+  useGenerateBudgetAccounts: () => ({ mutateAsync: vi.fn().mockResolvedValue({ created: 2 }) }),
+}))
 vi.mock('../api/enterprise', () => ({
   useERPAccountPermissions: () => ({ data: mocks.permissions.current, isLoading: false }),
   useERPAccountOptions: () => ({ data: accounts, isLoading: false }),
@@ -80,6 +85,13 @@ describe('ChartOfAccountsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Хадгалах' }))
     await waitFor(() => expect(mocks.update).toHaveBeenCalled())
     expect(mocks.update.mock.calls[0][0]).toMatchObject({ id: 6, code: '5100', name: 'Үндсэн цалингийн зардал', classification: 'expense', purpose: 'salary_expense', parent_id: 5 })
+  })
+
+  it('offers to create budget accounts from unlinked income/expense accounts', async () => {
+    mocks.permissions.current = { view: true, create: true, edit: true, administer: true }
+    render(<MemoryRouter><ChartOfAccountsPage /></MemoryRouter>)
+    expect(await screen.findByText(/2 орлого\/зардлын данс төсөвт данстай холбогдоогүй/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Төсөвт данс үүсгэх' })).toBeTruthy()
   })
 
   it('deletes an unused account and archives a used one', async () => {

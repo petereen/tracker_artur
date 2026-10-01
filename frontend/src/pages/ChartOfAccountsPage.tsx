@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Archive, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Archive, Pencil, Plus, Trash2, Wand2 } from 'lucide-react'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -11,6 +11,7 @@ import { FormLayout } from '@astryxdesign/core/FormLayout'
 import { Heading } from '@astryxdesign/core/Heading'
 import { HStack } from '@astryxdesign/core/HStack'
 import { IconButton } from '@astryxdesign/core/IconButton'
+import { Link } from '@astryxdesign/core/Link'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Selector } from '@astryxdesign/core/Selector'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
@@ -23,6 +24,8 @@ import {
   type ERPAccountCatalog, type ERPAccountClassification, type ERPAccountInput, type ERPAccountOption, type ERPAccountUsage,
   useCreateERPAccount, useDeleteERPAccount, useERPAccountCatalog, useERPAccountOptions, useERPAccountPermissions, useERPAccountUsage, useUpdateERPAccount,
 } from '../api/enterprise'
+import { useBudgetCapabilities, useBudgetLookups, useGenerateBudgetAccounts } from '../api/budget'
+import { RouterLink } from '../components/budget/shared'
 import { CLASSIFICATION_LABELS, CLASSIFICATION_ORDER, ClassificationToken, accountErrorText, accountLabel } from '../components/accounts/accountShared'
 
 type StatusFilter = 'active' | 'inactive' | 'all'
@@ -140,11 +143,19 @@ export function ChartOfAccountsPage() {
   const catalog = useERPAccountCatalog(canView)
   const usage = useERPAccountUsage(canView)
   const remove = useDeleteERPAccount()
+  const budgetCaps = useBudgetCapabilities(canView)
+  const budgetSettings = budgetCaps.data?.settings
+  const budgetLookups = useBudgetLookups(Boolean(budgetSettings?.view))
+  const generateBudget = useGenerateBudgetAccounts()
   const [editing, setEditing] = useState<ERPAccountOption | 'new' | null>(null)
   const [classification, setClassification] = useState<'all' | ERPAccountClassification>('all')
   const [status, setStatus] = useState<StatusFilter>('active')
   const [search, setSearch] = useState('')
   const usageById = useMemo(() => new Map((usage.data ?? []).map((row) => [row.account_id, row])), [usage.data])
+  const budgetByLedger = useMemo(() => {
+    const names = new Map((budgetLookups.data?.accounts ?? []).map((row) => [row.id, row]))
+    return new Map((budgetLookups.data?.erp_accounts ?? []).map((row) => [row.id, row.budget_account_id ? names.get(row.budget_account_id) : undefined]))
+  }, [budgetLookups.data])
   const purposeLabels = useMemo(() => new Map((catalog.data?.purposes ?? []).map((row) => [row.key, row.label])), [catalog.data])
 
   if (permissions.isLoading || (canView && (accounts.isLoading || catalog.isLoading))) return <Skeleton height={320} />
@@ -161,6 +172,12 @@ export function ChartOfAccountsPage() {
   const rows: AccountRow[] = (needle ? filtered.map((account) => ({ account, depth: 0 })).sort((a, b) => a.account.code.localeCompare(b.account.code, undefined, { numeric: true })) : treeOrder(filtered))
     .map(({ account, depth }) => ({ id: account.id, account, depth, usage: usageById.get(account.id) }))
   const counts = CLASSIFICATION_ORDER.reduce<Record<string, number>>((acc, key) => ({ ...acc, [key]: all.filter((account) => account.classification === key && account.is_active !== false).length }), {})
+  const budgetable = (account: ERPAccountOption) => !account.is_group && account.is_active !== false && ['income', 'expense'].includes(account.classification)
+  const unlinkedBudget = budgetLookups.data ? all.filter((account) => budgetable(account) && !budgetByLedger.get(account.id)).length : 0
+  const generateBudgetAccounts = async () => {
+    if (!window.confirm(`Төсөвт холбогдоогүй ${unlinkedBudget} орлого/зардлын данс бүрт төсөвт данс үүсгэх үү?`)) return
+    try { const result = await generateBudget.mutateAsync(undefined); toast.success(`${result.created} төсөвт данс үүслээ`) } catch (error) { toast.error(accountErrorText(error)) }
+  }
   const inactive = all.filter((account) => account.is_active === false).length
 
   const removeAccount = async (account: ERPAccountOption, used: boolean) => {
@@ -188,6 +205,14 @@ export function ChartOfAccountsPage() {
       {perms.create && <Button label="Данс нэмэх" variant="primary" icon={<Plus size={15} />} onClick={() => setEditing('new')} />}
     </HStack>
 
+    {budgetSettings?.view && budgetLookups.data && unlinkedBudget > 0 && <Banner status="warning" collapsible={false}
+      title={`${unlinkedBudget} орлого/зардлын данс төсөвт данстай холбогдоогүй байна`}
+      description="Төсөвт данс нь энд биш, Төсөв → Данс хэсэгт үүсдэг. Доорх товчоор орлого, зардлын дансуудаас шууд үүсгэнэ."
+      endContent={<HStack gap={2} vAlign="center">
+        <Link as={RouterLink} href="/erp/budget/accounts">Төсөвт данс</Link>
+        {budgetSettings.create && <Button label="Төсөвт данс үүсгэх" size="sm" icon={<Wand2 size={14} />} clickAction={generateBudgetAccounts} />}
+      </HStack>} />}
+
     <Card padding={0}>
       {rows.length === 0 ? <EmptyState title="Данс олдсонгүй" description={all.length ? 'Шүүлтүүрээ өөрчилнө үү.' : '“Данс нэмэх”-ээр эхэлнэ үү.'} />
         : <Table<AccountRow>
@@ -205,6 +230,11 @@ export function ChartOfAccountsPage() {
             { key: 'classification', header: 'Ангилал', width: pixel(120), renderCell: ({ account }) => <ClassificationToken classification={account.classification} /> },
             { key: 'purpose', header: 'Зориулалт', width: proportional(2), renderCell: ({ account }) => <Text type={account.purpose === 'general' ? 'supporting' : undefined}>{purposeLabels.get(account.purpose ?? 'general') ?? account.purpose}</Text> },
             { key: 'currency', header: 'Валют', width: pixel(80), renderCell: ({ account }) => <Text type="supporting">{account.currency ?? 'MNT'}</Text> },
+            ...(budgetSettings?.view ? [{ key: 'budget', header: 'Төсөвт данс', width: proportional(2), renderCell: ({ account }: AccountRow) => {
+              if (!budgetable(account)) return <Text type="supporting">—</Text>
+              const linked = budgetByLedger.get(account.id)
+              return linked ? <Token size="sm" label={linked.code} description={linked.name} /> : <Token size="sm" color="orange" label="Холбоогүй" />
+            } }] : []),
             { key: 'usage', header: 'Ашиглалт', width: proportional(2), renderCell: ({ usage: used }) => used?.total
               ? <HStack gap={0.5} wrap="wrap">{Object.entries(used.modules).map(([module, count]) => <Token key={module} size="sm" label={catalog.data!.usage_modules[module] ?? module} description={String(count)} />)}</HStack>
               : <Text type="supporting">—</Text> },
