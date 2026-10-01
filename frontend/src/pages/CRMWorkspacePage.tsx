@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { createElement, useState } from 'react'
+import { MessagesSquare, Settings2, Users, type LucideIcon } from 'lucide-react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useCRMActivity, useCRMCapabilities, useCRMLookups, type CRMActivity, type CRMParty } from '../api/crm'
 import { useActor } from '../api/enterprise'
@@ -14,6 +15,7 @@ import '../components/crm/crm.css'
 type Tab = 'activities' | 'customers' | 'settings'
 const TAB_PATHS: Record<Tab, string> = { activities: '/erp/crm', customers: '/erp/crm/customers', settings: '/erp/crm/settings' }
 const TAB_LABELS: Record<Tab, string> = { activities: 'Харилцаа холбоо', customers: 'Харилцагч', settings: 'Тохиргоо' }
+const TAB_ICONS: Record<Tab, LucideIcon> = { activities: MessagesSquare, customers: Users, settings: Settings2 }
 const MANAGER_ROLES = ['admin', 'manager', 'team_lead']
 
 export function CRMWorkspacePage() {
@@ -55,7 +57,7 @@ export function CRMWorkspacePage() {
       CRM модуль цэсэнд идэвхжээгүй байна. {actor.data?.roles?.includes('admin') ? <Link to="/administration/organization/modules">Модуль ба боломжууд</Link> : 'Админ'} хэсгээс идэвхжүүлнэ үү.
     </div>}
     <nav className="page-tabs"><div className="page-tabs-list" aria-label="CRM sections">
-      {visibleTabs.map((key) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(TAB_PATHS[key])}>{TAB_LABELS[key]}</button>)}
+      {visibleTabs.map((key) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => navigate(TAB_PATHS[key])}>{createElement(TAB_ICONS[key], { size: 15 })}{TAB_LABELS[key]}</button>)}
     </div></nav>
 
     {tab === 'activities' && caps.activities.view && <ActivitiesPanel lookups={data} capabilities={caps} isManager={isManager} onOpen={openActivity} onCreate={() => setEditingActivity('new')} />}

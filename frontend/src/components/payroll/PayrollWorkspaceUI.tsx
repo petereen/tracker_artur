@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { ArrowUpRight, BarChart3, ClipboardList, Landmark, WalletCards, type LucideIcon } from 'lucide-react'
+import { ArrowUpRight, BarChart3, ClipboardList, FileText, Landmark, LayoutDashboard, Receipt, Settings2, WalletCards, type LucideIcon } from 'lucide-react'
 import type { PayrollEntry, PayrollPayslip } from '../../api/enterprise'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
@@ -56,21 +56,21 @@ export function payrollSectionForPath(pathname: string): PayrollSection {
   return 'overview'
 }
 
-const tabs: Array<{ id: PayrollSection; label: string; href: string }> = [
-  { id: 'overview', label: 'Тойм', href: '/erp/payroll' },
-  { id: 'setup', label: 'Тохиргоо', href: '/erp/payroll/salary-components' },
-  { id: 'entries', label: 'Payroll Entries', href: '/erp/payroll/payroll-entries' },
-  { id: 'payslips', label: 'Salary Slips', href: '/erp/payroll/salary-slips' },
-  { id: 'reports', label: 'Тайлан', href: '/erp/payroll/reports/salary-register' },
+const tabs: Array<{ id: PayrollSection; label: string; href: string; icon: LucideIcon }> = [
+  { id: 'overview', label: 'Тойм', href: '/erp/payroll', icon: LayoutDashboard },
+  { id: 'setup', label: 'Тохиргоо', href: '/erp/payroll/salary-components', icon: Settings2 },
+  { id: 'entries', label: 'Payroll Entries', href: '/erp/payroll/payroll-entries', icon: ClipboardList },
+  { id: 'payslips', label: 'Salary Slips', href: '/erp/payroll/salary-slips', icon: Receipt },
+  { id: 'reports', label: 'Тайлан', href: '/erp/payroll/reports/salary-register', icon: BarChart3 },
 ]
 
 export function PayrollWorkspaceTabs() {
   const location = useLocation()
   const active = payrollSectionForPath(location.pathname)
   return <nav className="page-tabs"><div className="page-tabs-list" aria-label="Payroll module sections">
-    {tabs.map((tab) => <Link key={tab.id} to={tab.href} className={active === tab.id ? 'active' : undefined} aria-current={active === tab.id ? 'page' : undefined}>{tab.label}</Link>)}
-    <Link to="/erp/payroll/additional-salaries">Нэмэлт цалин</Link>
-    <Link to="/erp/payroll/tax-benefits">Татвар &amp; benefits</Link>
+    {tabs.map((tab) => <Link key={tab.id} to={tab.href} className={active === tab.id ? 'active' : undefined} aria-current={active === tab.id ? 'page' : undefined}><tab.icon size={15} />{tab.label}</Link>)}
+    <Link to="/erp/payroll/additional-salaries"><WalletCards size={15} />Нэмэлт цалин</Link>
+    <Link to="/erp/payroll/tax-benefits"><Landmark size={15} />Татвар &amp; benefits</Link>
   </div></nav>
 }
 

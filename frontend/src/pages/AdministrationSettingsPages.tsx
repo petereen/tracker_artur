@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { createElement, useEffect, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bell, Bot, BookOpen, Building2, Globe, Send, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, FileCheck2, KeyRound, LocateFixed, MapPin, MonitorUp, ScanLine, Settings2, ShieldAlert, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, Wifi, X } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -28,45 +28,45 @@ import { NotificationSettings } from '../components/NotificationSettings'
 import { Banner } from '@astryxdesign/core/Banner'
 import { tenancyErrorMessage, useTenantSeats } from '../api/tenancy'
 
-type SettingsTab = { to: string; label: string; roles?: string[] }
+type SettingsTab = { to: string; label: string; roles?: string[]; icon?: typeof Settings2 }
 type SettingsCategory = { id: string; to: string; label: string; icon: typeof Settings2; roles: string[]; tabs: SettingsTab[] }
 
 const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
     id: 'organization', to: '/administration/organization/profile', label: 'Байгууллага', icon: Building2, roles: ['admin', 'manager'],
     tabs: [
-      { to: '/administration/organization/profile', label: 'Профайл ба брэндинг', roles: ['admin', 'manager'] },
-      { to: '/administration/organization/modules', label: 'Модуль ба боломжууд', roles: ['admin'] },
-      { to: '/administration/organization/domains', label: 'Өөрийн домэйн', roles: ['admin'] },
+      { to: '/administration/organization/profile', label: 'Профайл ба брэндинг', icon: Building2, roles: ['admin', 'manager'] },
+      { to: '/administration/organization/modules', label: 'Модуль ба боломжууд', icon: Settings2, roles: ['admin'] },
+      { to: '/administration/organization/domains', label: 'Өөрийн домэйн', icon: Globe, roles: ['admin'] },
     ],
   },
   {
     id: 'people', to: '/administration/people/users', label: 'Хэрэглэгч ба эрх', icon: Users2, roles: ['admin', 'manager'],
     tabs: [
-      { to: '/administration/people/users', label: 'Ажилтан ба хэрэглэгч', roles: ['admin'] },
-      { to: '/administration/people/permissions', label: 'Үүрэг ба эрх', roles: ['admin', 'manager'] },
+      { to: '/administration/people/users', label: 'Ажилтан ба хэрэглэгч', icon: Users2, roles: ['admin'] },
+      { to: '/administration/people/permissions', label: 'Үүрэг ба эрх', icon: ShieldCheck, roles: ['admin', 'manager'] },
     ],
   },
   {
     id: 'workflows', to: '/administration/workflows/worktime', label: 'Ажлын цаг ба процесс', icon: UserRoundCog, roles: ['admin', 'manager', 'team_lead'],
     tabs: [
-      { to: '/administration/workflows/worktime', label: 'Ажлын цаг ба check-in' },
-      { to: '/administration/workflows/reports', label: 'Тайлангийн тохиргоо' },
+      { to: '/administration/workflows/worktime', label: 'Ажлын цаг ба check-in', icon: CalendarClock },
+      { to: '/administration/workflows/reports', label: 'Тайлангийн тохиргоо', icon: ClipboardList },
     ],
   },
   {
     id: 'integrations', to: '/administration/integrations/overview', label: 'Автоматжуулалт ба интеграци', icon: CalendarClock, roles: ['admin', 'manager', 'team_lead'],
-    tabs: [{ to: '/administration/integrations/overview', label: 'Интеграци ба төхөөрөмж' }],
+    tabs: [{ to: '/administration/integrations/overview', label: 'Интеграци ба төхөөрөмж', icon: Send }],
   },
   {
     id: 'ai', to: '/administration/ai/knowledge', label: 'OYUNS AI ба сургалт', icon: Bot, roles: ['admin', 'manager', 'team_lead', 'hr', 'member', 'contractor', 'client_auditor', 'legal_counsel'],
-    tabs: [{ to: '/administration/ai/knowledge', label: 'Сургалт ба агент' }],
+    tabs: [{ to: '/administration/ai/knowledge', label: 'Сургалт ба агент', icon: BookOpen }],
   },
   {
     id: 'security', to: '/administration/security/authentication', label: 'Систем ба аюулгүй байдал', icon: KeyRound, roles: ['admin'],
     tabs: [
-      { to: '/administration/security/authentication', label: 'Нэвтрэлт ба админ' },
-      { to: '/administration/security/license', label: 'Лиценз ба идэвхжүүлэлт' },
+      { to: '/administration/security/authentication', label: 'Нэвтрэлт ба админ', icon: KeyRound },
+      { to: '/administration/security/license', label: 'Лиценз ба идэвхжүүлэлт', icon: FileCheck2 },
     ],
   },
 ]
@@ -110,7 +110,7 @@ function SettingsPage({ title, categoryId, activeTab, children }: { title: strin
       </aside>
       <main className="settings-main">
         <div className="view-toolbar settings-page-heading"><div><h2>{title}</h2></div><Settings2 /></div>
-        <nav className="page-tabs"><div className="page-tabs-list" aria-label={`${category.label} tabs`}>{tabs.map((tab) => <NavLink key={tab.to} to={tab.to} className={tab.to === activeTab ? 'active' : undefined}>{tab.label}</NavLink>)}</div></nav>
+        <nav className="page-tabs"><div className="page-tabs-list" aria-label={`${category.label} tabs`}>{tabs.map((tab) => <NavLink key={tab.to} to={tab.to} className={tab.to === activeTab ? 'active' : undefined}>{createElement(tab.icon || category.icon, { size: 15 })}{tab.label}</NavLink>)}</div></nav>
         <div className="settings-content">{children}</div>
       </main>
     </div>

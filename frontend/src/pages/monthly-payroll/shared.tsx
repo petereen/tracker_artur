@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink } from 'react-router-dom'
+import { Archive, BarChart3, CalendarRange, LayoutDashboard, Settings2, Users } from 'lucide-react'
 import type { MonthlyPayrollRunRow } from '../../api/enterprise'
 import './monthlyPayroll.css'
 
@@ -113,12 +114,12 @@ export function MonthlyShell({ children, actions, canAdminister = false }: { chi
   return <main className="payroll-v2-shell"><div className="payroll-v2-content">
     <div className="page-tabs">
       <nav className="page-tabs-list" aria-label="Цалингийн навигаци">
-        <NavLink className={tab} to="/erp/payroll" end>Хянах самбар</NavLink>
-        <NavLink className={tab} to="/erp/payroll/monthly" end>Сарын цалин</NavLink>
-        <NavLink className={tab} to="/erp/payroll/monthly/reports">Тайлан</NavLink>
-        <NavLink className={tab} to="/erp/payroll/monthly/archive">Архив</NavLink>
-        {canAdminister && <NavLink className={tab} to="/erp/payroll/monthly/settings">Тохиргоо</NavLink>}
-        <NavLink to="/hr?tab=payroll">HR тохиргоо</NavLink>
+        <NavLink className={tab} to="/erp/payroll" end><LayoutDashboard size={15} />Хянах самбар</NavLink>
+        <NavLink className={tab} to="/erp/payroll/monthly" end><CalendarRange size={15} />Сарын цалин</NavLink>
+        <NavLink className={tab} to="/erp/payroll/monthly/reports"><BarChart3 size={15} />Тайлан</NavLink>
+        <NavLink className={tab} to="/erp/payroll/monthly/archive"><Archive size={15} />Архив</NavLink>
+        {canAdminister && <NavLink className={tab} to="/erp/payroll/monthly/settings"><Settings2 size={15} />Тохиргоо</NavLink>}
+        <NavLink to="/hr?tab=payroll"><Users size={15} />HR тохиргоо</NavLink>
       </nav>
       {actions ? <div className="page-tabs-actions payroll-compact-actions">{actions}</div> : null}
     </div>

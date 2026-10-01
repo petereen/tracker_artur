@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { createElement, useState } from 'react'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
-import { ExternalLink, Paperclip, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import { Contact, ExternalLink, FileCheck2, FileText, History, Info, Landmark, MessagesSquare, Paperclip, Pencil, Plus, RefreshCw, Trash2, X, type LucideIcon } from 'lucide-react'
 import {
   downloadCRMFile, useCRMFiles, useCRMParty, useCRMPartyDocuments, useCRMPartyHistory, useDeleteCRMBankAccount, useDeleteCRMContact, useDeleteCRMFile,
   useDeleteCRMParty, useRefreshCRMTaxStatus, useSaveCRMBankAccount, useSaveCRMContact, useUploadCRMFile,
@@ -14,6 +14,7 @@ import { CheckField, Field, TextInput, crmErrorText, formatDate, formatDateTime,
 
 type Tab = 'overview' | 'contacts' | 'bank' | 'activities' | 'contracts' | 'documents' | 'files' | 'history'
 const TAB_LABELS: Record<Tab, string> = { overview: 'Ерөнхий', contacts: 'Холбоо барих', bank: 'Банкны данс', activities: 'Харилцаа холбоо', contracts: 'Гэрээ', documents: 'Баримтууд', files: 'Файл', history: 'Лог' }
+const TAB_ICONS: Record<Tab, LucideIcon> = { overview: Info, contacts: Contact, bank: Landmark, activities: MessagesSquare, contracts: FileText, documents: FileCheck2, files: Paperclip, history: History }
 const CONTRACT_STATUS_LABELS: Record<string, string> = { DRAFT: 'Ноорог', PENDING_REVIEW: 'Хянагдаж байна', CHANGES_REQUESTED: 'Засвар шаардлагатай', APPROVED: 'Баталгаажсан', REJECTED: 'Буцаагдсан', SIGNED_AND_STAMPED: 'Гарын үсэг зурсан' }
 const FIELD_LABELS: Record<string, string> = {
   code: 'Код', name: 'Нэр', registry_no: 'РД', tax_id: 'ТТД', group_id: 'Бүлэг', price_list_id: 'Үнийн жагсаалт', sales_discount_pct: 'Борлуулалт %',
@@ -80,7 +81,7 @@ export function CustomerDetail({ partyId, lookups, capabilities, isManager, onCl
           <div><small>Сүүлийн харилцаа</small><strong>{formatDate(data.stats.last_activity_at)}</strong></div>
         </div>
 
-        <nav className="page-tabs crm-detail-tabs"><div className="page-tabs-list">{(Object.keys(TAB_LABELS) as Tab[]).map((key) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{TAB_LABELS[key]}</button>)}</div></nav>
+        <nav className="page-tabs crm-detail-tabs"><div className="page-tabs-list">{(Object.keys(TAB_LABELS) as Tab[]).map((key) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{createElement(TAB_ICONS[key], { size: 15 })}{TAB_LABELS[key]}</button>)}</div></nav>
 
         {tab === 'overview' && <Overview data={data} onOpenParty={onOpenParty} onRefresh={canEdit ? refresh : undefined} refreshing={refreshTax.isPending} onDelete={capabilities.parties.archive ? destroy : undefined} />}
         {tab === 'contacts' && <Contacts party={data} canEdit={canEdit} />}

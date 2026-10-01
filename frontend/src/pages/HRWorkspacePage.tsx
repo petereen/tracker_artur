@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
-import { Archive, ArchiveRestore, Building2, CalendarDays, Check, Copy, Link2, Pencil, Plus, Search, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Building2, CalendarDays, Check, Clock, Copy, Link2, Pencil, Plus, Search, Trash2, UserPlus, Users, Wallet, X, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useHREmployeeRoles, useSetHREmployeeRoles, useActor, useArchiveHREmployee, useCreateHRDepartment, useCreateHREmployee, useDecideHRLeave, useDeleteHRDepartment, useDeleteHREmployeePermanently, useHRDepartments, useHREmployees, useHRLeaveBalances, useHRLeaveRequests, useSetHRLeaveBalance, useSubmitHRLeave, useUpdateHRDepartment, useUpdateHREmployee, useUpdateHRLeave } from '../api/enterprise'
 import type { HRDepartment, HREmployee, HREmploymentStatus, HREmploymentType, HRLeaveRequest } from '../api/enterprise'
@@ -58,10 +58,11 @@ export function HRWorkspacePage() {
   const leave = useHRLeaveRequests({ status: isManager ? undefined : undefined })
   const balances = useHRLeaveBalances({ employee_id: isHR ? undefined : actor.data?.employee_id || undefined })
   const visibleTabs: Tab[] = isHR ? ['directory', 'departments', 'leave', 'attendance', 'payroll'] : ['directory', 'leave', 'attendance']
+  const navIcons: Record<Tab, LucideIcon> = { directory: Users, departments: Building2, leave: CalendarDays, attendance: Clock, payroll: Wallet }
   const navLabels: Record<Tab, string> = { directory: 'Ажилтны лавлах', departments: 'Хэлтэс', leave: 'Чөлөө', attendance: 'Ирц', payroll: 'Цалин' }
   return <div className="hr-workspace">
     <div className="page-tabs">
-      <nav className="page-tabs-list" aria-label="HR sections">{visibleTabs.map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{navLabels[item]}</button>)}</nav>
+      <nav className="page-tabs-list" aria-label="HR sections">{visibleTabs.map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{(() => { const Icon = navIcons[item]; return <Icon size={15} /> })()}{navLabels[item]}</button>)}</nav>
       {isHR && <div className="page-tabs-actions"><CreateButton label="Ажилтан нэмэх" icon={<UserPlus size={16} />} onClick={() => setEditing('new')} /></div>}
     </div>
     {tab === 'directory' && <Directory employees={employees.data?.items || []} departments={departments.data || []} search={search} setSearch={setSearch} department={department} setDepartment={setDepartment} statusFilter={statusFilter} setStatusFilter={setStatusFilter} includeArchived={includeArchived} setIncludeArchived={setIncludeArchived} canEdit={isHR} onSelect={setSelected} onEdit={setEditing} />}

@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+import { BarChart3, BookOpen, Wallet } from 'lucide-react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Link } from '@astryxdesign/core/Link'
@@ -15,6 +17,7 @@ import { RouterLink, budgetErrorText } from '../components/budget/shared'
 type BudgetTab = 'budgets' | 'analysis' | 'accounts'
 const TAB_PATHS: Record<BudgetTab, string> = { budgets: '/erp/budget', analysis: '/erp/budget/analysis', accounts: '/erp/budget/accounts' }
 const TAB_LABELS: Record<BudgetTab, string> = { budgets: 'Төсөв', analysis: 'Төсвийн анализ', accounts: 'Төсөвт данс' }
+const TAB_ICONS: Record<BudgetTab, ReactNode> = { budgets: <Wallet size={15} />, analysis: <BarChart3 size={15} />, accounts: <BookOpen size={15} /> }
 
 /** Төсөв, гүйцэтгэл (Dayansoft d161): plan → budget → actual → comparison → decision. */
 export function BudgetWorkspacePage() {
@@ -41,7 +44,7 @@ export function BudgetWorkspacePage() {
       description={isAdmin ? undefined : 'Админ “Модуль ба боломжууд” хэсгээс идэвхжүүлнэ.'}
       endContent={isAdmin ? <Link as={RouterLink} href="/administration/organization/modules">Модуль ба боломжууд</Link> : undefined} />}
     <TabList value={tab} onChange={(value) => navigate(TAB_PATHS[value as BudgetTab])} hasDivider role="tablist">
-      {visibleTabs.map((key) => <Tab key={key} value={key} label={TAB_LABELS[key]} />)}
+      {visibleTabs.map((key) => <Tab key={key} value={key} label={TAB_LABELS[key]} icon={TAB_ICONS[key]} />)}
     </TabList>
     {tab === 'budgets' && caps.budgets.view && (budgetId ? <BudgetEditor budgetId={Number(budgetId)} capabilities={caps} lookups={lookups.data} /> : <BudgetsPanel capabilities={caps} lookups={lookups.data} />)}
     {tab === 'analysis' && caps.budgets.view && <AnalysisPanel capabilities={caps} lookups={lookups.data} />}
