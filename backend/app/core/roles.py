@@ -12,3 +12,6 @@ SYSTEM_ROLES = frozenset({
 })
 
 WORKTIME_REPORT_ROLES = frozenset({"admin", "manager", "hr", "team_lead"})
+# Roles that see the whole tenant in the Telegram companion (same as the web
+# workspace: a team lead keeps the personal scope).
+TELEGRAM_MANAGEMENT_ROLES = frozenset({"admin", "manager"})

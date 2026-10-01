@@ -330,7 +330,7 @@ def all_active_grouped_by_assignee() -> dict[str, list[dict]]:
 
 def set_status(task_id: int, status: str, *, by_employee_id: Optional[int] = None) -> Optional[dict]:
     with get_session() as s:
-        task = s.get(Task, task_id)
+        task = s.execute(_scoped(select(Task).where(Task.id == task_id), Task)).scalar_one_or_none()
         if not task:
             return None
         task.status = status
@@ -347,7 +347,7 @@ def set_status(task_id: int, status: str, *, by_employee_id: Optional[int] = Non
 def submit_for_review(task_id: int, *, by_employee_id: Optional[int] = None) -> Optional[dict]:
     """Move a task into review; reviewer selection remains optional."""
     with get_session() as s:
-        task = s.get(Task, task_id)
+        task = s.execute(_scoped(select(Task).where(Task.id == task_id), Task)).scalar_one_or_none()
         if not task:
             return None
         task.status = "open"
@@ -371,7 +371,7 @@ def submit_for_review(task_id: int, *, by_employee_id: Optional[int] = None) -> 
 
 def snooze(task_id: int, new_deadline: datetime) -> Optional[dict]:
     with get_session() as s:
-        task = s.get(Task, task_id)
+        task = s.execute(_scoped(select(Task).where(Task.id == task_id), Task)).scalar_one_or_none()
         if not task:
             return None
         task.deadline_at = new_deadline
@@ -405,7 +405,7 @@ def can_modify(task: dict, *, employee_id: Optional[int], tg_id: Optional[str], 
 
 def mark_overdue_pinged(task_id: int) -> None:
     with get_session() as s:
-        t = s.get(Task, task_id)
+        t = s.execute(_scoped(select(Task).where(Task.id == task_id), Task)).scalar_one_or_none()
         if t:
             t.overdue_pinged_at = datetime.now(timezone.utc)
             s.commit()

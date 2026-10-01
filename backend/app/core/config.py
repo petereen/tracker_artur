@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # Retained only so old deployments can start; browser login no longer
     # reads this legacy widget setting.
     TELEGRAM_BOT_USERNAME: str = ""
-    MANAGER_TG_ID: str = "306983322"
+    MANAGER_TG_ID: str = ""
     # Public HTTPS address opened by Telegram. It must point to the Mini App
     # route on the ERP domain, not directly to the API container.
     MINI_APP_URL: str = "https://erp.oyuns.mn/tg"

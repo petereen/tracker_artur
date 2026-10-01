@@ -360,7 +360,7 @@ export function EnterpriseShell() {
     <RealtimeProvider>
       <div className="workspace-shell">
         <aside className="workspace-sidebar">
-          <div className="sidebar-brand"><img src={logo || (theme === 'dark' ? '/oyuns-aio-logo.png' : '/favicon.png')} alt="OYUNS" /></div>
+          <div className="sidebar-brand">{branding.isPending ? null : <img src={logo || (theme === 'dark' ? '/oyuns-aio-logo.png' : '/favicon.png')} alt="OYUNS" />}</div>
           <nav aria-label="Үндсэн цэс">
             {nav.map(({ to, label, icon: Icon }) => (
               <div className={NAV_GROUP_BREAKS.has(to) ? 'nav-group nav-group-break' : 'nav-group'} key={to}>

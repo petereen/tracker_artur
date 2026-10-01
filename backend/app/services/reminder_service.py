@@ -103,15 +103,6 @@ def reconcile_task_reminders() -> None:
             log.exception("reconcile: не удалось запланировать напоминания task=%s", task["id"])
 
 
-def _manager_tg() -> str | None:
-    from app.bot.db import get_manager_settings
-
-    ms = get_manager_settings()
-    if ms and ms.telegram_id:
-        return str(ms.telegram_id)
-    return str(settings.MANAGER_TG_ID) if settings.MANAGER_TG_ID else None
-
-
 def _fmt_deadline(dt: datetime | None) -> str:
     if not dt:
         return "Хугацаагүй"

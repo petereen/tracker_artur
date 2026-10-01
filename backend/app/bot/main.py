@@ -21,6 +21,7 @@ from aiogram.methods import TelegramMethod
 from aiogram.types import ErrorEvent, Update
 
 from app.bot.assistant_handlers import router as assistant_router
+from app.bot.db import is_primary_tenant
 from app.bot.handlers import router
 from app.bot.handshake_handlers import router as handshake_router
 from app.bot.middlewares import EmployeeMiddleware
@@ -28,12 +29,14 @@ from app.bot.scheduler import rebuild_jobs, scheduler
 from app.bot.tasks_handlers import router as tasks_router
 from app.bot.work_report_handlers import router as work_report_router
 from app.bot.menu import setup_bot_menus
-from app.core.config import settings
+from app.core.tenancy import install_tenant_guards
 from app.observability.sentry import init_from_env
 from app.services import telegram_bots
 from app.services.telegram_bots import TenantBot
 
 init_from_env(server_name="tracker-artur-bot")
+# Same isolation layers as the API: ORM guard + ``app.tenant_id`` for RLS.
+install_tenant_guards()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -61,17 +64,6 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(router)
     dp.include_router(assistant_router)
     return dp
-
-
-def _manager_chats(organization_id: int) -> list[str]:
-    from app.bot.db import get_manager_settings, is_primary_tenant
-    from app.services.manager_recipients import manager_telegram_ids
-
-    primary = is_primary_tenant(organization_id)
-    chats = manager_telegram_ids(get_manager_settings(organization_id), primary=primary)
-    if primary and settings.MANAGER_TG_ID and str(settings.MANAGER_TG_ID) not in chats:
-        chats.append(str(settings.MANAGER_TG_ID))
-    return chats
 
 
 class BotPool:
@@ -132,9 +124,9 @@ class BotPool:
         # Polling fails with 409 while a webhook is set on the bot.
         await bot.delete_webhook(drop_pending_updates=False)
         try:
-            chats = await asyncio.to_thread(_manager_chats, tenant_bot.organization_id)
+            primary = await asyncio.to_thread(is_primary_tenant, tenant_bot.organization_id)
             mini_app_url = await asyncio.to_thread(telegram_bots.mini_app_url_sync, tenant_bot.organization_id)
-            await setup_bot_menus(bot, chats, mini_app_url)
+            await setup_bot_menus(bot, mini_app_url, primary=primary)
         except Exception:
             log.exception("bot.menu_setup_failed bot=%s", tenant_bot.bot_id)
 

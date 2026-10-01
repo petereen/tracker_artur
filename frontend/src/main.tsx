@@ -58,7 +58,7 @@ function AppToaster() {
   return <Toaster
     position={phone ? 'top-center' : 'top-right'}
     containerStyle={phone ? { top: 'calc(10px + env(safe-area-inset-top))' } : undefined}
-    toastOptions={{ style: { background: '#161B22', color: '#E6EDF3', border: '1px solid #30363D', ...(phone ? { borderRadius: '14px', maxWidth: 'calc(100vw - 24px)' } : {}) } }}
+    toastOptions={{ style: { background: 'var(--color-text)', color: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius)', ...(phone ? { maxWidth: 'calc(100vw - var(--space-6))' } : {}) } }}
   />
 }
 

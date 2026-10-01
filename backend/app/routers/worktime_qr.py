@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -254,11 +254,19 @@ async def pair_kiosk(data: PairInput, request: Request, response: Response, db: 
     kiosk.last_seen_at = now
     await db.commit()
     _set_kiosk_cookie(response, f"{kiosk.public_id}.{credential}")
-    return {"status": "paired", "kiosk": _kiosk_out(kiosk)}
+    return {"status": "paired", "kiosk": _kiosk_out(kiosk), "device_credential": f"{kiosk.public_id}.{credential}"}
 
 
 @router.get("/display-token")
-async def display_token(response: Response, kiosk_cookie: str | None = Cookie(default=None, alias=KIOSK_COOKIE), db: AsyncSession = Depends(get_db)):
+async def display_token(
+    response: Response,
+    kiosk_cookie: str | None = Cookie(default=None, alias=KIOSK_COOKIE),
+    kiosk_header: str | None = Header(default=None, alias="X-Kiosk-Credential"),
+    db: AsyncSession = Depends(get_db),
+):
+    # TV/tablet browsers frequently drop cookies; the display keeps the same
+    # credential in local storage and sends it as a fallback.
+    kiosk_cookie = kiosk_cookie or kiosk_header
     kiosk = await _kiosk_from_cookie(kiosk_cookie, db)
     await _require_qr_enabled(db, kiosk.organization_id)
     if not await _limit(f"display:{kiosk.id}", 10):

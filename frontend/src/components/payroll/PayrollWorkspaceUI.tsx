@@ -95,9 +95,9 @@ export function PayrollAnnualChart({ data }: { data: PayrollTrendPoint[] }) {
       <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: 'var(--color-muted)' }} tickFormatter={(value) => `${Math.round(Number(value) / 1000000)}m`} width={34} />
       <Tooltip formatter={(value: number) => formatMnt(value)} contentStyle={{ borderRadius: 10, border: '1px solid var(--color-border)', background: 'var(--color-panel)', color: 'var(--color-text)' }} />
       <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />
-      <Bar dataKey="net" name="Net pay" stackId="payroll" fill="#2d62ec" radius={[4, 4, 0, 0]} />
-      <Bar dataKey="pit" name="PIT" stackId="payroll" fill="#ff833b" />
-      <Bar dataKey="shi" name="SHI" stackId="payroll" fill="#7657e8" />
+      <Bar dataKey="net" name="Net pay" stackId="payroll" fill="var(--color-accent)" radius={[4, 4, 0, 0]} />
+      <Bar dataKey="pit" name="PIT" stackId="payroll" fill="var(--color-brand-orange)" />
+      <Bar dataKey="shi" name="SHI" stackId="payroll" fill="var(--color-purple)" />
     </BarChart></ResponsiveContainer></div> : <div className="payroll-reference-chart-empty"><BarChart3 size={22} /><span>Сүүлийн 12 сард тооцоолсон payroll entry алга.</span></div>}
   </section>
 }

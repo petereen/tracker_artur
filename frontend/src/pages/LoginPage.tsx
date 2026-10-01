@@ -57,7 +57,7 @@ export function LoginPage() {
     <main className="login-stage auth-layout">
       <section className="auth-form-side" aria-labelledby="login-title">
         <div className="auth-form-wrap">
-          <img src={capabilities.data?.light_logo || '/oyuns-aio-logo.png'} alt="OYUNS All-in-One" className="login-logo" />
+          {capabilities.isPending ? <div className="login-logo" aria-hidden /> : <img src={capabilities.data?.light_logo || '/oyuns-aio-logo.png'} alt="OYUNS All-in-One" className={capabilities.data?.light_logo ? 'login-logo' : 'login-logo is-default'} />}
           <div className="auth-form-heading">
             <h1 id="login-title">Тавтай морил</h1>
             {workspaceName && <p className="login-inline-hint">{workspaceName}</p>}

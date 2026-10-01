@@ -14,12 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.core.enterprise_deps import tenant_is_operational
+from app.core.enterprise_deps import actor_from_telegram_id, tenant_is_operational
+from app.core.roles import TELEGRAM_MANAGEMENT_ROLES
 from app.core.telegram_auth import verify_tenant_init_data
-from app.core.tenancy import bind_tenant, current_tenant_id, tenant_directory
+from app.core.tenancy import bind_tenant, current_tenant_id
 from app.models.models import DEFAULT_REMINDER_INTERVALS_MIN, Employee, NotificationOutbox, Task, TaskComment
 from app.services.notification_policy import load_policy, next_allowed
-from app.services.manager_recipients import manager_settings_for, manager_telegram_ids
+from app.services.manager_recipients import manager_settings_for
 from app.services.collaboration_permissions import employee_can_assign_tasks
 
 router = APIRouter()          # admin, mount /tasks
@@ -244,24 +245,27 @@ async def _miniapp_actor(db: AsyncSession, init_data: Optional[str]) -> tuple[Em
     # Фолбэк: найти по username из initData и автопроставить числовой telegram_id.
     if emp is None and tg_user.get("username"):
         uname = str(tg_user["username"]).lstrip("@")
-        query = select(Employee).where(Employee.telegram_username.ilike(uname))
+        # Only a profile without a Telegram id is bound by username.
+        query = select(Employee).where(
+            Employee.telegram_username.ilike(uname),
+            or_(Employee.telegram_id.is_(None), Employee.telegram_id == ""),
+        )
         if bot_tenant is not None:
             query = query.where(Employee.organization_id == bot_tenant)
-        emp = (await db.execute(query)).scalars().first()
-        if emp and emp.telegram_id != tg_id:
+        matches = (await db.execute(query.limit(2))).scalars().all()
+        emp = matches[0] if len(matches) == 1 else None
+        if emp:
             emp.telegram_id = tg_id
             await db.commit()
-    primary_id = await tenant_directory.primary_id()
-    organization_id = emp.organization_id if emp else (bot_tenant or primary_id)
-    is_manager = tg_id == str(settings.MANAGER_TG_ID) and organization_id == primary_id
-    if not is_manager and organization_id:
-        ms = await manager_settings_for(db, organization_id)
-        is_manager = tg_id in manager_telegram_ids(ms, primary=organization_id == primary_id)
-    if not emp and not is_manager:
+    if not emp:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not registered")
+    organization_id = emp.organization_id
     if not organization_id or not await tenant_is_operational(organization_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace unavailable")
     await bind_tenant(db, organization_id)
+    # Management scope follows the ERP roles of the linked account.
+    actor = await actor_from_telegram_id(tg_id, db)
+    is_manager = bool(actor and actor.roles & TELEGRAM_MANAGEMENT_ROLES)
     return emp, is_manager
 
 

@@ -86,7 +86,7 @@ export function ActivitiesPanel({ lookups, capabilities, isManager, partyId, com
               <td>{row.responsible_name || '—'}</td>
               <td>{formatDateTime(row.due_at)}</td>
               <td>{row.overdue_days ? <span className={row.is_overdue ? 'crm-overdue' : ''}>{row.overdue_days}</span> : '—'}</td>
-              <td>{row.is_closed ? <StatusChip name="Хаагдсан" color="#64748B" /> : row.status ? <StatusChip name={row.status.name} color={row.status.color} /> : '—'}</td>
+              <td>{row.is_closed ? <StatusChip name="Хаагдсан" color="var(--color-muted)" /> : row.status ? <StatusChip name={row.status.name} color={row.status.color} /> : '—'}</td>
             </tr>)}
           </tbody>
         </table>

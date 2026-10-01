@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.bot.db import get_session
+from app.core.tenancy import current_tenant_id
 from app.models.models import AttendanceLog, Employee, Organization, PlanIdea, UserAccount, WorkReport, WorkReportPrompt, WorkReportRevision, WorkTimeEntry
 from app.services.attendance_service import apply_worktime_attendance
 from app.services.report_policy import ReportPeriod
@@ -138,16 +139,18 @@ def period_report_needs_submission(employee_id: int, period: ReportPeriod, *, de
 
 
 def reset_test_reports(report_types: frozenset[str] = TEST_REPORT_TYPES) -> int:
-    """Remove all isolated test runs and their prompts/revisions.
+    """Remove the bound tenant's isolated test runs and their prompts/revisions.
 
     Deleting through the ORM keeps the relationship cascades effective on
     databases where foreign-key cascades are not enabled by the driver.
     Returns the number of test report lifecycles removed.
     """
+    query = select(WorkReport).where(WorkReport.report_type.in_(report_types))
+    tenant_id = current_tenant_id()
+    if tenant_id is not None:
+        query = query.where(WorkReport.employee_id.in_(select(Employee.id).where(Employee.organization_id == tenant_id)))
     with get_session() as s:
-        reports = s.execute(
-            select(WorkReport).where(WorkReport.report_type.in_(report_types))
-        ).scalars().all()
+        reports = s.execute(query).scalars().all()
         for report in reports:
             s.delete(report)
         s.commit()

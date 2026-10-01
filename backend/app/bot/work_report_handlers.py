@@ -603,22 +603,22 @@ async def cmd_test_monthly_digest(message: Message, is_manager: bool = False):
 
 
 @router.message(Command("monthly_digest"))
-async def cmd_monthly_digest(message: Message):
+async def cmd_monthly_digest(message: Message, is_manager: bool = False):
     """Generate and send the real previous-month digest on demand.
 
-    Authorization and delivery are both scoped to the configured management
-    Telegram recipients.  ``reserve=False`` makes this an on-demand read;
-    the scheduled once-per-period delivery guard does not prevent a manager
-    from requesting the current digest again.
+    Authorization follows the caller's ERP role; delivery goes to the caller
+    and the tenant's configured management recipients. ``reserve=False`` makes
+    this an on-demand read; the scheduled once-per-period delivery guard does
+    not prevent a manager from requesting the current digest again.
     """
     from app.bot.db import is_primary_tenant
     from app.core.tenancy import current_tenant_id
 
-    recipients = manager_telegram_ids(get_manager_settings(), primary=is_primary_tenant(current_tenant_id()))
-    caller_id = str(message.chat.id)
-    if caller_id not in recipients:
-        await message.answer("❌ Энэ команд зөвхөн telegram_admin_ids-д бүртгэгдсэн удирдлагад зориулсан.")
+    if not is_manager:
+        await message.answer("❌ Энэ команд зөвхөн удирдлагад зориулсан.")
         return
+    configured = manager_telegram_ids(get_manager_settings(), primary=is_primary_tenant(current_tenant_id()))
+    recipients = list(dict.fromkeys([str(message.chat.id), *configured]))
 
     sent = await try_send_monthly_report_digest(
         date.today(),

@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
-import { KeyRound, MoreVertical, Pencil, Trash2, UserCheck, UserRoundX } from 'lucide-react'
+import { KeyRound, MoreVertical, Trash2, UserCheck, UserRoundX } from 'lucide-react'
 import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../components/ui'
 import { useEmployees, useCreateEmployee, useDeleteEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
-import { useCreateManagedAccount, useDeleteManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
+import { useAssignERPAccountRole, useERPAccessRoles, useUnassignERPAccountRole } from '../api/enterprise'
+import { useCreateManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
 import { TELEGRAM_BOT_REQUIRED_HINT, tenancyErrorMessage, useTenantContext } from '../api/tenancy'
 import { ReportDetailModal } from '../components/ReportDetailModal'
 import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
@@ -62,14 +63,18 @@ export function EmployeesPage() {
   const accounts = useManagedAccounts()
   const createAccount = useCreateManagedAccount()
   const updateAccount = useUpdateManagedAccount()
-  const deleteAccount = useDeleteManagedAccount()
-  const { full: seatLimitReached } = useWorkerSeats()
+    const { full: seatLimitReached } = useWorkerSeats()
+  const customRolesQuery = useERPAccessRoles()
+  const customRoles = (customRolesQuery.data || []).filter((role) => role.is_active)
+  const assignCustomRole = useAssignERPAccountRole()
+  const unassignCustomRole = useUnassignERPAccountRole()
 
   const [search, setSearch] = useState('')
   // null = закрыто, { id: null } = создание, { id: number } = редактирование
   const [editing, setEditing] = useState<{ id: number | null } | null>(null)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null)
   const [employeeView, setEmployeeView] = useState<'settings' | 'stats'>('settings')
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [openMenuId, setOpenMenuId] = useState<number | null>(null)
   const [performanceId, setPerformanceId] = useState<number | null>(null)
   const [performanceRange, setPerformanceRange] = useState<'day' | 'week' | 'month' | 'all' | 'custom'>('month')
@@ -89,14 +94,32 @@ export function EmployeesPage() {
     (e.telegram_username || '').includes(search)
   )
 
+  const visibleSelected = filtered.filter((e: any) => selectedIds.has(e.id))
+  const allSelected = filtered.length > 0 && visibleSelected.length === filtered.length
+  const toggleSelected = (id: number) => setSelectedIds((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })
+  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(filtered.map((e: any) => e.id)))
+
+  const runBatch = async (action: 'activate' | 'deactivate' | 'delete') => {
+    const targets = visibleSelected.filter((e: any) => action === 'delete' ? !e.deleted_at : action === 'activate' ? !e.is_active || e.deleted_at : e.is_active)
+    if (!targets.length) { toast('Сонгосон ажилтанд хэрэгжих өөрчлөлт алга'); return }
+    if (action === 'delete' && !window.confirm(`${targets.length} ажилтныг жагсаалтаас устгах уу?`)) return
+    const results = await Promise.allSettled(targets.map((e: any) => action === 'delete' ? deleteEmployee.mutateAsync(e.id) : update.mutateAsync({ id: e.id, is_active: action === 'activate' })))
+    const failed = results.filter((r) => r.status === 'rejected').length
+    if (failed) toast.error(`${targets.length - failed} амжилттай, ${failed} амжилтгүй`)
+    else toast.success(`${targets.length} ажилтан шинэчлэгдлээ`)
+    setSelectedIds(new Set())
+  }
+
   const openCreate = () => {
     setForm(EMPTY_FORM)
     setEditing({ id: null })
   }
 
+  // One editor for a worker: the detail modal (settings tab holds the editable fields).
   const openEdit = (emp: any) => {
-    setSelectedEmployeeId(null)
     setPerformanceId(null)
+    setEmployeeView('settings')
+    setSelectedEmployeeId(emp.id)
     setForm({
       name: emp.name || '',
       telegram_id: emp.telegram_id || '',
@@ -104,7 +127,15 @@ export function EmployeesPage() {
       timezone: emp.timezone || 'Asia/Ulaanbaatar',
       is_active: emp.is_active,
     })
-    setEditing({ id: emp.id })
+  }
+
+  const saveEdit = async (emp: any) => {
+    try {
+      await update.mutateAsync({ id: emp.id, name: form.name, telegram_username: form.telegram_username, timezone: form.timezone, is_active: form.is_active })
+      toast.success('Ажилтны мэдээлэл хадгалагдлаа')
+    } catch (error: any) {
+      toast.error(tenancyErrorMessage(error, 'Хадгалагдсангүй'))
+    }
   }
 
   const close = () => setEditing(null)
@@ -130,7 +161,6 @@ export function EmployeesPage() {
     close()
   }
 
-  const toggle = (emp: any) => update.mutate({ id: emp.id, is_active: !emp.is_active })
   const accountFor = (emp: any) => accounts.data?.find((account) => account.telegram_id === emp.telegram_id)
     || accounts.data?.find((account) => account.employee_id === emp.id)
   const toggleAccessRole = async (emp: any, role: string) => {
@@ -140,6 +170,15 @@ export function EmployeesPage() {
     if (!roles.length) { toast.error('Хэрэглэгч дор хаяж нэг эрхтэй байна'); return }
     try {
       await updateAccount.mutateAsync({ id: account.id, roles })
+      toast.success('Хандалтын эрх шинэчлэгдлээ')
+    } catch (error: any) {
+      toast.error(tenancyErrorMessage(error, 'Эрх шинэчлэгдсэнгүй'))
+    }
+  }
+  const toggleCustomRole = async (accountId: number, roleId: number, assignmentId?: number) => {
+    try {
+      if (assignmentId) await unassignCustomRole.mutateAsync({ roleId, assignmentId })
+      else await assignCustomRole.mutateAsync({ roleId, account_id: accountId })
       toast.success('Хандалтын эрх шинэчлэгдлээ')
     } catch (error: any) {
       toast.error(tenancyErrorMessage(error, 'Эрх шинэчлэгдсэнгүй'))
@@ -172,11 +211,6 @@ export function EmployeesPage() {
     const account = accountFor(emp)
     if (account) updateAccount.mutate({ id: account.id, status: account.status === 'disabled' ? 'active' : 'disabled' })
   }
-  const removeAccess = (emp: any) => {
-    const account = accountFor(emp)
-    if (!account || !window.confirm(`${emp.name}-ийн хандалтыг устгах уу?`)) return
-    deleteAccount.mutate(account.id)
-  }
   const removeEmployee = (emp: any) => {
     if (!window.confirm(`${emp.name}-ийг ажилтны жагсаалтаас устгах уу?`)) return
     deleteEmployee.mutate(emp.id, {
@@ -204,9 +238,17 @@ export function EmployeesPage() {
             placeholder="Нэр эсвэл @username-аар хайх…"
             className="w-full bg-surface2 border border-border rounded-lg px-3 py-[7px] text-text text-[13px] outline-none focus:border-accent" />
         </div>
+        {visibleSelected.length > 0 && <div className="flex items-center gap-2 flex-wrap px-5 py-2.5 border-b border-border bg-surface2" role="toolbar" aria-label="Бөөнөөр үйлдэх">
+          <strong className="text-[13px] mr-2">{visibleSelected.length} сонгосон</strong>
+          <Btn onClick={() => runBatch('activate')}>Идэвхжүүлэх</Btn>
+          <Btn onClick={() => runBatch('deactivate')}>Идэвхгүй болгох</Btn>
+          <Btn onClick={() => runBatch('delete')}>Устгах</Btn>
+          <Btn onClick={() => setSelectedIds(new Set())}>Болих</Btn>
+        </div>}
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-surface2">
+              <th className="px-4 py-2.5 w-8 border-b border-border"><input type="checkbox" aria-label="Бүгдийг сонгох" checked={allSelected} onChange={toggleAll} /></th>
               {['Нэр', 'Telegram', 'Telegram ID', 'Идэвхтэй эрх', 'Төлөв', ''].map((h) => (
                 <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted border-b border-border whitespace-nowrap">{h}</th>
               ))}
@@ -214,14 +256,17 @@ export function EmployeesPage() {
           </thead>
           <tbody>
             {filtered.map((e: any, i: number) => (
-              <tr key={e.id} onClick={() => { setSelectedEmployeeId(e.id); setEmployeeView('settings'); setOpenMenuId(null) }}
+              <tr key={e.id} onClick={() => { openEdit(e); setOpenMenuId(null) }}
                 className={`cursor-pointer transition-colors hover:bg-surface2 ${i < filtered.length - 1 ? 'border-b border-border2' : ''}`}>
+                <td className="px-4 py-2.5 w-8" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`${e.name} сонгох`} checked={selectedIds.has(e.id)} onChange={() => toggleSelected(e.id)} /></td>
                 <td className="px-4 py-2.5 font-medium">{e.name}</td>
                 <td className="px-4 py-2.5 text-muted font-mono text-xs">{e.telegram_username || '—'}</td>
                 <td className="px-4 py-2.5 text-muted2 font-mono text-[11px]">{e.telegram_id}</td>
                 <td className="px-4 py-2.5">
-                  {(() => { const account = accountFor(e); return account?.roles.length
-                    ? <div className="employee-role-chips">{ACCESS_ROLES.filter(([value]) => account.roles.includes(value)).map(([, label]) => <span key={label}>{label}</span>)}</div>
+                  {(() => { const account = accountFor(e)
+                    const custom = account ? customRoles.filter((role) => role.account_assignments.some((a) => a.account_id === account.id)) : []
+                    return account?.roles.length || custom.length
+                    ? <div className="employee-role-chips">{ACCESS_ROLES.filter(([value]) => account?.roles.includes(value)).map(([, label]) => <span key={label}>{label}</span>)}{custom.map((role) => <span key={`c${role.id}`}>{role.name}</span>)}</div>
                     : <span className="text-xs text-muted">Эрх тохируулаагүй</span> })()}
                 </td>
                 <td className="px-4 py-3"><Badge color={e.deleted_at ? 'muted' : e.is_active ? 'green' : 'muted'}>{e.deleted_at ? 'Архивласан' : e.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}</Badge></td>
@@ -276,21 +321,23 @@ export function EmployeesPage() {
             {([['settings', 'Тохиргоо'], ['stats', 'Статистик']] as const).map(([view, label]) => <button key={view} type="button" role="radio" aria-checked={employeeView === view} className={employeeView === view ? 'active' : ''} onClick={() => { setEmployeeView(view); if (view === 'stats') { setPerformanceId(employee.id); setPerformanceRange('month'); setPerformanceFrom(''); setPerformanceTo('') } }}><span className="employee-radio-dot" />{label}</button>)}
           </div>
           {employeeView === 'settings' ? <section className="employee-settings-view">
-            <div className="employee-settings-grid">
-              <div><span className="employee-field-label">Telegram</span><strong>{employee.telegram_username || '—'}</strong></div>
-              <div><span className="employee-field-label">Цагийн бүс</span><strong>{employee.timezone}</strong></div>
+            <div className="flex flex-col gap-3.5">
+              <Input label="Нэр, овог" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} fullWidth />
+              <Input label="Telegram username" value={form.telegram_username} onChange={(v) => setForm((f) => ({ ...f, telegram_username: v }))} placeholder="@username" fullWidth />
+              <Select label="Цагийн бүс" value={form.timezone} onChange={(v) => setForm((f) => ({ ...f, timezone: v }))} options={TZ_OPTIONS} fullWidth />
+              <Select label="Төлөв" value={form.is_active ? 'active' : 'inactive'} onChange={(v) => setForm((f) => ({ ...f, is_active: v === 'active' }))} options={STATUS_OPTIONS} fullWidth />
+              <div className="flex justify-end"><Btn variant="primary" onClick={() => saveEdit(employee)} disabled={update.isPending || !form.name.trim()}>Хадгалах</Btn></div>
             </div>
             <div className="employee-access-header"><div><strong>Хандалтын эрх</strong><span>Энэ ажилтанд оноосон role-ууд</span></div>
               {!account && <Btn variant="primary" onClick={() => linkAccess(employee)} disabled={createAccount.isPending || seatLimitReached}>Хандалт холбох</Btn>}
             </div>
             {!account && <SeatLimitNotice context="account" />}
-            {account ? <fieldset className="employee-role-editor"><legend>Хандалтын эрхүүд</legend>{ACCESS_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleAccessRole(employee, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}</fieldset> : <p className="employee-no-access">Хандалт холбогдоогүй байна.</p>}
+            {account ? <fieldset className="employee-role-editor"><legend>Хандалтын эрхүүд</legend>{ACCESS_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleAccessRole(employee, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}{customRoles.map((role) => { const assignment = role.account_assignments.find((a) => a.account_id === account.id); return <label key={`c${role.id}`} title={role.description || undefined}><input type="checkbox" checked={Boolean(assignment)} onChange={() => toggleCustomRole(account.id, role.id, assignment?.id)} disabled={assignCustomRole.isPending || unassignCustomRole.isPending} /><span>{role.name}</span></label> })}</fieldset> : <p className="employee-no-access">Хандалт холбогдоогүй байна.</p>}
             <div className="employee-settings-footer"><span>{account ? `Хэрэглэгчийн төлөв · ${account.status === 'active' ? 'Идэвхтэй' : 'Идэвхгүй'}` : 'Хандалтын бүртгэл алга'}</span><div className="employee-detail-menu-wrap">
               <button className="employee-detail-more" type="button" aria-label="Хэрэглэгчийн нэмэлт үйлдэл" aria-expanded={openMenuId === -1} onClick={() => setOpenMenuId(openMenuId === -1 ? null : -1)}><MoreVertical size={18} />Үйлдлүүд</button>
               {openMenuId === -1 && <div className="employee-action-menu employee-detail-action-menu" role="menu">
-                <button role="menuitem" onClick={() => { openEdit(employee); setOpenMenuId(null) }}><Pencil size={15} />Ажилтан засах</button>
-                {account ? <><button role="menuitem" onClick={() => changeAccessPassword(employee)}><KeyRound size={15} />Нууц үг солих</button><button role="menuitem" onClick={() => toggleAccountStatus(employee)}>{account.status === 'disabled' ? <UserCheck size={15} /> : <UserRoundX size={15} />}{account.status === 'disabled' ? 'Хандалт идэвхжүүлэх' : 'Хандалт хаах'}</button><button role="menuitem" className="danger" onClick={() => removeAccess(employee)}><Trash2 size={15} />Хандалтыг устгах</button></> : null}
-                <button role="menuitem" onClick={() => toggle(employee)}>{employee.is_active ? <UserRoundX size={15} /> : <UserCheck size={15} />}{employee.is_active ? 'Ажилтныг идэвхгүй болгох' : 'Ажилтныг идэвхжүүлэх'}</button>
+                {account ? <><button role="menuitem" onClick={() => changeAccessPassword(employee)}><KeyRound size={15} />Нууц үг солих</button><button role="menuitem" onClick={() => toggleAccountStatus(employee)}>{account.status === 'disabled' ? <UserCheck size={15} /> : <UserRoundX size={15} />}{account.status === 'disabled' ? 'Нэвтрэх эрх нээх' : 'Нэвтрэх эрх хаах'}</button></> : null}
+                <button role="menuitem" onClick={() => { update.mutate({ id: employee.id, is_active: !employee.is_active }); setForm((f) => ({ ...f, is_active: !employee.is_active })); setOpenMenuId(null) }}>{employee.is_active ? <UserRoundX size={15} /> : <UserCheck size={15} />}{employee.is_active ? 'Ажилтныг идэвхгүй болгох' : 'Ажилтныг идэвхжүүлэх'}</button>
                 <button role="menuitem" className="danger" onClick={() => removeEmployee(employee)}><Trash2 size={15} />Ажилтныг устгах</button>
               </div>}
             </div></div>

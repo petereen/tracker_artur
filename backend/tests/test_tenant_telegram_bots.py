@@ -180,34 +180,111 @@ def test_manager_fallback_id_belongs_to_the_primary_tenant(monkeypatch):
     assert manager_telegram_ids(configured, primary=False) == ["3", "1", "2"]
 
 
-def test_bot_middleware_ignores_workers_of_other_tenants_and_binds_the_bot_tenant(monkeypatch):
+def _companion(monkeypatch, *, worker=None, roles=frozenset()):
+    """Bot middleware with the ERP lookups replaced by fixed answers."""
+    from aiogram.types import Message
+
     from app.bot import middlewares
 
-    worker = SimpleNamespace(id=5, organization_id=1, name="Primary worker")
     monkeypatch.setattr(middlewares, "get_employee_by_tg", lambda tg_id: worker)
     linked = []
     monkeypatch.setattr(middlewares, "link_employee_telegram", lambda *args: linked.append(args))
-    monkeypatch.setattr(middlewares, "get_manager_settings", lambda organization_id=None: None)
     monkeypatch.setattr(middlewares, "is_primary_tenant", lambda organization_id: organization_id == 1)
 
     async def operational(_tenant_id):
         return True
 
+    async def actor(_tg_id):
+        return SimpleNamespace(roles=frozenset(roles), tenant=current_tenant_id())
+
+    async def name(_tenant_id):
+        return "Acme <LLC>"
+
     monkeypatch.setattr(middlewares, "_tenant_operational", operational)
+    monkeypatch.setattr(middlewares, "_erp_actor", actor)
+    monkeypatch.setattr(middlewares, "_tenant_name", name)
+    answers = []
+
+    def message(text):
+        item = Message.model_construct(message_id=1, date=0, chat=None, text=text)
+
+        async def answer(reply):
+            answers.append(reply)
+
+        object.__setattr__(item, "answer", answer)
+        return item
+
+    return middlewares, message, answers, linked
+
+
+def test_bot_middleware_ignores_workers_of_other_tenants_and_binds_the_bot_tenant(monkeypatch):
+    worker = SimpleNamespace(id=5, organization_id=1, name="Primary worker")
+    middlewares, message, answers, linked = _companion(monkeypatch, worker=worker, roles={"member"})
     seen = {}
 
     async def handler(event, data):
         seen.update(data, tenant=current_tenant_id())
 
+    # Tenant 2's bot: the worker belongs to tenant 1 and is told so; no handler runs.
     data = {"bot_tenant_id": 2, "event_from_user": SimpleNamespace(id=100, username="worker")}
-    asyncio.run(middlewares.EmployeeMiddleware()(handler, SimpleNamespace(), data))
-    assert seen["employee"] is None and seen["foreign_tenant"] is True
-    assert seen["tenant"] == 2 and linked == []
+    asyncio.run(middlewares.EmployeeMiddleware()(handler, message("/mytasks"), data))
+    assert seen == {} and answers == [middlewares.FOREIGN_TENANT] and linked == []
     assert current_tenant_id() is None
 
     data = {"bot_tenant_id": 1, "event_from_user": SimpleNamespace(id=100, username="worker")}
-    asyncio.run(middlewares.EmployeeMiddleware()(handler, SimpleNamespace(), data))
+    asyncio.run(middlewares.EmployeeMiddleware()(handler, message("/mytasks"), data))
     assert seen["employee"] is worker and seen["foreign_tenant"] is False and seen["tenant"] == 1
+    assert seen["actor"].tenant == 1 and seen["is_manager"] is False
+
+
+@pytest.mark.parametrize("roles, is_manager", [
+    ({"member"}, False), ({"team_lead"}, False), ({"member", "manager"}, True), ({"admin"}, True), (set(), False),
+])
+def test_bot_management_scope_comes_from_erp_roles(monkeypatch, roles, is_manager):
+    worker = SimpleNamespace(id=5, organization_id=2, name="Worker")
+    middlewares, message, _answers, _linked = _companion(monkeypatch, worker=worker, roles=roles)
+    # The legacy env allowlist no longer grants anything in the bot.
+    monkeypatch.setattr(settings, "MANAGER_TG_ID", "100")
+    seen = {}
+
+    async def handler(event, data):
+        seen.update(data)
+
+    data = {"bot_tenant_id": 2, "event_from_user": SimpleNamespace(id=100, username=None)}
+    asyncio.run(middlewares.EmployeeMiddleware()(handler, message("/dashboard"), data))
+    assert seen["is_manager"] is is_manager and seen["roles"] == frozenset(roles)
+
+
+def test_unregistered_users_get_an_information_message_and_no_handler(monkeypatch):
+    middlewares, message, answers, _linked = _companion(monkeypatch)
+    ran = []
+
+    async def handler(event, data):
+        ran.append(event.text)
+
+    def send(text):
+        data = {"bot_tenant_id": 2, "event_from_user": SimpleNamespace(id=100, username=None)}
+        asyncio.run(middlewares.EmployeeMiddleware()(handler, message(text), data))
+
+    for text in ("сайн уу", "/mytasks", "/start", "/start something"):
+        send(text)
+    assert ran == [] and len(answers) == 4
+    assert all("Acme &lt;LLC&gt;" in answer and "<code>100</code>" in answer for answer in answers)
+
+    # Account-linking entry points and /myid still reach their handlers.
+    for text in ("/start invite_abc", "/start oyuns-abc", "/myid"):
+        send(text)
+    assert ran == ["/start invite_abc", "/start oyuns-abc", "/myid"] and len(answers) == 4
+
+
+def test_update_without_a_tenant_is_refused(monkeypatch):
+    middlewares, message, answers, _linked = _companion(monkeypatch, worker=SimpleNamespace(id=5, organization_id=1))
+
+    async def handler(event, data):  # pragma: no cover - must not run
+        raise AssertionError("handler ran without a tenant")
+
+    asyncio.run(middlewares.EmployeeMiddleware()(handler, message("/mytasks"), {"event_from_user": SimpleNamespace(id=100)}))
+    assert answers == [middlewares.BOT_NOT_CONNECTED]
 
 
 def test_suspended_tenant_bots_answer_without_running_handlers(monkeypatch):

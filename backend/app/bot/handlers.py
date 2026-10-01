@@ -74,7 +74,7 @@ async def _ask_question(message_or_cb, question, state: FSMContext, session_id: 
 # ─── /start ──────────────────────────────────────────────────────────────────
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext, employee=None, bot_tenant_id: int | None = None, foreign_tenant: bool = False):
+async def cmd_start(message: Message, state: FSMContext, employee=None, bot_tenant_id: int | None = None):
     emp = employee
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) > 1 and parts[1].startswith("invite_"):
@@ -87,10 +87,7 @@ async def cmd_start(message: Message, state: FSMContext, employee=None, bot_tena
         await message.answer("✅ Telegram бүртгэл амжилттай холбогдлоо. OYUNS самбарыг нээж эхлүүлнэ үү.", reply_markup=mini_app_keyboard(bot_tenant_id))
         return
     if not emp:
-        if foreign_tenant:
-            await message.answer("❌ Таны Telegram бүртгэл өөр байгууллагад холбогдсон байна. Өөрийн байгууллагын ботыг ашиглана уу.")
-            return
-        await message.answer("❌ Та системд бүртгэгдээгүй байна. Удирдлагадаа хандана уу.")
+        # Unregistered users are answered by the middleware.
         return
 
     mark_employee_onboarded(emp.id)

@@ -4,7 +4,7 @@ import hashlib
 import secrets
 
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -115,17 +115,20 @@ def link_employee_telegram(username: str | None, tg_id: str, organization_id: in
     telegram_id при первом контакте (чтобы заводить сотрудников по @username).
 
     Usernames are only unique inside a tenant: the search is limited to the
-    tenant of the bot that received the message."""
+    tenant of the bot that received the message. A profile that already has a
+    Telegram id is never re-bound (a released @username must not take it over)."""
     uname = (username or "").lstrip("@")
-    if not uname:
+    if not uname or organization_id is None:
         return None
     with get_session() as s:
-        query = select(Employee).where(Employee.telegram_username.ilike(uname))
-        if organization_id is not None:
-            query = query.where(Employee.organization_id == organization_id)
+        query = select(Employee).where(
+            Employee.telegram_username.ilike(uname),
+            Employee.organization_id == organization_id,
+            or_(Employee.telegram_id.is_(None), Employee.telegram_id == ""),
+        )
         emp = s.execute(query.limit(2)).scalars().all()
         emp = emp[0] if len(emp) == 1 else None
-        if emp and emp.telegram_id != tg_id:
+        if emp:
             emp.telegram_id = tg_id
             s.commit()
             s.refresh(emp)

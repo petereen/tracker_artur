@@ -266,7 +266,15 @@ export function useUpdateWorktimeMethods() {
 }
 
 export function useWorktimeQrDisplayToken(enabled = true) {
-  return useQuery<WorktimeQrDisplayToken>({ queryKey: [...worktimeQrKeys, 'display-token'], queryFn: () => publicApi.get('/v1/worktime-qr/display-token', { headers: { 'Cache-Control': 'no-cache' } }).then((response) => response.data), enabled, refetchInterval: (query) => {
+  return useQuery<WorktimeQrDisplayToken>({ queryKey: [...worktimeQrKeys, 'display-token'], queryFn: () => {
+    const credential = readKioskCredential()
+    return publicApi.get('/v1/worktime-qr/display-token', { headers: { 'Cache-Control': 'no-cache', ...(credential ? { 'X-Kiosk-Credential': credential } : {}) } }).then((response) => response.data).catch((error) => {
+      // Only a definitive server verdict drops the stored credential.
+      const code = error?.response?.data?.detail?.code
+      if (code === 'kiosk_revoked') storeKioskCredential(null)
+      throw error
+    })
+  }, enabled, refetchInterval: (query) => {
     const expiresAt = query.state.data?.expires_at
     // A display whose QR check-in was switched off keeps polling slowly so it
     // comes back on its own once an admin re-enables it.

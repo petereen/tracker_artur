@@ -76,7 +76,7 @@ def test_report_draft_renders_the_worker_raw_text_without_rewriting():
     assert "  Борлуулалт &lt;10%&gt; өссөн.  " in rendered
 
 
-def test_monthly_digest_is_restricted_to_configured_manager_recipients(monkeypatch):
+def test_monthly_digest_is_restricted_to_erp_management_roles(monkeypatch):
     answers = []
 
     async def answer(text):
@@ -86,12 +86,12 @@ def test_monthly_digest_is_restricted_to_configured_manager_recipients(monkeypat
     monkeypatch.setattr(work_report_handlers, "get_manager_settings", lambda: SimpleNamespace())
     monkeypatch.setattr(work_report_handlers, "manager_telegram_ids", lambda _, **_kwargs: ["manager-1"])
 
-    asyncio.run(cmd_monthly_digest(message))
+    asyncio.run(cmd_monthly_digest(message, is_manager=False))
 
-    assert answers == ["❌ Энэ команд зөвхөн telegram_admin_ids-д бүртгэгдсэн удирдлагад зориулсан."]
+    assert answers == ["❌ Энэ команд зөвхөн удирдлагад зориулсан."]
 
 
-def test_monthly_digest_sends_on_demand_only_to_configured_recipients(monkeypatch):
+def test_monthly_digest_sends_on_demand_to_the_caller_and_configured_recipients(monkeypatch):
     calls = []
     answers = []
 
@@ -102,13 +102,13 @@ def test_monthly_digest_sends_on_demand_only_to_configured_recipients(monkeypatc
         calls.append((today, recipients, reserve))
         return True
 
-    message = SimpleNamespace(chat=SimpleNamespace(id="manager-1"), answer=answer)
+    message = SimpleNamespace(chat=SimpleNamespace(id="manager-3"), answer=answer)
     monkeypatch.setattr(work_report_handlers, "get_manager_settings", lambda: SimpleNamespace())
     monkeypatch.setattr(work_report_handlers, "manager_telegram_ids", lambda _, **_kwargs: ["manager-1", "manager-2"])
     monkeypatch.setattr(work_report_handlers, "try_send_monthly_report_digest", fake_send)
 
-    asyncio.run(cmd_monthly_digest(message))
+    asyncio.run(cmd_monthly_digest(message, is_manager=True))
 
     assert len(calls) == 1
-    assert calls[0][1:] == (["manager-1", "manager-2"], False)
+    assert calls[0][1:] == (["manager-3", "manager-1", "manager-2"], False)
     assert answers == []

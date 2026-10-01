@@ -68,7 +68,7 @@ def pool(monkeypatch):
         return None
 
     monkeypatch.setattr(runner, "setup_bot_menus", no_menus)
-    monkeypatch.setattr(runner, "_manager_chats", lambda organization_id: [])
+    monkeypatch.setattr(runner, "is_primary_tenant", lambda organization_id: organization_id == 1)
     monkeypatch.setattr(runner.telegram_bots, "mini_app_url_sync", lambda organization_id: "")
     seen = []
     errors = []

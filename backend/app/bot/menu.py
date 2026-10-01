@@ -1,7 +1,5 @@
-"""Ролевое меню команд бота — setup_bot_menus вызывается при старте."""
+"""Ролевое меню команд бота: меню по умолчанию — при старте, меню руководителя — по ERP-ролям."""
 import logging
-from typing import Iterable
-
 from aiogram import Bot
 from aiogram.types import (
     BotCommand,
@@ -54,48 +52,52 @@ MANAGER_COMMANDS: list[BotCommand] = [
     BotCommand(command="summary",   description="Өчигдрийн асуулгын хураангуй"),
     BotCommand(command="week",      description="7 хоногийн асуулгын статистик"),
     BotCommand(command="blockers",  description="Сарын гол саад бэрхшээлүүд"),
-    BotCommand(command="test_daily", description="Өдрийн урсгалын тест"),
-    BotCommand(command="test_monthly", description="Сарын урсгалын тест"),
-    BotCommand(command="seed_monthly_digest", description="Dummy сарын тайлан үүсгэх"),
-    BotCommand(command="test_monthly_digest", description="Dummy сарын хураангуй тест"),
     BotCommand(command="monthly_digest", description="Сарын тайлангийн хураангуй авах"),
 ]
 
 
-async def setup_bot_menus(
-    bot: Bot, manager_tg: str | int | Iterable[str | int] | None = None, mini_app_url: str = ""
-) -> None:
-    """Регистрирует команды в Telegram.
+# Check-in surveys predate tenancy and exist for the primary tenant only.
+CHECKIN_COMMANDS = frozenset({"today", "my_stats", "leaderboard", "summary", "week", "blockers"})
 
-    - Default scope (все пользователи) → EMPLOYEE_COMMANDS.
-    - Для каждого чата руководителя (manager_tg: один id или список) → MANAGER_COMMANDS.
-    """
+# Last menu pushed to a private chat by this process: (manager, primary).
+_chat_menus: dict[tuple[int, int], tuple[bool, bool]] = {}
+
+
+def commands_for(is_manager: bool, primary: bool = True) -> list[BotCommand]:
+    """Menu for a role inside a tenant (management = ERP roles, see middleware)."""
+    commands = MANAGER_COMMANDS if is_manager else EMPLOYEE_COMMANDS
+    return commands if primary else [item for item in commands if item.command not in CHECKIN_COMMANDS]
+
+
+async def sync_chat_menu(bot: Bot, chat_id: int, *, is_manager: bool, primary: bool) -> None:
+    """Keep a worker's private-chat menu in step with their current ERP role.
+
+    Called on every update; Telegram is only contacted when the role changed
+    (or once after a restart), so a promotion or demotion in the ERP shows up
+    on the worker's next message."""
+    key, wanted = (bot.id, chat_id), (is_manager, primary)
+    if _chat_menus.get(key) == wanted:
+        return
     try:
-        await bot.set_my_commands(EMPLOYEE_COMMANDS, scope=BotCommandScopeDefault())
-        log.info("Меню сотрудника установлено (%d команд)", len(EMPLOYEE_COMMANDS))
+        scope = BotCommandScopeChat(chat_id=chat_id)
+        if is_manager:
+            await bot.set_my_commands(commands_for(True, primary), scope=scope)
+        else:
+            # Back to the bot's default (employee) menu.
+            await bot.delete_my_commands(scope=scope)
+        _chat_menus[key] = wanted
+    except Exception:
+        log.exception("bot.chat_menu_failed chat=%s", chat_id)
+
+
+async def setup_bot_menus(bot: Bot, mini_app_url: str = "", *, primary: bool = True) -> None:
+    """Registers the default (employee) menu and the Mini App button.
+
+    Management menus are per chat and follow ERP roles: see ``sync_chat_menu``."""
+    try:
+        await bot.set_my_commands(commands_for(False, primary), scope=BotCommandScopeDefault())
     except Exception:
         log.exception("Не удалось установить меню по умолчанию")
-
-    if manager_tg is None:
-        manager_ids: list[str | int] = []
-    elif isinstance(manager_tg, (str, int)):
-        manager_ids = [manager_tg]
-    else:
-        manager_ids = list(manager_tg)
-    for manager_id in manager_ids:
-        try:
-            chat_id = int(manager_id)
-            await bot.set_my_commands(
-                MANAGER_COMMANDS,
-                scope=BotCommandScopeChat(chat_id=chat_id),
-            )
-            log.info(
-                "Меню руководителя установлено для chat_id=%d (%d команд)",
-                chat_id,
-                len(MANAGER_COMMANDS),
-            )
-        except Exception:
-            log.exception("Не удалось установить меню руководителя (manager_tg=%r)", manager_id)
 
     # The persistent Telegram menu button gives every registered employee a
     # one-tap entry to /tg. Telegram accepts Web Apps only over HTTPS.

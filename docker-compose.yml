@@ -55,7 +55,7 @@ services:
       TELEGRAM_OIDC_REDIRECT_URI: ${TELEGRAM_OIDC_REDIRECT_URI:-https://erp.oyuns.mn/api/v1/auth/telegram/callback}
       TELEGRAM_OIDC_NATIVE_REDIRECT_URI: ${TELEGRAM_OIDC_NATIVE_REDIRECT_URI:-https://erp.oyuns.mn/mobile-auth/telegram/callback}
       TELEGRAM_OIDC_ISSUER: ${TELEGRAM_OIDC_ISSUER:-https://oauth.telegram.org}
-      MANAGER_TG_ID: ${MANAGER_TG_ID:-306983322}
+      MANAGER_TG_ID: ${MANAGER_TG_ID:-}
       MINI_APP_URL: ${MINI_APP_URL:-https://erp.oyuns.mn/tg}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
@@ -167,7 +167,7 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       GOOGLE_WEBHOOK_URL: ${GOOGLE_WEBHOOK_URL:-}
-      MANAGER_TG_ID: ${MANAGER_TG_ID:-306983322}
+      MANAGER_TG_ID: ${MANAGER_TG_ID:-}
       MINI_APP_URL: ${MINI_APP_URL:-https://erp.oyuns.mn/tg}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
