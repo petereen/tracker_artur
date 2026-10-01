@@ -294,7 +294,7 @@ export function useWorktimeQrDisplayToken(enabled = true) {
     // comes back on its own once an admin re-enables it.
     if ((query.state.error as any)?.response?.data?.detail?.code === 'worktime_qr_disabled') return 30_000
     if (query.state.error) return expiresAt ? 5_000 : false
-    if (expiresAt) return Math.max(1_000, new Date(expiresAt).getTime() - Date.now() - 4_000)
+    if (expiresAt) return Math.max(1_000, new Date(expiresAt).getTime() - Date.now() - 5_000)
     return 30_000
   }, refetchOnWindowFocus: false, refetchOnReconnect: false, refetchIntervalInBackground: true, retry: false })
 }

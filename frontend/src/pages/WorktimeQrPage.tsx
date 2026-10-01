@@ -1,7 +1,7 @@
 import { forwardRef, memo, useEffect, useRef, useState } from 'react'
 import { Maximize2, MonitorUp, ShieldAlert, Wifi, WifiOff } from 'lucide-react'
 import { QRCodeCanvas } from 'qrcode.react'
-import { usePairWorktimeQrKiosk, useWorktimeQrDisplayToken } from '../api/enterprise'
+import { usePairWorktimeQrKiosk, useWorktimeQrDisplayToken, type WorktimeQrDisplayToken } from '../api/enterprise'
 
 const qrSizeFor = () => Math.min(480, Math.max(240, Math.round(Math.min(window.innerWidth * 0.62, window.innerHeight * 0.5))))
 
@@ -34,7 +34,19 @@ export function WorktimeQrPage() {
   const [, setExpiryTick] = useState(0)
   const qrRef = useRef<HTMLCanvasElement>(null)
   const pipVideoRef = useRef<HTMLVideoElement>(null)
-  const data = display.data
+  const fetched = display.data
+  // The next code is fetched a few seconds early and held back; the displayed
+  // code only swaps at the instant the current one expires.
+  const [shown, setShown] = useState<WorktimeQrDisplayToken | undefined>()
+  const [next, setNext] = useState<WorktimeQrDisplayToken | undefined>()
+  const data = shown
+
+  useEffect(() => {
+    if (!fetched || fetched.token === shown?.token || fetched.token === next?.token) return
+    const shownLive = shown && new Date(shown.expires_at).getTime() - (Date.now() + serverOffset) > 0
+    if (shownLive) setNext(fetched)
+    else { setShown(fetched); setNext(undefined) }
+  }, [fetched?.token])
 
   useEffect(() => {
     setPipAvailable(Boolean(document.pictureInPictureEnabled && HTMLVideoElement.prototype.requestPictureInPicture))
@@ -45,16 +57,19 @@ export function WorktimeQrPage() {
   }, [])
 
   useEffect(() => {
-    if (data?.token) setServerOffset(new Date(data.server_time).getTime() - Date.now())
-  }, [data?.token, data?.server_time])
+    if (fetched?.token) setServerOffset(new Date(fetched.server_time).getTime() - Date.now())
+  }, [fetched?.token, fetched?.server_time])
 
   // One re-render exactly when the current code expires.
   useEffect(() => {
     if (!data) return
     const delay = new Date(data.expires_at).getTime() - (Date.now() + serverOffset)
-    const timer = window.setTimeout(() => setExpiryTick((value) => value + 1), Math.max(0, delay) + 50)
+    const timer = window.setTimeout(() => {
+      if (next) { setShown(next); setNext(undefined) }
+      setExpiryTick((value) => value + 1)
+    }, Math.max(0, delay))
     return () => window.clearTimeout(timer)
-  }, [data?.token, data?.expires_at, serverOffset])
+  }, [data?.token, data?.expires_at, next, serverOffset])
 
   const remaining = data ? Math.max(0, new Date(data.expires_at).getTime() - (Date.now() + serverOffset)) : 0
   const displayError = display.error as any
