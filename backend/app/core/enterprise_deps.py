@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.core.tenancy import TenantBoundaryViolation, bind_tenant, current_tenant_id, tenant_directory
-from app.models.models import Employee, RoleAssignment, UserAccount
+from app.models.models import Employee, ERPAccessRole, ERPAccountRole, ERPTeamRole, RoleAssignment, TeamMember, UserAccount
 from app.services.file_search_service import FileSearchPrincipal
 from app.core.config import settings
 
@@ -100,6 +100,28 @@ def build_actor_context(*, account_id: int, organization_id: int, employee_id: i
     )
 
 
+async def custom_role_grants(db: AsyncSession, account_id: int, employee_id: int | None) -> set[str]:
+    """Platform roles granted by active custom roles (directly or via a team)."""
+    from app.erp.role_catalog import granted_system_roles
+
+    rows = list((await db.execute(
+        select(ERPAccessRole.system_roles)
+        .join(ERPAccountRole, ERPAccountRole.access_role_id == ERPAccessRole.id)
+        .where(ERPAccountRole.account_id == account_id, ERPAccessRole.is_active.is_(True))
+    )).scalars().all())
+    if employee_id is not None:
+        rows += (await db.execute(
+            select(ERPAccessRole.system_roles)
+            .join(ERPTeamRole, ERPTeamRole.access_role_id == ERPAccessRole.id)
+            .join(TeamMember, TeamMember.team_id == ERPTeamRole.team_id)
+            .where(TeamMember.employee_id == employee_id, ERPAccessRole.is_active.is_(True))
+        )).scalars().all()
+    granted: set[str] = set()
+    for value in rows:
+        granted |= granted_system_roles(value)
+    return granted
+
+
 async def actor_from_account_id(account_id: int, db: AsyncSession) -> ActorContext:
     """Rehydrate current account status and time-bounded roles from storage."""
     try:
@@ -133,7 +155,7 @@ async def actor_from_account_id(account_id: int, db: AsyncSession) -> ActorConte
         employee_id=account.employee_id,
         email=account.email,
         locale=account.locale,
-        roles=frozenset(rows),
+        roles=frozenset(rows) | await custom_role_grants(db, account.id, account.employee_id),
     )
 
 
@@ -167,7 +189,8 @@ async def actor_from_telegram_id(telegram_id: str, db: AsyncSession) -> ActorCon
         return None
     today = date.today()
     roles = (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id, or_(RoleAssignment.valid_from.is_(None), RoleAssignment.valid_from <= today), or_(RoleAssignment.valid_until.is_(None), RoleAssignment.valid_until >= today)))).scalars().all()
-    return build_actor_context(account_id=account.id, organization_id=account.organization_id, employee_id=account.employee_id, email=account.email, locale=account.locale, roles=frozenset(roles), channel="telegram")
+    roles = frozenset(roles) | await custom_role_grants(db, account.id, account.employee_id)
+    return build_actor_context(account_id=account.id, organization_id=account.organization_id, employee_id=account.employee_id, email=account.email, locale=account.locale, roles=roles, channel="telegram")
 
 
 async def tenant_is_operational(organization_id: int) -> bool:

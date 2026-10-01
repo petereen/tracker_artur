@@ -7,11 +7,15 @@ Settings → Workflows → Reports. The policy decides:
   overridden per department;
 * which departments write a department-level report (authored by the
   department head) and how often;
-* how many days before a period ends reminders start.
+* how many days before a period ends reminders start;
+* per frequency (``frequency_settings``): where the period starts (week day,
+  day of month, first month of the fiscal year/quarter/half), how many days
+  before the end reminders start, how many days after the end the report may
+  still be submitted (and is reminded about), and the local reminder hour.
 
 Frequencies are the standard ``daily``/``weekly``/``monthly``/``quarterly``/
-``yearly`` periods plus admin-defined custom periods (``custom:<id>``) that
-repeat every N days, weeks or months from an anchor date.
+``half_yearly``/``yearly`` periods plus admin-defined custom periods
+(``custom:<id>``) that repeat every N days, weeks or months from an anchor date.
 
 The bot scheduler creates the matching report rows and prompts only for the
 enabled periods, and the web report list/creation form follow the same policy.
@@ -25,8 +29,8 @@ from datetime import date, timedelta
 from typing import Any, Iterable
 
 REPORT_POLICY_KEY = "report_policy"
-STANDARD_FREQUENCIES = ("daily", "weekly", "monthly", "quarterly", "yearly")
-PERIODIC_REPORT_TYPES = ("weekly", "monthly", "quarterly", "yearly", "custom")
+STANDARD_FREQUENCIES = ("daily", "weekly", "monthly", "quarterly", "half_yearly", "yearly")
+PERIODIC_REPORT_TYPES = ("weekly", "monthly", "quarterly", "half_yearly", "yearly", "custom")
 REVIEWED_REPORT_TYPES = frozenset(PERIODIC_REPORT_TYPES)
 CUSTOM_PREFIX = "custom:"
 CUSTOM_UNITS = ("day", "week", "month")
@@ -34,13 +38,17 @@ DEFAULT_WORKER_FREQUENCIES = ("daily", "monthly")
 DEFAULT_REMINDER_DAYS = 3
 MAX_REMINDER_DAYS = 14
 MAX_CUSTOM_PERIODS = 12
+MAX_SCHEDULE_DAYS = 60
 FREQUENCY_LABELS = {
     "daily": "Өдрийн тайлан",
     "weekly": "7 хоногийн тайлан",
     "monthly": "Сарын тайлан",
     "quarterly": "Улирлын тайлан",
+    "half_yearly": "Хагас жилийн тайлан",
     "yearly": "Жилийн тайлан",
 }
+# Periods built from whole months starting at the fiscal ``start_month``.
+MONTH_SPANS = {"quarterly": 3, "half_yearly": 6, "yearly": 12}
 _CUSTOM_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 
 
@@ -95,6 +103,51 @@ def _custom_periods(raw: Any) -> list[dict]:
     return periods
 
 
+def _bounded_int(value: Any, low: int, high: int) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if low <= number <= high else None
+
+
+def _reminder_hour(value: Any) -> int | None:
+    """``"HH:MM"`` or an hour; reminders run on the hour of the worker's schedule."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, str) and ":" in value:
+        value = value.split(":", 1)[0]
+    return _bounded_int(value, 0, 23)
+
+
+def frequency_settings_for(raw: Any, frequency: str) -> dict:
+    """Normalized period start and schedule for one frequency.
+
+    ``reminder_days`` ``None`` inherits the company ``reminder_days``;
+    ``reminder_hour`` ``None`` keeps the worker's morning check-in time.
+    """
+    item = raw if isinstance(raw, dict) else {}
+    report_type, _ = report_type_for(frequency)
+    settings: dict[str, Any] = {
+        "reminder_days": _bounded_int(item.get("reminder_days"), 1, MAX_SCHEDULE_DAYS),
+        "due_days": _bounded_int(item.get("due_days"), 0, MAX_SCHEDULE_DAYS) or 0,
+        "reminder_hour": _reminder_hour(item.get("reminder_hour", item.get("reminder_time"))),
+    }
+    if report_type == "weekly":
+        weekday = _bounded_int(item.get("start_weekday"), 0, 6)
+        settings["start_weekday"] = 0 if weekday is None else weekday
+    if report_type == "monthly" or report_type in MONTH_SPANS:
+        settings["start_day"] = _bounded_int(item.get("start_day"), 1, 28) or 1
+    if report_type in MONTH_SPANS:
+        settings["start_month"] = _bounded_int(item.get("start_month"), 1, 12) or 1
+    return settings
+
+
+def _frequency_settings(raw: Any, allowed: Iterable[str]) -> dict[str, dict]:
+    raw = raw if isinstance(raw, dict) else {}
+    return {frequency: frequency_settings_for(raw.get(frequency), frequency) for frequency in allowed if frequency != "daily"}
+
+
 def _frequencies(raw: Any, allowed: set[str]) -> list[str]:
     values: list[str] = []
     for item in raw if isinstance(raw, list) else []:
@@ -142,7 +195,12 @@ def report_policy(organization_settings: dict | None) -> dict:
         "custom_periods": custom,
         "departments": departments,
         "reminder_days": max(1, min(MAX_REMINDER_DAYS, reminder_days)),
+        "frequency_settings": _frequency_settings(raw.get("frequency_settings"), allowed_frequencies(custom)),
     }
+
+
+def settings_for(policy: dict, frequency: str) -> dict:
+    return (policy.get("frequency_settings") or {}).get(frequency) or frequency_settings_for(None, frequency)
 
 
 def _department_rule(policy: dict, department_id: int | None) -> dict | None:
@@ -204,17 +262,18 @@ def period_for_frequency(policy: dict, frequency: str, day: date) -> ReportPerio
     if report_type == "daily":
         start = end = day
     elif report_type == "weekly":
-        start = day - timedelta(days=day.weekday())
+        start_weekday = settings_for(policy, frequency).get("start_weekday", 0)
+        start = day - timedelta(days=(day.weekday() - start_weekday) % 7)
         end = start + timedelta(days=6)
-    elif report_type == "monthly":
-        start = day.replace(day=1)
-        end = day.replace(day=calendar.monthrange(day.year, day.month)[1])
-    elif report_type == "quarterly":
-        first_month = 3 * ((day.month - 1) // 3) + 1
-        start = date(day.year, first_month, 1)
-        end = _add_months(start, 3) - timedelta(days=1)
-    elif report_type == "yearly":
-        start, end = date(day.year, 1, 1), date(day.year, 12, 31)
+    elif report_type == "monthly" or report_type in MONTH_SPANS:
+        # A company month may run e.g. from the 26th to the 25th, and a fiscal
+        # year (with its quarters and halves) may start in any month.
+        config = settings_for(policy, frequency)
+        span = MONTH_SPANS.get(report_type, 1)
+        anchor = date(2000, config.get("start_month", 1), config.get("start_day", 1))
+        index = _months_between(anchor, day) // span
+        start = _add_months(anchor, index * span)
+        end = _add_months(anchor, (index + 1) * span) - timedelta(days=1)
     elif report_type == "custom":
         custom = next((item for item in policy["custom_periods"] if item["id"] == period_key), None)
         if custom is None:
@@ -247,6 +306,43 @@ def reminder_window_open(period: ReportPeriod, day: date, reminder_days: int) ->
     return period.end - timedelta(days=window - 1) <= day <= period.end
 
 
+def previous_period(policy: dict, period: ReportPeriod) -> ReportPeriod | None:
+    return period_for_frequency(policy, period.frequency, period.start - timedelta(days=1))
+
+
+def open_report_periods(policy: dict, frequency: str, day: date) -> list[tuple[ReportPeriod, str]]:
+    """Periods of ``frequency`` a worker is reminded about on ``day``.
+
+    ``("closing", period)``: the current period is in its reminder window
+    (``reminder_days`` before the end); ``("overdue", period)``: the previous
+    period ended less than ``due_days`` ago and may still be submitted.
+    """
+    current = period_for_frequency(policy, frequency, day)
+    if current is None:
+        return []
+    config = settings_for(policy, frequency)
+    result: list[tuple[ReportPeriod, str]] = []
+    due_days = int(config.get("due_days") or 0)
+    if due_days and current.report_type != "daily":
+        previous = previous_period(policy, current)
+        if previous and day <= previous.end + timedelta(days=due_days):
+            result.append((previous, "overdue"))
+    explicit = config.get("reminder_days")
+    if explicit and current.report_type != "daily":
+        # An explicit lead time may cover the whole period (e.g. 30 days
+        # before a yearly report is due); the default stays capped.
+        window = max(1, min(int(explicit), current.length_days))
+        if current.end - timedelta(days=window - 1) <= day <= current.end:
+            result.append((current, "closing"))
+    elif reminder_window_open(current, day, policy["reminder_days"]):
+        result.append((current, "closing"))
+    return result
+
+
+def submission_deadline(policy: dict, period: ReportPeriod) -> date:
+    return period.end + timedelta(days=int(settings_for(policy, period.frequency).get("due_days") or 0))
+
+
 def validate_policy_input(data: dict) -> dict:
     """Normalize admin input, rejecting references to unknown frequencies."""
     custom = _custom_periods(data.get("custom_periods"))
@@ -261,5 +357,8 @@ def validate_policy_input(data: dict) -> dict:
         for value in [*(rule.get("worker_frequencies") or []), *(rule.get("department_frequencies") or [])]:
             if value not in allowed:
                 raise ValueError(f"unknown_frequency:{value}")
+    for value in (data.get("frequency_settings") or {}):
+        if value not in allowed:
+            raise ValueError(f"unknown_frequency:{value}")
     normalized = report_policy({REPORT_POLICY_KEY: data})
     return normalized

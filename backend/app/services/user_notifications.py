@@ -11,12 +11,14 @@ from app.models.models import (
     Employee,
     ManagerSettings,
     NotificationOutbox,
+    Organization,
     UserAccount,
     UserNotification,
     DEFAULT_PRIORITY_NOTIFICATION_KINDS,
 )
 from app.services.manager_recipients import manager_settings_for
 from app.services.notification_policy import load_policy, next_allowed
+from app.services.notification_preferences import resolve_category, category_for, tenant_rules, user_choices
 
 
 async def create_notifications(
@@ -51,16 +53,33 @@ async def create_notifications(
     rows = (await db.execute(query)).all()
     manager_settings = await manager_settings_for(db, organization_id)
     policy = load_policy(manager_settings)
+    # Tenant rules + each recipient's own choices decide web and Telegram.
+    organization = await db.get(Organization, organization_id)
+    rules = tenant_rules(organization.settings if organization else None, legacy_available=bool(organization and organization.is_primary))
+    category = category_for(kind)
     created: list[UserNotification] = []
     covered_employee_ids: set[int] = set()
     for account, employee in rows:
         if employee:
             covered_employee_ids.add(employee.id)
+        delivery = resolve_category(rules, user_choices(account.preferences), category)
+        if not delivery.any:
+            continue
         scoped_key = f"{dedup_key}:account:{account.id}"
         existing = await db.scalar(select(UserNotification.id).where(UserNotification.dedup_key == scoped_key))
         if existing:
             continue
-        telegram_available = bool(deliver_telegram and employee and employee.telegram_id)
+        telegram_available = bool(deliver_telegram and delivery.telegram and employee and employee.telegram_id)
+        if not delivery.web:
+            # Telegram only: no bell entry, just the queued message.
+            if telegram_available:
+                not_before = datetime.now(timezone.utc) if immediate else next_allowed(datetime.now(timezone.utc), employee.timezone, policy)
+                db.add(NotificationOutbox(
+                    event_id=source_event_id, task_id=task_id, recipient_tg=str(employee.telegram_id), kind=kind,
+                    payload={"title": title, "body": body, "target_url": target_url, **(payload or {})},
+                    not_before=not_before, status="pending", dedup_key=f"telegram:{scoped_key}",
+                ))
+            continue
         notification = UserNotification(
             organization_id=organization_id,
             recipient_account_id=account.id,
@@ -105,7 +124,7 @@ async def create_notifications(
     # Telegram users may be registered employees before they have opened the
     # web app and therefore have no UserAccount yet. They cannot receive an
     # in-app notification, but must still receive the Telegram delivery.
-    unlinked_employee_ids = employee_set - covered_employee_ids if deliver_telegram else set()
+    unlinked_employee_ids = employee_set - covered_employee_ids if deliver_telegram and resolve_category(rules, {}, category).telegram else set()
     if unlinked_employee_ids:
         unlinked = (await db.execute(select(Employee).where(Employee.id.in_(unlinked_employee_ids), Employee.is_active.is_(True)))).scalars().all()
         for employee in unlinked:
@@ -137,6 +156,10 @@ def mirror_existing_telegram_notification(
 ) -> None:
     """Persist a web copy after a legacy scheduler has sent its Telegram message."""
     from app.bot.db import get_session
+    from app.services.notification_preferences import delivery_for_employee_sync
+
+    if not delivery_for_employee_sync(employee_id, kind).web:
+        return
 
     with get_session() as db:
         account = db.execute(select(UserAccount).where(UserAccount.employee_id == employee_id, UserAccount.status == "active")).scalar_one_or_none()

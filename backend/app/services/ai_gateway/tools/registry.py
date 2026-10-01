@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.core.enterprise_deps import ActorContext, permissions_for_roles
+from app.core.tenancy import tenant_scope
 from app.services.ai_gateway.access_policy import AccessPolicy
 from app.services.ai_gateway.runtime import resolve_ai_runtime
 from app.services.mcp import adapters
@@ -43,6 +44,19 @@ class ToolRegistry:
     async def dispatch_tool(self, tool_name: str, arguments: dict, actor_context: ActorContext,
                             *, db: Any, request_id: str | None = None, conversation_id: int | None = None) -> ToolResult:
         request_id = request_id or f"tool-{uuid4().hex}"
+        from app.services.ai_gateway.tenant_db import TenantIsolationError, require_tenant
+
+        try:
+            # Voice calls and MCP clients dispatch directly: the same tenant
+            # pin as an agent turn applies (no tenant or another tenant → deny).
+            tenant_id = require_tenant(actor_context.organization_id)
+        except TenantIsolationError:
+            return self._denied(request_id)
+        with tenant_scope(tenant_id):
+            return await self._dispatch(tool_name, arguments, actor_context, db=db, request_id=request_id, conversation_id=conversation_id)
+
+    async def _dispatch(self, tool_name: str, arguments: dict, actor_context: ActorContext,
+                        *, db: Any, request_id: str, conversation_id: int | None) -> ToolResult:
         definition = self.get(tool_name)
         if definition is None:
             return self._denied(request_id)

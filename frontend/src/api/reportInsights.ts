@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
 import { api } from './client'
 import { requireWebCapability } from '../platform/runtime'
 
-export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom' | 'next_month_plan'
+export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly' | 'custom' | 'next_month_plan'
 export type ReportGroupBy = 'worker' | 'department'
 export type ReportScope = 'all' | 'employee' | 'department'
 

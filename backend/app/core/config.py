@@ -8,6 +8,14 @@ class Settings(BaseSettings):
     # SYNC_DATABASE_URL use the least-privilege ``oyuns_app`` role so
     # row-level security applies; empty falls back to SYNC_DATABASE_URL.
     MIGRATION_DATABASE_URL: str = ""
+    # OYUNS AI agent data access (``app/services/ai_gateway/tenant_db.py``).
+    # Point it at a dedicated least-privilege role (e.g. ``oyuns_ai``,
+    # NOSUPERUSER NOBYPASSRLS, see ops/sql/oyuns_ai_role.sql) so PostgreSQL
+    # row-level security physically confines every agent query to the
+    # asking tenant. Empty falls back to DATABASE_URL.
+    AI_DATABASE_URL: str = ""
+    # Refuse agent data access when the agent's database role bypasses RLS.
+    AI_DATABASE_REQUIRE_RLS: bool = False
     SECRET_KEY: str
     BOT_TOKEN: str = ""
     # Retained only so old deployments can start; browser login no longer

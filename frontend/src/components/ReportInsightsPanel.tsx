@@ -28,6 +28,7 @@ const REPORT_TYPES: Array<{ key: ReportType; label: string }> = [
   { key: 'weekly', label: '7 хоногийн' },
   { key: 'monthly', label: 'Сарын' },
   { key: 'quarterly', label: 'Улирлын' },
+  { key: 'half_yearly', label: 'Хагас жилийн' },
   { key: 'yearly', label: 'Жилийн' },
   { key: 'custom', label: 'Тусгай' },
   { key: 'next_month_plan', label: 'Дараа сарын төлөвлөгөө' },

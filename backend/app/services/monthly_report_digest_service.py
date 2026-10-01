@@ -24,6 +24,24 @@ def previous_month(today: date) -> date:
     return date(today.year - int(today.month == 1), 12 if today.month == 1 else today.month - 1, 1)
 
 
+def _previous_period_start(organization_id: int, today: date, report_type: str) -> date:
+    """Start of the tenant's previous monthly period (its month may start mid-month)."""
+    if report_type != "monthly":
+        return previous_month(today)
+    from app.models.models import Organization
+    from app.services.report_policy import period_for_frequency, previous_period, report_policy
+
+    try:
+        with get_session() as session:
+            organization = session.get(Organization, organization_id)
+            policy = report_policy(organization.settings if isinstance(getattr(organization, "settings", None), dict) else None)
+    except Exception:  # noqa: BLE001 - calendar months are the default policy
+        policy = report_policy(None)
+    current = period_for_frequency(policy, "monthly", today)
+    previous = previous_period(policy, current) if current else None
+    return previous.start if previous else previous_month(today)
+
+
 def _reports_for_period(
     period: date, report_type: str = "monthly", organization_id: int | None = None
 ) -> tuple[list[str], list[tuple[str, str]]]:
@@ -190,10 +208,15 @@ async def _send_tenant_digest(
 ) -> bool:
     from app.bot.db import is_primary_tenant
 
-    period = previous_month(today or date.today())
+    period = _previous_period_start(organization_id, today or date.today(), report_type)
     worker_names, reports = _reports_for_period(period, report_type, organization_id)
     if not worker_names or len(reports) != len(worker_names):
         return False
+    if not test_mode:
+        from app.services.notification_preferences import tenant_category_enabled_sync
+
+        if not tenant_category_enabled_sync(organization_id, "digests"):
+            return False
     if recipients is None:
         recipients = manager_telegram_ids(get_manager_settings(organization_id), primary=is_primary_tenant(organization_id))
     if not recipients or (reserve and not _reserve(period, organization_id)):

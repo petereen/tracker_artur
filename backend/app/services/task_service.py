@@ -417,11 +417,19 @@ def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, 
     if not recipient_tg:
         return
     payload = payload or {}
+    from app.services.notification_preferences import resolve
+
     with get_session() as s:
         employee = s.execute(select(Employee).where(Employee.telegram_id == str(recipient_tg))).scalar_one_or_none()
         account = s.execute(select(UserAccount).where(UserAccount.employee_id == employee.id, UserAccount.status == "active")).scalar_one_or_none() if employee else None
+        organization = s.get(Organization, employee.organization_id) if employee and employee.organization_id else None
+        # Tenant rules and the recipient's own choices (web bell / Telegram).
+        delivery = resolve(organization.settings if organization else None, account.preferences if account else None, kind,
+                           legacy_available=bool(organization and organization.is_primary))
+        if not delivery.any:
+            return
         user_notification_id = None
-        if account:
+        if account and delivery.web:
             notification_payload = {**(payload or {}), "task_id": task_id} if task_id else payload
             web_key = f"legacy:{dedup_key}:account:{account.id}"
             notification = s.execute(select(UserNotification).where(UserNotification.dedup_key == web_key)).scalar_one_or_none()
@@ -446,6 +454,9 @@ def enqueue_notification(*, recipient_tg, kind, payload, not_before, dedup_key, 
                 s.flush()
                 s.execute(text("SELECT pg_notify('oyuns_events', :event_id)"), {"event_id": str(event.id)})
             user_notification_id = notification.id
+        if not delivery.telegram:
+            s.commit()
+            return
         stmt = (
             pg_insert(NotificationOutbox)
             .values(
@@ -535,7 +546,8 @@ def mark_outbox(outbox_id: int, status: str, error: str | None = None, *, final:
             if r.user_notification_id:
                 notification = s.get(UserNotification, r.user_notification_id)
                 if notification:
-                    notification.telegram_status = r.status if r.status in {"sent", "failed"} else "queued"
+                    # "skipped": the recipient's preferences turned Telegram off.
+                    notification.telegram_status = r.status if r.status in {"sent", "failed"} else "unavailable" if r.status == "skipped" else "queued"
             s.commit()
 
 

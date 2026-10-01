@@ -40,7 +40,7 @@ SHARE_KINDS: tuple[str, ...] = ("task", "plan_item", "plan_idea", "plan_report",
 ACTIVE_TASK_EXCLUDED = ("done", "cancelled")
 # All periodic report types the report policy can produce; "next_month_plan" is a
 # separate share kind ("plan_report").
-REPORT_TYPES = ("daily", "weekly", "monthly", "quarterly", "yearly", "custom")
+REPORT_TYPES = ("daily", "weekly", "monthly", "quarterly", "half_yearly", "yearly", "custom")
 GROUPS = (
     ("tasks", "Идэвхтэй даалгавар"),
     ("plans", "Төлөвлөгөө"),

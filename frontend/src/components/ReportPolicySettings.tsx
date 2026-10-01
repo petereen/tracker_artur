@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Save, Trash2 } from 'lucide-react'
-import { useReportPolicy, useUpdateReportPolicy, type CustomReportPeriod, type DepartmentReportRule, type ReportPolicyInput } from '../api/enterprise'
+import { useReportPolicy, useUpdateReportPolicy, type CustomReportPeriod, type DepartmentReportRule, type ReportFrequencySettings, type ReportPolicyInput } from '../api/enterprise'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 
 const STANDARD = [
@@ -8,8 +8,45 @@ const STANDARD = [
   { value: 'weekly', label: '7 хоног' },
   { value: 'monthly', label: 'Сар' },
   { value: 'quarterly', label: 'Улирал' },
+  { value: 'half_yearly', label: 'Хагас жил' },
   { value: 'yearly', label: 'Жил' },
 ]
+const WEEKDAYS = ['Даваа', 'Мягмар', 'Лхагва', 'Пүрэв', 'Баасан', 'Бямба', 'Ням']
+const MONTHS = Array.from({ length: 12 }, (_, index) => `${index + 1}-р сар`)
+const MONTH_SPAN_FREQUENCIES = new Set(['quarterly', 'half_yearly', 'yearly'])
+const DAYS_OF_MONTH = Array.from({ length: 28 }, (_, index) => index + 1)
+const HOURS = Array.from({ length: 24 }, (_, index) => index)
+
+function defaultSettings(frequency: string): ReportFrequencySettings {
+  const settings: ReportFrequencySettings = { reminder_days: null, due_days: 0, reminder_hour: null }
+  if (frequency === 'weekly') settings.start_weekday = 0
+  if (frequency === 'monthly' || MONTH_SPAN_FREQUENCIES.has(frequency)) settings.start_day = 1
+  if (MONTH_SPAN_FREQUENCIES.has(frequency)) settings.start_month = 1
+  return settings
+}
+
+function numberOrNull(value: string, min: number, max: number) {
+  if (value.trim() === '') return null
+  const number = Math.round(Number(value))
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : null
+}
+
+/** Period start and reminder schedule of one report frequency. */
+function FrequencyScheduleCard({ frequency, label, value, onChange, disabled, companyReminderDays, preview }: { frequency: string; label: string; value: ReportFrequencySettings; onChange: (next: ReportFrequencySettings) => void; disabled: boolean; companyReminderDays: number; preview?: { start: string; end: string; due: string } }) {
+  const set = (patch: Partial<ReportFrequencySettings>) => onChange({ ...value, ...patch })
+  const monthSpan = MONTH_SPAN_FREQUENCIES.has(frequency)
+  return <article className="report-schedule-card panel" aria-label={`${label} хуваарь`}>
+    <header><strong>{label}</strong>{preview && <small>Одоогийн хугацаа: {preview.start} – {preview.end}{preview.due !== preview.end ? ` · Илгээх эцсийн өдөр: ${preview.due}` : ''}</small>}</header>
+    <div className="report-schedule-grid">
+      {frequency === 'weekly' && <label>7 хоног эхлэх өдөр<select value={value.start_weekday ?? 0} disabled={disabled} onChange={(event) => set({ start_weekday: Number(event.target.value) })}>{WEEKDAYS.map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label>}
+      {monthSpan && <label>{frequency === 'yearly' ? 'Санхүүгийн жил эхлэх сар' : 'Эхний хугацаа эхлэх сар'}<select value={value.start_month ?? 1} disabled={disabled} onChange={(event) => set({ start_month: Number(event.target.value) })}>{MONTHS.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></label>}
+      {(frequency === 'monthly' || monthSpan) && <label>Эхлэх өдөр (сарын)<select value={value.start_day ?? 1} disabled={disabled} onChange={(event) => set({ start_day: Number(event.target.value) })}>{DAYS_OF_MONTH.map((day) => <option key={day} value={day}>{day}</option>)}</select></label>}
+      <label>Дуусахаас өмнө сануулах (өдөр)<input type="number" min={1} max={60} value={value.reminder_days ?? ''} placeholder={`${companyReminderDays} (компанийн)`} disabled={disabled} onChange={(event) => set({ reminder_days: numberOrNull(event.target.value, 1, 60) })} /></label>
+      <label>Дууссаны дараа илгээх хугацаа (өдөр)<input type="number" min={0} max={60} value={value.due_days} disabled={disabled} onChange={(event) => set({ due_days: numberOrNull(event.target.value, 0, 60) ?? 0 })} /></label>
+      <label>Сануулах цаг<select value={value.reminder_hour ?? ''} disabled={disabled} onChange={(event) => set({ reminder_hour: event.target.value === '' ? null : Number(event.target.value) })}><option value="">Өглөөний цаг (ажилтны хуваарь)</option>{HOURS.map((hour) => <option key={hour} value={hour}>{`${String(hour).padStart(2, '0')}:00`}</option>)}</select></label>
+    </div>
+  </article>
+}
 const UNIT_LABELS: Record<CustomReportPeriod['unit'], string> = { day: 'өдөр', week: '7 хоног', month: 'сар' }
 
 function slugify(label: string, taken: Set<string>) {
@@ -52,6 +89,7 @@ export function ReportPolicySettings() {
       custom_periods: policy.data.custom_periods,
       departments: policy.data.departments,
       reminder_days: policy.data.reminder_days,
+      frequency_settings: policy.data.frequency_settings ?? {},
     })
   }, [policy.data])
 
@@ -91,8 +129,17 @@ export function ReportPolicySettings() {
       })),
     })
   }
+  // Frequencies someone actually reports on get a period/schedule card.
+  const usedFrequencies = frequencyOptions.filter((option) => option.value !== 'daily' && (
+    form.worker_frequencies.includes(option.value)
+    || form.departments.some((rule) => rule.worker_frequencies?.includes(option.value) || rule.department_frequencies.includes(option.value))
+  ))
+  const settingsFor = (frequency: string) => ({ ...defaultSettings(frequency), ...(form.frequency_settings?.[frequency] ?? {}) })
+  const setSettings = (frequency: string, next: ReportFrequencySettings) => setForm({ ...form, frequency_settings: { ...form.frequency_settings, [frequency]: next } })
   const save = () => update.mutate({
     ...form,
+    // Only settings of frequencies that still exist are sent.
+    frequency_settings: Object.fromEntries(Object.entries(form.frequency_settings ?? {}).filter(([frequency]) => frequencyOptions.some((option) => option.value === frequency))),
     // Drop rules that no longer change anything.
     departments: form.departments.filter((rule) => rule.worker_frequencies !== null || rule.department_frequencies.length > 0),
   })
@@ -109,14 +156,23 @@ export function ReportPolicySettings() {
     </section>
 
     <section className="report-policy-block">
+      <h3>Хугацаа ба хуваарь</h3>
+      <p>Компани бүрийн тайлант хугацаа өөр: сар 26-нд эхэлж болно, санхүүгийн жил 7-р сард эхэлж болно. Давтамж бүрийн эхлэх өдөр, сануулга эхлэх хугацаа, илгээх эцсийн хугацаа, сануулах цагийг тохируулна.</p>
+      {usedFrequencies.length === 0 ? <p className="query-region-state">Идэвхтэй тайлангийн давтамж алга (өдрийн тайлан өдөр бүр оройн check-in-ээр сануулагдана).</p> : <div className="report-schedule-list">{usedFrequencies.map((option) => <FrequencyScheduleCard
+        key={option.value} frequency={option.value.startsWith('custom:') ? 'custom' : option.value} label={option.label}
+        value={settingsFor(option.value)} onChange={(next) => setSettings(option.value, next)} disabled={!canEdit}
+        companyReminderDays={form.reminder_days} preview={policy.data?.current_periods?.[option.value]} />)}</div>}
+    </section>
+
+    <section className="report-policy-block">
       <h3>Тусгай хугацаа</h3>
-      <p>Жишээ нь “Хагас жил” (6 сар тутам) эсвэл “Спринт” (2 долоо хоног тутам). Эхлэх огнооноос тоологдоно.</p>
+      <p>Жишээ нь “Спринт” (2 долоо хоног тутам) эсвэл “4 сар тутам”. Эхлэх огнооноос тоологдоно.</p>
       {form.custom_periods.length > 0 && <ul className="report-custom-list">{form.custom_periods.map((item) => <li key={item.id}>
         <span><strong>{item.label}</strong><small>{item.interval} {UNIT_LABELS[item.unit]} тутам · {item.anchor_date}-с</small></span>
         {canEdit && <button type="button" className="danger-action compact" onClick={() => removeCustomPeriod(item.id)} aria-label={`${item.label} устгах`}><Trash2 size={14} /></button>}
       </li>)}</ul>}
       {canEdit && <div className="report-custom-form">
-        <label>Нэр<input value={newPeriod.label} maxLength={80} onChange={(event) => setNewPeriod({ ...newPeriod, label: event.target.value })} placeholder="Хагас жил" /></label>
+        <label>Нэр<input value={newPeriod.label} maxLength={80} onChange={(event) => setNewPeriod({ ...newPeriod, label: event.target.value })} placeholder="Спринт" /></label>
         <label>Тутам<input type="number" min={1} max={newPeriod.unit === 'day' ? 366 : newPeriod.unit === 'week' ? 52 : 24} value={newPeriod.interval} onChange={(event) => setNewPeriod({ ...newPeriod, interval: Math.max(1, Number(event.target.value) || 1) })} /></label>
         <label>Нэгж<select value={newPeriod.unit} onChange={(event) => setNewPeriod({ ...newPeriod, unit: event.target.value as CustomReportPeriod['unit'] })}><option value="day">өдөр</option><option value="week">7 хоног</option><option value="month">сар</option></select></label>
         <label>Эхлэх огноо<input type="date" value={newPeriod.anchor_date} onChange={(event) => setNewPeriod({ ...newPeriod, anchor_date: event.target.value })} /></label>

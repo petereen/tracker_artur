@@ -91,6 +91,7 @@ def _prompt_text(report_type: str, prompt_type: str | None = None) -> str:
 PERIODIC_LABELS = {
     "weekly": "7 хоногийн тайлан",
     "quarterly": "Улирлын тайлан",
+    "half_yearly": "Хагас жилийн тайлан",
     "yearly": "Жилийн тайлан",
     "custom": "Тусгай хугацааны тайлан",
 }

@@ -185,8 +185,15 @@ async def activate(data: LicenseTokenInput, db: AsyncSession = Depends(get_db), 
     return {"license": license_status(organization), "active": license_view(row), "seats": (await seat_usage(db, organization.id)).as_dict()}
 
 
+async def require_worker_manager(actor: ActorContext = Depends(get_account_actor)) -> ActorContext:
+    """Admins and HR add workers, so both see how many seats remain."""
+    if not {"admin", "hr"} & set(actor.granted_roles):
+        raise HTTPException(status_code=403, detail="Insufficient permission")
+    return actor
+
+
 @router.get("/seats")
-async def get_seats(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_tenant_admin)):
+async def get_seats(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_worker_manager)):
     return (await seat_usage(db, actor.organization_id)).as_dict()
 
 

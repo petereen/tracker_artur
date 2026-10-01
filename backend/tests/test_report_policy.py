@@ -109,3 +109,73 @@ def test_due_report_periods_include_led_department_reports():
     assert [(period.report_type, department) for period, department in due] == [("monthly", 7)]
     sunday = due_report_periods(scope, date(2026, 10, 4))
     assert [(period.report_type, department) for period, department in sunday] == [("weekly", None)]
+
+
+def test_company_periods_start_on_configured_days():
+    policy = policy_with(frequency_settings={
+        "weekly": {"start_weekday": 4},  # Friday
+        "monthly": {"start_day": 26},
+        "quarterly": {"start_month": 7},
+        "half_yearly": {"start_month": 7, "start_day": 1},
+        "yearly": {"start_month": 7},
+    })
+    day = date(2026, 9, 28)  # Monday
+    weekly = period_for_frequency(policy, "weekly", day)
+    assert (weekly.start, weekly.end) == (date(2026, 9, 25), date(2026, 10, 1))
+    monthly = period_for_frequency(policy, "monthly", day)
+    assert (monthly.start, monthly.end) == (date(2026, 9, 26), date(2026, 10, 25))
+    assert period_for_frequency(policy, "monthly", date(2026, 9, 25)).start == date(2026, 8, 26)
+    quarterly = period_for_frequency(policy, "quarterly", day)
+    assert (quarterly.start, quarterly.end) == (date(2026, 7, 1), date(2026, 9, 30))
+    assert period_for_frequency(policy, "quarterly", date(2026, 10, 1)).start == date(2026, 10, 1)
+    half = period_for_frequency(policy, "half_yearly", date(2026, 10, 5))
+    assert (half.start, half.end, half.report_type) == (date(2026, 7, 1), date(2026, 12, 31), "half_yearly")
+    half = period_for_frequency(policy, "half_yearly", date(2027, 2, 3))
+    assert (half.start, half.end) == (date(2027, 1, 1), date(2027, 6, 30))
+    yearly = period_for_frequency(policy, "yearly", date(2027, 3, 1))
+    assert (yearly.start, yearly.end) == (date(2026, 7, 1), date(2027, 6, 30))
+
+
+def test_default_half_yearly_period_is_calendar_half():
+    policy = report_policy(None)
+    half = period_for_frequency(policy, "half_yearly", date(2026, 9, 28))
+    assert (half.start, half.end) == (date(2026, 7, 1), date(2026, 12, 31))
+
+
+def test_frequency_settings_are_normalized_and_bounded():
+    policy = policy_with(frequency_settings={"monthly": {"start_day": 31, "reminder_days": 99, "due_days": 5, "reminder_hour": "18:30"}})
+    monthly = policy["frequency_settings"]["monthly"]
+    assert monthly == {"reminder_days": None, "due_days": 5, "reminder_hour": 18, "start_day": 1}
+    assert "daily" not in policy["frequency_settings"]
+    assert policy["frequency_settings"]["yearly"]["start_month"] == 1
+    with pytest.raises(ValueError):
+        validate_policy_input({"worker_frequencies": [], "frequency_settings": {"custom:nope": {}}})
+
+
+def test_open_periods_cover_lead_time_and_submission_grace():
+    from app.services.report_policy import open_report_periods, submission_deadline
+
+    policy = policy_with(worker_frequencies=["yearly"], frequency_settings={"yearly": {"reminder_days": 30, "due_days": 15}})
+    # 30 days before the year ends the current period is reminded about.
+    phases = open_report_periods(policy, "yearly", date(2026, 12, 2))
+    assert [(period.start, phase) for period, phase in phases] == [(date(2026, 1, 1), "closing")]
+    assert open_report_periods(policy, "yearly", date(2026, 12, 1)) == []
+    # For 15 days into the new year the previous year is still due.
+    phases = open_report_periods(policy, "yearly", date(2027, 1, 15))
+    assert [(period.start, phase) for period, phase in phases] == [(date(2026, 1, 1), "overdue")]
+    assert open_report_periods(policy, "yearly", date(2027, 1, 16)) == []
+    assert submission_deadline(policy, period_for_frequency(policy, "yearly", date(2026, 5, 1))) == date(2027, 1, 15)
+
+
+def test_due_report_periods_respect_reminder_hour():
+    from app.bot.scheduler import due_report_periods
+
+    policy = policy_with(worker_frequencies=["monthly", "weekly"], frequency_settings={"monthly": {"reminder_hour": 17}})
+    scope = {"policy": policy, "frequencies": policy["worker_frequencies"], "led_departments": {}}
+    day = date(2026, 5, 31)  # Sunday: last day of the month and of the week
+    at_nine = due_report_periods(scope, day, 9, 9)
+    assert [period.report_type for period, _ in at_nine] == ["weekly"]
+    at_five = due_report_periods(scope, day, 17, 9)
+    assert [period.report_type for period, _ in at_five] == ["monthly"]
+    # Without an hour (legacy persisted jobs) everything due today is returned.
+    assert {period.report_type for period, _ in due_report_periods(scope, day)} == {"monthly", "weekly"}

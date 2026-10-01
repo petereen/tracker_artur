@@ -52,6 +52,7 @@ import {
   type UserProfile,
 } from "../api/enterprise";
 import { notificationService, type NotificationPermissionState } from "../platform/notifications";
+import { NotificationPreferencesCard } from "../components/NotificationPreferencesCard";
 import { isNativePlatform, resolvePublicAssetUrl } from "../platform/runtime";
 import { desktopChatPermission, previewChatSound, requestDesktopChatPermission } from "../platform/chat-notifications";
 
@@ -627,6 +628,8 @@ export function ProfilePage() {
               )}
             </VStack>
           </Card>
+
+          <NotificationPreferencesCard />
         </VStack>
       </Grid>
 

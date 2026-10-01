@@ -25,13 +25,13 @@ from app.services.ai_gateway.runtime import resolve_ai_runtime
 log = logging.getLogger(__name__)
 
 EXPORT_ROLES = ("admin", "manager")
-REPORT_TYPES = ("daily", "weekly", "monthly", "quarterly", "yearly", "custom", "next_month_plan")
+REPORT_TYPES = ("daily", "weekly", "monthly", "quarterly", "half_yearly", "yearly", "custom", "next_month_plan")
 MONTH_PERIOD_TYPES = {"monthly", "next_month_plan"}
 MAX_PERIOD_DAYS = 3 * 366
 NO_DEPARTMENT = "Хэлтэсгүй"
 REPORT_TYPE_LABEL = {
     "daily": "Өдрийн тайлан", "weekly": "7 хоногийн тайлан", "monthly": "Сарын тайлан",
-    "quarterly": "Улирлын тайлан", "yearly": "Жилийн тайлан", "custom": "Тусгай тайлан",
+    "quarterly": "Улирлын тайлан", "half_yearly": "Хагас жилийн тайлан", "yearly": "Жилийн тайлан", "custom": "Тусгай тайлан",
     "next_month_plan": "Дараа сарын төлөвлөгөө",
 }
 REPORT_STATUS_LABEL = {"awaiting": "Хүлээгдэж буй", "draft": "Ноорог", "editing": "Засварлаж буй", "submitted": "Илгээсэн", "revision_requested": "Засвар хүссэн", "approved": "Батлагдсан"}

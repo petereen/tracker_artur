@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, Bot, BookOpen, Building2, Globe, Send, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, FileCheck2, KeyRound, LocateFixed, MapPin, MonitorUp, ScanLine, Settings2, ShieldAlert, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, Wifi, X } from 'lucide-react'
+import { ArrowLeft, Bell, Bot, BookOpen, Building2, Globe, Send, CalendarClock, CalendarDays, Check, ChevronDown, ClipboardList, Code2, FileCheck2, KeyRound, LocateFixed, MapPin, MonitorUp, ScanLine, Settings2, ShieldAlert, ShieldCheck, Trash2, UserPlus, UserRoundCog, Users2, Wifi, X } from 'lucide-react'
 import { Link, NavLink } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useBrandingSettings, useCreateManagedAccount, useCreateWorktimeQrKiosk, useDeleteManagedAccount, useDeleteWorktimeQrKiosk, useGoogleCalendarConnect, useGoogleCalendarDisconnect, useGoogleCalendarStatus, useGoogleCalendarSyncMode, useHolidaySettings, useManagedAccounts, usePermissionSettings, useRenewWorktimeQrPairingCode, useRevokeWorktimeQrKiosk, useSetHolidayCountry, useUpdateBrandingSettings, useUpdateManagedAccount, useUpdatePermissionSettings, useUpdateWorktimeGeofenceSettings, useUploadBrandingLogo, useWorktimeGeofenceSettings, useWorktimeQrKiosks } from '../api/enterprise'
@@ -14,6 +14,7 @@ import { AiAgentSettings } from '../components/AiAgentSettings'
 import { OnboardingPage } from './OnboardingPage'
 import { DeveloperPage } from './DeveloperPage'
 import { ERPBuilderPanels } from '../components/ERPBuilderPanels'
+import { RoleBuilder } from '../components/RoleBuilder'
 import { ERPModuleSettings } from '../components/ERPModuleSettings'
 import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
 import { WorktimeMethodsSettings } from '../components/WorktimeMethodsSettings'
@@ -22,6 +23,8 @@ import { SeatMeter, TenantLicenseSettings } from '../components/TenantLicenseSet
 import { TenantBrandingSettings } from '../components/TenantBrandingSettings'
 import { TenantDomainSettings } from '../components/TenantDomainSettings'
 import { TenantTelegramBotSettings } from '../components/TenantTelegramBotSettings'
+import { SeatLimitNotice } from '../components/SeatLimitNotice'
+import { NotificationSettings } from '../components/NotificationSettings'
 import { Banner } from '@astryxdesign/core/Banner'
 import { tenancyErrorMessage, useTenantSeats } from '../api/tenancy'
 
@@ -158,7 +161,7 @@ function SeatUsagePanel() {
     <div className="settings-form-stack">
       <SeatMeter seats={seats.data} />
       {full && <Banner status="warning" collapsible={false} title="Лицензийн бүх хэрэглэгчийн эрх ашиглагдсан"
-        description="Шинэ хэрэглэгч нэмэх, идэвхгүй хэрэглэгчийг сэргээхийн тулд багцаа өргөтгөх эсвэл ашиглахгүй хэрэглэгчийг идэвхгүй болгоно уу."
+        description="Ажилтан бүртгэх боломжтой хэвээр, гэхдээ шинэ нэвтрэх эрх олгох, идэвхгүй хэрэглэгчийг сэргээхийн тулд багцаа өргөтгөх эсвэл ашиглахгүй хэрэглэгчийг идэвхгүй болгоно уу."
         endContent={<Link to="/administration/security/license">Багц өргөтгөх</Link>} />}
     </div>
   </SettingsSection>
@@ -176,7 +179,7 @@ function TaskAssignmentPermissionsPanel() {
 
 export function PermissionsSettingsPage() {
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
-  return <SettingsPage categoryId="people" activeTab="/administration/people/permissions" title="Үүрэг ба эрх"><TaskAssignmentPermissionsPanel />{roles.includes('admin') && <SettingsSection title="Системийн role" icon={ShieldCheck} className="settings-embedded"><ERPBuilderPanels /></SettingsSection>}</SettingsPage>
+  return <SettingsPage categoryId="people" activeTab="/administration/people/permissions" title="Үүрэг ба эрх"><TaskAssignmentPermissionsPanel />{roles.includes('admin') && <SettingsSection title="Үүрэг үүсгэх ба эрх" icon={ShieldCheck} className="settings-embedded"><RoleBuilder /></SettingsSection>}{roles.includes('admin') && <SettingsSection title="Маягт ба батлах урсгал (ERP)" icon={ClipboardList} className="settings-embedded"><ERPBuilderPanels /></SettingsSection>}</SettingsPage>
 }
 
 export function CollaborationSettingsPage() {
@@ -339,7 +342,7 @@ function UnlinkedAccountsPanel() {
   const remove = (account: { id: number; email: string }) => {
     if (window.confirm(`${account.email} хэрэглэгчийг устгах уу?`)) deleteAccount.mutate(account.id)
   }
-  return <SettingsSection title="Ажилтантай холбогдоогүй хэрэглэгчид" icon={Users2} className="account-admin panel"><form className="account-create-form" onSubmit={create}><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label><label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" minLength={10} autoComplete="new-password" required /></label><label>Role<select value={role} onChange={(event) => setRole(event.target.value)}>{ACCOUNT_ROLES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className="primary-action compact" disabled={createAccount.isPending}><UserPlus size={15} />Нэмэх</button></form><div className="account-list" aria-live="polite">{unlinkedAccounts.map((account) => <article key={account.id}><div className="account-identity"><strong>{account.email}</strong><span>{account.status} · ажилтантай холбогдоогүй</span></div><fieldset className="role-editor"><legend>Access roles</legend>{ACCOUNT_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleRole(account, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}</fieldset><div className="settings-row-actions"><button type="button" className="settings-icon-action" onClick={() => changePassword(account)} aria-label={`${account.email} нууц үг солих`} title="Нууц үг солих"><KeyRound size={16} /></button><button type="button" className="settings-icon-action" onClick={() => updateAccount.mutate({ id: account.id, status: account.status === 'disabled' ? 'active' : 'disabled' })} aria-label={`${account.email} ${account.status === 'disabled' ? 'идэвхжүүлэх' : 'идэвхгүй болгох'}`} title={account.status === 'disabled' ? 'Идэвхжүүлэх' : 'Идэвхгүй болгох'}><span className="sr-only">{account.status === 'disabled' ? 'Идэвхжүүлэх' : 'Идэвхгүй болгох'}</span>{account.status === 'disabled' ? <Check size={16} /> : <X size={16} />}</button><button type="button" className="settings-icon-action danger" onClick={() => remove(account)} aria-label={`${account.email} устгах`} title="Устгах"><Trash2 size={16} /></button></div></article>)}</div></SettingsSection>
+  return <SettingsSection title="Ажилтантай холбогдоогүй хэрэглэгчид" icon={Users2} className="account-admin panel"><SeatLimitNotice context="account" /><form className="account-create-form" onSubmit={create}><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label><label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" minLength={10} autoComplete="new-password" required /></label><label>Role<select value={role} onChange={(event) => setRole(event.target.value)}>{ACCOUNT_ROLES.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className="primary-action compact" disabled={createAccount.isPending}><UserPlus size={15} />Нэмэх</button></form><div className="account-list" aria-live="polite">{unlinkedAccounts.map((account) => <article key={account.id}><div className="account-identity"><strong>{account.email}</strong><span>{account.status} · ажилтантай холбогдоогүй</span></div><fieldset className="role-editor"><legend>Access roles</legend>{ACCOUNT_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleRole(account, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}</fieldset><div className="settings-row-actions"><button type="button" className="settings-icon-action" onClick={() => changePassword(account)} aria-label={`${account.email} нууц үг солих`} title="Нууц үг солих"><KeyRound size={16} /></button><button type="button" className="settings-icon-action" onClick={() => updateAccount.mutate({ id: account.id, status: account.status === 'disabled' ? 'active' : 'disabled' })} aria-label={`${account.email} ${account.status === 'disabled' ? 'идэвхжүүлэх' : 'идэвхгүй болгох'}`} title={account.status === 'disabled' ? 'Идэвхжүүлэх' : 'Идэвхгүй болгох'}><span className="sr-only">{account.status === 'disabled' ? 'Идэвхжүүлэх' : 'Идэвхгүй болгох'}</span>{account.status === 'disabled' ? <Check size={16} /> : <X size={16} />}</button><button type="button" className="settings-icon-action danger" onClick={() => remove(account)} aria-label={`${account.email} устгах`} title="Устгах"><Trash2 size={16} /></button></div></article>)}</div></SettingsSection>
 }
 
 export function AccessControlSettingsPage() {
@@ -362,6 +365,7 @@ export function AutomationSettingsPage() {
   return <SettingsPage categoryId="integrations" activeTab="/administration/integrations/overview" title="Интеграци ба төхөөрөмж">
     <SettingsSection title="Google Calendar" icon={CalendarClock} className="integration-grid settings-integrations"><article className="integration-panel"><div><strong>Google Calendar</strong><p>{calendarStatus.data?.status === 'active' ? `Холбогдсон · webhook ${calendarStatus.data.watch_active ? 'идэвхтэй' : 'шинэчлэгдэж байна'}${calendarStatus.data.last_error ? ` · ${calendarStatus.data.last_error}` : ''}` : 'Холбогдоогүй'}</p>{calendarStatus.data?.status === 'active' && <select aria-label="Calendar sync mode" value={calendarStatus.data.sync_mode} onChange={(event) => syncMode.mutate(event.target.value as 'outbound' | 'bidirectional')}><option value="outbound">Зөвхөн OYUNS → Google</option><option value="bidirectional">Хоёр чиглэлтэй хугацааны sync</option></select>}</div>{calendarStatus.data?.status === 'active' ? <button className="secondary-action" onClick={() => disconnect.mutate()} disabled={disconnect.isPending}>Салгах</button> : <button className="secondary-action" onClick={connectCalendar} disabled={calendar.isPending}>Холбох</button>}</article></SettingsSection>
     {isAdmin && <SettingsSection title="Telegram бот" icon={Send} className="settings-embedded"><TenantTelegramBotSettings /></SettingsSection>}
+    {isAdmin && <SettingsSection title="Мэдэгдлийн тохиргоо (бүх хэрэглэгч)" icon={Bell} className="settings-embedded"><NotificationSettings /></SettingsSection>}
     <SettingsSection title="Мэдэгдэл ба Telegram" icon={UserRoundCog} className="settings-embedded"><ManagerSettingsPage /></SettingsSection>
   </SettingsPage>
 }

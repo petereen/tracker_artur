@@ -7,6 +7,7 @@ import { useHREmployeeRoles, useSetHREmployeeRoles, useActor, useArchiveHREmploy
 import type { HRDepartment, HREmployee, HREmploymentStatus, HREmploymentType, HRLeaveRequest } from '../api/enterprise'
 import { Badge, Btn, Card, Input, Modal, Select } from '../components/ui'
 import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
+import { SeatLimitNotice } from '../components/SeatLimitNotice'
 import { MonthlyPayrollProfileDrawer } from '../components/MonthlyPayrollProfileDrawer'
 import { EmployeeWorktimeStats } from '../components/EmployeeWorktimeStats'
 import { AttendanceGrid } from '../components/attendance/AttendanceGrid'
@@ -160,11 +161,13 @@ function WorkerFormModal({ employee, departments, employees, onClose, onCreated 
         toast.success('Ажилтны мэдээлэл хадгалагдлаа'); onClose()
       } else {
         const result = await create.mutateAsync({ ...values, telegram_id: botConnected ? form.telegram_id.trim() || null : null, annual_leave_days: form.annual_leave_days ? Number(form.annual_leave_days) : null })
+        if (result.seat_warning) toast(result.seat_warning, { icon: '⚠️', duration: 8000 })
         onCreated(result.invite?.deep_link ?? null)
       }
     } catch (error) { toast.error(errorText(error)) }
   }
   return <Modal title={employee ? `${employee.name} — засах` : 'Ажилтан нэмэх'} onClose={onClose} className="hr-worker-modal">
+    {!employee && <SeatLimitNotice />}
     <h4 className="hr-form-section">Хувийн мэдээлэл</h4>
     <div className="hr-form-grid">
       <Input label="Овог" value={form.last_name} onChange={set('last_name')} fullWidth />

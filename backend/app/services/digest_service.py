@@ -210,9 +210,15 @@ async def _send(recipient_tg: str | None, text: str | None, organization_id: int
     await send_telegram(recipient_tg, text, organization_id=organization_id)
 
 
+def _digest_allowed_for(emp_id: int) -> bool:
+    from app.services.notification_preferences import delivery_for_employee_sync
+
+    return delivery_for_employee_sync(emp_id, "task_digest").telegram
+
+
 async def send_employee_morning_digest(emp_id: int) -> None:
     emp = _get_employee(emp_id)
-    if not emp or not _policy(emp.organization_id).enabled:
+    if not emp or not _policy(emp.organization_id).enabled or not _digest_allowed_for(emp_id):
         return
     message = build_employee_morning(emp_id, emp.timezone)
     from app.bot.db import get_schedule
@@ -229,7 +235,7 @@ async def send_employee_morning_digest(emp_id: int) -> None:
 
 async def send_employee_evening_digest(emp_id: int) -> None:
     emp = _get_employee(emp_id)
-    if not emp or not _policy(emp.organization_id).enabled:
+    if not emp or not _policy(emp.organization_id).enabled or not _digest_allowed_for(emp_id):
         return
     message = build_employee_evening(emp_id, emp.timezone)
     from app.bot.db import get_schedule
@@ -241,7 +247,7 @@ async def send_employee_evening_digest(emp_id: int) -> None:
         _has_employee_task_on_day(emp_id, emp.timezone, local_day),
     ):
         return
-    await _send(emp.telegram_id, message)
+    await _send(emp.telegram_id, message, emp.organization_id)
 
 
 async def send_manager_task_digest() -> None:
@@ -254,7 +260,9 @@ async def send_manager_task_digest() -> None:
         try:
             with tenant_scope(organization_id):
                 policy = _policy(organization_id)
-                if not policy.enabled:
+                from app.services.notification_preferences import tenant_category_enabled_sync
+
+                if not policy.enabled or not tenant_category_enabled_sync(organization_id, "digests"):
                     continue
                 ms = get_manager_settings(organization_id)
                 local_day = _local_today("Asia/Ulaanbaatar")

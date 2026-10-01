@@ -15,10 +15,11 @@ from app.models.models import AssistantSemanticCache
 log = logging.getLogger(__name__)
 
 
-def exact_key(*, prompt_version: str, language: str, text: str) -> str:
+def exact_key(*, organization_id: int, prompt_version: str, language: str, text: str) -> str:
+    """Cached answers never cross tenants: the tenant is part of the key."""
     normalized = " ".join(text.split())
     material = f"{prompt_version}|{language}|{normalized}".encode()
-    return "ai:exact:" + hashlib.sha256(material).hexdigest()
+    return f"ai:exact:{int(organization_id)}:" + hashlib.sha256(material).hexdigest()
 
 
 class ResponseCache:
@@ -81,6 +82,9 @@ class ResponseCache:
         except Exception:
             log.warning("ai_gateway.circuit_failure_failed", exc_info=True)
 
+    # The semantic cache table has no tenant column, so it may only ever hold
+    # public, context-independent answers; the agent does not use it for
+    # company data (every turn carries tenant context).
     async def get_semantic(self, db: AsyncSession, embedding: list[float], *, prompt_version: str, language: str) -> AssistantSemanticCache | None:
         # pgvector's cosine distance operator avoids pulling all vectors into
         # application memory. A missing extension simply yields no cache hit.

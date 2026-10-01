@@ -124,6 +124,11 @@ services:
       # OYUNS ERP multi-tenant SaaS (docs/multi-tenancy.md). Defaults keep the
       # single-company deployment behaving exactly as before.
       MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
+      # OYUNS AI agent least-privilege DB role: the migration creates `oyuns_ai`
+      # with AI_DB_PASSWORD; AI_DATABASE_URL points the agent at it.
+      AI_DB_PASSWORD: ${AI_DB_PASSWORD:-}
+      AI_DATABASE_URL: ${AI_DATABASE_URL:-}
+      AI_DATABASE_REQUIRE_RLS: ${AI_DATABASE_REQUIRE_RLS:-false}
       PLATFORM_ROOT_HOSTS: ${PLATFORM_ROOT_HOSTS:-erp.oyuns.mn,localhost,127.0.0.1,backend}
       TENANT_BASE_DOMAIN: ${TENANT_BASE_DOMAIN:-}
       TENANT_UNKNOWN_HOST_POLICY: ${TENANT_UNKNOWN_HOST_POLICY:-shared}

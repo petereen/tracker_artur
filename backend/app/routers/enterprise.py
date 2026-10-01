@@ -106,11 +106,14 @@ from app.services.attendance_service import sync_worktime_attendance
 from app.services.report_policy import (
     REPORT_POLICY_KEY,
     REVIEWED_REPORT_TYPES,
+    allowed_frequencies,
     department_frequencies,
     frequency_for,
     frequency_label,
+    open_report_periods,
     period_for_frequency,
     report_policy,
+    submission_deadline,
     validate_policy_input,
     worker_frequencies,
 )
@@ -340,11 +343,25 @@ class DepartmentReportRuleInput(BaseModel):
     department_frequencies: list[str] = Field(default_factory=list, max_length=20)
 
 
+class FrequencySettingsInput(BaseModel):
+    """Where a period starts and when it is reminded about (per frequency)."""
+    start_weekday: int | None = Field(default=None, ge=0, le=6)
+    start_day: int | None = Field(default=None, ge=1, le=28)
+    start_month: int | None = Field(default=None, ge=1, le=12)
+    # None inherits the company ``reminder_days``.
+    reminder_days: int | None = Field(default=None, ge=1, le=60)
+    # Days after the period end the report is still accepted and reminded.
+    due_days: int = Field(default=0, ge=0, le=60)
+    # Local hour of the reminder; None keeps the worker's morning time.
+    reminder_hour: int | None = Field(default=None, ge=0, le=23)
+
+
 class ReportPolicyInput(BaseModel):
     worker_frequencies: list[str] = Field(default_factory=list, max_length=20)
     custom_periods: list[CustomReportPeriodInput] = Field(default_factory=list, max_length=12)
     departments: list[DepartmentReportRuleInput] = Field(default_factory=list, max_length=200)
     reminder_days: int = Field(default=3, ge=1, le=14)
+    frequency_settings: dict[str, FrequencySettingsInput] = Field(default_factory=dict, max_length=40)
 
 
 async def _report_policy_out(db: AsyncSession, organization: Organization) -> dict:
@@ -355,12 +372,20 @@ async def _report_policy_out(db: AsyncSession, organization: Organization) -> di
         .where(Department.organization_id == organization.id, Department.is_active.is_(True))
         .order_by(Department.name)
     )).all()
+    today = date.today()
+    previews = {}
+    for value in allowed_frequencies(policy["custom_periods"]):
+        period = period_for_frequency(policy, value, today)
+        if period and value != "daily":
+            previews[value] = {"start": period.start, "end": period.end, "due": submission_deadline(policy, period)}
     return {
         **policy,
         "available_frequencies": [
             {"value": value, "label": frequency_label(policy, value)}
-            for value in ("daily", "weekly", "monthly", "quarterly", "yearly", *(f"custom:{item['id']}" for item in policy["custom_periods"]))
+            for value in allowed_frequencies(policy["custom_periods"])
         ],
+        # The period containing today under the saved settings (UI preview).
+        "current_periods": previews,
         "department_options": [
             {"id": row[0], "name": row[1], "manager_employee_id": row[2], "manager_name": row[3]}
             for row in departments
@@ -729,7 +754,7 @@ class ReportDraftInput(BaseModel):
 
 
 class ReportCreateInput(BaseModel):
-    report_type: Literal["daily", "weekly", "monthly", "quarterly", "yearly", "custom"] = "daily"
+    report_type: Literal["daily", "weekly", "monthly", "quarterly", "half_yearly", "yearly", "custom"] = "daily"
     period_date: date
     # Custom period id for report_type="custom".
     period_key: str | None = Field(default=None, max_length=40)
@@ -2778,17 +2803,21 @@ async def report_options(db: AsyncSession = Depends(get_db), actor: ActorContext
     scope = await _actor_report_scope(db, actor)
     policy = scope["policy"]
     today = date.today()
-    personal = []
-    for frequency in scope["frequencies"]:
+
+    def options(frequency: str, department_id: int | None, department_name: str | None) -> list[dict]:
         period = period_for_frequency(policy, frequency, today)
-        if period:
-            personal.append({"frequency": frequency, "report_type": period.report_type, "period_key": period.period_key or None, "label": period.label, "department_id": None, "department_name": None, "current_period": _period_out(period)})
-    department = []
-    for department_id, rule in scope["led_departments"].items():
-        for frequency in rule["frequencies"]:
-            period = period_for_frequency(policy, frequency, today)
-            if period:
-                department.append({"frequency": frequency, "report_type": period.report_type, "period_key": period.period_key or None, "label": period.label, "department_id": department_id, "department_name": rule["name"], "current_period": _period_out(period)})
+        if not period:
+            return []
+        base = {"frequency": frequency, "report_type": period.report_type, "period_key": period.period_key or None, "label": period.label, "department_id": department_id, "department_name": department_name}
+        result = [{**base, "current_period": _period_out(period), "due_date": submission_deadline(policy, period), "overdue": False}]
+        # A previous period still inside its submission grace days.
+        for open_period, phase in open_report_periods(policy, frequency, today):
+            if phase == "overdue":
+                result.append({**base, "current_period": _period_out(open_period), "due_date": submission_deadline(policy, open_period), "overdue": True})
+        return result
+
+    personal = [item for frequency in scope["frequencies"] for item in options(frequency, None, None)]
+    department = [item for department_id, rule in scope["led_departments"].items() for frequency in rule["frequencies"] for item in options(frequency, department_id, rule["name"])]
     return {"personal": personal, "department": department, "reminder_days": policy["reminder_days"]}
 
 

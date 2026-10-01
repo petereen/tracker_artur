@@ -183,6 +183,7 @@ def _iso(dt: datetime | None) -> str | None:
 async def drain_notification_outbox() -> None:
     """Отправляет готовые (not_before<=now) уведомления из outbox. Interval-джоб бота."""
     from app.bot.scheduler import _make_bot
+    from app.services.notification_preferences import telegram_allowed_sync
     from app.services.telegram_bots import tenant_app_url_sync
 
     due = task_service.fetch_due_outbox()
@@ -199,6 +200,11 @@ async def drain_notification_outbox() -> None:
                 # Для задач, которые уже закрыты — не слать (но пометить отправленным).
                 if item["task_id"] and (item["task_status"] in ("done", "cancelled") or item.get("task_workflow_status") == "review"):
                     task_service.mark_outbox(item["id"], "sent")
+                    continue
+                # Preferences are checked again at send time: a category the
+                # tenant or the user switched off after queueing is dropped.
+                if not telegram_allowed_sync(item["recipient_tg"], item["kind"], organization_id):
+                    task_service.mark_outbox(item["id"], "skipped", "notification_preferences", final=True)
                     continue
                 if organization_id not in bots:
                     bots[organization_id] = _make_bot(organization_id)
@@ -219,8 +225,31 @@ async def drain_notification_outbox() -> None:
                 await bot.session.close()
 
 
+CATEGORY_ICONS = {
+    "tasks": "📌", "reports": "📝", "worktime": "🕘", "calendar": "📅", "contracts": "📄",
+    "hr": "🧑‍💼", "crm": "🤝", "payroll": "💰", "digests": "🗞", "checkin": "✅", "system": "🔔",
+}
+
+
+def _open_button(url: str | None, label: str = "🔗 Нээх"):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    if not url or not url.startswith("http"):
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=label, url=url)]])
+
+
+def _absolute(app_url: str, target: str | None) -> str | None:
+    if not target:
+        return None
+    return target if target.startswith("http") else f"{app_url}{target if target.startswith('/') else '/' + target}"
+
+
 def _render_outbox(item: dict):
+    from html import escape
+
     from app.bot.keyboards import task_actions_kb
+    from app.services.notification_preferences import category_for
 
     p = item.get("payload") or {}
     tid = item["task_id"]
@@ -250,12 +279,14 @@ def _render_outbox(item: dict):
         text = f"🔎 <b>Хянах шаардлагатай</b>\n\n<b>Даалгавар:</b> #{tid} {title}\n<b>Хариуцагч:</b> {assignee}\n<b>Нээх:</b> {task_url}\n{p.get('text', '')}"
         return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, description=description, timezone_name=timezone_name, include_submit_for_review=False, task_url=task_url) if tid else None)
     if item["kind"] == "task_overdue":
-        text = (f"🔴 #{tid} даалгаврын хугацаа хэтэрлээ: {title}\n"
-                f"/done {tid} гэж дуусгах эсвэл /snooze {tid} <цаг> гэж хугацааг хойшлуулна уу.")
-        return text, (task_actions_kb(tid) if tid else None)
+        task_url = p.get("task_url") or f"{app_url}/tasks?task={tid}"
+        text = (f"🔴 <b>Даалгаврын хугацаа хэтэрлээ</b>\n\n#{tid} {escape(title)}\n"
+                f"Хугацаа: <b>{dl_h}</b>\nДоорх товчоор дуусгах эсвэл хойшлуулна уу.")
+        return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, timezone_name=timezone_name, task_url=task_url) if tid else None)
     if item["kind"] == "task_deadline":
-        text = f"⏰ <b>Даалгаврын сануулга</b>\n\n#{tid} {title}\nХугацаа: <b>{dl_h}</b> ({p.get('when', 'удахгүй')})"
-        return text, (task_actions_kb(tid) if tid else None)
+        task_url = p.get("task_url") or f"{app_url}/tasks?task={tid}"
+        text = f"⏰ <b>Даалгаврын сануулга</b>\n\n#{tid} {escape(title)}\nХугацаа: <b>{dl_h}</b> ({p.get('when', 'удахгүй')})"
+        return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, timezone_name=timezone_name, task_url=task_url) if tid else None)
     if item["kind"] in {"calendar_reminder", "event"}:
         starts_at = p.get("starts_at")
         starts_at_dt = datetime.fromisoformat(starts_at) if starts_at else None
@@ -268,4 +299,12 @@ def _render_outbox(item: dict):
         if p.get("location"):
             text += f"\nБайршил: {p['location']}"
         return f"{text}\n🔗 <b>Календарь нээх:</b> {entry_url}", None
-    return p.get("text") or f"🔔 <b>{p.get('title', 'Мэдэгдэл')}</b>\n\n{p.get('body', '')}", None
+    # Every other kind: category icon, title, body and an "open" button to
+    # the same page the in-app notification opens.
+    icon = CATEGORY_ICONS.get(category_for(item["kind"]), "🔔")
+    target = _absolute(app_url, p.get("target_url"))
+    if p.get("text"):
+        return p["text"], _open_button(target)
+    heading = escape(str(p.get("title") or "Мэдэгдэл"))
+    body = escape(str(p.get("body") or ""))
+    return f"{icon} <b>{heading}</b>" + (f"\n\n{body}" if body else ""), _open_button(target)

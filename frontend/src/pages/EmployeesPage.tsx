@@ -8,6 +8,7 @@ import { useCreateManagedAccount, useDeleteManagedAccount, useManagedAccounts, u
 import { TELEGRAM_BOT_REQUIRED_HINT, tenancyErrorMessage, useTenantContext } from '../api/tenancy'
 import { ReportDetailModal } from '../components/ReportDetailModal'
 import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
+import { SEAT_FULL_WORKER_MESSAGE, SeatLimitNotice, useWorkerSeats } from '../components/SeatLimitNotice'
 
 const TZ_OPTIONS = [
   { value: 'Asia/Ulaanbaatar',    label: 'Улаанбаатар (UTC+8)' },
@@ -62,6 +63,7 @@ export function EmployeesPage() {
   const createAccount = useCreateManagedAccount()
   const updateAccount = useUpdateManagedAccount()
   const deleteAccount = useDeleteManagedAccount()
+  const { full: seatLimitReached } = useWorkerSeats()
 
   const [search, setSearch] = useState('')
   // null = закрыто, { id: null } = создание, { id: number } = редактирование
@@ -123,6 +125,7 @@ export function EmployeesPage() {
         telegram_username: form.telegram_username,
         timezone: form.timezone,
       })
+      if (seatLimitReached) toast(SEAT_FULL_WORKER_MESSAGE, { icon: '⚠️', duration: 7000 })
     }
     close()
   }
@@ -143,6 +146,7 @@ export function EmployeesPage() {
     }
   }
   const linkAccess = async (emp: any) => {
+    if (seatLimitReached) { toast.error('Лицензийн хэрэглэгчийн эрх дүүрсэн тул нэвтрэх эрх холбох боломжгүй. Багцаа өргөтгөх эсвэл ашиглахгүй хэрэглэгчийг идэвхгүй болгоно уу.'); return }
     const password = window.prompt(`${emp.name}-ийн шинэ нууц үг (10+ тэмдэгт):`)
     if (!password) return
     if (password.length < 10) { toast.error('Нууц үг 10+ тэмдэгт байх ёстой'); return }
@@ -234,6 +238,7 @@ export function EmployeesPage() {
       {editing && createPortal(
         <Modal title={isEdit ? 'Ажилтан засах' : 'Шинэ ажилтан'} onClose={close}>
           <div className="flex flex-col gap-3.5">
+            {!isEdit && <SeatLimitNotice />}
             <Input label="Нэр, овог" value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="Бат Болд" fullWidth />
             {isEdit ? (
               <div className="flex flex-col gap-1.5">
@@ -276,8 +281,9 @@ export function EmployeesPage() {
               <div><span className="employee-field-label">Цагийн бүс</span><strong>{employee.timezone}</strong></div>
             </div>
             <div className="employee-access-header"><div><strong>Хандалтын эрх</strong><span>Энэ ажилтанд оноосон role-ууд</span></div>
-              {!account && <Btn variant="primary" onClick={() => linkAccess(employee)} disabled={createAccount.isPending}>Хандалт холбох</Btn>}
+              {!account && <Btn variant="primary" onClick={() => linkAccess(employee)} disabled={createAccount.isPending || seatLimitReached}>Хандалт холбох</Btn>}
             </div>
+            {!account && <SeatLimitNotice context="account" />}
             {account ? <fieldset className="employee-role-editor"><legend>Хандалтын эрхүүд</legend>{ACCESS_ROLES.map(([value, label]) => <label key={value}><input type="checkbox" checked={account.roles.includes(value)} onChange={() => toggleAccessRole(employee, value)} disabled={updateAccount.isPending} /><span>{label}</span></label>)}</fieldset> : <p className="employee-no-access">Хандалт холбогдоогүй байна.</p>}
             <div className="employee-settings-footer"><span>{account ? `Хэрэглэгчийн төлөв · ${account.status === 'active' ? 'Идэвхтэй' : 'Идэвхгүй'}` : 'Хандалтын бүртгэл алга'}</span><div className="employee-detail-menu-wrap">
               <button className="employee-detail-more" type="button" aria-label="Хэрэглэгчийн нэмэлт үйлдэл" aria-expanded={openMenuId === -1} onClick={() => setOpenMenuId(openMenuId === -1 ? null : -1)}><MoreVertical size={18} />Үйлдлүүд</button>

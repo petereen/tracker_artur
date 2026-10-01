@@ -26,6 +26,8 @@ from app.erp.service import (
     DEFAULT_ACCOUNTS, DOCUMENT_MODULES, DOCUMENT_TYPES, ERP_MODULES, MODULE_SETTINGS_KEY, VALID_ACTIONS, as_money, calculate_lines,
     approval_required, bootstrap_organization, cancel_document, capability_scopes, default_workflow, document_out, ensure_definition, module_settings, next_number, operation_catalog, post_document, published_definition, record_workflow_transition, require_capability, scope_allows, validate_custom_fields, validate_definition_fields, validate_form_values, validate_workflow,
 )
+from app.erp.role_catalog import CATALOG_PAIRS, catalog as role_catalog, normalize_system_roles
+from app.erp.service import ROLE_TEMPLATES
 from app.erp.chart import BANK_FIELDS, account_usage, catalog as account_catalog, classify_import, descendant_ids, posting_type, validate_purpose
 from app.payroll.router import router as payroll_router
 from app.crm.router import router as crm_router
@@ -111,9 +113,11 @@ class CapabilityInput(BaseModel):
 
 class AccessRoleInput(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    code: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$")
+    # Optional: generated from the name (Mongolian names have no Latin slug).
+    code: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$")
     description: str | None = None
-    capabilities: list[CapabilityInput] = Field(default_factory=list)
+    capabilities: list[CapabilityInput] = Field(default_factory=list, max_length=300)
+    system_roles: list[str] = Field(default_factory=list, max_length=10)
 
 
 class AccountRoleInput(BaseModel):
@@ -152,7 +156,8 @@ class FormDefinitionInput(BaseModel):
 class RolePatchInput(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
-    capabilities: list[CapabilityInput] | None = None
+    capabilities: list[CapabilityInput] | None = Field(default=None, max_length=300)
+    system_roles: list[str] | None = Field(default=None, max_length=10)
 
 
 class TeamRoleInput(BaseModel):
@@ -334,12 +339,62 @@ async def _validated_scope(db: AsyncSession, organization_id: int, scope: dict[s
 
 async def _role_out(db: AsyncSession, role: ERPAccessRole) -> dict[str, Any]:
     capabilities = (await db.execute(select(ERPCapability).where(ERPCapability.access_role_id == role.id))).scalars().all()
-    account_assignments = (await db.execute(select(ERPAccountRole).where(ERPAccountRole.access_role_id == role.id))).scalars().all()
-    team_assignments = (await db.execute(select(ERPTeamRole).where(ERPTeamRole.access_role_id == role.id))).scalars().all()
+    account_assignments = (await db.execute(
+        select(ERPAccountRole, UserAccount.email, Employee.name)
+        .join(UserAccount, UserAccount.id == ERPAccountRole.account_id)
+        .outerjoin(Employee, Employee.id == UserAccount.employee_id)
+        .where(ERPAccountRole.access_role_id == role.id)
+    )).all()
+    team_assignments = (await db.execute(
+        select(ERPTeamRole, Team.name).join(Team, Team.id == ERPTeamRole.team_id).where(ERPTeamRole.access_role_id == role.id)
+    )).all()
     return {"id": role.id, "name": role.name, "code": role.code, "description": role.description, "is_system": role.is_system, "is_active": role.is_active,
+            "system_roles": list(role.system_roles or []),
             "capabilities": [{"resource": cap.resource, "action": cap.action} for cap in capabilities],
-            "account_assignments": [{"id": assignment.id, "account_id": assignment.account_id, "scope": assignment.scope} for assignment in account_assignments],
-            "team_assignments": [{"id": assignment.id, "team_id": assignment.team_id, "scope": assignment.scope} for assignment in team_assignments]}
+            "account_assignments": [{"id": assignment.id, "account_id": assignment.account_id, "scope": assignment.scope, "label": name or email} for assignment, email, name in account_assignments],
+            "team_assignments": [{"id": assignment.id, "team_id": assignment.team_id, "scope": assignment.scope, "label": team_name} for assignment, team_name in team_assignments]}
+
+
+def _validated_capabilities(capabilities: list[CapabilityInput]) -> list[tuple[str, str]]:
+    """Known resource × action pairs only (no silent no-op grants)."""
+    # Catalog pairs, plus resources of the document operations and the seeded
+    # templates (clones of templates keep their ``resource.*`` grants).
+    catalog_resources = {resource for resource, _ in CATALOG_PAIRS}
+    legacy = (set(operation_catalog()["operations"]) | {resource for _, grants in ROLE_TEMPLATES.values() for resource, _ in grants}) - catalog_resources
+    pairs: list[tuple[str, str]] = []
+    for cap in capabilities:
+        pair = (cap.resource, cap.action)
+        known = (
+            pair in CATALOG_PAIRS or pair == ("*", "*")
+            or (cap.resource in catalog_resources and cap.action == "*")
+            or (cap.resource in legacy and (cap.action in VALID_ACTIONS or cap.action == "*"))
+        )
+        if not known:
+            raise HTTPException(status_code=422, detail={"code": "erp_role_unknown_capability", "resource": cap.resource, "action": cap.action,
+                                                         "message": f"Тодорхойгүй эрх: {cap.resource}.{cap.action}"})
+        if pair not in pairs:
+            pairs.append(pair)
+    return pairs
+
+
+def _validated_system_roles(values: list[str] | None) -> list[str]:
+    try:
+        return normalize_system_roles(values)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "erp_role_system_role_not_grantable", "message": "Админ эрхийг үүргээр олгох боломжгүй; хэрэглэгчид шууд оноогоорой."}) from exc
+
+
+async def _role_code(db: AsyncSession, organization_id: int, name: str, requested: str | None) -> str:
+    import re
+    import secrets
+
+    base = requested or re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "role"
+    code = base
+    while await db.scalar(select(ERPAccessRole.id).where(ERPAccessRole.organization_id == organization_id, ERPAccessRole.code == code)):
+        if requested:
+            raise HTTPException(status_code=409, detail={"code": "erp_role_code_exists", "message": "Ийм кодтой үүрэг байна."})
+        code = f"{base[:52]}-{secrets.token_hex(3)}"
+    return code
 
 
 async def _actor_erp_role_ids(db: AsyncSession, actor: ActorContext) -> set[int]:
@@ -565,6 +620,14 @@ async def update_modules(data: ModulesInput, db: AsyncSession = Depends(get_db),
     return {"modules": module_settings(settings), "notice": "Visibility changes do not disable APIs, integrations, or existing automations."}
 
 
+@router.get("/admin/roles/catalog")
+async def role_permission_catalog(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Platform roles and module permissions a custom role can grant."""
+    await require_capability(db, actor, "erp_roles", "administer")
+    tenant = state_from_organization(await _organization(db, actor))
+    return role_catalog({feature for feature in ("crm", "budget", "payroll") if tenant.has_feature(feature)})
+
+
 @router.get("/admin/roles")
 async def list_roles(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "erp_roles", "administer")
@@ -575,14 +638,19 @@ async def list_roles(db: AsyncSession = Depends(get_db), actor: ActorContext = D
 @router.post("/admin/roles", status_code=status.HTTP_201_CREATED)
 async def create_role(data: AccessRoleInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "erp_roles", "administer")
-    catalog_resources = set(operation_catalog()["operations"]) | {"*", "accounts", "parties", "items", "warehouses", "stock", "payroll", "erp_settings", "erp_roles", "erp_custom_fields", "erp_approval_rules", "erp_imports", "erp_dashboard"}
-    if any((cap.action not in VALID_ACTIONS and cap.action != "*") or cap.resource not in catalog_resources for cap in data.capabilities):
-        raise HTTPException(status_code=422, detail="Unknown capability action")
-    role = ERPAccessRole(organization_id=actor.organization_id, name=data.name, code=data.code, description=data.description)
+    pairs = _validated_capabilities(data.capabilities)
+    system_roles = _validated_system_roles(data.system_roles)
+    if not pairs and not system_roles:
+        raise HTTPException(status_code=422, detail={"code": "erp_role_empty", "message": "Үүрэгт дор хаяж нэг эрх сонгоно уу."})
+    name = data.name.strip()
+    if await db.scalar(select(ERPAccessRole.id).where(ERPAccessRole.organization_id == actor.organization_id, func.lower(ERPAccessRole.name) == name.lower())):
+        raise HTTPException(status_code=409, detail={"code": "erp_role_name_exists", "message": "Ийм нэртэй үүрэг байна."})
+    role = ERPAccessRole(organization_id=actor.organization_id, name=name, code=await _role_code(db, actor.organization_id, name, data.code),
+                         description=data.description, system_roles=system_roles)
     db.add(role)
     await db.flush()
-    db.add_all([ERPCapability(access_role_id=role.id, resource=cap.resource, action=cap.action) for cap in data.capabilities])
-    await record_change(db, actor=actor, topic="erp", aggregate_type="erp_access_role", aggregate_id=role.id, operation="created", after={"code": role.code})
+    db.add_all([ERPCapability(access_role_id=role.id, resource=resource, action=action) for resource, action in pairs])
+    await record_change(db, actor=actor, topic="erp", aggregate_type="erp_access_role", aggregate_id=role.id, operation="created", after={"code": role.code, "system_roles": system_roles, "capabilities": [f"{resource}.{action}" for resource, action in pairs]})
     await db.commit()
     return await _role_out(db, role)
 
@@ -593,14 +661,22 @@ async def update_role(role_id: int, data: RolePatchInput, db: AsyncSession = Dep
     role = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
     if not role: raise HTTPException(status_code=404, detail="ERP role not found")
     if role.is_system: raise HTTPException(status_code=409, detail={"code": "erp_system_role_immutable"})
-    if data.name is not None: role.name = data.name
+    if data.name is not None:
+        name = data.name.strip()
+        if await db.scalar(select(ERPAccessRole.id).where(ERPAccessRole.organization_id == actor.organization_id, func.lower(ERPAccessRole.name) == name.lower(), ERPAccessRole.id != role.id)):
+            raise HTTPException(status_code=409, detail={"code": "erp_role_name_exists", "message": "Ийм нэртэй үүрэг байна."})
+        role.name = name
     if data.description is not None: role.description = data.description
+    if data.system_roles is not None:
+        role.system_roles = _validated_system_roles(data.system_roles)
     if data.capabilities is not None:
-        catalog_resources = set(operation_catalog()["operations"]) | {"*", "accounts", "parties", "items", "warehouses", "stock", "payroll", "erp_settings", "erp_roles", "erp_custom_fields", "erp_approval_rules", "erp_imports", "erp_dashboard"}
-        if any((cap.action not in VALID_ACTIONS and cap.action != "*") or cap.resource not in catalog_resources for cap in data.capabilities): raise HTTPException(status_code=422, detail="Unknown capability")
+        pairs = _validated_capabilities(data.capabilities)
         old = (await db.execute(select(ERPCapability).where(ERPCapability.access_role_id == role.id))).scalars().all()
         for capability in old: await db.delete(capability)
-        db.add_all([ERPCapability(access_role_id=role.id, resource=cap.resource, action=cap.action) for cap in data.capabilities])
+        # Delete before insert: the (role, resource, action) pair is unique.
+        await db.flush()
+        db.add_all([ERPCapability(access_role_id=role.id, resource=resource, action=action) for resource, action in pairs])
+    await record_change(db, actor=actor, topic="erp", aggregate_type="erp_access_role", aggregate_id=role.id, operation="updated", after={"name": role.name, "system_roles": list(role.system_roles or [])})
     await db.commit(); return await _role_out(db, role)
 
 
@@ -609,7 +685,7 @@ async def clone_role(role_id: int, db: AsyncSession = Depends(get_db), actor: Ac
     await require_capability(db, actor, "erp_roles", "administer")
     source = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
     if not source: raise HTTPException(status_code=404, detail="ERP role not found")
-    copy = ERPAccessRole(organization_id=actor.organization_id, name=f"{source.name} copy", code=f"{source.code}-{int(datetime.now(timezone.utc).timestamp())}", description=source.description)
+    copy = ERPAccessRole(organization_id=actor.organization_id, name=f"{source.name} (хуулбар)", code=await _role_code(db, actor.organization_id, f"{source.code}-copy", None), description=source.description, system_roles=list(source.system_roles or []))
     db.add(copy); await db.flush()
     capabilities = (await db.execute(select(ERPCapability).where(ERPCapability.access_role_id == source.id))).scalars().all()
     db.add_all([ERPCapability(access_role_id=copy.id, resource=cap.resource, action=cap.action) for cap in capabilities])
@@ -628,6 +704,32 @@ async def deactivate_role(role_id: int, db: AsyncSession = Depends(get_db), acto
     role.is_active = False; await db.commit(); return await _role_out(db, role)
 
 
+@router.post("/admin/roles/{role_id}/activate")
+async def activate_role(role_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    await require_capability(db, actor, "erp_roles", "administer")
+    role = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
+    if not role: raise HTTPException(status_code=404, detail="ERP role not found")
+    role.is_active = True; await db.commit(); return await _role_out(db, role)
+
+
+@router.delete("/admin/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_role(role_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+    """Delete a custom role nobody holds; roles in use are deactivated instead."""
+    await require_capability(db, actor, "erp_roles", "administer")
+    role = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
+    if not role: raise HTTPException(status_code=404, detail="ERP role not found")
+    if role.is_system: raise HTTPException(status_code=409, detail={"code": "erp_system_role_immutable", "message": "Системийн загвар үүргийг устгах боломжгүй."})
+    holders = (await db.scalar(select(func.count()).select_from(ERPAccountRole).where(ERPAccountRole.access_role_id == role.id)) or 0) \
+        + (await db.scalar(select(func.count()).select_from(ERPTeamRole).where(ERPTeamRole.access_role_id == role.id)) or 0)
+    if holders:
+        raise HTTPException(status_code=409, detail={"code": "erp_role_in_use", "message": "Энэ үүрэг хэрэглэгч эсвэл багт оноогдсон байна. Эхлээд хасах эсвэл идэвхгүй болгоно уу."})
+    definitions = (await db.execute(select(ERPFormDefinition).where(ERPFormDefinition.organization_id == actor.organization_id))).scalars().all()
+    if any(role_id in set(sum((transition.get("role_ids") or [] for transition in (definition.workflow or {}).get("transitions", [])), [])) for definition in definitions):
+        raise HTTPException(status_code=409, detail={"code": "erp_role_used_by_published_workflow", "message": "Батлах урсгалд ашиглагдаж байна."})
+    await record_change(db, actor=actor, topic="erp", aggregate_type="erp_access_role", aggregate_id=role.id, operation="deleted", before={"code": role.code})
+    await db.delete(role); await db.commit()
+
+
 @router.post("/admin/roles/{role_id}/accounts", status_code=status.HTTP_201_CREATED)
 async def assign_role(role_id: int, data: AccountRoleInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     await require_capability(db, actor, "erp_roles", "administer")
@@ -636,6 +738,8 @@ async def assign_role(role_id: int, data: AccountRoleInput, db: AsyncSession = D
         raise HTTPException(status_code=404, detail="ERP role not found")
     account = await db.scalar(select(UserAccount).where(UserAccount.id == data.account_id, UserAccount.organization_id == actor.organization_id))
     if not account: raise HTTPException(status_code=422, detail={"code": "erp_invalid_role_account"})
+    if await db.scalar(select(ERPAccountRole.id).where(ERPAccountRole.account_id == account.id, ERPAccountRole.access_role_id == role.id)):
+        raise HTTPException(status_code=409, detail={"code": "erp_role_already_assigned", "message": "Энэ хэрэглэгчид үүрэг аль хэдийн оноогдсон."})
     assignment = ERPAccountRole(account_id=data.account_id, access_role_id=role.id, scope=await _validated_scope(db, actor.organization_id, data.scope))
     db.add(assignment)
     await db.commit()
@@ -656,6 +760,8 @@ async def assign_team_role(role_id: int, data: TeamRoleInput, db: AsyncSession =
     role = await db.scalar(select(ERPAccessRole).where(ERPAccessRole.id == role_id, ERPAccessRole.organization_id == actor.organization_id))
     team = await db.scalar(select(Team).where(Team.id == data.team_id, Team.organization_id == actor.organization_id))
     if not role or not team: raise HTTPException(status_code=404, detail="ERP role or team not found")
+    if await db.scalar(select(ERPTeamRole.id).where(ERPTeamRole.team_id == team.id, ERPTeamRole.access_role_id == role.id)):
+        raise HTTPException(status_code=409, detail={"code": "erp_role_already_assigned", "message": "Энэ багт үүрэг аль хэдийн оноогдсон."})
     assignment = ERPTeamRole(team_id=team.id, access_role_id=role.id, scope=await _validated_scope(db, actor.organization_id, data.scope))
     db.add(assignment); await db.commit()
     return {"id": assignment.id, "role_id": role.id, "team_id": team.id, "scope": assignment.scope}

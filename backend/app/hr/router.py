@@ -40,7 +40,7 @@ from app.services.attendance_service import sync_worktime_attendance
 from app.services.enterprise_events import record_change
 from app.services.telegram_bots import TelegramBotError, require_bot_for_telegram_id
 from app.services.user_notifications import create_notifications
-from app.services.tenant_service import identity_in_use
+from app.services.tenant_service import identity_in_use, seat_usage
 from .schemas import (
     AttendanceBulkUpdate,
     AttendanceUpdate,
@@ -349,7 +349,16 @@ async def create_hr_employee(data: EmployeeCreate, db: AsyncSession = Depends(ge
     invite = await create_invite(db, actor, employee)
     await record_change(db, actor=actor, topic="hr", aggregate_type="employee", aggregate_id=employee.id, operation="created", after=_event_payload(employee.id, data.model_dump(exclude_none=True, exclude={"name", "annual_leave_days"})))
     await _commit_worker(db)
-    return {"employee": await _employee_out(db, actor, employee, details), "invite": invite}
+    # Adding a worker never takes a seat (only a login does), so a full
+    # license does not block HR records; the admin is warned instead.
+    seats = (await seat_usage(db, actor.organization_id)).as_dict()
+    seat_warning = None
+    if seats["limit"] is not None and seats["used"] >= seats["limit"]:
+        seat_warning = (
+            f"Лицензийн хэрэглэгчийн эрх дүүрсэн ({seats['used']}/{seats['limit']}). "
+            "Ажилтан бүртгэгдсэн ч системд нэвтрэх эрх олгогдохгүй — багцаа өргөтгөх эсвэл ашиглахгүй хэрэглэгчийг идэвхгүй болгоно уу."
+        )
+    return {"employee": await _employee_out(db, actor, employee, details), "invite": invite, "seats": seats, "seat_warning": seat_warning}
 
 
 @router.get("/employees/{employee_id}")

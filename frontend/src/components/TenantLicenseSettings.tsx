@@ -56,7 +56,7 @@ export function SeatMeter({ seats }: { seats: SeatUsage }) {
   return <VStack gap={1}>
     <ProgressBar label="Хэрэглэгчийн эрх" isLabelHidden value={Math.min(seats.used, seats.limit)} max={Math.max(seats.limit, 1)}
       variant={full ? 'error' : nearly ? 'warning' : 'accent'} hasValueLabel formatValueLabel={() => `${seats.used} / ${seats.limit}`} />
-    <Text type="supporting">{full ? 'Бүх эрх ашиглагдсан — шинэ хэрэглэгч нэмэх боломжгүй.' : `${seats.available} сул эрх үлдсэн.`}</Text>
+    <Text type="supporting">{full ? 'Бүх эрх ашиглагдсан — шинэ нэвтрэх эрх олгох боломжгүй (ажилтан бүртгэх боломжтой).' : `${seats.available} сул эрх үлдсэн.`}</Text>
   </VStack>
 }
 

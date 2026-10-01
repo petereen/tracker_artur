@@ -37,12 +37,13 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
 from app.core.enterprise_deps import ActorContext
+from app.core.tenancy import tenant_scope
 from app.models.models import Department, Employee, EmployeeDetails, Organization, Task, TaskAssignee, WorkTimeEntry
 from app.services.ai_gateway.access_policy import FULL_ACCESS, AccessPolicy
 from app.services.ai_gateway.cache import ResponseCache
 from app.services.ai_gateway.runtime import AIRuntime, build_runtime, resolve_ai_runtime
+from app.services.ai_gateway.tenant_db import bind_session_tenant, require_tenant, tenant_ai_session
 from app.services.ai_gateway.tools.registry import ToolRegistry
 from app.services.assistant_text import detect_language
 from app.services.file_search_service import FileSearchPrincipal, KnowledgeSearchResult, search_knowledge_documents, search_tokens
@@ -346,7 +347,31 @@ class AIGateway:
         sensitive_allowed: bool = True,
         input_mode: Literal["text", "voice", "voice_call"] = "text",
     ) -> GatewayResponse:
-        """Run one transport-neutral turn: context → agent loop → answer."""
+        """Run one transport-neutral turn: context → agent loop → answer.
+
+        The whole turn is pinned to the actor's tenant: a turn without a
+        tenant, or for a tenant other than the one bound to the request,
+        fails closed before any data is read (``tenant_db``).
+        """
+        tenant_id = require_tenant(actor_context.organization_id)
+        with tenant_scope(tenant_id):
+            await bind_session_tenant(db, tenant_id)
+            return await self._execute_turn(
+                db, actor_context, message_history, conversation_id=conversation_id, memory=memory,
+                sensitive_allowed=sensitive_allowed, input_mode=input_mode,
+            )
+
+    async def _execute_turn(
+        self,
+        db: Any,
+        actor_context: ActorContext,
+        message_history: Sequence[dict] | MessageHistory,
+        *,
+        conversation_id: int | None,
+        memory: list[dict] | None,
+        sensitive_allowed: bool,
+        input_mode: Literal["text", "voice", "voice_call"],
+    ) -> GatewayResponse:
         history = ([item.model_dump() for item in message_history.messages]
                    if isinstance(message_history, MessageHistory)
                    else list(message_history))
@@ -782,10 +807,11 @@ class AIGateway:
                 if schedule.get("start_at"):
                     arguments["deadline_at"] = None
             # AsyncSession is not safe for concurrent operations. Reads get
-            # independent short-lived sessions; previews stay on the request
+            # independent short-lived sessions on the tenant's own agent pool
+            # (strict RLS, see tenant_db); previews stay on the request
             # transaction inside a savepoint and are serialized.
             if definition is not None and definition.read_only and isinstance(request.database, AsyncSession):
-                async with AsyncSessionLocal() as read_db:
+                async with tenant_ai_session(request.actor_context.organization_id) as read_db:
                     result = await self.tool_registry.dispatch_tool(name, arguments, request.actor_context, db=read_db, conversation_id=request.conversation_id)
                     try:
                         # Reads only add tool-audit rows; persist them.
@@ -866,8 +892,12 @@ class AIGateway:
         history = self._trim_history(request.history, HISTORY_TOKEN_BUDGET - self._tokens([{"content": request.text}]))
         base_inputs = [grounding_message, *request.mcp_context, *history, {"role": "user", "content": request.text}]
         last_error: GatewayError | None = None
+        # Tenants bring their own API keys: one tenant's failing key must not
+        # open the circuit (and degrade answers) for everybody else.
+        circuit_scope = f"{request.actor_context.organization_id if request.actor_context else 'public'}:{runtime.source}"
         for model_id in runtime.models:
-            if await self.cache.circuit_open(model_id):
+            circuit_key = f"{circuit_scope}:{model_id}"
+            if await self.cache.circuit_open(circuit_key):
                 log.info("ai_gateway.model_circuit_open model=%s", model_id)
                 continue
             inputs = list(base_inputs)
@@ -898,7 +928,7 @@ class AIGateway:
                                 log.warning("ai_gateway.language_repair_failed model=%s", model_id)
                         tool_results = [result for _, result in collected] + self._mcp_results(output)
                         deliveries = [delivery for _, result in collected for delivery in self._materialize_file_deliveries(result, request.actor_context)]
-                        await self.cache.record_model_success(model_id)
+                        await self.cache.record_model_success(circuit_key)
                         log.info("ai_gateway.answer model=%s tools=%s web=%s latency_ms=%d", model_id, [name for name, _ in collected], web_used, int((time.monotonic() - started) * 1000))
                         return GatewayResponse(
                             answer=answer, sources=[*request.grounding_sources, *self._sources(output)], route="agent",
@@ -952,7 +982,7 @@ class AIGateway:
                         collected.append((call.get("name", ""), result))
                         pending = result.get("data", {}).get("pending_action") if isinstance(result.get("data"), dict) else None
                         if pending and call.get("name") == "oyuns_tasks_prepare_create":
-                            await self.cache.record_model_success(model_id)
+                            await self.cache.record_model_success(circuit_key)
                             return GatewayResponse(
                                 answer=task_preview_text(pending, target_language),
                                 sources=request.grounding_sources, route="task_preview", model=model_id,
@@ -970,7 +1000,7 @@ class AIGateway:
                 last_error = exc
                 if exc.kind == "not_configured":
                     break
-                await self.cache.record_model_failure(model_id)
+                await self.cache.record_model_failure(circuit_key)
                 log.warning("ai_gateway.model_failed model=%s kind=%s", model_id, exc.kind, exc_info=True)
         failure = last_error or GatewayError("No eligible live model could answer", kind="provider_5xx", retryable=True)
         task_preview = await self._offline_task_preview(db, request)

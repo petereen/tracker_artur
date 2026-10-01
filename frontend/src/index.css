@@ -12504,6 +12504,8 @@ html.capacitor-native .native-boot-error {
 .employee-action-menu button { align-items: center; background: transparent; border: 0; border-radius: 7px; color: var(--color-text); cursor: pointer; display: flex; font: inherit; font-size: 12px; gap: 9px; min-height: 36px; padding: 7px 9px; text-align: left; white-space: nowrap; width: 100%; }
 .employee-action-menu button:hover, .employee-action-menu button:focus-visible { background: var(--color-surface-2); outline: none; }
 .employee-action-menu button.danger { color: var(--color-red); }
+/* Portalled row menu (WorkerActionsMenu): above tables, cards and sticky headers. */
+.employee-action-menu.employee-action-menu-floating { z-index: 1200; max-height: calc(100vh - 16px); overflow-y: auto; }
 .employee-detail-modal { align-self: flex-start; margin: clamp(16px, 4vh, 36px) auto; max-height: calc(100vh - 32px); max-width: min(1040px, calc(100vw - 40px)); overflow: auto; padding: 24px 30px 28px; width: 100%; }
 .employee-detail-modal > div:first-child { background: var(--color-surface); margin: -24px -30px 14px; padding: 16px 30px 12px; position: sticky; top: -24px; z-index: 5; }
 .employee-detail-modal > div:first-child > div:first-child { align-items: center; }
@@ -13465,3 +13467,32 @@ body { -webkit-tap-highlight-color: transparent; }
 .archive-registry .contract-form-grid { grid-template-columns: 1fr; }
 .archive-registry .contract-registry-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .archive-registry-hint { color: var(--color-muted); font-size: 12px; margin: 0; }
+
+/* Report policy → per-frequency period start and reminder schedule. */
+.report-schedule-list { display: grid; gap: 12px; }
+.report-schedule-card { display: grid; gap: 10px; padding: 14px 16px; }
+.report-schedule-card header { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; justify-content: space-between; }
+.report-schedule-card header small { color: var(--color-muted); font-size: 12px; }
+.report-schedule-grid { display: grid; gap: 10px 14px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.report-schedule-grid label { display: grid; gap: 5px; color: var(--color-muted); font-size: 12px; font-weight: 500; }
+.report-schedule-grid input, .report-schedule-grid select { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text); font: inherit; font-size: 13px; min-height: 36px; padding: 6px 10px; width: 100%; }
+
+/* Settings → Үүрэг ба эрх: role list + editor (RoleBuilder). */
+.role-builder { display: grid; gap: 20px; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); }
+.role-builder-list { display: flex; flex-direction: column; gap: 4px; }
+.role-builder-list button { background: transparent; border: 1px solid transparent; border-radius: 10px; color: var(--color-text); cursor: pointer; display: grid; font: inherit; gap: 2px; padding: 8px 10px; text-align: left; }
+.role-builder-list button span { align-items: center; display: inline-flex; font-size: 13px; font-weight: 600; gap: 6px; }
+.role-builder-list button small { color: var(--color-muted); font-size: 11px; }
+.role-builder-list button:hover { background: var(--color-surface-2); }
+.role-builder-list button.active { background: var(--color-surface-2); border-color: var(--color-border); }
+.role-builder-group { color: var(--color-muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; margin: 10px 10px 2px; text-transform: uppercase; }
+.role-system-grid { display: grid; gap: 10px 18px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.role-matrix-module { border: 1px solid var(--color-border); border-radius: 12px; display: grid; gap: 8px; padding: 12px 14px; }
+.role-matrix-row { align-items: start; border-top: 1px solid var(--color-border); display: grid; gap: 6px 16px; grid-template-columns: minmax(170px, 230px) minmax(0, 1fr); padding-top: 8px; }
+.role-matrix-actions { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+@media (max-width: 800px) {
+  .role-builder { grid-template-columns: 1fr; }
+  .role-builder-list { flex-direction: row; flex-wrap: wrap; }
+  .role-builder-group { flex-basis: 100%; }
+  .role-matrix-row { grid-template-columns: 1fr; }
+}

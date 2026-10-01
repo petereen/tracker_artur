@@ -978,7 +978,7 @@ export function useEnterpriseReports(status?: string, period?: DateRange) {
   return useQuery<any[]>({ queryKey: ['v1', 'reports', status, period], queryFn: () => api.get('/v1/reports', { params: { ...(status ? { status } : {}), ...period } }).then((response) => response.data) })
 }
 
-export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom'
+export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly' | 'custom'
 
 export interface ReportCreateInput {
   report_type: ReportType
@@ -1004,6 +1004,10 @@ export interface ReportOption {
   department_id: number | null
   department_name: string | null
   current_period: { start: string; end: string }
+  /** Last day the report is accepted (period end + submission grace days). */
+  due_date?: string
+  /** A previous period still inside its submission grace days. */
+  overdue?: boolean
 }
 
 export interface ReportOptions { personal: ReportOption[]; department: ReportOption[]; reminder_days: number }
@@ -1014,15 +1018,29 @@ export function useReportOptions(enabled = true) {
 
 export interface CustomReportPeriod { id: string; label: string; unit: 'day' | 'week' | 'month'; interval: number; anchor_date: string }
 export interface DepartmentReportRule { department_id: number; worker_frequencies: string[] | null; department_frequencies: string[] }
+/** Where a report period starts and when it is reminded about. */
+export interface ReportFrequencySettings {
+  start_weekday?: number
+  start_day?: number
+  start_month?: number
+  /** null inherits the company reminder_days. */
+  reminder_days: number | null
+  /** Days after the period end the report is still accepted and reminded. */
+  due_days: number
+  /** Local reminder hour; null keeps the worker's morning time. */
+  reminder_hour: number | null
+}
 export interface ReportPolicy {
   worker_frequencies: string[]
   custom_periods: CustomReportPeriod[]
   departments: DepartmentReportRule[]
   reminder_days: number
+  frequency_settings: Record<string, ReportFrequencySettings>
   available_frequencies: { value: string; label: string }[]
+  current_periods?: Record<string, { start: string; end: string; due: string }>
   department_options: { id: number; name: string; manager_employee_id: number | null; manager_name: string | null }[]
 }
-export type ReportPolicyInput = Pick<ReportPolicy, 'worker_frequencies' | 'custom_periods' | 'departments' | 'reminder_days'>
+export type ReportPolicyInput = Pick<ReportPolicy, 'worker_frequencies' | 'custom_periods' | 'departments' | 'reminder_days' | 'frequency_settings'>
 
 const reportPolicyKey = ['v1', 'settings', 'report-policy'] as const
 
@@ -1632,7 +1650,14 @@ export interface ERPFormField { key: string; label: string; help_text?: string |
 export interface ERPWorkflow { initial_state: string; states: Array<{ key: string; label?: string; terminal?: boolean }>; transitions: Array<{ from: string; to: string; label: string; role_ids: number[]; requester_allowed: boolean }> }
 export interface ERPFormDefinition { id: number; operation: string; version: number; status: 'draft' | 'published' | 'archived'; fields: ERPFormField[]; workflow: ERPWorkflow; published_at?: string | null; archived_at?: string | null; updated_at?: string }
 export interface ERPOperationCatalog { operations: Record<string, { key: string; label: string; kind: 'document'; module: string | null; sections: Array<'header' | 'line'>; posting_capable: boolean }>; actions: string[]; field_types: ERPFieldType[]; sections: string[]; reference_targets: string[]; scope_dimensions: string[] }
-export interface ERPAccessRole { id: number; name: string; code: string; description: string | null; is_system: boolean; is_active: boolean; capabilities: Array<{ resource: string; action: string }>; account_assignments: Array<{ id: number; account_id: number; scope: ERPAssignmentScope }>; team_assignments: Array<{ id: number; team_id: number; scope: ERPAssignmentScope }> }
+export interface ERPAccessRole { id: number; name: string; code: string; description: string | null; is_system: boolean; is_active: boolean; system_roles: string[]; capabilities: Array<{ resource: string; action: string }>; account_assignments: Array<{ id: number; account_id: number; scope: ERPAssignmentScope; label?: string | null }>; team_assignments: Array<{ id: number; team_id: number; scope: ERPAssignmentScope; label?: string | null }> }
+/** What a custom role can grant: platform access levels and module permissions. */
+export interface ERPRoleCatalog {
+  system_roles: Array<{ key: string; label: string; description: string }>
+  modules: Array<{ key: string; label: string; resources: Array<{ key: string; label: string; actions: Array<{ key: string; label: string }> }> }>
+  action_labels: Record<string, string>
+}
+export type ERPRoleInput = { name: string; code?: string; description?: string; system_roles: string[]; capabilities: Array<{ resource: string; action: string }> }
 export interface ERPAssignmentScope { warehouse_ids?: number[]; project_ids?: number[]; branch_codes?: string[] }
 
 export interface PayrollReconciliationIssue { key: string; code: string; severity: 'error' | 'warning'; employee_id: number | null; message: string; resolved: boolean }
@@ -1861,8 +1886,13 @@ export function useERPForm(operation: string, admin = false, history = false) { 
 export function useSaveERPFormDraft(operation: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (input: Pick<ERPFormDefinition, 'fields' | 'workflow'>) => api.put(`/v1/erp/admin/forms/${operation}`, input).then((r) => r.data as ERPFormDefinition), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'form', operation] }) }) }
 export function usePublishERPForm(operation: string) { const qc = useQueryClient(); return useMutation({ mutationFn: () => api.post(`/v1/erp/admin/forms/${operation}/publish`).then((r) => r.data as ERPFormDefinition), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp'] }) }) }
 export function useERPAccessRoles() { return useQuery<ERPAccessRole[]>({ queryKey: ['v1', 'erp', 'roles'], queryFn: () => api.get('/v1/erp/admin/roles').then((r) => r.data), retry: false }) }
-export function useCreateERPAccessRole() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: { name: string; code: string; description?: string; capabilities: Array<{ resource: string; action: string }> }) => api.post('/v1/erp/admin/roles', input).then((r) => r.data as ERPAccessRole), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
-export function useUpdateERPAccessRole() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...input }: { id: number; name?: string; description?: string; capabilities?: Array<{ resource: string; action: string }> }) => api.patch(`/v1/erp/admin/roles/${id}`, input).then((r) => r.data as ERPAccessRole), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
+export function useERPRoleCatalog() { return useQuery<ERPRoleCatalog>({ queryKey: ['v1', 'erp', 'roles', 'catalog'], queryFn: () => api.get('/v1/erp/admin/roles/catalog').then((r) => r.data), retry: false, staleTime: 5 * 60_000 }) }
+export function useCreateERPAccessRole() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: ERPRoleInput) => api.post('/v1/erp/admin/roles', input).then((r) => r.data as ERPAccessRole), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
+export function useUpdateERPAccessRole() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...input }: { id: number } & Partial<ERPRoleInput>) => api.patch(`/v1/erp/admin/roles/${id}`, input).then((r) => r.data as ERPAccessRole), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
+export function useActivateERPAccessRole() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.post(`/v1/erp/admin/roles/${id}/activate`).then((r) => r.data as ERPAccessRole), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
+export function useDeleteERPAccessRole() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/v1/erp/admin/roles/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
+export function useUnassignERPAccountRole() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ roleId, assignmentId }: { roleId: number; assignmentId: number }) => api.delete(`/v1/erp/admin/roles/${roleId}/accounts/${assignmentId}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
+export function useUnassignERPTeamRole() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ roleId, assignmentId }: { roleId: number; assignmentId: number }) => api.delete(`/v1/erp/admin/roles/${roleId}/teams/${assignmentId}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
 export function useCloneERPAccessRole() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.post(`/v1/erp/admin/roles/${id}/clone`).then((r) => r.data as ERPAccessRole), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
 export function useDeactivateERPAccessRole() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.post(`/v1/erp/admin/roles/${id}/deactivate`).then((r) => r.data as ERPAccessRole), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }
 export function useAssignERPAccountRole() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ roleId, account_id, scope = {} }: { roleId: number; account_id: number; scope?: ERPAssignmentScope }) => api.post(`/v1/erp/admin/roles/${roleId}/accounts`, { account_id, scope }).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['v1', 'erp', 'roles'] }) }) }

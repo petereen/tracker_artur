@@ -80,7 +80,8 @@ def test_explicit_prompt_cache_uses_provider_supported_ttl():
 
 
 def test_exact_cache_key_is_stable_for_whitespace_only_changes():
-    assert exact_key(prompt_version="v1", language="mn", text="сайн байна уу") == exact_key(prompt_version="v1", language="mn", text="  сайн   байна уу  ")
+    assert exact_key(organization_id=1, prompt_version="v1", language="mn", text="сайн байна уу") == exact_key(organization_id=1, prompt_version="v1", language="mn", text="  сайн   байна уу  ")
+    assert exact_key(organization_id=1, prompt_version="v1", language="mn", text="x") != exact_key(organization_id=2, prompt_version="v1", language="mn", text="x")
 
 
 def test_history_is_trimmed_from_oldest_turns_without_touching_latest_turn():
@@ -152,7 +153,8 @@ def test_fallback_model_answers_when_primary_fails():
     response = asyncio.run(gateway.respond(None, request("hello there", actor_context=actor(detected_language="en"))))
     assert response.answer == "fallback answer"
     assert [item["model"] for item in posts] == ["gpt-5.6-luna", "gpt-5.6-terra"]
-    assert gateway.cache.failures == ["gpt-5.6-luna"]
+    # The circuit is scoped to the tenant (and its key source), never global.
+    assert gateway.cache.failures == ["3:organization:gpt-5.6-luna"]
 
 
 def test_custom_model_400_retries_once_with_minimal_payload():

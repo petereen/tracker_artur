@@ -414,7 +414,7 @@ class UserNotification(Base):
 # ─── Ажлын тайлангууд ────────────────────────────────────────────────────────
 
 WORK_REPORT_TYPES = (
-    "daily", "weekly", "monthly", "quarterly", "yearly", "custom", "next_month_plan",
+    "daily", "weekly", "monthly", "quarterly", "half_yearly", "yearly", "custom", "next_month_plan",
     "daily_test", "monthly_test", "next_month_plan_test",
 )
 WORK_REPORT_STATUSES = ("awaiting", "draft", "editing", "approved")
@@ -443,7 +443,7 @@ class WorkReport(Base):
             unique=True, postgresql_where=sa_text("department_id IS NOT NULL"),
         ),
         CheckConstraint(
-            "report_type IN ('daily','weekly','monthly','quarterly','yearly','custom','next_month_plan','daily_test','monthly_test','next_month_plan_test')",
+            "report_type IN ('daily','weekly','monthly','quarterly','half_yearly','yearly','custom','next_month_plan','daily_test','monthly_test','next_month_plan_test')",
             name="ck_work_reports_type",
         ),
         CheckConstraint(
@@ -2187,6 +2187,9 @@ class ERPAccessRole(Base):
     description = Column(Text)
     is_system = Column(Boolean, nullable=False, server_default=sa_text("false"), default=False)
     is_active = Column(Boolean, nullable=False, server_default=sa_text("true"), default=True)
+    # Platform roles (manager, hr, …) granted on top of the capabilities;
+    # see app/erp/role_catalog.py. Never "admin".
+    system_roles = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 

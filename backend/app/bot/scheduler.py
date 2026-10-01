@@ -149,14 +149,15 @@ def _rebuild_jobs_unlocked():
             hour=ed.hour, minute=ed.minute, timezone=tz,
             id=f"task_evening_{emp.id}", replace_existing=True, args=[emp.id])
 
-        # Periodic (weekly/monthly/quarterly/yearly/custom) and department
-        # reports follow the admin report policy; the job checks each day
-        # whether a period's reminder window is open. Employees without a
-        # legacy Schedule row use the same default start-of-day time.
+        # Periodic (weekly/monthly/quarterly/half-yearly/yearly/custom) and
+        # department reports follow the admin report policy. The job runs
+        # hourly at the worker's start-of-day minute; each frequency fires in
+        # its configured reminder hour (default: the morning check-in hour)
+        # while its reminder or submission-grace window is open.
         morning: time = sch.morning_time if sch and sch.morning_time else time(9, 15)
         scheduler.add_job(send_periodic_report_prompts, "cron",
-            hour=morning.hour, minute=morning.minute, timezone=tz,
-            id=f"monthly_report_{emp.id}", replace_existing=True, args=[emp.id])
+            minute=morning.minute, timezone=tz,
+            id=f"monthly_report_{emp.id}", replace_existing=True, args=[emp.id, morning.hour])
 
         if emp.birthday:
             # APScheduler omits an invalid day-of-month in non-leap years. A
@@ -325,10 +326,17 @@ async def send_survey(employee_id: int):
         telegram_id = emp.telegram_id
         timezone_name = emp.timezone
         organization_id = emp.organization_id
+    from app.services.notification_preferences import delivery_for_employee_sync
+
     daily_report_reminders_enabled = getattr(get_manager_settings(organization_id), "daily_report_reminders_enabled", True)
     local_day = _local_today(timezone_name)
     report = work_report_service.get_or_create_report(employee_id, "daily", local_day)
     if not daily_report_reminders_enabled or not telegram_id:
+        return
+    report_delivery = delivery_for_employee_sync(employee_id, "daily_report")
+    # The legacy check-in questionnaire is its own (default-off) category.
+    checkin_enabled = delivery_for_employee_sync(employee_id, "daily_checkin").telegram
+    if not report_delivery.telegram and not checkin_enabled:
         return
     bot = _make_bot(organization_id)
     if bot is None:
@@ -336,8 +344,8 @@ async def send_survey(employee_id: int):
     try:
         # The report policy may drop daily reports for this worker; the
         # check-in questionnaire itself is independent of the policy.
-        daily_reports = work_report_service.daily_reports_enabled(employee_id)
-        if not get_questions(employee_id):
+        daily_reports = work_report_service.daily_reports_enabled(employee_id) and report_delivery.telegram
+        if not checkin_enabled or not get_questions(employee_id):
             if not daily_reports:
                 return
             await send_report_prompt(
@@ -418,7 +426,12 @@ async def send_reminder(employee_id: int, num: int):
         daily_report_reminders_enabled = getattr(get_manager_settings(organization_id), "daily_report_reminders_enabled", True)
         if not daily_report_reminders_enabled:
             return
-        checkin_complete = canonical_checkin_complete(employee_id, local_day) or sess is None
+        from app.services.notification_preferences import delivery_for_employee_sync
+
+        if not delivery_for_employee_sync(employee_id, "daily_reminder").telegram:
+            return
+        checkin_enabled = delivery_for_employee_sync(employee_id, "daily_checkin").telegram
+        checkin_complete = not checkin_enabled or canonical_checkin_complete(employee_id, local_day) or sess is None
         report_complete = (
             not work_report_service.daily_reports_enabled(employee_id)
             or not work_report_service.report_needs_submission(employee_id, "daily", local_day)
@@ -455,6 +468,10 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str, reminder
         timezone_name = emp.timezone
         organization_id = emp.organization_id
         schedule = s.query(Schedule).filter(Schedule.employee_id == employee_id).one_or_none()
+    from app.services.notification_preferences import delivery_for_employee_sync
+
+    if not delivery_for_employee_sync(employee_id, "worktime_reminder").telegram:
+        return
     bot = _make_bot(organization_id)
     if bot is None:
         return
@@ -469,8 +486,8 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str, reminder
             if state["started"]:
                 return
             message = (
-                "🕛 Цагаа бүртгэхээ мартсан юм биш биз? 🙂\n\n"
-                "Өнөөдрийн ажлаа эхлүүлсэн бол эхэлсэн цагаа бүртгэнэ үү:\n"
+                "🕛 <b>Ажлын цагаа бүртгээрэй</b>\n\n"
+                "Өнөөдөр ажлаа эхлүүлсэн бол эхэлсэн цагаа бүртгэнэ үү:\n"
                 "🏢 Оффис: <b>/daystart</b>\n"
                 "🏠 Remote: <b>/remotestart</b>"
             )
@@ -480,7 +497,7 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str, reminder
             end_command = "/dayend" if state["mode"] == "in_person" else "/remoteend"
             mode_label = "оффисын" if state["mode"] == "in_person" else "remote"
             message = (
-                "🌙 Ажлаа дуусгахаа мартсан юм биш биз? 🙂\n\n"
+                "🌙 <b>Ажлын цаг нээлттэй байна</b>\n\n"
                 f"Таны {mode_label} ажлын цаг одоогоор нээлттэй байна. "
                 f"Дуусгахдаа <b>{end_command}</b> командыг ашиглана уу."
             )
@@ -528,7 +545,11 @@ async def mark_missed_job(employee_ids: list[int]):
     from app.bot.db import is_primary_tenant
 
     # One alert per tenant, to that tenant's managers through its own bot.
+    from app.services.notification_preferences import tenant_category_enabled_sync
+
     for organization_id, missing_names in missing_by_tenant.items():
+        if not tenant_category_enabled_sync(organization_id, "checkin"):
+            continue
         ms = get_manager_settings(organization_id)
         recipients = manager_telegram_ids(ms, primary=is_primary_tenant(organization_id))
         if not ms or not ms.alerts_enabled or not recipients:
@@ -541,22 +562,30 @@ async def mark_missed_job(employee_ids: list[int]):
                 await bot.send_message(recipient, message)
 
 
-def _local_today(timezone_name: str | None):
+def _local_now(timezone_name: str | None) -> datetime:
     try:
         zone = pytz.timezone(timezone_name or "Asia/Ulaanbaatar")
     except Exception:
         zone = DEFAULT_TIMEZONE
-    return datetime.now(zone).date()
+    return datetime.now(zone)
 
 
-def due_report_periods(scope: dict, local_day: date) -> list[tuple[object, int | None]]:
-    """Report periods whose reminder window is open today.
+def _local_today(timezone_name: str | None):
+    return _local_now(timezone_name).date()
+
+
+def due_report_periods(scope: dict, local_day: date, local_hour: int | None = None, default_hour: int | None = None) -> list[tuple[object, int | None]]:
+    """Report periods to remind about now.
 
     Returns ``(period, department_id)`` pairs: personal periods from the
     worker's frequencies (daily stays with the evening check-in flow) and
-    department periods for departments the worker heads.
+    department periods for departments the worker heads. A period is due in
+    its end-of-period reminder window and, when the policy grants submission
+    grace days, the previous period until its deadline. With ``local_hour``
+    only frequencies whose reminder hour (``default_hour`` when unset) is now
+    are returned.
     """
-    from app.services.report_policy import period_for_frequency, reminder_window_open
+    from app.services.report_policy import open_report_periods, settings_for
 
     policy = scope["policy"]
     due: list[tuple[object, int | None]] = []
@@ -564,13 +593,16 @@ def due_report_periods(scope: dict, local_day: date) -> list[tuple[object, int |
     for department_id, frequencies in scope["led_departments"].items():
         candidates.extend((frequency, department_id) for frequency in frequencies)
     for frequency, department_id in candidates:
-        period = period_for_frequency(policy, frequency, local_day)
-        if period and reminder_window_open(period, local_day, policy["reminder_days"]):
+        if local_hour is not None:
+            hour = settings_for(policy, frequency).get("reminder_hour")
+            if (default_hour if hour is None else hour) != local_hour:
+                continue
+        for period, _phase in open_report_periods(policy, frequency, local_day):
             due.append((period, department_id))
     return due
 
 
-async def send_periodic_report_prompts(employee_id: int):
+async def send_periodic_report_prompts(employee_id: int, default_hour: int | None = None):
     """Prompt for every enabled report period in its end-of-period window.
 
     Each prompt is sent at most once per report and day (``reserve_prompt``)
@@ -580,6 +612,7 @@ async def send_periodic_report_prompts(employee_id: int):
     from app.bot.work_report_handlers import send_report_prompt
     from app.models.models import Department, Employee
     from app.services import work_report_service
+    from app.services.notification_preferences import delivery_for_employee_sync
     from app.services.user_notifications import mirror_existing_telegram_notification
 
     with get_session() as s:
@@ -589,9 +622,11 @@ async def send_periodic_report_prompts(employee_id: int):
         telegram_id = emp.telegram_id
         timezone_name = emp.timezone
         organization_id = emp.organization_id
-    local_day = _local_today(timezone_name)
+    local_now = _local_now(timezone_name)
+    local_day = local_now.date()
     scope = work_report_service.employee_report_scope(employee_id)
-    due = due_report_periods(scope, local_day)
+    # Jobs persisted before the hourly schedule pass no hour: run as before.
+    due = due_report_periods(scope, local_day, local_now.hour if default_hour is not None else None, default_hour)
     if not due:
         return
     bot = _make_bot(organization_id) if telegram_id else None
@@ -600,7 +635,8 @@ async def send_periodic_report_prompts(employee_id: int):
             if not work_report_service.period_report_needs_submission(employee_id, period, department_id=department_id):
                 continue
             if period.report_type == "monthly" and department_id is None:
-                report = work_report_service.get_or_create_report(employee_id, "monthly", local_day)
+                # The policy period (company month may not start on the 1st).
+                report = work_report_service.get_or_create_period_report(employee_id, period)
                 prompt_type = "monthly_report"
             else:
                 report = work_report_service.get_or_create_period_report(employee_id, period, department_id=department_id)
@@ -611,7 +647,8 @@ async def send_periodic_report_prompts(employee_id: int):
                     department = s.get(Department, department_id)
                     department_name = department.name if department else None
             telegram_status = "unavailable"
-            if bot is not None:
+            kind = "monthly_report" if prompt_type == "monthly_report" else "periodic_report"
+            if bot is not None and delivery_for_employee_sync(employee_id, kind).telegram:
                 try:
                     await send_report_prompt(bot, report, telegram_chat_id=telegram_id, prompt_type=prompt_type, local_day=local_day)
                     telegram_status = "sent"
@@ -626,7 +663,7 @@ async def send_periodic_report_prompts(employee_id: int):
                 body=f"{period.start.isoformat()} – {period.end.isoformat()} хугацааны тайлангаа илгээнэ үү.",
                 target_url=f"/reports?report={report.id}",
                 dedup_key=(
-                    f"monthly-report:{employee_id}:{local_day.strftime('%Y-%m')}" if prompt_type == "monthly_report"
+                    f"monthly-report:{employee_id}:{period.start.isoformat()}" if prompt_type == "monthly_report"
                     else f"periodic-report:{report.id}:{local_day.isoformat()}"
                 ),
                 telegram_status=telegram_status,
@@ -667,8 +704,10 @@ async def send_birthday_greeting(employee_id: int):
     if not _birthday_occurs_on_day(birthday, local_day):
         return
 
+    from app.services.notification_preferences import delivery_for_employee_sync
+
     telegram_status = "unavailable"
-    bot = _make_bot(organization_id) if telegram_id else None
+    bot = _make_bot(organization_id) if telegram_id and delivery_for_employee_sync(employee_id, "birthday").telegram else None
     if bot is not None:
         try:
             await bot.send_message(str(telegram_id), BIRTHDAY_MESSAGE)
@@ -724,6 +763,12 @@ async def morning_summary():
     from app.bot.db import get_manager_settings, get_yesterday_summary
     from app.services.manager_recipients import manager_telegram_ids
 
+    from app.bot.db import primary_tenant_id
+    from app.services.notification_preferences import tenant_category_enabled_sync
+
+    # Yesterday's check-in answers: part of the legacy check-in category.
+    if not tenant_category_enabled_sync(primary_tenant_id(), "checkin"):
+        return
     ms = get_manager_settings()
     recipients = manager_telegram_ids(ms)
     if not ms or not recipients:

@@ -141,7 +141,7 @@ EMPLOYEE_REFERENCE_HELP = "Opaque employee reference (from current_employee or o
 
 
 class ReportsSearchInput(StrictInput):
-    report_types: list[Literal["daily", "weekly", "monthly", "quarterly", "yearly", "custom", "next_month_plan"]] = Field(default_factory=lambda: ["daily", "monthly"], min_length=1, max_length=7, description="Report kinds. weekly/quarterly/yearly/custom are policy-driven periodic reports; department reports are included with their department name.")
+    report_types: list[Literal["daily", "weekly", "monthly", "quarterly", "half_yearly", "yearly", "custom", "next_month_plan"]] = Field(default_factory=lambda: ["daily", "monthly"], min_length=1, max_length=8, description="Report kinds. weekly/quarterly/half_yearly/yearly/custom are policy-driven periodic reports; department reports are included with their department name.")
     employee_reference: str | None = Field(default=None, max_length=4096, description=EMPLOYEE_REFERENCE_HELP)
     date_from: date | None = Field(default=None, description="Report period start (inclusive). Defaults to 7 days ago.")
     date_to: date | None = Field(default=None, description="Report period end (inclusive). Defaults to today.")
