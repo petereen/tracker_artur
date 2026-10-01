@@ -172,7 +172,7 @@ export function ChartOfAccountsPage() {
   const rows: AccountRow[] = (needle ? filtered.map((account) => ({ account, depth: 0 })).sort((a, b) => a.account.code.localeCompare(b.account.code, undefined, { numeric: true })) : treeOrder(filtered))
     .map(({ account, depth }) => ({ id: account.id, account, depth, usage: usageById.get(account.id) }))
   const counts = CLASSIFICATION_ORDER.reduce<Record<string, number>>((acc, key) => ({ ...acc, [key]: all.filter((account) => account.classification === key && account.is_active !== false).length }), {})
-  const budgetable = (account: ERPAccountOption) => !account.is_group && account.is_active !== false && ['income', 'expense'].includes(account.classification)
+  const budgetable = (account: ERPAccountOption) => !account.is_group && account.is_active !== false && !!account.classification && ['income', 'expense'].includes(account.classification)
   const unlinkedBudget = budgetLookups.data ? all.filter((account) => budgetable(account) && !budgetByLedger.get(account.id)).length : 0
   const generateBudgetAccounts = async () => {
     if (!window.confirm(`Төсөвт холбогдоогүй ${unlinkedBudget} орлого/зардлын данс бүрт төсөвт данс үүсгэх үү?`)) return
