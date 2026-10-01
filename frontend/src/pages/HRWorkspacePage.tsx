@@ -13,6 +13,7 @@ import { EmployeeWorktimeStats } from '../components/EmployeeWorktimeStats'
 import { AttendanceGrid } from '../components/attendance/AttendanceGrid'
 import { normalizeRegistrationNumber, parseRegistrationNumber } from '../utils/registrationNumber'
 import { TELEGRAM_BOT_REQUIRED_HINT, useTenantContext } from '../api/tenancy'
+import { CreateButton } from '../components/CreateButton'
 
 type Tab = 'directory' | 'departments' | 'leave' | 'attendance' | 'payroll'
 const errorText = (error: any) => {
@@ -61,7 +62,7 @@ export function HRWorkspacePage() {
   return <div className="hr-workspace">
     <div className="page-tabs">
       <nav className="page-tabs-list" aria-label="HR sections">{visibleTabs.map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{navLabels[item]}</button>)}</nav>
-      {isHR && <div className="page-tabs-actions"><Btn variant="primary" onClick={() => setEditing('new')}><UserPlus size={15} />Ажилтан нэмэх</Btn></div>}
+      {isHR && <div className="page-tabs-actions"><CreateButton label="Ажилтан нэмэх" icon={<UserPlus size={16} />} onClick={() => setEditing('new')} /></div>}
     </div>
     {tab === 'directory' && <Directory employees={employees.data?.items || []} departments={departments.data || []} search={search} setSearch={setSearch} department={department} setDepartment={setDepartment} statusFilter={statusFilter} setStatusFilter={setStatusFilter} includeArchived={includeArchived} setIncludeArchived={setIncludeArchived} canEdit={isHR} onSelect={setSelected} onEdit={setEditing} />}
     {tab === 'departments' && isHR && <DepartmentsPanel departments={departments.data || []} employees={allEmployees.data?.items || []} />}
@@ -259,7 +260,7 @@ function DepartmentsPanel({ departments, employees }: { departments: HRDepartmen
   const setActive = async (item: HRDepartment, active: boolean) => { try { await update.mutateAsync({ id: item.id, is_active: active }); toast.success(active ? 'Хэлтсийг идэвхжүүллээ' : 'Хэлтсийг идэвхгүй болголоо') } catch (error) { toast.error(errorText(error)) } }
   const destroy = async (item: HRDepartment) => { if (!window.confirm(`"${item.name}" хэлтсийг бүр мөсөн устгах уу?`)) return; try { await remove.mutateAsync(item.id); toast.success('Хэлтэс устгагдлаа') } catch (error) { toast.error(errorText(error)) } }
   return <Card className="hr-directory-card">
-    <div className="view-toolbar"><div><span className="eyebrow">DEPARTMENTS</span><h2>Хэлтэс, нэгж</h2><p>Хэлтэс нэмэх, засах, удирдагч оноох. Ажилтантай хэлтсийг устгахын оронд идэвхгүй болгоно.</p></div><div className="hr-inline-actions"><label className="employee-archive-toggle"><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />Идэвхгүй</label><Btn variant="primary" onClick={() => setEditing('new')}><Plus size={14} />Хэлтэс нэмэх</Btn></div></div>
+    <div className="view-toolbar"><div><span className="eyebrow">DEPARTMENTS</span><h2>Хэлтэс, нэгж</h2><p>Хэлтэс нэмэх, засах, удирдагч оноох. Ажилтантай хэлтсийг устгахын оронд идэвхгүй болгоно.</p></div><div className="hr-inline-actions"><label className="employee-archive-toggle"><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />Идэвхгүй</label><CreateButton label="Хэлтэс нэмэх" onClick={() => setEditing('new')} /></div></div>
     <div className="hr-directory-table"><table><thead><tr><th>Нэр</th><th>Код</th><th>Удирдагч</th><th>Ажилтан</th><th>Төлөв</th><th /></tr></thead><tbody>{rows.map((item) => <tr key={item.id} onClick={() => setEditing(item)}>
       <td><div className="hr-person"><span><Building2 size={14} /></span><div className="hr-department-name"><strong>{item.name}</strong>{item.description && <small>{item.description}</small>}</div></div></td>
       <td>{item.code}</td>

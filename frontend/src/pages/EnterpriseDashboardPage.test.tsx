@@ -341,7 +341,7 @@ describe("Today work-hour timer", () => {
     };
     const { container } = renderDashboard();
     expect(container.querySelectorAll(".today-widget-slot")).toHaveLength(1);
-    expect(container.querySelector(".today-kpi .today-widget-meta")).toHaveTextContent("Өмнөх долоо хоног");
+    expect(container.querySelector(".today-kpi .today-period-toggle [aria-checked=true]")).toHaveTextContent("Өмнөх 7 хоног");
     expect(container.querySelectorAll(".today-kpi-tile")).toHaveLength(1);
     // Previous week (Mon 3 – Sun 9 Aug 2026) compared with the week before.
     expect(mocks.summaryCalls).toContainEqual({ date_from: "2026-08-03", date_to: "2026-08-09" });

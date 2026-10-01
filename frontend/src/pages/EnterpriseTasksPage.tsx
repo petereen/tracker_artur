@@ -79,6 +79,7 @@ import {
 import { UserTagPicker } from "../components/UserTagPicker";
 import { useWorkspaceMode } from "../components/WorkspaceModeProvider";
 import { resolvePublicAssetUrl } from "../platform/runtime";
+import { CreateButton } from "../components/CreateButton";
 
 const COLUMNS: { key: WorkflowStatus; label: string }[] = [
   { key: "backlog", label: "Backlog" },
@@ -1160,13 +1161,7 @@ export function EnterpriseTasksPage() {
               Нийт даалгаврууд
             </button>
           )}
-          <button
-            className="primary-action compact"
-            onClick={() => openCreate()}
-          >
-            <Plus size={16} />
-            Даалгавар
-            </button>
+          <CreateButton label="Даалгавар" onClick={() => openCreate()} />
         </div>
       </div>
       {lastMove && (

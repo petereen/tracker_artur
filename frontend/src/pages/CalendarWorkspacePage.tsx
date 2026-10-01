@@ -9,6 +9,9 @@ import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { CalendarSkeleton, QueryRegion, toQueryRegionState } from '../components/Loading'
 import { useWorkspaceMode } from '../components/WorkspaceModeProvider'
 import { MobileCalendarView } from '../components/MobileCalendarView'
+import { CreateButton } from '../components/CreateButton'
+import { Button } from '@astryxdesign/core/Button'
+import { IconButton } from '@astryxdesign/core/IconButton'
 
 function localDate(value: Date) { const offset = value.getTimezoneOffset() * 60_000; return new Date(value.getTime() - offset).toISOString().slice(0, 10) }
 function calendarDate(value: unknown) {
@@ -286,6 +289,7 @@ export function CalendarWorkspacePage() {
   const scope: 'private' | 'corporate' = isManagerMode ? 'corporate' : 'private'
   const canPublish = roles.some((role) => ['admin', 'manager', 'team_lead'].includes(role))
   const days = useMemo(() => monthGridDays(anchor), [anchor])
+  const isCurrentMonth = anchor.getFullYear() === new Date().getFullYear() && anchor.getMonth() === new Date().getMonth()
   const events = useCalendarEvents(scope, anchor)
   const createEntry = useCreateCalendarEntry(); const updateEntry = useUpdateCalendarEntry(); const deleteEntry = useDeleteCalendarEntry()
   const createTask = useCreateEnterpriseTask(); const updateTask = useUpdateEnterpriseTask(); const deleteTask = useDeleteEnterpriseTask()
@@ -364,8 +368,22 @@ export function CalendarWorkspacePage() {
   const toggleFilter = (key: CalendarFilterKey) => setFilters((current) => ({ ...current, [key]: !current[key] }))
   const allFiltersSelected = CALENDAR_FILTERS.every((filter) => filters[filter.key])
   const setAllFilters = () => setFilters((current) => CALENDAR_FILTERS.reduce((result, filter) => ({ ...result, [filter.key]: !allFiltersSelected }), current))
-  return <div className="calendar-workspace"><div className="workspace-toolbar calendar-toolbar"><div className="toolbar-start"><GoogleCalendarSyncControl /><span className="calendar-scope-badge">{isManagerMode ? 'Компаний харагдац' : 'Хувийн харагдац'}</span></div><div className="calendar-toolbar-main"><div className="calendar-filter-toolbar" role="toolbar" aria-label="Календарийн төрлийн шүүлтүүр"><div className="calendar-filter-chips"><span className="calendar-filter-label">Харах</span>{CALENDAR_FILTERS.map((filter) => <button type="button" key={filter.key} className={`calendar-filter-chip ${filter.key} ${filters[filter.key] ? 'active' : ''}`} aria-pressed={filters[filter.key]} onClick={() => toggleFilter(filter.key)}><i aria-hidden />{filter.label}</button>)}</div><button type="button" className="calendar-filter-all" onClick={setAllFilters}>{allFiltersSelected ? 'Бүгдийг цуцлах' : 'Бүгдийг сонгох'}</button></div><div className="calendar-nav-actions"><button onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1)))} aria-label="Өмнөх сар"><ChevronLeft size={16} /></button><button className="calendar-today-button" onClick={() => startTransition(() => { const today = new Date(); setAnchor(new Date(today.getFullYear(), today.getMonth(), 1)) })}>Өнөөдөр</button><button onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1)))} aria-label="Дараагийн сар"><ChevronRight size={16} /></button></div><button className="primary-action compact calendar-create-action" onClick={() => openCreate()}><Plus size={16} />Үүсгэх</button></div></div>
-    <div className="calendar-month-nav"><strong>{anchor.toLocaleDateString('mn-MN', { year: 'numeric', month: 'long' })}</strong></div>
+  return <div className="calendar-workspace"><div className="workspace-toolbar calendar-toolbar">
+      <div className="calendar-toolbar-nav">
+        <IconButton label="Өмнөх сар" tooltip="Өмнөх сар" icon={<ChevronLeft size={16} />} variant="ghost" size="sm" onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1)))} />
+        <strong className="calendar-toolbar-month">{anchor.toLocaleDateString('mn-MN', { year: 'numeric', month: 'long' })}</strong>
+        <IconButton label="Дараагийн сар" tooltip="Дараагийн сар" icon={<ChevronRight size={16} />} variant="ghost" size="sm" onClick={() => startTransition(() => setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1)))} />
+        {!isCurrentMonth && <Button label="Өнөөдөр" variant="ghost" size="sm" onClick={() => startTransition(() => { const today = new Date(); setAnchor(new Date(today.getFullYear(), today.getMonth(), 1)) })} />}
+      </div>
+      <div className="calendar-filter-toolbar" role="toolbar" aria-label="Календарийн төрлийн шүүлтүүр">
+        <div className="calendar-filter-chips">{CALENDAR_FILTERS.map((filter) => <button type="button" key={filter.key} className={`calendar-filter-chip ${filter.key} ${filters[filter.key] ? 'active' : ''}`} aria-pressed={filters[filter.key]} onClick={() => toggleFilter(filter.key)}><i aria-hidden />{filter.label}</button>)}</div>
+        <button type="button" className="calendar-filter-all" onClick={setAllFilters}>{allFiltersSelected ? 'Бүгдийг цуцлах' : 'Бүгдийг сонгох'}</button>
+      </div>
+      <div className="calendar-toolbar-actions">
+        <GoogleCalendarSyncControl />
+        <CreateButton label="Үүсгэх" onClick={() => openCreate()} />
+      </div>
+    </div>
     {events.isError && <div className="panel calendar-status error">Календарийн мэдээлэл ачаалагдсангүй. Дахин оролдоно уу.</div>}
     <QueryRegion state={toQueryRegionState(events)} skeleton={<CalendarSkeleton />}><>
       <div className="planning-calendar calendar-month panel">

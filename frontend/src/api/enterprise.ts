@@ -1,5 +1,6 @@
 import { InfiniteData, keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
+import { useRef } from 'react'
 import toast from 'react-hot-toast'
 import { acceptSession, api, clearAuthenticatedQueryCache, clearSessionCredentials, publicApi, refreshAccessToken } from './client'
 import { tenancyErrorMessage } from './tenancy'
@@ -1231,9 +1232,15 @@ export function useCalendarEvents(scope: 'private' | 'corporate', anchor: Date, 
     return combined
   }, { tasks: [], projects: [], plans: [], entries: [], holidays: [], time_blocks: [] } as Record<string, any[]>)
   const allLoaded = queries.every((query) => query.data !== undefined)
+  // Keep showing the previous months while a new one loads, so the page is not swapped for a skeleton
+  // (which would remount the calendar views and reset the month being viewed).
+  const lastLoaded = useRef<{ key: string; data: Record<string, any[]> } | undefined>(undefined)
+  const scopeKey = `${scope}:${employeeId ?? ''}`
+  if (allLoaded) lastLoaded.current = { key: scopeKey, data }
+  const previous = lastLoaded.current?.key === scopeKey ? lastLoaded.current.data : undefined
   return {
-    data: allLoaded ? data : undefined,
-    isLoading: queries.some((query) => query.isLoading),
+    data: allLoaded ? data : previous,
+    isLoading: previous === undefined && queries.some((query) => query.isLoading),
     isFetching: queries.some((query) => query.isFetching),
     isError: queries.some((query) => query.isError),
   }

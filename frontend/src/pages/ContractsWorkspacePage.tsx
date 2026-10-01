@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   FileCheck2,
-  FilePlus2,
   FileSignature,
   LockKeyhole,
   MessageSquare,
@@ -54,6 +53,7 @@ import {
   registryDraftFrom,
   registryPayload,
 } from "../components/ContractRegistryFields";
+import { CreateButton } from "../components/CreateButton";
 const LazyRichContractEditor = lazy(() => import('../components/RichContractEditor').then((module) => ({ default: module.RichContractEditor })))
 const LazyQRCodeSVG = lazy(() => import('qrcode.react').then((module) => ({ default: module.QRCodeSVG })))
 
@@ -1006,18 +1006,13 @@ export function ContractsWorkspacePage() {
             ))}
           </div>
         </div>
-        <button
-          type="button"
-          className="contract-icon-button contract-new-document-button"
+        <CreateButton
+          label="Шинэ баримт бичиг"
           onClick={() => {
             setCreateMode(true);
             setParams({ create: "1" });
           }}
-          aria-label="Шинэ баримт бичиг"
-          title="Шинэ баримт бичиг"
-        >
-          <FilePlus2 size={19} />
-        </button>
+        />
       </div>
       {createMode && (
         <ContractComposer
@@ -1122,15 +1117,10 @@ export function ContractsWorkspacePage() {
             <div className="contract-empty">
               <FileCheck2 size={32} />
               <h3>Одоогоор ямар нэг үүсгэсэн баримт бичиг алга</h3>
-              <button
-                type="button"
-                className="contract-icon-button contract-new-document-button"
+              <CreateButton
+                label="Шинэ баримт бичиг"
                 onClick={() => setCreateMode(true)}
-                aria-label="Шинэ баримт бичиг"
-                title="Шинэ баримт бичиг"
-              >
-                <FilePlus2 size={19} />
-              </button>
+              />
             </div>
           )}
         </div>

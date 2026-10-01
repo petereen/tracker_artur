@@ -16,6 +16,7 @@ import { installNativeTelegramAuth } from './platform/telegram-auth'
 import { startTelemetry } from './platform/telemetry'
 import './index.css'
 import './workspace-features.css'
+import './unified-controls.css'
 import './i18n'
 
 initializeRuntimeClass()

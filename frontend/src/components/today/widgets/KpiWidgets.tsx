@@ -7,7 +7,7 @@ import { useDailyAnalytics, useEnterpriseSummary } from '../../../api/enterprise
 import { useAuthStore } from '../../../store/auth'
 import { useWorkspaceMode } from '../../WorkspaceModeProvider'
 import type { WidgetProps, WidgetSettingsProps } from '../types'
-import { formatHours, normalizePeriod, Sparkline, WEEK_PERIOD_LABELS, WeekPeriodField, weekRanges, WidgetHeader, type SparkPoint, type WeekPeriod } from './shared'
+import { formatHours, normalizePeriod, Sparkline, WeekPeriodToggle, weekRanges, WidgetHeader, type SparkPoint, type WeekPeriod } from './shared'
 
 type MetricKey = 'completed_tasks' | 'completion_rate' | 'worked_minutes' | 'average_work_minutes' | 'report_submission_rate' | 'active_projects'
 
@@ -78,13 +78,13 @@ function KpiTile({ metric, summary, previous, days }: { metric: MetricKey; summa
   )
 }
 
-export function KpiWidget({ settings }: WidgetProps<KpiSettings>) {
+export function KpiWidget({ settings, updateSettings }: WidgetProps<KpiSettings>) {
   const period = normalizePeriod(settings.period)
   const metrics = (settings.metrics ?? DEFAULT_KPI_SETTINGS.metrics).filter(isMetric)
   const { summary, previous, days, isLoading } = useWeekMetrics(period)
   return (
     <section className="today-widget today-kpi" aria-label="Гүйцэтгэлийн үзүүлэлт">
-      <WidgetHeader icon={BarChart3} title="Гүйцэтгэлийн үзүүлэлт" meta={WEEK_PERIOD_LABELS[period]} />
+      <WidgetHeader icon={BarChart3} title="Гүйцэтгэлийн үзүүлэлт"><WeekPeriodToggle value={period} onChange={(next) => updateSettings({ period: next })} /></WidgetHeader>
       {metrics.length ? (
         <div className={`today-kpi-grid${isLoading ? ' is-loading' : ''}`}>
           {metrics.map((metric) => <KpiTile key={metric} metric={metric} summary={summary} previous={previous} days={days} />)}
@@ -94,13 +94,13 @@ export function KpiWidget({ settings }: WidgetProps<KpiSettings>) {
   )
 }
 
-export function SingleKpiWidget({ settings }: WidgetProps<SingleKpiSettings>) {
+export function SingleKpiWidget({ settings, updateSettings }: WidgetProps<SingleKpiSettings>) {
   const period = normalizePeriod(settings.period)
   const metric = isMetric(settings.metric) ? settings.metric : DEFAULT_SINGLE_KPI_SETTINGS.metric
   const { summary, previous, days } = useWeekMetrics(period)
   return (
     <section className="today-widget today-kpi is-single" aria-label={METRICS[metric].label}>
-      <WidgetHeader icon={Gauge} title={METRICS[metric].label} meta={WEEK_PERIOD_LABELS[period]} />
+      <WidgetHeader icon={Gauge} title={METRICS[metric].label}><WeekPeriodToggle value={period} onChange={(next) => updateSettings({ period: next })} /></WidgetHeader>
       <KpiTile metric={metric} summary={summary} previous={previous} days={days} />
     </section>
   )
@@ -109,7 +109,6 @@ export function SingleKpiWidget({ settings }: WidgetProps<SingleKpiSettings>) {
 export function KpiSettingsForm({ settings, onChange }: WidgetSettingsProps<KpiSettings>) {
   return (
     <VStack gap={4}>
-      <WeekPeriodField value={normalizePeriod(settings.period)} onChange={(period) => onChange({ ...settings, period })} />
       <CheckboxList label="Үзүүлэлтүүд" density="compact" value={(settings.metrics ?? []).filter(isMetric)} onChange={(values) => onChange({ ...settings, metrics: METRIC_KEYS.filter((key) => values.includes(key)) })}>
         {METRIC_KEYS.map((key) => <CheckboxListItem key={key} value={key} label={METRICS[key].label} />)}
       </CheckboxList>
@@ -120,7 +119,6 @@ export function KpiSettingsForm({ settings, onChange }: WidgetSettingsProps<KpiS
 export function SingleKpiSettingsForm({ settings, onChange }: WidgetSettingsProps<SingleKpiSettings>) {
   return (
     <VStack gap={4}>
-      <WeekPeriodField value={normalizePeriod(settings.period)} onChange={(period) => onChange({ ...settings, period })} />
       <RadioList label="Үзүүлэлт" size="sm" value={isMetric(settings.metric) ? settings.metric : DEFAULT_SINGLE_KPI_SETTINGS.metric} onChange={(metric) => onChange({ ...settings, metric: metric as MetricKey })}>
         {METRIC_KEYS.map((key) => <RadioListItem key={key} value={key} label={METRICS[key].label} />)}
       </RadioList>

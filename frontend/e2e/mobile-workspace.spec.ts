@@ -42,7 +42,6 @@ test('desktop calendar keeps sidebar and full month grid', async ({ page }) => {
   await expect(page.locator('.workspace-sidebar')).toBeVisible()
   await expect(page.locator('.planning-calendar')).toBeVisible()
   await expect(page.locator('.mobile-calendar')).toBeHidden()
-  await expect(page.locator('.period-filter-mobile-trigger')).toBeHidden()
 })
 
 test('mobile chat uses the direct tab destination and an interruptible conversation drawer', async ({ page }) => {

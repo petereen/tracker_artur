@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { Plus, Search, Star } from 'lucide-react'
+import { Search, Star } from 'lucide-react'
 import { useCRMActivities, useCRMSummary, type CRMActivity, type CRMActivityFilters, type CRMCapabilities, type CRMLookups } from '../../api/crm'
 import { Btn, Card } from '../ui'
 import { CheckField, NativeSelect, StatusChip, formatDateTime, formatMoney } from './shared'
+import { CreateButton } from '../CreateButton'
 
 type Preset = 'open' | 'overdue' | 'today' | 'week' | 'important'
 const PAGE_SIZE = 50
@@ -65,7 +66,7 @@ export function ActivitiesPanel({ lookups, capabilities, isManager, partyId, com
         <NativeSelect value={statusId} onChange={(value) => { setStatusId(value); setPage(1) }} options={lookups.statuses.map((row) => ({ value: String(row.id), label: row.name }))} placeholder="Бүх төлөв" />
         <NativeSelect value={typeId} onChange={(value) => { setTypeId(value); setPage(1) }} options={lookups.activity_types.map((row) => ({ value: String(row.id), label: row.name }))} placeholder="Бүх төрөл" />
         <NativeSelect value={responsible} onChange={(value) => { setResponsible(value); setPage(1) }} options={lookups.employees.map((row) => ({ value: String(row.id), label: row.name }))} placeholder="Бүх хариуцагч" />
-        {capabilities.activities.create ? <Btn variant="primary" onClick={onCreate}><Plus size={15} />Шинэ бүртгэл</Btn> : <span />}
+        {capabilities.activities.create ? <CreateButton label="Шинэ бүртгэл" onClick={onCreate} /> : <span />}
       </div>
       <div className="crm-toolbar-flags">
         {!compact && <CheckField label="Зөвхөн миний" checked={mine} onChange={(value) => { setMine(value); setPage(1) }} />}

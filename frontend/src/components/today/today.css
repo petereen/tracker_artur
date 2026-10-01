@@ -931,3 +931,25 @@
   .today-widget-gear,
   .today-grid-overlay { animation: none; }
 }
+
+.today-period-toggle {
+  background: var(--color-surface-muted, rgba(127, 127, 127, 0.12));
+  border-radius: 999px;
+  display: inline-flex;
+  padding: 2px;
+}
+.today-period-toggle button {
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.today-period-toggle button.is-active {
+  background: var(--color-accent);
+  color: #fff;
+}

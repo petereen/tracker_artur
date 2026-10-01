@@ -97,5 +97,5 @@ test('detail routes keep their section title and report actions keep their label
   const create = page.getByRole('button', { name: 'Тайлан үүсгэх' })
   await expect(create).toBeVisible()
   expect((await create.boundingBox())?.height).toBeGreaterThanOrEqual(44)
-  expect(await create.evaluate((node) => getComputedStyle(node, '::after').content)).toContain('Тайлан үүсгэх')
+  await expect(create).toHaveText('Тайлан үүсгэх')
 })

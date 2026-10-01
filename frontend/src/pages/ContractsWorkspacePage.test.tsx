@@ -52,12 +52,11 @@ describe('ContractsWorkspacePage', () => {
     expect(screen.getByRole('tab', { name: /Баталгаажсан/ })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('offers a clear icon-only creation affordance', () => {
+  it('offers the shared labelled create button', () => {
     render(<MemoryRouter><ContractsWorkspacePage /></MemoryRouter>)
-    const button = screen.getByRole('button', { name: /Шинэ баримт бичиг/ })
-    expect(button).toBeInTheDocument()
-    expect(button).toHaveAttribute('title', 'Шинэ баримт бичиг')
-    expect(button).toHaveClass('contract-icon-button')
+    const button = screen.getByRole('button', { name: 'Шинэ баримт бичиг' })
+    expect(button).toHaveTextContent('Шинэ баримт бичиг')
+    expect(button).toHaveAttribute('data-variant', 'primary')
   })
 
   it('queues and uploads attachments while creating a new draft', async () => {

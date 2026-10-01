@@ -65,7 +65,7 @@ test('default canvas: compact clock strip, no legacy headers, check-in hidden', 
   await expect(page.locator('.today-kpi-tile')).toHaveCount(4)
   await expect(page.getByText('Байгууллагын тойм')).toHaveCount(0)
   await expect(page.getByText('Нийт гүйцэтгэлийн үзүүлэлт')).toHaveCount(0)
-  await expect(page.locator('.period-filter, .daily-focus')).toHaveCount(0)
+  await expect(page.locator('.period-picker-trigger, .daily-focus')).toHaveCount(0)
   const strip = await box(page, '[data-widget-id="world-clock-default"]')
   expect(strip.height).toBeLessThanOrEqual(48)
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/today-default.png`, fullPage: true })

@@ -66,6 +66,19 @@ export function WeekPeriodField({ value, onChange }: { value: WeekPeriod; onChan
   )
 }
 
+/** Compact [ This | Previous ] switch for a widget header: changes the period straight from the Today screen. */
+export function WeekPeriodToggle({ value, onChange }: { value: WeekPeriod; onChange: (value: WeekPeriod) => void }) {
+  return (
+    <div className="today-period-toggle" role="radiogroup" aria-label="Хугацаа">
+      {(['this_week', 'previous_week'] as const).map((key) => (
+        <button key={key} type="button" role="radio" aria-checked={value === key} className={value === key ? 'is-active' : undefined} onClick={() => onChange(key)}>
+          {key === 'this_week' ? 'Энэ 7 хоног' : 'Өмнөх 7 хоног'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ---- sparkline ---------------------------------------------------------------
 
 export interface SparkPoint { label: string; value: number }

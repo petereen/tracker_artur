@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Download, FileUp, ListPlus, Plus, Search } from 'lucide-react'
+import { Download, FileUp, ListPlus, Search } from 'lucide-react'
 import {
   downloadCRMImportTemplate, downloadCRMPartiesCsv, useBulkCRMActivities, useCRMParties, useImportCRMParties,
   type CRMCapabilities, type CRMImportResult, type CRMLookups, type CRMParty, type CRMPartyFilters,
 } from '../../api/crm'
 import { Badge, Btn, Card, Modal } from '../ui'
 import { CheckField, Field, NativeSelect, TextInput, crmErrorText, formatDate } from './shared'
+import { CreateButton } from '../CreateButton'
 
 const PAGE_SIZE = 50
 
@@ -37,7 +38,7 @@ export function CustomersPanel({ lookups, capabilities, onOpen, onCreate }: { lo
       <NativeSelect value={kind === 'all' ? '' : kind} onChange={(value) => reset(setKind)((value || 'all') as typeof kind)} options={[{ value: 'customer', label: 'Худалдан авагч' }, { value: 'supplier', label: 'Нийлүүлэгч' }, { value: 'prospect', label: 'Lead' }]} placeholder="Бүх төрөл" />
       <NativeSelect value={groupId} onChange={reset(setGroupId)} options={lookups.party_groups.map((row) => ({ value: String(row.id), label: row.name }))} placeholder="Бүх бүлэг" />
       <NativeSelect value={responsible} onChange={reset(setResponsible)} options={lookups.employees.map((row) => ({ value: String(row.id), label: row.name }))} placeholder="Бүх хариуцагч" />
-      {capabilities.parties.create ? <Btn variant="primary" onClick={onCreate}><Plus size={15} />Шинэ харилцагч</Btn> : <span />}
+      {capabilities.parties.create ? <CreateButton label="Шинэ харилцагч" onClick={onCreate} /> : <span />}
     </div>
     <div className="crm-toolbar-flags">
       <NativeSelect value={active} onChange={(value) => reset(setActive)(value as typeof active)} options={[{ value: 'active', label: 'Идэвхтэй' }, { value: 'inactive', label: 'Идэвхгүй' }]} placeholder="Идэвхтэй / идэвхгүй" />

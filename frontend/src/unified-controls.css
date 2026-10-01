@@ -1,0 +1,275 @@
+/* Unified controls.
+   One look for the controls every page shares, matched to the Astryx components used on the Plans
+   and HR attendance pages: underline tabs (Astryx Tab), the blue create button (Astryx primary
+   Button, medium height), a subtle hover highlight on clickable controls, the compact period
+   picker and the calendar toolbar. Imported last so it settles the older per-page rules.
+   Colours come from the shared palette / Astryx tokens only. */
+
+/* ── Underline tabs ─────────────────────────────────────────────────────────────────────────── */
+.page-tabs { align-items: center; gap: var(--spacing-3) var(--spacing-6); }
+.page-tabs .page-tabs-list,
+div.mp-tabs { gap: var(--spacing-1); padding-bottom: var(--spacing-1-5); }
+.page-tabs .page-tabs-list > :is(a, button),
+div.mp-tabs > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-element);
+  color: var(--color-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font: var(--font-weight-normal) var(--text-label-size) / var(--text-label-leading) var(--font-brand);
+  gap: var(--spacing-1);
+  height: var(--size-element-md);
+  min-height: 0;
+  padding: 0 var(--spacing-3);
+  position: relative;
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard);
+  white-space: nowrap;
+}
+.page-tabs .page-tabs-list > :is(a, button)::after,
+div.mp-tabs > button::after {
+  background: transparent;
+  border-radius: var(--radius-full);
+  bottom: calc(var(--spacing-1-5) * -1);
+  content: "";
+  height: 2px;
+  left: var(--spacing-3);
+  pointer-events: none;
+  position: absolute;
+  right: var(--spacing-3);
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+.page-tabs .page-tabs-list > :is(a, button).active,
+div.mp-tabs > button.active {
+  border-bottom-color: transparent;
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+}
+.page-tabs .page-tabs-list > :is(a, button).active::after,
+div.mp-tabs > button.active::after { background: var(--color-accent); }
+.page-tabs .page-tabs-list > :is(a, button):focus-visible,
+div.mp-tabs > button:focus-visible { border-radius: var(--radius-element); outline: var(--focus-ring); outline-offset: var(--focus-ring-inset); }
+.page-tabs .page-tabs-actions { padding-bottom: var(--spacing-1-5); }
+@media (hover: hover) {
+  .page-tabs .page-tabs-list > :is(a, button):hover,
+  div.mp-tabs > button:hover { background: var(--color-overlay-hover); color: var(--color-text); }
+}
+.page-tabs .page-tabs-list > :is(a, button):active,
+div.mp-tabs > button:active { background: var(--color-overlay-pressed); }
+
+/* ── Subtle highlight on clickable controls ─────────────────────────────────────────────────── */
+@media (hover: hover) {
+  :is(.segmented-control, .contract-tabs, .today-task-tabs, .task-collaboration nav) button:not(.active):hover,
+  :is(.calendar-filter-chip, .calendar-filter-all, .text-action):hover:not(:disabled) {
+    background-image: linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover));
+    color: var(--color-text);
+  }
+  .calendar-filter-chip.active:hover { color: var(--calendar-kind-color); }
+}
+
+/* ── Blue create / primary button ───────────────────────────────────────────────────────────── */
+/* Legacy primaries take the Astryx primary Button metrics, so they match <CreateButton>. */
+.workspace-btn { min-height: var(--size-element-md); padding-block: 0; }
+.workspace-btn-primary,
+.payroll-v2-button.primary:not(.compact),
+:is(.workspace-toolbar, .view-toolbar, .page-tabs-actions, .toolbar-cluster) .primary-action {
+  background-color: var(--color-accent);
+  border: 0;
+  border-radius: var(--radius-element);
+  color: var(--color-on-accent);
+  filter: none;
+  font-size: var(--text-label-size);
+  font-weight: var(--font-weight-medium);
+  gap: var(--spacing-2);
+  height: var(--size-element-md);
+  line-height: var(--text-label-leading);
+  min-height: var(--size-element-md);
+  opacity: 1;
+  padding: 0 var(--spacing-3);
+  transform: none;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .workspace-btn-primary:hover:not(:disabled),
+  .payroll-v2-button.primary:not(.compact):hover,
+  :is(.workspace-toolbar, .view-toolbar, .page-tabs-actions, .toolbar-cluster) .primary-action:hover:not(:disabled) {
+    background-image: linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover));
+    filter: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+.workspace-btn-primary:disabled,
+.payroll-v2-button.primary:disabled { opacity: var(--action-disabled-opacity); }
+/* Icon-only toolbar actions sit at the same height as the create button. */
+:is(.workspace-toolbar, .page-tabs-actions) :is(.secondary-action, .archive-icon-action) { min-height: var(--size-element-md); }
+:is(.workspace-toolbar, .page-tabs-actions) .archive-icon-action { min-width: var(--size-element-md); padding: 0; width: var(--size-element-md); }
+
+/* ── Period picker (TimePeriodFilter) ───────────────────────────────────────────────────────── */
+.period-picker-trigger {
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-element);
+  color: var(--color-text);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-family: var(--font-brand);
+  font-size: var(--text-label-size);
+  gap: var(--spacing-2);
+  height: var(--size-element-md);
+  max-width: 100%;
+  padding: 0 var(--spacing-2) 0 var(--spacing-3);
+  transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+  white-space: nowrap;
+}
+.period-picker-trigger > svg { color: var(--color-muted); flex: 0 0 auto; }
+.period-picker-trigger > strong { font-weight: var(--font-weight-medium); overflow: hidden; text-overflow: ellipsis; }
+.period-picker-range { color: var(--color-muted); font-size: var(--font-size-sm); font-variant-numeric: tabular-nums; }
+.period-picker-trigger[aria-expanded="true"] { border-color: var(--color-accent); }
+.period-picker-trigger:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-outline-offset); }
+@media (hover: hover) {
+  .period-picker-trigger:hover { background-image: linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover)); }
+}
+.period-picker-backdrop { inset: 0; position: fixed; z-index: 80; }
+.period-picker-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  display: grid;
+  gap: var(--spacing-3);
+  left: var(--period-picker-left, 0);
+  padding: var(--spacing-3);
+  position: fixed;
+  top: var(--period-picker-top, 0);
+  width: 288px;
+}
+.period-picker-panel > header { align-items: center; display: none; justify-content: space-between; }
+.period-picker-panel > header h2 { font-size: var(--font-size-lg); margin: 0; }
+.period-picker-panel > header button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-element);
+  color: var(--color-muted);
+  display: inline-flex;
+  height: var(--size-element-lg);
+  justify-content: center;
+  width: var(--size-element-lg);
+}
+.period-picker-presets { display: grid; gap: var(--spacing-0-5); }
+.period-picker-presets button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-element);
+  color: var(--color-text);
+  cursor: pointer;
+  display: flex;
+  font-size: var(--text-label-size);
+  height: var(--size-element-md);
+  justify-content: space-between;
+  padding: 0 var(--spacing-2);
+  text-align: left;
+}
+.period-picker-presets button.active { background: var(--color-accent-soft); color: var(--color-accent); font-weight: var(--font-weight-semibold); }
+@media (hover: hover) {
+  .period-picker-presets button:not(.active):hover,
+  .period-picker-panel > header button:hover { background: var(--color-overlay-hover); }
+}
+.period-picker-custom { border-top: 1px solid var(--color-border-soft); display: grid; gap: var(--spacing-2); padding-top: var(--spacing-3); }
+.period-picker-caption { color: var(--color-muted); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); }
+.period-picker-custom > div { display: grid; gap: var(--spacing-2); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.period-picker-custom label { color: var(--color-muted); display: grid; font-size: var(--font-size-xs); gap: var(--spacing-1); min-width: 0; }
+.period-picker-custom input {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-element);
+  color: var(--color-text);
+  font-family: var(--font-brand);
+  font-size: var(--font-size-sm);
+  height: var(--size-element-md);
+  min-width: 0;
+  padding: 0 var(--spacing-2);
+  width: 100%;
+}
+.period-picker-custom input:focus-visible { border-color: var(--color-accent); outline: 0; }
+.period-picker-custom p { color: var(--color-red-strong); font-size: var(--font-size-sm); margin: 0; }
+.period-picker-panel > footer { display: flex; gap: var(--spacing-2); justify-content: flex-end; }
+.period-picker-panel > footer button {
+  border-radius: var(--radius-element);
+  font-size: var(--text-label-size);
+  font-weight: var(--font-weight-medium);
+  min-height: var(--size-element-md);
+  padding: 0 var(--spacing-3);
+}
+@media (max-width: 800px) {
+  .period-picker-trigger { height: 44px; justify-content: flex-start; width: 100%; }
+  .period-picker-trigger > svg:last-child { margin-left: auto; }
+  .period-picker-backdrop { align-items: flex-end; background: color-mix(in srgb, var(--color-ink) 42%, transparent); display: flex; }
+  .period-picker-panel {
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    gap: var(--spacing-4);
+    max-height: min(88vh, 620px);
+    overflow-y: auto;
+    padding: var(--spacing-4) var(--spacing-4) calc(var(--spacing-4) + env(safe-area-inset-bottom));
+    position: static;
+    width: 100%;
+  }
+  .period-picker-panel > header { display: flex; }
+  .period-picker-presets { gap: var(--spacing-2); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .period-picker-presets button { background: var(--color-surface-2); border: 1px solid var(--color-border); height: 44px; padding: 0 var(--spacing-3); }
+  .period-picker-presets button.active { border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border)); }
+  .period-picker-custom input { height: 42px; }
+  .period-picker-panel > footer button { flex: 1; justify-content: center; min-height: 44px; }
+}
+
+/* ── Reports toolbar ────────────────────────────────────────────────────────────────────────── */
+.reports-toolbar .report-toolbar { flex: 1 1 auto; margin-left: 0; }
+@media (max-width: 800px) {
+  .report-toolbar-actions > .astryx-button { flex: 1 1 0; min-height: 44px; }
+}
+
+/* ── Calendar toolbar: month navigation · type filters · sync + create ──────────────────────── */
+.calendar-workspace .calendar-toolbar {
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--spacing-2) var(--spacing-4);
+  margin-bottom: var(--spacing-3);
+}
+.calendar-toolbar-nav { align-items: center; display: flex; flex: 0 0 auto; gap: var(--spacing-1); }
+.calendar-toolbar-month {
+  color: var(--color-text);
+  font-size: var(--text-label-size);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+  min-width: 9.5em;
+  text-align: center;
+  text-transform: capitalize;
+}
+.calendar-workspace .calendar-toolbar .calendar-filter-toolbar {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  justify-content: flex-end;
+  margin: 0;
+  min-width: 0;
+}
+.calendar-workspace .calendar-toolbar .calendar-filter-chips { flex-wrap: wrap; gap: var(--spacing-1); }
+.calendar-workspace .calendar-toolbar :is(.calendar-filter-chip, .calendar-filter-all) { font-size: var(--font-size-sm); min-height: var(--size-element-sm); padding: 0 var(--spacing-2-5, var(--spacing-2)); }
+.calendar-workspace .calendar-toolbar .calendar-filter-all { background: transparent; border-color: transparent; color: var(--color-muted); font-weight: var(--font-weight-medium); margin-left: 0; }
+.calendar-toolbar-actions { align-items: center; display: flex; flex: 0 0 auto; gap: var(--spacing-2); }
+.calendar-toolbar-actions .google-calendar-sync-control { border-radius: var(--radius-element); font-size: var(--text-label-size); min-height: var(--size-element-md); padding-block: 0; }
+.calendar-toolbar-actions .google-calendar-sync-control.disconnected { font-weight: var(--font-weight-medium); }
+@media (max-width: 1280px) {
+  .calendar-workspace .calendar-toolbar { flex-wrap: wrap; }
+  .calendar-workspace .calendar-toolbar .calendar-filter-toolbar { flex: 1 1 100%; justify-content: flex-start; order: 3; }
+  .calendar-toolbar-actions { margin-left: auto; }
+}
