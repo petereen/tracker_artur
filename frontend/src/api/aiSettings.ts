@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from './client'
+import i18n from '../i18n'
 
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high'
 export type AiKeySource = 'organization' | 'environment' | 'none'
@@ -127,9 +128,9 @@ export function useUpdateAiAgentSettings() {
       queryClient.setQueryData(SETTINGS_KEY, data)
       queryClient.invalidateQueries({ queryKey: [...SETTINGS_KEY, 'models'] })
       queryClient.invalidateQueries({ queryKey: [...SETTINGS_KEY, 'elevenlabs-voices'] })
-      toast.success('AI тохиргоо хадгалагдлаа')
+      toast.success(i18n.t('st.api.aiSaved'))
     },
-    onError: (error: any) => toast.error(typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'AI тохиргоо хадгалагдсангүй'),
+    onError: (error: any) => toast.error(typeof error.response?.data?.detail === 'string' ? error.response.data.detail : i18n.t('st.api.aiNotSaved')),
   })
 }
 
@@ -182,8 +183,8 @@ export function useUpdateAiAccessSettings() {
     mutationFn: (sections: Record<string, AiAccessEntry>) => api.put('/v1/settings/ai-agent/access', { sections }).then((response) => response.data as AiAccessSettings),
     onSuccess: (data) => {
       queryClient.setQueryData(ACCESS_KEY, data)
-      toast.success('AI туслахын эрх хадгалагдлаа')
+      toast.success(i18n.t('st.api.aiAccessSaved'))
     },
-    onError: (error: any) => toast.error(typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'AI туслахын эрх хадгалагдсангүй'),
+    onError: (error: any) => toast.error(typeof error.response?.data?.detail === 'string' ? error.response.data.detail : i18n.t('st.api.aiAccessNotSaved')),
   })
 }

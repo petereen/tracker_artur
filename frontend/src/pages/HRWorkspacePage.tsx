@@ -14,7 +14,7 @@ import { MonthlyPayrollProfileDrawer } from '../components/MonthlyPayrollProfile
 import { EmployeeWorktimeStats } from '../components/EmployeeWorktimeStats'
 import { AttendanceGrid } from '../components/attendance/AttendanceGrid'
 import { normalizeRegistrationNumber, parseRegistrationNumber } from '../utils/registrationNumber'
-import { TELEGRAM_BOT_REQUIRED_HINT, useTenantContext } from '../api/tenancy'
+import { telegramBotRequiredHint, useTenantContext } from '../api/tenancy'
 import { CreateButton } from '../components/CreateButton'
 
 type Tab = 'directory' | 'departments' | 'leave' | 'attendance' | 'payroll'
@@ -214,7 +214,7 @@ function WorkerFormModal({ employee, departments, employees, onClose, onCreated 
       <Input label={t('hr.form.hireDate')} type="date" value={form.start_date} onChange={set('start_date')} fullWidth />
       {(status === 'probation' || form.probation_end_date) && <Input label={t('hr.form.probationEnd')} type="date" value={form.probation_end_date} onChange={set('probation_end_date')} fullWidth />}
       {status === 'terminated' && <><Input label={t('hr.form.terminationDate')} type="date" value={form.end_date} onChange={set('end_date')} fullWidth /><Input label={t('hr.form.terminationReason')} value={form.termination_reason} onChange={set('termination_reason')} fullWidth /></>}
-      {!employee && <><Input label={t('hr.form.annualLeave')} type="number" min="0" max="366" value={form.annual_leave_days} onChange={set('annual_leave_days')} placeholder="15" fullWidth /><Input label={t('hr.form.telegramOptional')} value={botConnected ? form.telegram_id : ''} onChange={set('telegram_id')} placeholder="123456789" fullWidth disabled={!botConnected} hint={botConnected ? undefined : TELEGRAM_BOT_REQUIRED_HINT} /></>}
+      {!employee && <><Input label={t('hr.form.annualLeave')} type="number" min="0" max="366" value={form.annual_leave_days} onChange={set('annual_leave_days')} placeholder="15" fullWidth /><Input label={t('hr.form.telegramOptional')} value={botConnected ? form.telegram_id : ''} onChange={set('telegram_id')} placeholder="123456789" fullWidth disabled={!botConnected} hint={botConnected ? undefined : telegramBotRequiredHint()} /></>}
     </div>
     {employee && !WORKING_STATUSES.includes(status) && WORKING_STATUSES.includes(employee.employment_status) && <p className="hr-form-note">{t('hr.form.inactiveHint')}</p>}
     <h4 className="hr-form-section">{t('hr.form.emergency')}</h4>

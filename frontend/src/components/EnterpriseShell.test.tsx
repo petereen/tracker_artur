@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import '../i18n'
+import i18n from '../i18n'
 import { EnterpriseShell } from './EnterpriseShell'
 
 const mocks = vi.hoisted(() => ({
@@ -11,11 +11,12 @@ const mocks = vi.hoisted(() => ({
   payrollVisible: false,
   accountsVisible: false,
   roles: ['manager'] as string[],
+  locale: 'mn',
   openDirect: vi.fn(async () => ({ public_id: 'direct-1' })),
 }))
 
 vi.mock('../api/enterprise', () => ({
-  useActor: () => ({ data: { name: 'Manager', email: 'manager@example.com', roles: mocks.roles, locale: 'mn', avatar_url: null } }),
+  useActor: () => ({ data: { name: 'Manager', email: 'manager@example.com', roles: mocks.roles, locale: mocks.locale, avatar_url: null } }),
   useBrandingSettings: () => ({ data: {} }),
   useERPMetadata: () => ({ data: { modules: { payroll: mocks.payrollVisible }, module_labels: {}, document_modules: {}, actions: [], currency: 'MNT', custom_fields: [], roles: [], module_visibility_is_not_authorization: true }, isLoading: false }),
   useERPAccountPermissions: () => ({ data: { view: mocks.accountsVisible, create: false, edit: false, administer: false } }),
@@ -35,7 +36,7 @@ vi.mock('./OyunsAssistant', () => ({ OyunsAssistant: () => null }))
 vi.mock('./Loading', () => ({ WorkspaceRouteSkeleton: () => null }))
 
 describe('enterprise sidebar', () => {
-  beforeEach(() => { mocks.workers = []; mocks.profile = null; mocks.payrollVisible = false; mocks.accountsVisible = false; mocks.roles = ['manager']; mocks.openDirect.mockClear() })
+  beforeEach(() => { mocks.workers = []; mocks.profile = null; mocks.payrollVisible = false; mocks.accountsVisible = false; mocks.roles = ['manager']; mocks.locale = 'mn'; mocks.openDirect.mockClear() })
   it('places company files immediately above the profile and logout controls', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
@@ -44,6 +45,33 @@ describe('enterprise sidebar', () => {
     expect(profile).not.toBeNull()
     expect(link.compareDocumentPosition(profile as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(link.parentElement).toHaveClass('sidebar-footer')
+  })
+
+  it('opens the account menu with theme switch, profile, docs placeholder and log out', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /><Route path="profile" element={<div>Profile page</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
+    expect(container.querySelector('.workspace-header .theme-toggle')).toBeNull()
+    const trigger = screen.getByRole('button', { name: 'Бүртгэлийн цэс нээх' })
+    expect(trigger).toHaveTextContent('Manager')
+    expect(trigger.querySelector('.avatar')).toHaveTextContent('M')
+    fireEvent.click(trigger)
+    const menu = screen.getByRole('menu', { name: 'Миний бүртгэл' })
+    expect(within(menu).getByRole('menuitem', { name: 'Профайл' })).toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: /Заавар/ })).toHaveAttribute('aria-disabled', 'true')
+    expect(within(menu).getByRole('menuitem', { name: 'Гарах' })).toBeInTheDocument()
+    expect(within(menu).getByRole('button', { name: /Харанхуй горимд шилжих|Гэрэлтэй горимд шилжих/ })).toBeInTheDocument()
+
+    // The shell follows the account locale, so the mocked account switches language with the UI.
+    mocks.locale = 'ru'
+    await act(async () => { await i18n.changeLanguage('ru') })
+    expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Профиль' })).toBeInTheDocument()
+    expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Выйти' })).toBeInTheDocument()
+    mocks.locale = 'mn'
+    await act(async () => { await i18n.changeLanguage('mn') })
+
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Профайл' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.getByText('Profile page')).toBeInTheDocument()
   })
 
   it('keeps five thumb-reachable mobile destinations and a More control', () => {

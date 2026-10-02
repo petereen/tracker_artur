@@ -22,24 +22,21 @@ import {
   type LicenseRecord, type LicenseState, type LicenseVerification, type SeatUsage, type TenantLicenseOverview,
   tenancyErrorMessage, useActivateLicense, useTenantLicense, useVerifyLicense,
 } from '../api/tenancy'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
+import { catalogText, labelOr } from '../utils/labelMap'
 import { intlLocale } from '../utils/locale'
 
+// Labels are getters so they follow the UI language when read (the console reuses LICENSE_STATE).
 export const LICENSE_STATE: Record<LicenseState, { label: string; variant: 'success' | 'warning' | 'error' | 'neutral' }> = {
-  valid: { label: 'Идэвхтэй', variant: 'success' },
-  grace: { label: 'Хугацаа дууссан — хөнгөлөлтийн хугацаа', variant: 'warning' },
-  expired: { label: 'Хугацаа дууссан', variant: 'error' },
-  missing: { label: 'Идэвхжүүлээгүй', variant: 'error' },
-  not_required: { label: 'Лиценз шаардлагагүй (үндсэн байгууллага)', variant: 'neutral' },
+  valid: { get label() { return i18n.t('st.lic.state.valid') }, variant: 'success' },
+  grace: { get label() { return i18n.t('st.lic.state.grace') }, variant: 'warning' },
+  expired: { get label() { return i18n.t('st.lic.state.expired') }, variant: 'error' },
+  missing: { get label() { return i18n.t('st.lic.state.missing') }, variant: 'error' },
+  not_required: { get label() { return i18n.t('st.lic.state.not_required') }, variant: 'neutral' },
 }
 
-const LICENSE_STATUS_LABEL: Record<LicenseRecord['status'], { label: string; color: 'green' | 'gray' | 'red' | 'blue' }> = {
-  active: { label: 'Идэвхтэй', color: 'green' },
-  issued: { label: 'Олгосон', color: 'blue' },
-  superseded: { label: 'Солигдсон', color: 'gray' },
-  revoked: { label: 'Цуцалсан', color: 'red' },
-}
-
-const CYCLE_LABEL: Record<string, string> = { monthly: 'Сар бүр', quarterly: 'Улирал бүр', yearly: 'Жил бүр', custom: 'Тусгай' }
+const LICENSE_STATUS_COLOR: Record<LicenseRecord['status'], 'green' | 'gray' | 'red' | 'blue'> = { active: 'green', issued: 'blue', superseded: 'gray', revoked: 'red' }
 
 export function formatDate(value: string | null | undefined) {
   if (!value) return '—'
@@ -49,43 +46,46 @@ export function formatDate(value: string | null | undefined) {
 
 /** Seat meter: active users vs the license ceiling. */
 export function SeatMeter({ seats }: { seats: SeatUsage }) {
+  const { t } = useTranslation()
   if (seats.unlimited || seats.limit === null) {
-    return <HStack gap={2} vAlign="center"><Token size="sm" color="gray" label="Хязгааргүй" /><Text type="supporting">{`${seats.used} идэвхтэй хэрэглэгч`}</Text></HStack>
+    return <HStack gap={2} vAlign="center"><Token size="sm" color="gray" label={t('st.lic.unlimited')} /><Text type="supporting">{t('st.lic.activeUsers', { n: seats.used })}</Text></HStack>
   }
   const full = seats.used >= seats.limit
   const nearly = !full && seats.limit > 0 && seats.used / seats.limit >= 0.8
   return <VStack gap={1}>
-    <ProgressBar label="Хэрэглэгчийн эрх" isLabelHidden value={Math.min(seats.used, seats.limit)} max={Math.max(seats.limit, 1)}
+    <ProgressBar label={t('st.lic.seats')} isLabelHidden value={Math.min(seats.used, seats.limit)} max={Math.max(seats.limit, 1)}
       variant={full ? 'error' : nearly ? 'warning' : 'accent'} hasValueLabel formatValueLabel={() => `${seats.used} / ${seats.limit}`} />
-    <Text type="supporting">{full ? 'Бүх эрх ашиглагдсан — шинэ нэвтрэх эрх олгох боломжгүй (ажилтан бүртгэх боломжтой).' : `${seats.available} сул эрх үлдсэн.`}</Text>
+    <Text type="supporting">{full ? t('st.lic.seatsFull') : t('st.lic.freeSeats', { n: seats.available })}</Text>
   </VStack>
 }
 
 function LicenseStatusCard({ data }: { data: TenantLicenseOverview }) {
+  const { t } = useTranslation()
   const state = LICENSE_STATE[data.license.state]
   return <Card padding={5}>
     <VStack gap={4}>
       <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
-        <Heading level={3}>Лицензийн төлөв</Heading>
+        <Heading level={3}>{t('st.lic.statusTitle')}</Heading>
         <HStack gap={2} vAlign="center"><StatusDot variant={state.variant} label={state.label} /><Text weight="semibold">{state.label}</Text></HStack>
       </HStack>
-      {data.license.state === 'grace' && <Banner status="warning" collapsible={false} title="Лицензийн хугацаа дууссан"
-        description={`${formatDate(data.license.grace_ends_at)} хүртэл ажиллана. Үйлчилгээ үзүүлэгчээс сунгалтын түлхүүр авч доор идэвхжүүлнэ үү.`} />}
-      {(data.license.state === 'missing' || data.license.state === 'expired') && <Banner status="error" collapsible={false} title="Хүчинтэй лиценз алга"
-        description="Лицензийн түлхүүр идэвхжүүлэх хүртэл ажлын орон зайн бусад хэсэг түгжигдсэн байна." />}
+      {data.license.state === 'grace' && <Banner status="warning" collapsible={false} title={t('st.lic.graceTitle')}
+        description={t('st.lic.graceDesc', { date: formatDate(data.license.grace_ends_at) })} />}
+      {(data.license.state === 'missing' || data.license.state === 'expired') && <Banner status="error" collapsible={false} title={t('st.lic.noValidTitle')}
+        description={t('st.lic.noValidDesc')} />}
       <MetadataList columns={2}>
-        <MetadataListItem label="Байгууллага">{data.tenant.name}</MetadataListItem>
-        <MetadataListItem label="Хаяг (slug)">{data.tenant.slug}</MetadataListItem>
-        <MetadataListItem label="Багц">{data.active?.plan_code ?? data.plan_code ?? '—'}</MetadataListItem>
-        <MetadataListItem label="Төлбөрийн мөчлөг">{CYCLE_LABEL[data.active?.billing_cycle ?? data.billing_cycle] ?? data.billing_cycle}</MetadataListItem>
-        <MetadataListItem label="Дуусах огноо">{formatDate(data.license.expires_at)}</MetadataListItem>
-        <MetadataListItem label="Үлдсэн хоног">{data.license.days_left === null ? '—' : String(Math.max(data.license.days_left, 0))}</MetadataListItem>
+        <MetadataListItem label={t('st.lic.org')}>{data.tenant.name}</MetadataListItem>
+        <MetadataListItem label={t('st.lic.slug')}>{data.tenant.slug}</MetadataListItem>
+        <MetadataListItem label={t('st.lic.plan')}>{data.active?.plan_code ?? data.plan_code ?? '—'}</MetadataListItem>
+        <MetadataListItem label={t('st.lic.billingCycle')}>{labelOr('st.lic.cycle', data.active?.billing_cycle ?? data.billing_cycle)}</MetadataListItem>
+        <MetadataListItem label={t('st.lic.expires')}>{formatDate(data.license.expires_at)}</MetadataListItem>
+        <MetadataListItem label={t('st.lic.daysLeft')}>{data.license.days_left === null ? '—' : String(Math.max(data.license.days_left, 0))}</MetadataListItem>
       </MetadataList>
     </VStack>
   </Card>
 }
 
 function ActivationCard() {
+  const { t } = useTranslation()
   const verify = useVerifyLicense()
   const activate = useActivateLicense()
   const [token, setToken] = useState('')
@@ -97,34 +97,34 @@ function ActivationCard() {
     try {
       setPreview(await verify.mutateAsync(trimmed))
     } catch (error) {
-      toast.error(tenancyErrorMessage(error, 'Лицензийн түлхүүрийг шалгаж чадсангүй'))
+      toast.error(tenancyErrorMessage(error, t('st.lic.verifyFailed')))
     }
   }
   const apply = async () => {
     try {
       await activate.mutateAsync(trimmed)
-      toast.success('Лиценз идэвхжлээ')
+      toast.success(t('st.lic.activated'))
       setToken('')
       setPreview(null)
     } catch (error) {
-      toast.error(tenancyErrorMessage(error, 'Лиценз идэвхжүүлж чадсангүй'))
+      toast.error(tenancyErrorMessage(error, t('st.lic.activateFailed')))
     }
   }
 
   return <Card padding={5}>
     <VStack gap={4}>
       <VStack gap={1}>
-        <Heading level={3}>Лиценз идэвхжүүлэх</Heading>
-        <Text type="supporting">OYUNS ERP-ээс ирсэн идэвхжүүлэх түлхүүрийг буулгана уу. Гарын үсэг, байгууллага, хугацааг шалгаад дараа нь идэвхжүүлнэ.</Text>
+        <Heading level={3}>{t('st.lic.activateTitle')}</Heading>
+        <Text type="supporting">{t('st.lic.activateHint')}</Text>
       </VStack>
-      <TextArea label="Идэвхжүүлэх түлхүүр" value={token} onChange={(value) => { setToken(value); setPreview(null) }} rows={4}
+      <TextArea label={t('st.lic.activationKey')} value={token} onChange={(value) => { setToken(value); setPreview(null) }} rows={4}
         placeholder="eyJhbGciOiJFZERTQSIs…" hasSpellCheck={false} />
       {preview && <Banner status={preview.fits_current_usage ? 'success' : 'warning'} collapsible={false}
-        title={preview.fits_current_usage ? 'Түлхүүр хүчинтэй' : 'Хэрэглэгчийн тоо лицензээс их байна'}
-        description={`${preview.claims.seats} хэрэглэгч · ${formatDate(preview.claims.valid_from)} – ${formatDate(preview.claims.expires_at)} · ${Object.values(preview.feature_labels).join(', ') || 'Суурь модулиуд'}${preview.fits_current_usage ? '' : ` · Одоо ${preview.seats.used} идэвхтэй хэрэглэгч байна.`}`} />}
+        title={preview.fits_current_usage ? t('st.lic.keyValid') : t('st.lic.tooManyUsers')}
+        description={`${t('st.lic.previewLine', { seats: preview.claims.seats, from: formatDate(preview.claims.valid_from), to: formatDate(preview.claims.expires_at), features: Object.entries(preview.feature_labels).map(([code, label]) => catalogText(`cat.feature.${code}`, label as string)).join(', ') || t('st.lic.baseModules') })}${preview.fits_current_usage ? '' : ` · ${t('st.lic.currentUsers', { used: preview.seats.used })}`}`} />}
       <HStack gap={2} hAlign="end">
-        <Button label="Шалгах" variant="secondary" icon={<ShieldCheck size={15} />} clickAction={check} isDisabled={!trimmed} />
-        <Button label="Идэвхжүүлэх" variant="primary" icon={<KeyRound size={15} />} clickAction={apply} isDisabled={!trimmed || (preview !== null && !preview.fits_current_usage)} />
+        <Button label={t('st.lic.verify')} variant="secondary" icon={<ShieldCheck size={15} />} clickAction={check} isDisabled={!trimmed} />
+        <Button label={t('st.lic.activate')} variant="primary" icon={<KeyRound size={15} />} clickAction={apply} isDisabled={!trimmed || (preview !== null && !preview.fits_current_usage)} />
       </HStack>
     </VStack>
   </Card>
@@ -134,9 +134,10 @@ interface HistoryRow extends Record<string, unknown> { id: string; record: Licen
 
 /** Settings → System → Лиценз ба идэвхжүүлэлт (tenant admins). */
 export function TenantLicenseSettings() {
+  const { t } = useTranslation()
   const overview = useTenantLicense()
   if (overview.isLoading) return <Card padding={5}><Skeleton height={240} /></Card>
-  if (overview.isError || !overview.data) return <Banner status="error" collapsible={false} title={tenancyErrorMessage(overview.error, 'Лицензийн мэдээллийг ачаалж чадсангүй')} />
+  if (overview.isError || !overview.data) return <Banner status="error" collapsible={false} title={tenancyErrorMessage(overview.error, t('st.lic.loadFailed'))} />
   const data = overview.data
   const rows: HistoryRow[] = data.history.map((record) => ({ id: record.id, record }))
   return <VStack gap={4}>
@@ -144,24 +145,24 @@ export function TenantLicenseSettings() {
       <LicenseStatusCard data={data} />
       <Card padding={5}>
         <VStack gap={4}>
-          <Heading level={3}>Хэрэглэгчийн эрх</Heading>
+          <Heading level={3}>{t('st.lic.seats')}</Heading>
           <SeatMeter seats={data.seats} />
           <List hasDividers>
-            {data.features.map((feature) => <ListItem key={feature.code} label={feature.label}
-              endContent={<Token size="sm" color={feature.enabled ? 'green' : 'gray'} label={feature.enabled ? 'Багцад орсон' : 'Ороогүй'} />} />)}
+            {data.features.map((feature) => <ListItem key={feature.code} label={catalogText(`cat.feature.${feature.code}`, feature.label)}
+              endContent={<Token size="sm" color={feature.enabled ? 'green' : 'gray'} label={feature.enabled ? t('st.lic.included') : t('st.lic.notIncluded')} />} />)}
           </List>
         </VStack>
       </Card>
     </Grid>
     <ActivationCard />
     <Card padding={0}>
-      {rows.length === 0 ? <EmptyState title="Лицензийн түүх хоосон" description="Идэвхжүүлсэн лицензүүд энд харагдана." />
+      {rows.length === 0 ? <EmptyState title={t('st.lic.historyEmpty')} description={t('st.lic.historyEmptyDesc')} />
         : <Table<HistoryRow> data={rows} idKey="id" density="compact" columns={[
-          { key: 'status', header: 'Төлөв', width: pixel(120), renderCell: ({ record }) => <Token size="sm" color={LICENSE_STATUS_LABEL[record.status].color} label={LICENSE_STATUS_LABEL[record.status].label} /> },
-          { key: 'plan', header: 'Багц', width: proportional(1), renderCell: ({ record }) => <Text>{record.plan_code ?? '—'}</Text> },
-          { key: 'seats', header: 'Хэрэглэгч', width: pixel(100), renderCell: ({ record }) => <Text>{String(record.seat_limit)}</Text> },
-          { key: 'window', header: 'Хугацаа', width: proportional(2), renderCell: ({ record }) => <Text type="supporting">{`${formatDate(record.valid_from)} – ${formatDate(record.expires_at)}`}</Text> },
-          { key: 'activated', header: 'Идэвхжсэн', width: proportional(1), renderCell: ({ record }) => <Text type="supporting">{formatDate(record.activated_at)}</Text> },
+          { key: 'status', header: t('st.lic.col.status'), width: pixel(120), renderCell: ({ record }) => <Token size="sm" color={LICENSE_STATUS_COLOR[record.status]} label={t(`st.lic.status.${record.status}`)} /> },
+          { key: 'plan', header: t('st.lic.plan'), width: proportional(1), renderCell: ({ record }) => <Text>{record.plan_code ?? '—'}</Text> },
+          { key: 'seats', header: t('st.lic.col.users'), width: pixel(100), renderCell: ({ record }) => <Text>{String(record.seat_limit)}</Text> },
+          { key: 'window', header: t('st.lic.col.window'), width: proportional(2), renderCell: ({ record }) => <Text type="supporting">{`${formatDate(record.valid_from)} – ${formatDate(record.expires_at)}`}</Text> },
+          { key: 'activated', header: t('st.lic.col.activated'), width: proportional(1), renderCell: ({ record }) => <Text type="supporting">{formatDate(record.activated_at)}</Text> },
         ]} />}
     </Card>
   </VStack>

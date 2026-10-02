@@ -251,7 +251,7 @@ export default defineMessages({
     'reports.edit.save': 'Сохранить',
     'reports.edit.submit': 'Отправить',
     'reports.edit.sendBack': 'Вернуть на доработку',
-    'reports.create.eyebrow': 'Шинэ тайлан',
+    'reports.create.eyebrow': 'Новый отчёт',
     'reports.create.noTypes': 'Для вас не настроены типы отчётов. Администратор настраивает их в «Настройках отчётов».',
     'reports.create.type': 'Тип отчёта',
     'reports.create.department': 'Отчёт отдела',

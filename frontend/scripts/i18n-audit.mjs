@@ -17,7 +17,7 @@ const SKIP_FILES = new Set(['i18n.ts', 'components/LanguageSwitcher.tsx'])
 const DEAD = new Set([
   'components/Sidebar.tsx', 'components/payroll/PayrollPaymentWorkflow.tsx', 'components/payroll/PayrollDocumentsPage.tsx',
   'components/payroll/PayrollReconciliationPanel.tsx', 'api/miniapp.ts', 'pages/JournalPage.tsx', 'pages/ReportsPage.tsx',
-  'pages/TasksPage.tsx', 'pages/TaxBenefitsWorkspacePage.tsx', 'pages/PayrollSetupHub.tsx', 'pages/OkrsWorkspacePage.tsx', 'pages/DashboardPage.tsx',
+  'pages/TasksPage.tsx', 'pages/TaxBenefitsWorkspacePage.tsx', 'pages/PayrollSetupHub.tsx', 'pages/OkrsWorkspacePage.tsx', 'pages/DashboardPage.tsx', 'components/payroll/PayrollWorkspaceUI.tsx',
 ])
 const CYRILLIC = /[Ѐ-ӿ]/
 

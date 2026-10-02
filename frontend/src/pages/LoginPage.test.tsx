@@ -36,11 +36,14 @@ describe('enterprise login', () => {
 
   it('switches the page to Russian and remembers the choice', async () => {
     renderLogin()
-    fireEvent.click(screen.getByRole('button', { name: 'Русский' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Хэл' }))
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Монгол', 'Русский', 'English'])
+    expect(screen.getByRole('option', { name: 'Монгол' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('option', { name: 'Русский' }))
     expect(await screen.findByLabelText('Логин')).toHaveAttribute('autocomplete', 'username')
     expect(screen.getByLabelText('Пароль')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Войти через Telegram/ })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Русский' })).toHaveAttribute('aria-pressed', 'true')
+    expect(window.localStorage.getItem('oyuns.language.chosen')).toBe('1')
     expect(document.documentElement.lang).toBe('ru')
     expect(window.localStorage.getItem('oyuns.language')).toBe('ru')
   })

@@ -1,104 +1,78 @@
 // Олон нийтэд нээлттэй эрх зүйн хуудсууд. Нийтлэхийн өмнө хуульчаар хянуулна.
+import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
-const UPDATED = '2026 оны 8 сарын 07'
-const OPERATOR = '«OYUNS Agent» үйлчилгээний оператор'
 const CONTACT = 'info@oyuns.mn'
 const DOMAIN = 'erp.oyuns.mn'
 
-function LegalShell({ title, children }: { title: string; children: React.ReactNode }) {
+/** `**bold**`, `{domain}` and `{email}` markers in a translated sentence become inline elements. */
+function rich(text: string): ReactNode {
+  return text.split(/(\*\*[^*]+\*\*|\{domain\}|\{email\})/).map((part, index) => {
+    if (part === '{domain}') return <b key={index}>{DOMAIN}</b>
+    if (part === '{email}') return <a key={index} href={`mailto:${CONTACT}`}>{CONTACT}</a>
+    if (part.startsWith('**')) return <b key={index}>{part.slice(2, -2)}</b>
+    return part
+  })
+}
+
+function LegalShell({ title, children }: { title: string; children: ReactNode }) {
+  const { t } = useTranslation()
   return (
     <div className="min-h-screen bg-gray-950 text-gray-200">
       <div className="max-w-2xl mx-auto px-5 py-8">
-        <a href="/" className="text-sky-400 text-sm">← Нүүр хуудас</a>
+        <a href="/" className="text-sky-400 text-sm">{t('legal.back')}</a>
         <h1 className="text-2xl font-bold text-white mt-4 mb-1">{title}</h1>
-        <div className="text-xs text-gray-500 mb-6">Сүүлд шинэчилсэн: {UPDATED}</div>
+        <div className="text-xs text-gray-500 mb-6">{t('legal.updatedLabel', { date: t('legal.updated') })}</div>
         <div className="space-y-4 text-[14px] leading-relaxed [&_h2]:text-white [&_h2]:font-semibold [&_h2]:mt-6 [&_h2]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_a]:text-sky-400">
           {children}
         </div>
         <div className="mt-10 flex gap-4 text-sm">
-          <a href="/privacy" className="text-sky-400">Нууцлалын бодлого</a>
-          <a href="/terms" className="text-sky-400">Үйлчилгээний нөхцөл</a>
+          <a href="/privacy" className="text-sky-400">{t('legal.nav.privacy')}</a>
+          <a href="/terms" className="text-sky-400">{t('legal.nav.terms')}</a>
         </div>
       </div>
     </div>
   )
 }
 
+function Section({ heading, items, children }: { heading: string; items?: string[]; children?: string }) {
+  const { t } = useTranslation()
+  return <>
+    <h2>{t(heading)}</h2>
+    {children && <p>{rich(t(children))}</p>}
+    {items && <ul>{items.map((key) => <li key={key}>{rich(t(key))}</li>)}</ul>}
+  </>
+}
+
 export function PrivacyPage() {
+  const { t } = useTranslation()
   return (
-    <LegalShell title="Нууцлалын бодлого">
-      <p>Энэхүү нууцлалын бодлого нь Telegram бот болон <b>{DOMAIN}</b> дээрх вэб апп-аар дамжуулан ашиглах
-        {OPERATOR} (цаашид «Үйлчилгээ» гэх) ямар мэдээлэл боловсруулдаг болон түүнийг хэрхэн ашигладгийг тайлбарлана.</p>
+    <LegalShell title={t('legal.nav.privacy')}>
+      <p>{rich(t('legal.privacy.intro', { operator: t('legal.operator') }))}</p>
 
-      <h2>1. Бидний боловсруулдаг мэдээлэл</h2>
-      <ul>
-        <li><b>Telegram таних мэдээлэл:</b> тоон ID, нэр, username — нэвтрэлт болон мэдэгдэл хүргэхэд.</li>
-        <li><b>Даалгаврын мэдээлэл:</b> гарчиг, тайлбар, хугацаа, тэргүүлэх зэрэг, төлөв, сэтгэгдэл, гүйцэтгэгч ба үүсгэгч.</li>
-        <li><b>Асуулгын хариулт ба идэвхжилийн үзүүлэлт</b>, бөглөлтийн цуврал.</li>
-        <li><b>Дуу хоолойн мессеж</b> (бот руу илгээсэн тохиолдолд) — яриаг таньж, даалгавар болгон боловсруулахад.</li>
-        <li><b>Техникийн мэдээлэл:</b> оношилгоонд зориулсан алдааны бүртгэл ба үйл явдал (Sentry).</li>
-      </ul>
-
-      <h2>2. Боловсруулах зорилго</h2>
-      <ul>
-        <li>Даалгавар үүсгэх, сануулах, хянах.</li>
-        <li>Өдөр тутмын үзүүлэлт цуглуулж, удирдлагад хураангуй бэлтгэх.</li>
-        <li>Чимээгүй цагийг харгалзан мэдэгдэл болон дайжест илгээх.</li>
-        <li>Үйлчилгээний найдвартай ажиллагаа, аюулгүй байдлыг хангах.</li>
-      </ul>
-
-      <h2>3. Гуравдагч этгээдэд дамжуулах</h2>
-      <ul>
-        <li><b>OpenAI</b> — даалгаврын текст, дуу хоолойг яриа таних (Whisper) болон даалгавар боловсруулах (LLM)-д ашиглаж болно. Компаний гадна гарах ёсгүй нууц мэдээллийг ИИ функцээр бүү дамжуулна уу.</li>
-        <li><b>Telegram</b> — мессеж хүргэх суваг.</li>
-        <li>Бид таны мэдээллийг <b>зардаггүй</b> бөгөөд сурталчилгаанд ашиглахгүй, зөвхөн компаний дотоод мэдээлэл байдлаар ашиглана.</li>
-      </ul>
-
-      <h2>4. Хадгалалт ба хамгаалалт</h2>
-      <p>Мэдээллийг PostgreSQL мэдээллийн санд хадгалагдана. Нууц утгууд хамгаалагдсан сангаар, холболтууд TLS/SSL шифрлэлтээр хамгаалагдана.</p>
-
-      <h2>5. Хадгалах хугацаа</h2>
-      <p>Даалгавар болон асуулгын хариултыг Үйлчилгээг ашиглах хугацаанд хадгална. Та өөрийн мэдээллийг устгах хүсэлтийг байгууллагын админ эсвэл доорх хаягаар илгээж болно.</p>
-
-      <h2>6. Таны эрх</h2>
-      <p>Та өөрийн хувийн мэдээлэлд хандах, засварлах, устгах хүсэлт гаргах эрхтэй. Үүний тулд админ эсвэл <a href={`mailto:${CONTACT}`}>{CONTACT}</a>-д хандана уу.</p>
-
-      <h2>7. Холбоо барих</h2>
-      <p>Мэдээлэл боловсруулахтай холбоотой асуултаа <a href={`mailto:${CONTACT}`}>{CONTACT}</a>-д илгээнэ үү.</p>
+      <Section heading="legal.privacy.h1" items={['legal.privacy.d1', 'legal.privacy.d2', 'legal.privacy.d3', 'legal.privacy.d4', 'legal.privacy.d5']} />
+      <Section heading="legal.privacy.h2" items={['legal.privacy.p1', 'legal.privacy.p2', 'legal.privacy.p3', 'legal.privacy.p4']} />
+      <Section heading="legal.privacy.h3" items={['legal.privacy.t1', 'legal.privacy.t2', 'legal.privacy.t3']} />
+      <Section heading="legal.privacy.h4">legal.privacy.storage</Section>
+      <Section heading="legal.privacy.h5">legal.privacy.retention</Section>
+      <Section heading="legal.privacy.h6">legal.privacy.rights</Section>
+      <Section heading="legal.privacy.h7">legal.privacy.contact</Section>
     </LegalShell>
   )
 }
 
 export function TermsPage() {
+  const { t } = useTranslation()
   return (
-    <LegalShell title="Үйлчилгээний нөхцөл">
-      <p>Telegram бот болон <b>{DOMAIN}</b> дээрх вэб апп-аар ашиглах «OYUNS Agent» үйлчилгээг (цаашид «Үйлчилгээ» гэх) ашигласнаар та энэхүү нөхцөлийг зөвшөөрнө.</p>
+    <LegalShell title={t('legal.nav.terms')}>
+      <p>{rich(t('legal.terms.intro'))}</p>
 
-      <h2>1. Зориулалт</h2>
-      <p>Үйлчилгээ нь байгууллага доторх даалгавар үүсгэх, хянах, ажлын үзүүлэлт цуглуулахад зориулагдсан. Байгууллагын ажилтан болон удирдлагад хандах эрх олгоно.</p>
-
-      <h2>2. Бүртгэл ба хандалт</h2>
-      <ul>
-        <li>Нэвтрэлтийг Telegram болон/эсвэл админы бүртгэлээр баталгаажуулна.</li>
-        <li>Та өөрийн бүртгэлээр хийгдсэн үйлдэлд хариуцлага хүлээнэ.</li>
-        <li>Бусад ажилтанд даалгавар өгөх эрх удирдлага болон тодорхой эрх бүхий ажилтнуудад байна.</li>
-      </ul>
-
-      <h2>3. Зөвшөөрөгдөх хэрэглээ</h2>
-      <ul>
-        <li>Үйлчилгээг хууль бус зорилго, спам, хортой контент түгээхэд ашиглахгүй.</li>
-        <li>Бусад хэрэглэгчийн мэдээлэлд зөвшөөрөлгүйгээр хандахыг хориглоно.</li>
-        <li>Байгууллага боловсруулахыг хориглосон мэдээллийг хиймэл оюун ухааны функцээр дамжуулахгүй.</li>
-      </ul>
-
-      <h2>4. Хиймэл оюун ухааныфункц</h2>
-      <p>Дуу хоолой таних, даалгавар боловсруулахад гуравдагч талын ХОУ үйлчилгээг ашиглаж болно. Үр дүнд алдаа байж болох тул баталгаажуулахын өмнө даалгаврын нооргийг шалгана уу.</p>
-
-      <h2>5. Өөрчлөлт</h2>
-      <p>Нөхцөл шинэчлэгдэж болно. Хүчинтэй хувилбарыг энэ хуудсанд шинэчлэгдсэн огнооны хамт байрлуулна.</p>
-
-      <h2>6. Холбоо барих</h2>
-      <p>Асуултаа <a href={`mailto:${CONTACT}`}>{CONTACT}</a>-д илгээнэ үү.</p>
+      <Section heading="legal.terms.h1">legal.terms.purpose</Section>
+      <Section heading="legal.terms.h2" items={['legal.terms.a1', 'legal.terms.a2', 'legal.terms.a3']} />
+      <Section heading="legal.terms.h3" items={['legal.terms.u1', 'legal.terms.u2', 'legal.terms.u3']} />
+      <Section heading="legal.terms.h4">legal.terms.ai</Section>
+      <Section heading="legal.terms.h5">legal.terms.changes</Section>
+      <Section heading="legal.terms.h6">legal.terms.contact</Section>
     </LegalShell>
   )
 }

@@ -4,6 +4,7 @@ import { App } from '@capacitor/app'
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import { isNativePlatform } from './runtime'
 import { checkSelfHostedUpdate } from './self-hosted-updater'
+import i18n from '../i18n'
 import { addTelemetryBreadcrumb, captureTelemetryException } from './telemetry'
 
 let listenersPromise: Promise<PluginListenerHandle[]> | null = null
@@ -77,7 +78,7 @@ class BootErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
 
   render() {
     if (this.state.failed) {
-      return <main className="native-boot-error" role="alert"><h1>Аппыг эхлүүлж чадсангүй</h1><p>Аппыг хаагаад дахин нээнэ үү.</p></main>
+      return <main className="native-boot-error" role="alert"><h1>{i18n.t('st.api.bootFailedTitle')}</h1><p>{i18n.t('st.api.bootFailedHint')}</p></main>
     }
     return this.props.children
   }

@@ -133,7 +133,7 @@ export default defineMessages({
     'projects.tab.overview': 'Обзор',
     'projects.tab.tasks': 'Задачи',
     'projects.tab.settings': 'Настройки',
-    'projects.newTaskEyebrow': 'Шинэ даалгавар',
+    'projects.newTaskEyebrow': 'Новая задача',
     'projects.newTask': 'Новая задача',
     'projects.cancel': 'Отмена',
     'projects.noDescriptionYet': 'Описание не добавлено.',

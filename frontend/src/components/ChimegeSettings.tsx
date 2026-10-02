@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
+import { labelMap } from '../utils/labelMap'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -19,16 +22,9 @@ import {
   useUpdateAiAgentSettings,
 } from '../api/aiSettings'
 
-const SOURCE: Record<ChimegeTokenState['source'], { label: string; color: 'green' | 'blue' | 'red' }> = {
-  organization: { label: 'Байгууллагын token', color: 'green' },
-  environment: { label: 'Серверийн орчны token (env)', color: 'blue' },
-  none: { label: 'Тохируулаагүй', color: 'red' },
-}
-
-const TEST_ERRORS: Record<string, string> = {
-  not_configured: 'Token оруулаагүй байна.',
-  needs_tts: 'Таних үйлчилгээг шалгахад TTS token хэрэгтэй (шалгалтын аудиог TTS-ээр үүсгэдэг).',
-}
+const SOURCE_COLORS: Record<ChimegeTokenState['source'], 'green' | 'blue' | 'red'> = { organization: 'green', environment: 'blue', none: 'red' }
+const SOURCE_KEYS: Record<ChimegeTokenState['source'], string> = { organization: 'st.chi.source.organization', environment: 'st.chi.source.environment', none: 'st.ai.source.none' }
+const TEST_ERRORS = labelMap('st.chi.testError', ['not_configured', 'needs_tts'])
 
 type Kind = 'stt' | 'tts'
 
@@ -40,8 +36,9 @@ function TokenField({ kind, state, value, onChange, onClear, busy }: {
   onClear: () => void
   busy: boolean
 }) {
-  const source = SOURCE[state.source]
-  const title = kind === 'stt' ? 'Яриа таних (STT) token' : 'Дуу үүсгэх (TTS) token'
+  const { t } = useTranslation()
+  const source = { label: t(SOURCE_KEYS[state.source]), color: SOURCE_COLORS[state.source] }
+  const title = kind === 'stt' ? t('st.chi.sttTitle') : t('st.chi.ttsTitle')
   return <VStack gap={2}>
     <HStack gap={2} vAlign="center" wrap="wrap">
       <Text weight="semibold">{title}</Text>
@@ -50,25 +47,26 @@ function TokenField({ kind, state, value, onChange, onClear, busy }: {
     </HStack>
     <TextInput
       type="password"
-      label={state.has_token ? `${title}: шинээр солих` : title}
-      description="Хоосон орхивол одоогийн token хэвээр үлдэнэ."
+      label={state.has_token ? t('st.chi.replaceToken', { title }) : title}
+      description={t('st.chi.tokenKeepHint')}
       value={value}
       onChange={onChange}
       isOptional
     />
     {state.has_token && <HStack gap={2}>
-      <Button label="Token устгах" variant="destructive" size="sm" isLoading={busy} onClick={() => { if (window.confirm(`${title}-ийг устгах уу?`)) onClear() }} />
+      <Button label={t('st.chi.deleteToken')} variant="destructive" size="sm" isLoading={busy} onClick={() => { if (window.confirm(t('st.chi.deleteConfirm', { title }))) onClear() }} />
     </HStack>}
   </VStack>
 }
 
 function testLine(label: string, result: ChimegeTestResult['stt'] | ChimegeTestResult['tts']) {
-  if (result.ok) return `${label}: амжилттай${result.latency_ms != null ? ` (${result.latency_ms} мс)` : ''}`
-  return `${label}: ${TEST_ERRORS[result.error ?? ''] ?? result.error ?? 'алдаа'}`
+  if (result.ok) return result.latency_ms != null ? i18n.t('st.chi.testOkMs', { label, ms: result.latency_ms }) : i18n.t('st.chi.testOk', { label })
+  return `${label}: ${TEST_ERRORS[(result.error ?? '') as keyof typeof TEST_ERRORS] ?? result.error ?? i18n.t('st.chi.testError')}`
 }
 
 /** Chimege tokens and switches for Mongolian speech (Telegram voice, web, calls). */
 export function ChimegeSettings({ settings }: { settings: Settings }) {
+  const { t } = useTranslation()
   const update = useUpdateAiAgentSettings()
   const test = useTestChimege()
   const [tokens, setTokens] = useState({ stt: '', tts: '' })
@@ -99,7 +97,7 @@ export function ChimegeSettings({ settings }: { settings: Settings }) {
     try {
       setResult(await test.mutateAsync({ stt_token: tokens.stt.trim() || null, tts_token: tokens.tts.trim() || null }))
     } catch {
-      setResult({ tts: { ok: false, error: 'Сервертэй холбогдож чадсангүй.' }, stt: { ok: false, error: 'Сервертэй холбогдож чадсангүй.' } })
+      setResult({ tts: { ok: false, error: t('st.chi.serverUnreachable') }, stt: { ok: false, error: t('st.chi.serverUnreachable') } })
     }
   }
 
@@ -109,42 +107,42 @@ export function ChimegeSettings({ settings }: { settings: Settings }) {
 
   return <Card padding={5}>
     <VStack gap={4}>
-      <Heading level={3}>Chimege · Монгол яриа</Heading>
-      <Text type="supporting">Chimege нь монгол яриаг таньж, монгол дуу хоолойгоор уншина. Telegram-ын дуут мессеж, вэбийн дуу оруулалт болон монгол хэлний дуут дуудлагад ашиглана. Token-ийг шифрлэж хадгална; хадгалсны дараа дахин харуулахгүй.</Text>
+      <Heading level={3}>{t('st.chi.title')}</Heading>
+      <Text type="supporting">{t('st.chi.intro')}</Text>
       <FormLayout>
         <TokenField kind="stt" state={settings.stt} value={tokens.stt} onChange={(value) => setTokens({ ...tokens, stt: value })} onClear={() => update.mutate({ clear_chimege_stt_token: true })} busy={update.isPending} />
         <TokenField kind="tts" state={settings.tts} value={tokens.tts} onChange={(value) => setTokens({ ...tokens, tts: value })} onClear={() => update.mutate({ clear_chimege_tts_token: true })} busy={update.isPending} />
       </FormLayout>
       <Divider />
       <Switch
-        label="Chimege яриа таних"
-        description="Дуут мессеж, дуу оруулалтыг эхлээд Chimege-ээр таньна. Идэвхгүй эсвэл алдаатай үед OpenAI ашиглана."
+        label={t('st.chi.sttSwitch')}
+        description={t('st.chi.sttSwitchHint')}
         value={draft.stt}
         onChange={(value) => setDraft({ ...draft, stt: value })}
       />
       <Switch
-        label="Chimege дуу хоолой"
-        description="OYUNS-ийн хариултыг Chimege-ийн монгол дуу хоолойгоор уншина (Telegram дуут хариулт, дуудлага)."
+        label={t('st.chi.ttsSwitch')}
+        description={t('st.chi.ttsSwitchHint')}
         value={draft.tts}
         onChange={(value) => setDraft({ ...draft, tts: value })}
       />
       <Switch
-        label="Монгол хэлний дуудлагад Chimege ашиглах"
-        description="Интерфейсийн хэл монгол үед дуут дуудлага Chimege таних → OYUNS → Chimege дуу хоолойгоор явагдана. Хариулт бага зэрэг удаан ч монгол хэлийг хамаагүй сайн ойлгож, зөв дуудна. Идэвхгүй бол OpenAI Realtime ашиглана."
+        label={t('st.chi.callSwitch')}
+        description={t('st.chi.callSwitchHint')}
         value={draft.call}
         onChange={(value) => setDraft({ ...draft, call: value })}
       />
-      {draft.call && !callReadyAfterSave && <Banner status="warning" title="Монгол горим ажиллахгүй" description="Монгол хэлний дуудлагад таних ба дуу үүсгэх хоёр token хоёулаа тохируулагдаж, хоёр шилжүүлэгч идэвхтэй байх шаардлагатай. Одоогоор OpenAI Realtime ашиглагдана." />}
+      {draft.call && !callReadyAfterSave && <Banner status="warning" title={t('st.chi.notWorking')} description={t('st.chi.notWorkingHint')} />}
       {result && <Banner
         status={result.tts.ok && result.stt.ok ? 'success' : result.tts.ok || result.stt.ok ? 'warning' : 'error'}
-        title="Chimege шалгалт"
-        description={`${testLine('Дуу үүсгэх', result.tts)} · ${testLine('Яриа таних', result.stt)}${result.stt.transcript ? ` — «${result.stt.transcript}»` : ''}`}
+        title={t('st.chi.testTitle')}
+        description={`${testLine(t('st.chi.lineTts'), result.tts)} · ${testLine(t('st.chi.lineStt'), result.stt)}${result.stt.transcript ? ` — «${result.stt.transcript}»` : ''}`}
         isDismissable
         onDismiss={() => setResult(null)}
       />}
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <Button label="Chimege хадгалах" variant="primary" isDisabled={!dirty} isLoading={update.isPending} clickAction={save} />
-        <Button label="Chimege шалгах" isLoading={test.isPending} clickAction={runTest} />
+        <Button label={t('st.chi.saveBtn')} variant="primary" isDisabled={!dirty} isLoading={update.isPending} clickAction={save} />
+        <Button label={t('st.chi.testBtn')} isLoading={test.isPending} clickAction={runTest} />
       </HStack>
     </VStack>
   </Card>

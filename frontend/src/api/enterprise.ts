@@ -4,6 +4,7 @@ import { useRef } from 'react'
 import toast from 'react-hot-toast'
 import { acceptSession, api, clearAuthenticatedQueryCache, clearSessionCredentials, publicApi, refreshAccessToken } from './client'
 import { tenancyErrorMessage } from './tenancy'
+import i18n from '../i18n'
 import { notificationService } from '../platform/notifications'
 import { getNativeRefreshToken } from '../platform/secure-session'
 import { isNativePlatform, requireWebCapability } from '../platform/runtime'
@@ -317,11 +318,11 @@ export function useUpdateWorktimeGeofenceSettings() {
     mutationFn: (input: { latitude: number; longitude: number; radius_meters: number }) => api.put('/v1/settings/worktime-geofence', input).then((response) => response.data as WorktimeGeofenceSettings),
     onSuccess: (data) => {
       queryClient.setQueryData(['v1', 'settings', 'worktime-geofence'], data)
-      toast.success('Оффисын байршил хадгалагдлаа')
+      toast.success(i18n.t('api.office.saved'))
     },
     onError: (error: any) => {
       const detail = error?.response?.data?.detail
-      toast.error(typeof detail === 'object' ? detail.message || 'Оффисын байршил хадгалагдсангүй' : detail || 'Оффисын байршил хадгалагдсангүй')
+      toast.error(typeof detail === 'object' ? detail.message || i18n.t('api.office.notSaved') : detail || i18n.t('api.office.notSaved'))
     },
   })
 }
@@ -411,7 +412,7 @@ export function useUpdateContract() {
     onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) },
   })
 }
-function contractAction(path: string) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, ...input }: { publicId: string; remark?: string; effective_end_on?: string; expiry_reminder_days?: number[] }) => api.post(`/v1/contracts/${publicId}/${path}`, input).then((r) => r.data), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Үйлдэл амжилтгүй боллоо') }) }
+function contractAction(path: string) { const qc = useQueryClient(); return useMutation({ mutationFn: ({ publicId, ...input }: { publicId: string; remark?: string; effective_end_on?: string; expiry_reminder_days?: number[] }) => api.post(`/v1/contracts/${publicId}/${path}`, input).then((r) => r.data), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: contractKeys }); qc.invalidateQueries({ queryKey: [...contractKeys, 'detail', v.publicId] }) }, onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.actionFailed')) }) }
 export function useSubmitContract() { return contractAction('submit') }
 export function useResubmitContract() { return contractAction('resubmit') }
 export function useRecallContract() { return contractAction('recall') }
@@ -447,12 +448,12 @@ export function useContractArchive(input: { folderId?: number; search?: string; 
 }
 export function useContractArchiveReviewQueue(enabled = true) { return useQuery<ContractArchiveReviewQueue>({ queryKey: [...archiveKeys, 'review-queue'], queryFn: () => api.get('/v1/contract-archive/review-queue').then((r) => r.data), enabled }) }
 export function useContractArchiveAccessCandidates(search = '', enabled = true) { return useQuery<ContractArchiveAccessCandidate[]>({ queryKey: [...archiveKeys, 'access-candidates', search], queryFn: () => api.get('/v1/contract-archive/access-candidates', { params: { q: search || undefined } }).then((r) => r.data), enabled }) }
-function useArchiveMutation<T>(mutationFn: (input: T) => Promise<unknown>, successMessage?: string) { const queryClient = useQueryClient(); return useMutation({ mutationFn, onSuccess: () => { queryClient.invalidateQueries({ queryKey: archiveKeys }); if (successMessage) toast.success(successMessage) }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Архивийн үйлдэл амжилтгүй боллоо') }) }
-export function useCreateContractArchiveFolder() { return useArchiveMutation((input: { name: string; description?: string | null; parent_id?: number | null }) => api.post('/v1/contract-archive/folders', input).then((r) => r.data), 'Хавтас үүслээ') }
-export function useUpdateContractArchiveFolder() { return useArchiveMutation((input: { id: number; name?: string; description?: string | null; version: number }) => api.patch(`/v1/contract-archive/folders/${input.id}`, { name: input.name, description: input.description, version: input.version }).then((r) => r.data), 'Хавтас шинэчлэгдлээ') }
-export function useUpdateContractArchiveAccess() { return useArchiveMutation((input: { id: number; name: string; description?: string | null; version: number; grants: Array<{ account_id: number; permission: ArchivePermission }> }) => api.put(`/v1/contract-archive/folders/${input.id}/access`, { name: input.name, description: input.description, version: input.version, grants: input.grants }).then((r) => r.data), 'Хандалтын тохиргоо хадгалагдлаа') }
+function useArchiveMutation<T>(mutationFn: (input: T) => Promise<unknown>, successMessage?: string) { const queryClient = useQueryClient(); return useMutation({ mutationFn, onSuccess: () => { queryClient.invalidateQueries({ queryKey: archiveKeys }); if (successMessage) toast.success(successMessage) }, onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.archive.failed')) }) }
+export function useCreateContractArchiveFolder() { return useArchiveMutation((input: { name: string; description?: string | null; parent_id?: number | null }) => api.post('/v1/contract-archive/folders', input).then((r) => r.data), i18n.t('api.folder.created')) }
+export function useUpdateContractArchiveFolder() { return useArchiveMutation((input: { id: number; name?: string; description?: string | null; version: number }) => api.patch(`/v1/contract-archive/folders/${input.id}`, { name: input.name, description: input.description, version: input.version }).then((r) => r.data), i18n.t('api.folder.updated')) }
+export function useUpdateContractArchiveAccess() { return useArchiveMutation((input: { id: number; name: string; description?: string | null; version: number; grants: Array<{ account_id: number; permission: ArchivePermission }> }) => api.put(`/v1/contract-archive/folders/${input.id}/access`, { name: input.name, description: input.description, version: input.version, grants: input.grants }).then((r) => r.data), i18n.t('api.access.saved')) }
 export function useDeleteContractArchiveFolder() { return useArchiveMutation((input: { id: number; verification_name?: string }) => api.delete(`/v1/contract-archive/folders/${input.id}`, { params: { verification_name: input.verification_name || undefined } })) }
-export function useUploadContractArchiveEntry() { return useArchiveMutation((input: { folderId: number; category: string; file: File }) => { const body = new FormData(); body.append('file', input.file); return api.post('/v1/contract-archive/entries/upload', body, { params: { folder_id: input.folderId, category: input.category } }).then((r) => r.data) }, 'Архивийн файл байршууллаа') }
+export function useUploadContractArchiveEntry() { return useArchiveMutation((input: { folderId: number; category: string; file: File }) => { const body = new FormData(); body.append('file', input.file); return api.post('/v1/contract-archive/entries/upload', body, { params: { folder_id: input.folderId, category: input.category } }).then((r) => r.data) }, i18n.t('api.archive.uploaded')) }
 export function useUpdateContractArchiveEntryRegistry() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -460,9 +461,9 @@ export function useUpdateContractArchiveEntryRegistry() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: archiveKeys }); queryClient.invalidateQueries({ queryKey: contractKeys }) },
   })
 }
-export function useUpdateContractArchiveEntry() { return useArchiveMutation((input: { id: number; name?: string; category?: string; expiry_on?: string | null; expiry_reminder_days?: number[] }) => api.patch(`/v1/contract-archive/entries/${input.id}`, { name: input.name, category: input.category, expiry_on: input.expiry_on, expiry_reminder_days: input.expiry_reminder_days }).then((r) => r.data), 'Архивийн мэдээлэл шинэчлэгдлээ') }
+export function useUpdateContractArchiveEntry() { return useArchiveMutation((input: { id: number; name?: string; category?: string; expiry_on?: string | null; expiry_reminder_days?: number[] }) => api.patch(`/v1/contract-archive/entries/${input.id}`, { name: input.name, category: input.category, expiry_on: input.expiry_on, expiry_reminder_days: input.expiry_reminder_days }).then((r) => r.data), i18n.t('api.archive.updated')) }
 export function useDeleteContractArchiveEntry() { return useArchiveMutation((id: number) => api.delete(`/v1/contract-archive/entries/${id}`)) }
-export function useReviewContractArchiveEntry() { return useArchiveMutation((input: { id: number; decision: 'approve' | 'reject'; folder_id?: number; new_folder?: { name: string; description?: string | null; parent_id?: number | null }; category?: string; reason?: string }) => api.post(`/v1/contract-archive/entries/${input.id}/review`, { decision: input.decision, folder_id: input.folder_id, new_folder: input.new_folder, category: input.category, reason: input.reason }).then((r) => r.data), 'Архивийн хяналт шинэчлэгдлээ') }
+export function useReviewContractArchiveEntry() { return useArchiveMutation((input: { id: number; decision: 'approve' | 'reject'; folder_id?: number; new_folder?: { name: string; description?: string | null; parent_id?: number | null }; category?: string; reason?: string }) => api.post(`/v1/contract-archive/entries/${input.id}/review`, { decision: input.decision, folder_id: input.folder_id, new_folder: input.new_folder, category: input.category, reason: input.reason }).then((r) => r.data), i18n.t('api.archive.controlUpdated')) }
 export function useContractArchiveFolderDetail(folderId?: number, enabled = true) { return useQuery<ContractArchiveFolderDetail>({ queryKey: [...archiveKeys, 'folder-detail', folderId], queryFn: () => api.get(`/v1/contract-archive/folders/${folderId}`).then((r) => r.data), enabled: Boolean(folderId) && enabled }) }
 export function useContractArchiveEntryDetail(entryId?: number, enabled = true) { return useQuery<ContractArchiveEntry & { timeline: ContractArchiveFolderDetail['timeline'] }>({ queryKey: [...archiveKeys, 'entry-detail', entryId], queryFn: () => api.get(`/v1/contract-archive/entries/${entryId}`).then((r) => r.data), enabled: Boolean(entryId) && enabled }) }
 export async function getContractArchiveEntryBlob(entry: ContractArchiveEntry, download = false, preview = false) { return (await api.get(`/v1/contract-archive/entries/${entry.id}/${preview ? 'preview' : 'content'}`, { params: preview ? undefined : { download }, responseType: 'blob' })).data as Blob }
@@ -545,7 +546,7 @@ export function useUpdateManagedAccount() {
   return useMutation({
     mutationFn: ({ id, ...input }: { id: number; username?: string; password?: string; roles?: string[]; status?: 'active' | 'disabled' }) => api.patch(`/v1/auth/accounts/${id}`, input).then((response) => response.data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'accounts'] }); queryClient.invalidateQueries({ queryKey: ['tenant'] }) },
-    onError: (error: any) => toast.error(tenancyErrorMessage(error, 'Хэрэглэгчийн эрх шинэчлэгдсэнгүй')),
+    onError: (error: any) => toast.error(tenancyErrorMessage(error, i18n.t('api.user.rolesNotUpdated'))),
   })
 }
 
@@ -555,9 +556,9 @@ export function useDeleteManagedAccount() {
     mutationFn: (id: number) => api.delete(`/v1/auth/accounts/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['v1', 'accounts'] })
-      toast.success('Хэрэглэгч устгагдлаа')
+      toast.success(i18n.t('api.user.deleted'))
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Хэрэглэгч устгагдсангүй'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.user.notDeleted')),
   })
 }
 
@@ -874,7 +875,7 @@ export function useClockAction() {
     onError: (error: any, _variables, context) => {
       if (context?.previous) queryClient.setQueryData(clockQueryKey, context.previous)
       const detail = error.response?.data?.detail
-      toast.error(typeof detail === 'object' ? detail.message || 'Цагийн төлөв өөрчлөгдсөнгүй' : detail || 'Цагийн төлөв өөрчлөгдсөнгүй')
+      toast.error(typeof detail === 'object' ? detail.message || i18n.t('api.worktime.statusNotChanged') : detail || i18n.t('api.worktime.statusNotChanged'))
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: clockQueryKey }),
   })
@@ -888,8 +889,8 @@ export function useCreateProject() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: Record<string, unknown>) => api.post('/v1/projects', input).then((response) => response.data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл үүслээ') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл үүссэнгүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success(i18n.t('api.project.created')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.project.notCreated')),
   })
 }
 
@@ -899,12 +900,12 @@ export function useProject(id?: number) {
 
 export function useUpdateProject() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: ({ id, ...input }: { id: number } & Record<string, unknown>) => api.patch(`/v1/projects/${id}`, input).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл хадгалагдсангүй') })
+  return useMutation({ mutationFn: ({ id, ...input }: { id: number } & Record<string, unknown>) => api.patch(`/v1/projects/${id}`, input).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success(i18n.t('api.project.saved')) }, onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.project.notSaved')) })
 }
 
 export function useArchiveProject() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: (id: number) => api.delete(`/v1/projects/${id}`), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success('Төсөл архивлагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Төсөл архивлагдсангүй') })
+  return useMutation({ mutationFn: (id: number) => api.delete(`/v1/projects/${id}`), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'projects'] }); toast.success(i18n.t('api.project.archived')) }, onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.project.notArchived')) })
 }
 
 export interface TaskFilters { kind?: 'all' | 'standalone' | 'project' | 'subtask'; workflow_status?: string; priority?: 1 | 2 | 3; overdue?: boolean; scope?: 'mine' | 'organization' | 'project' | 'delegated' | 'oversight' }
@@ -926,8 +927,8 @@ export function useCreateEnterpriseTask() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: Record<string, unknown>) => api.post('/v1/tasks', input, { headers: { 'Idempotency-Key': crypto.randomUUID() } }).then((response) => response.data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success('Даалгавар үүслээ') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Даалгавар үүссэнгүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success(i18n.t('api.task.created')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.task.notCreated')),
   })
 }
 
@@ -943,7 +944,7 @@ export function useUpdateEnterpriseTask() {
     },
     onError: (error: any, _change, context) => {
       context?.snapshots.forEach(([key, tasks]) => queryClient.setQueryData(key, tasks))
-      toast.error(error.response?.status === 409 ? 'Даалгаврыг өөр хүн шинэчилсэн. Хамгийн сүүлийн хувилбарыг авлаа.' : 'Шинэчлэлт хадгалагдсангүй')
+      toast.error(error.response?.status === 409 ? i18n.t('api.task.conflict') : i18n.t('api.task.notSaved'))
     },
     onSettled: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'deadlines'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }) },
   })
@@ -953,8 +954,8 @@ export function useDeleteEnterpriseTask() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/v1/tasks/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'deadlines'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success('Даалгавар устгагдлаа') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Даалгавар устгагдсангүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'tasks'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'deadlines'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success(i18n.t('api.task.deleted')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.task.notDeleted')),
   })
 }
 
@@ -964,23 +965,23 @@ const invalidateTaskDetail = (queryClient: ReturnType<typeof useQueryClient>, id
 }
 
 export function useTaskDependencies(id?: number) { return useQuery<TaskDependency[]>({ queryKey: ['v1', 'tasks', id, 'dependencies'], queryFn: () => api.get(`/v1/tasks/${id}/dependencies`).then((r) => r.data), enabled: Boolean(id) }) }
-export function useAddTaskDependency() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, predecessor_task_id, dependency_type }: { taskId: number; predecessor_task_id: number; dependency_type: 'blocks' | 'related' }) => api.post(`/v1/tasks/${taskId}/dependencies`, { predecessor_task_id, dependency_type }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || 'Хамаарал хадгалагдсангүй') }) }
+export function useAddTaskDependency() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, predecessor_task_id, dependency_type }: { taskId: number; predecessor_task_id: number; dependency_type: 'blocks' | 'related' }) => api.post(`/v1/tasks/${taskId}/dependencies`, { predecessor_task_id, dependency_type }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.task.dependencyNotSaved')) }) }
 export function useDeleteTaskDependency() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id }: { taskId: number; id: number }) => api.delete(`/v1/tasks/${taskId}/dependencies/${id}`), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId) }) }
 
 export function useTaskCheckItems(id?: number) { return useQuery<TaskCheckItem[]>({ queryKey: ['v1', 'tasks', id, 'check-items'], queryFn: () => api.get(`/v1/tasks/${id}/check-items`).then((r) => r.data), enabled: Boolean(id) }) }
 export function checklistPosition(now = Date.now()) { return Math.floor(now / 1000) }
-export function useAddTaskCheckItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, text }: { taskId: number; text: string }) => api.post(`/v1/tasks/${taskId}/check-items`, { text, position: checklistPosition() }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || 'Checklist хадгалагдсангүй') }) }
-export function useUpdateTaskCheckItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id, ...input }: { taskId: number; id: number; text?: string; is_completed?: boolean }) => api.patch(`/v1/tasks/${taskId}/check-items/${id}`, input).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || 'Checklist шинэчлэгдсэнгүй') }) }
-export function useDeleteTaskCheckItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id }: { taskId: number; id: number }) => api.delete(`/v1/tasks/${taskId}/check-items/${id}`), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || 'Checklist устгагдсангүй') }) }
+export function useAddTaskCheckItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, text }: { taskId: number; text: string }) => api.post(`/v1/tasks/${taskId}/check-items`, { text, position: checklistPosition() }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.checklist.notSaved')) }) }
+export function useUpdateTaskCheckItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id, ...input }: { taskId: number; id: number; text?: string; is_completed?: boolean }) => api.patch(`/v1/tasks/${taskId}/check-items/${id}`, input).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.checklist.notUpdated')) }) }
+export function useDeleteTaskCheckItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id }: { taskId: number; id: number }) => api.delete(`/v1/tasks/${taskId}/check-items/${id}`), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.checklist.notDeleted')) }) }
 
 export function useTaskComments(id?: number) { return useQuery<TaskComment[]>({ queryKey: ['v1', 'tasks', id, 'comments'], queryFn: () => api.get(`/v1/tasks/${id}/comments`).then((r) => r.data), enabled: Boolean(id) }) }
-export function useAddTaskComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, text, mentions = [] }: { taskId: number; text: string; mentions?: number[] }) => api.post(`/v1/tasks/${taskId}/comments`, { text, mentions }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || 'Сэтгэгдэл хадгалагдсангүй') }) }
+export function useAddTaskComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, text, mentions = [] }: { taskId: number; text: string; mentions?: number[] }) => api.post(`/v1/tasks/${taskId}/comments`, { text, mentions }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.comment.notSaved')) }) }
 export function useResolveTaskComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id, is_resolved }: { taskId: number; id: number; is_resolved: boolean }) => api.patch(`/v1/tasks/${taskId}/comments/${id}`, { is_resolved }).then((r) => r.data), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId) }) }
-export function useDeleteTaskComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id }: { taskId: number; id: number }) => api.delete(`/v1/tasks/${taskId}/comments/${id}`), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || 'Сэтгэгдэл устгагдсангүй') }) }
+export function useDeleteTaskComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ taskId, id }: { taskId: number; id: number }) => api.delete(`/v1/tasks/${taskId}/comments/${id}`), onSuccess: (_d, v) => invalidateTaskDetail(qc, v.taskId), onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.comment.notDeleted')) }) }
 
 export function useAttachments(objectType: 'task' | 'report', objectId?: number) { return useQuery<EnterpriseAttachment[]>({ queryKey: ['v1', 'attachments', objectType, objectId], queryFn: () => api.get('/v1/attachments', { params: { object_type: objectType, object_id: objectId } }).then((r) => r.data), enabled: Boolean(objectId) }) }
-export function useUploadAttachment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ objectType, objectId, file, onProgress }: { objectType: 'task' | 'report'; objectId: number; file: File; onProgress?: (value: number) => void }) => { const form = new FormData(); form.append('file', file); return api.post('/v1/attachments', form, { params: { object_type: objectType, object_id: objectId }, onUploadProgress: (event) => onProgress?.(event.total ? Math.round(event.loaded * 100 / event.total) : 0) }).then((r) => r.data) }, onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['v1', 'attachments', v.objectType, v.objectId] }); if (v.objectType === 'task') invalidateTaskDetail(qc, v.objectId) }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Файл байршуулсангүй') }) }
-export function useDeleteAttachment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id }: { id: number; objectType: 'task' | 'report'; objectId: number }) => api.delete(`/v1/attachments/${id}`), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['v1', 'attachments', v.objectType, v.objectId] }); if (v.objectType === 'task') invalidateTaskDetail(qc, v.objectId) }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Файл устгагдсангүй') }) }
+export function useUploadAttachment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ objectType, objectId, file, onProgress }: { objectType: 'task' | 'report'; objectId: number; file: File; onProgress?: (value: number) => void }) => { const form = new FormData(); form.append('file', file); return api.post('/v1/attachments', form, { params: { object_type: objectType, object_id: objectId }, onUploadProgress: (event) => onProgress?.(event.total ? Math.round(event.loaded * 100 / event.total) : 0) }).then((r) => r.data) }, onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['v1', 'attachments', v.objectType, v.objectId] }); if (v.objectType === 'task') invalidateTaskDetail(qc, v.objectId) }, onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.file.notUploaded')) }) }
+export function useDeleteAttachment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id }: { id: number; objectType: 'task' | 'report'; objectId: number }) => api.delete(`/v1/attachments/${id}`), onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['v1', 'attachments', v.objectType, v.objectId] }); if (v.objectType === 'task') invalidateTaskDetail(qc, v.objectId) }, onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.file.notDeleted')) }) }
 export async function downloadAttachment(id: number, filename: string) { requireWebCapability('File downloads'); const response = await api.get(`/v1/attachments/${id}/download`, { responseType: 'blob' }); const url = URL.createObjectURL(response.data); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url) }
 
 export function useTaskActivity(id?: number) { return useQuery<TaskActivity[]>({ queryKey: ['v1', 'tasks', id, 'activity'], queryFn: () => api.get(`/v1/tasks/${id}/activity`).then((r) => r.data), enabled: Boolean(id) }) }
@@ -1013,8 +1014,8 @@ export function useCreateReport() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: ReportCreateInput) => api.post('/v1/reports', input).then((response) => response.data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'reports'] }); toast.success('Тайлан үүслээ') },
-    onError: (error: any) => toast.error(error.response?.data?.detail === 'report_frequency_not_enabled' ? 'Энэ төрлийн тайлан таньд тохируулагдаагүй байна' : error.response?.data?.detail || 'Тайлан үүссэнгүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'reports'] }); toast.success(i18n.t('api.report.created')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail === 'report_frequency_not_enabled' ? i18n.t('api.report.notEnabled') : error.response?.data?.detail || i18n.t('api.report.notCreated')),
   })
 }
 
@@ -1077,9 +1078,9 @@ export function useUpdateReportPolicy() {
     onSuccess: (data) => {
       queryClient.setQueryData(reportPolicyKey, data)
       queryClient.invalidateQueries({ queryKey: ['v1', 'reports'] })
-      toast.success('Тайлангийн тохиргоо хадгалагдлаа')
+      toast.success(i18n.t('api.report.policySaved'))
     },
-    onError: (error: any) => toast.error(typeof error.response?.data?.detail === 'string' ? `Хадгалагдсангүй: ${error.response.data.detail}` : 'Тайлангийн тохиргоо хадгалагдсангүй'),
+    onError: (error: any) => toast.error(typeof error.response?.data?.detail === 'string' ? i18n.t('api.report.notSavedDetail', { detail: error.response.data.detail }) : i18n.t('api.report.policyNotSaved')),
   })
 }
 
@@ -1089,7 +1090,7 @@ export function usePermissionSettings() {
 }
 export function useUpdatePermissionSettings() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: (task_assignment_roles: string[]) => api.put('/v1/settings/permissions', { task_assignment_roles }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'settings', 'permissions'] }); toast.success('Даалгаврын эрх хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Эрх хадгалагдсангүй') })
+  return useMutation({ mutationFn: (task_assignment_roles: string[]) => api.put('/v1/settings/permissions', { task_assignment_roles }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'settings', 'permissions'] }); toast.success(i18n.t('api.perm.taskSaved')) }, onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.perm.notSaved')) })
 }
 
 export interface BrandingSettings {
@@ -1108,8 +1109,8 @@ export function useUpdateBrandingSettings() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: { theme: 'light' | 'dark'; source: 'legacy-aio' | 'legacy-icon' | 'default' }) => api.put('/v1/settings/branding', input).then((response) => response.data),
-    onSuccess: (data) => { queryClient.setQueryData(['v1', 'settings', 'branding'], data); toast.success('Лого хадгалагдлаа') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Лого хадгалагдсангүй'),
+    onSuccess: (data) => { queryClient.setQueryData(['v1', 'settings', 'branding'], data); toast.success(i18n.t('api.logo.saved')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.logo.notSaved')),
   })
 }
 
@@ -1117,8 +1118,8 @@ export function useUploadBrandingLogo() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ theme, file }: { theme: 'light' | 'dark'; file: File }) => { const form = new FormData(); form.append('file', file); return api.post('/v1/settings/branding/logo', form, { params: { theme } }).then((response) => response.data) },
-    onSuccess: (data) => { queryClient.setQueryData(['v1', 'settings', 'branding'], data); toast.success('Лого байршууллаа') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Лого байршуулсангүй'),
+    onSuccess: (data) => { queryClient.setQueryData(['v1', 'settings', 'branding'], data); toast.success(i18n.t('api.logo.uploaded')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.logo.notUploaded')),
   })
 }
 
@@ -1133,7 +1134,7 @@ export function useStartCheckin() {
 
 export function useSubmitCheckin() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: ({ id, answers }: { id: number; answers: any[] }) => api.post(`/v1/checkins/${id}/submit`, { answers }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'checkins'] }); toast.success('Өдрийн check-in хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Check-in хадгалагдсангүй') })
+  return useMutation({ mutationFn: ({ id, answers }: { id: number; answers: any[] }) => api.post(`/v1/checkins/${id}/submit`, { answers }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'checkins'] }); toast.success(i18n.t('api.checkin.saved')) }, onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.checkin.notSaved')) })
 }
 
 export function useDailyAnalytics(period: DateRange, employeeId?: number) {
@@ -1252,20 +1253,20 @@ export function useHolidaySettings() {
 
 export function useSetHolidayCountry() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: async (country_code: string) => { await api.put('/v1/calendar/holiday-country', { country_code }); const year = new Date().getFullYear(); await Promise.all([api.post('/v1/calendar/holidays/sync', null, { params: { year } }), api.post('/v1/calendar/holidays/sync', null, { params: { year: year + 1 } })]) }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success('Амралтын өдрийн улс шинэчлэгдлээ') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Улс шинэчлэгдсэнгүй') })
+  return useMutation({ mutationFn: async (country_code: string) => { await api.put('/v1/calendar/holiday-country', { country_code }); const year = new Date().getFullYear(); await Promise.all([api.post('/v1/calendar/holidays/sync', null, { params: { year } }), api.post('/v1/calendar/holidays/sync', null, { params: { year: year + 1 } })]) }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); toast.success(i18n.t('api.holiday.updated')) }, onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.holiday.notUpdated')) })
 }
 
 export function useCreateCalendarEntry() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/entries', input).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success('Календарийн item хадгалагдлаа') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Календарийн item хадгалагдсангүй') })
+  return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/entries', input).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success(i18n.t('api.calendar.saved')) }, onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.calendar.notSaved')) })
 }
 
 export function useUpdateCalendarEntry() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, version, ...input }: { id: number; version: number } & Record<string, unknown>) => api.patch(`/v1/calendar/entries/${id}`, input, { headers: { 'If-Match': String(version) } }).then((response) => response.data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success('Календарийн item шинэчлэгдлээ') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Календарийн item шинэчлэгдсэнгүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success(i18n.t('api.calendar.updated')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.calendar.notUpdated')),
   })
 }
 
@@ -1273,8 +1274,8 @@ export function useDeleteCalendarEntry() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id }: { id: number; version?: number }) => api.delete(`/v1/calendar/entries/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success('Календарийн item устгагдлаа') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Календарийн item устгагдсангүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'today'] }); toast.success(i18n.t('api.calendar.deleted')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.calendar.notDeleted')),
   })
 }
 
@@ -1284,7 +1285,7 @@ export function useTodayAgenda() {
 
 export function useCreateTimeBlock() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/time-blocks', input).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }), onError: (error: any) => toast.error(error.response?.data?.detail || 'Хувийн төлөвлөгөө хадгалагдсангүй') })
+  return useMutation({ mutationFn: (input: Record<string, unknown>) => api.post('/v1/calendar/time-blocks', input).then((response) => response.data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['v1', 'calendar'] }), onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.plan.personalNotSaved')) })
 }
 
 export function useDeleteTimeBlock() {
@@ -1312,9 +1313,9 @@ export function useSaveReportDraft() {
   })
 }
 
-export function useAddReportComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ reportId, revision_id, text, range_metadata }: { reportId: number; revision_id?: number; text: string; range_metadata?: { start: number; end: number; quote: string } }) => api.post(`/v1/reports/${reportId}/comments`, { revision_id, text, range_metadata }).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['v1', 'reports', 'detail', v.reportId] }), onError: (e: any) => toast.error(e.response?.data?.detail || 'Сэтгэгдэл хадгалагдсангүй') }) }
+export function useAddReportComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ reportId, revision_id, text, range_metadata }: { reportId: number; revision_id?: number; text: string; range_metadata?: { start: number; end: number; quote: string } }) => api.post(`/v1/reports/${reportId}/comments`, { revision_id, text, range_metadata }).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['v1', 'reports', 'detail', v.reportId] }), onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.comment.notSaved')) }) }
 export function useResolveReportComment() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ reportId, id, is_resolved }: { reportId: number; id: number; is_resolved: boolean }) => api.patch(`/v1/reports/${reportId}/comments/${id}`, null, { params: { is_resolved } }).then((r) => r.data), onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['v1', 'reports', 'detail', v.reportId] }) }) }
-export function useBatchApproveReports() { const qc = useQueryClient(); return useMutation({ mutationFn: (report_ids: number[]) => api.post('/v1/reports/batch-approve', { report_ids }).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'reports'] }); toast.success('Сонгосон тайлангууд батлагдлаа') }, onError: (e: any) => toast.error(e.response?.data?.detail || 'Багц батлалт амжилтгүй') }) }
+export function useBatchApproveReports() { const qc = useQueryClient(); return useMutation({ mutationFn: (report_ids: number[]) => api.post('/v1/reports/batch-approve', { report_ids }).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['v1', 'reports'] }); toast.success(i18n.t('api.report.batchApproved')) }, onError: (e: any) => toast.error(e.response?.data?.detail || i18n.t('api.report.batchFailed')) }) }
 
 export interface WorkerDirectoryItem {
   id: number
@@ -2038,7 +2039,7 @@ export function useUpdateWorkspaceModePreferences() {
   return useMutation({
     mutationFn: (input: WorkspaceModePreferences) => api.put('/v1/auth/preferences/workspace-mode', input).then((response) => response.data as WorkspaceModePreferences),
     onSuccess: (data) => queryClient.setQueryData(workspaceModeQueryKey(accountId), data),
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Ажлын горим хадгалагдсангүй'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.workMode.notSaved')),
   })
 }
 
@@ -2048,22 +2049,22 @@ export function useUpdateWorldClockPreferences() {
     mutationFn: (input: WorldClockPreferences) => api.put('/v1/auth/preferences/world-clock', input).then((response) => response.data as WorldClockPreferences),
     onSuccess: (data) => {
       queryClient.setQueryData(['v1', 'auth', 'preferences', 'world-clock'], data)
-      toast.success('Цагийн тохиргоо хадгалагдлаа')
+      toast.success(i18n.t('api.timeSettings.saved'))
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Цагийн тохиргоо хадгалагдсангүй'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.timeSettings.notSaved')),
   })
 }
 
 export interface ChatNotificationPreferences { desktop_alerts_enabled: boolean; sound_enabled: boolean }
 export function useChatNotificationPreferences(enabled = true) { return useQuery<ChatNotificationPreferences>({ queryKey: ['v1', 'auth', 'preferences', 'chat-notifications'], queryFn: () => api.get('/v1/auth/preferences/chat-notifications').then((response) => response.data), enabled }) }
-export function useUpdateChatNotificationPreferences() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: ChatNotificationPreferences) => api.put('/v1/auth/preferences/chat-notifications', input).then((response) => response.data as ChatNotificationPreferences), onSuccess: (data) => qc.setQueryData(['v1', 'auth', 'preferences', 'chat-notifications'], data), onError: (error: any) => toast.error(error.response?.data?.detail || 'Чатын мэдэгдлийн тохиргоо хадгалагдсангүй') }) }
+export function useUpdateChatNotificationPreferences() { const qc = useQueryClient(); return useMutation({ mutationFn: (input: ChatNotificationPreferences) => api.put('/v1/auth/preferences/chat-notifications', input).then((response) => response.data as ChatNotificationPreferences), onSuccess: (data) => qc.setQueryData(['v1', 'auth', 'preferences', 'chat-notifications'], data), onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.chatNotif.notSaved')) }) }
 
 export function useUpdateProfile() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: { username?: string; avatar_url?: string | null; locale?: string; phone_number?: string | null; birthday?: string | null; work_direction?: string | null; work_branch?: string | null; department_id?: number | null; current_password?: string }) => api.patch('/v1/auth/profile', input).then((response) => response.data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success('Профайл хадгалагдлаа') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Профайл хадгалагдсангүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success(i18n.t('api.profile.saved')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.profile.notSaved')),
   })
 }
 
@@ -2071,14 +2072,14 @@ export function useChangeProfilePassword() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: { current_password?: string; new_password: string }) => api.patch('/v1/auth/profile/password', input).then((response) => response.data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); toast.success('Нууц үг хадгалагдлаа') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Нууц үг хадгалагдсангүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); toast.success(i18n.t('api.password.saved')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.password.notSaved')),
   })
 }
 
 export function useTelegramProfileLink() {
   const queryClient = useQueryClient()
-  return useMutation({ mutationFn: (init_data: string) => api.post('/v1/auth/profile/telegram-link', null, { params: { init_data } }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); toast.success('Telegram холбогдлоо') }, onError: (error: any) => toast.error(error.response?.data?.detail || 'Telegram холбогдсонгүй') })
+  return useMutation({ mutationFn: (init_data: string) => api.post('/v1/auth/profile/telegram-link', null, { params: { init_data } }).then((response) => response.data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); toast.success(i18n.t('api.telegram.linked')) }, onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.telegram.notLinked')) })
 }
 
 export interface UserNotification {
@@ -2153,8 +2154,8 @@ export function useUploadAvatar() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (file: File) => { const body = new FormData(); body.append('file', file); return api.post('/v1/auth/profile/avatar', body).then((response) => response.data) },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success('Профайл зураг хадгалагдлаа') },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Зураг хадгалагдсангүй'),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['v1', 'profile'] }); queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] }); toast.success(i18n.t('api.avatar.saved')) },
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.avatar.notSaved')),
   })
 }
 
@@ -2205,14 +2206,14 @@ function useCompanyFilesMutation<T>(mutationFn: (input: T) => Promise<unknown>, 
     onError: (error: any) => {
       if (axios.isCancel(error)) return
       const detail = error?.response?.data?.detail
-      const message = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Үйлдэл амжилтгүй боллоо'
+      const message = typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : i18n.t('api.actionFailed')
       toast.error(message)
     },
   })
 }
 
 export function useCreateCompanyFolder() {
-  return useCompanyFilesMutation((input: { name: string; parent_id: number | null }) => api.post('/v1/company-files/folders', input).then((response) => response.data), 'Хавтас үүслээ')
+  return useCompanyFilesMutation((input: { name: string; parent_id: number | null }) => api.post('/v1/company-files/folders', input).then((response) => response.data), i18n.t('api.folder.created'))
 }
 
 export interface CompanyFileShareGrant { account_id: number; email?: string; access_level: 'read' | 'edit' }
@@ -2224,7 +2225,7 @@ export function useCompanyFolderAccess(folderId?: number, enabled = true) {
   return useQuery<{ folder_id: number; grants: CompanyFileShareGrant[] }>({ queryKey: ['v1', 'company-files', folderId, 'access'], queryFn: () => api.get(`/v1/company-files/${folderId}/access`).then((response) => response.data), enabled: enabled && Boolean(folderId) })
 }
 export function useUpdateCompanyFolderAccess() {
-  return useCompanyFilesMutation((input: { folderId: number; grants: CompanyFileShareGrant[] }) => api.put(`/v1/company-files/${input.folderId}/access`, { grants: input.grants.map(({ account_id, access_level }) => ({ account_id, access_level })) }).then((response) => response.data), 'Хандалтын эрх шинэчлэгдлээ')
+  return useCompanyFilesMutation((input: { folderId: number; grants: CompanyFileShareGrant[] }) => api.put(`/v1/company-files/${input.folderId}/access`, { grants: input.grants.map(({ account_id, access_level }) => ({ account_id, access_level })) }).then((response) => response.data), i18n.t('api.access.updated'))
 }
 
 export function useUploadCompanyFile() {
@@ -2242,23 +2243,23 @@ export function useUploadCompanyFile() {
         input.onProgress?.(percent)
       },
     }).then((response) => response.data)
-  }, 'Файл байршлаа')
+  }, i18n.t('api.companyFile.uploaded'))
 }
 
 export function useUpdateCompanyItem() {
-  return useCompanyFilesMutation((input: { id: number; name?: string; parent_id?: number; move_to_root?: boolean }) => api.patch(`/v1/company-files/${input.id}`, { name: input.name, parent_id: input.parent_id, move_to_root: input.move_to_root || false }).then((response) => response.data), 'Файл сан шинэчлэгдлээ')
+  return useCompanyFilesMutation((input: { id: number; name?: string; parent_id?: number; move_to_root?: boolean }) => api.patch(`/v1/company-files/${input.id}`, { name: input.name, parent_id: input.parent_id, move_to_root: input.move_to_root || false }).then((response) => response.data), i18n.t('api.companyFile.updated'))
 }
 
 export function useTrashCompanyItem() {
-  return useCompanyFilesMutation((id: number) => api.delete(`/v1/company-files/${id}`), 'Хогийн сав руу зөөлөө')
+  return useCompanyFilesMutation((id: number) => api.delete(`/v1/company-files/${id}`), i18n.t('api.companyFile.trashed'))
 }
 
 export function useRestoreCompanyItem() {
-  return useCompanyFilesMutation((id: number) => api.post(`/v1/company-files/${id}/restore`).then((response) => response.data), 'Сэргээлээ')
+  return useCompanyFilesMutation((id: number) => api.post(`/v1/company-files/${id}/restore`).then((response) => response.data), i18n.t('api.companyFile.restored'))
 }
 
 export function useDeleteCompanyItemPermanently() {
-  return useCompanyFilesMutation((id: number) => api.delete(`/v1/company-files/${id}/permanent`), 'Бүрмөсөн устгалаа')
+  return useCompanyFilesMutation((id: number) => api.delete(`/v1/company-files/${id}/permanent`), i18n.t('api.companyFile.purged'))
 }
 
 export async function downloadCompanyFile(item: CompanyLibraryItem) {

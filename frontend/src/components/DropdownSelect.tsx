@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 export type DropdownOption = {
   value: string
@@ -30,6 +31,7 @@ export function DropdownSelect({
   className = '',
   required = false,
 }: DropdownSelectProps) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -89,7 +91,7 @@ export function DropdownSelect({
         onClick={() => setOpen((current) => !current)}
         onKeyDown={handleKeyDown}
       >
-        <span>{selected?.label || options[0]?.label || 'Сонгох'}</span>
+        <span>{selected?.label || options[0]?.label || t('st.api.pick')}</span>
         <ChevronDown aria-hidden="true" size={16} strokeWidth={2.25} className={`dropdown-select-chevron ${open ? 'is-open' : ''}`} />
       </button>
       {open && (

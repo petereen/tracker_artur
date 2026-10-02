@@ -12,3 +12,11 @@ export function labelOr(prefix: string, key: string): string {
   const full = `${prefix}.${key}`
   return i18n.exists(full) ? i18n.t(full) : key
 }
+
+/**
+ * Catalog text the backend serves in Mongolian (notification categories, AI access sections, role catalog, license
+ * features). Other languages overlay a translation keyed by the item's code; unknown codes keep the server text.
+ */
+export function catalogText(key: string, fallback: string): string {
+  return i18n.language !== 'mn' && i18n.exists(key) ? i18n.t(key) : fallback
+}

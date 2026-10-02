@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
+import { useTranslation } from 'react-i18next'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -23,6 +24,7 @@ function validUrl(value: string) {
 
 /** Company name, logo/favicon URLs and brand colours applied to the whole workspace. */
 export function TenantBrandingSettings() {
+  const { t } = useTranslation()
   const settings = useTenantBrandingSettings()
   const update = useUpdateTenantBranding()
   const roles = useAuthStore((state) => state.actor?.roles ?? EMPTY_ROLES)
@@ -32,20 +34,20 @@ export function TenantBrandingSettings() {
   useEffect(() => { if (settings.data) setDraft(settings.data.branding) }, [settings.data])
 
   if (settings.isLoading) return <Card padding={5}><Skeleton height={200} /></Card>
-  if (settings.isError || !settings.data) return <Banner status="error" collapsible={false} title={tenancyErrorMessage(settings.error, 'Брэндингийн тохиргоог ачаалж чадсангүй')} />
+  if (settings.isError || !settings.data) return <Banner status="error" collapsible={false} title={tenancyErrorMessage(settings.error, t('st.brand.loadFailed'))} />
 
   const set = (key: keyof EditableBranding, value: string) => setDraft((current) => ({ ...current, [key]: value.trim() ? value : null }))
-  const colorError = (value: string | null) => (value && !isHexColor(value) ? '#RRGGBB хэлбэрээр оруулна уу' : undefined)
-  const urlError = (value: string | null) => (value && !validUrl(value) ? 'https:// эсвэл /-ээр эхэлсэн хаяг оруулна уу' : undefined)
+  const colorError = (value: string | null) => (value && !isHexColor(value) ? t('st.brand.hexError') : undefined)
+  const urlError = (value: string | null) => (value && !validUrl(value) ? t('st.brand.urlError') : undefined)
   const invalid = Boolean(colorError(draft.primary_color) || colorError(draft.secondary_color) || urlError(draft.logo_url) || urlError(draft.favicon_url))
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings.data.branding)
 
   const save = async () => {
     try {
       await update.mutateAsync(draft)
-      toast.success('Брэндинг хадгалагдлаа')
+      toast.success(t('st.brand.saved'))
     } catch (error) {
-      toast.error(tenancyErrorMessage(error, 'Брэндинг хадгалж чадсангүй'))
+      toast.error(tenancyErrorMessage(error, t('st.brand.saveFailed')))
     }
   }
 
@@ -54,28 +56,28 @@ export function TenantBrandingSettings() {
   return <Card padding={5}>
     <VStack gap={4}>
       <VStack gap={1}>
-        <Heading level={3}>Байгууллагын брэндинг</Heading>
-        <Text type="supporting">Нэр, лого, favicon ба үндсэн өнгө нэвтрэх хуудас болон бүх ажлын орон зайд харагдана.</Text>
+        <Heading level={3}>{t('st.adm.orgBranding')}</Heading>
+        <Text type="supporting">{t('st.brand.intro')}</Text>
       </VStack>
       <FormLayout>
-        <TextInput label="Байгууллагын нэр" value={draft.display_name ?? ''} onChange={(value) => set('display_name', value)} isOptional isDisabled={!canEdit} placeholder={preview.name} />
-        <TextInput label="Логоны хаяг" value={draft.logo_url ?? ''} onChange={(value) => set('logo_url', value)} isOptional isDisabled={!canEdit}
-          placeholder="https://…/logo.png" description="Хоосон бол доорх «Лого ба theme» хэсэгт байршуулсан лого ашиглагдана." status={status(urlError(draft.logo_url))} />
-        <TextInput label="Favicon хаяг" value={draft.favicon_url ?? ''} onChange={(value) => set('favicon_url', value)} isOptional isDisabled={!canEdit}
+        <TextInput label={t('st.brand.name')} value={draft.display_name ?? ''} onChange={(value) => set('display_name', value)} isOptional isDisabled={!canEdit} placeholder={preview.name} />
+        <TextInput label={t('st.brand.logoUrl')} value={draft.logo_url ?? ''} onChange={(value) => set('logo_url', value)} isOptional isDisabled={!canEdit}
+          placeholder="https://…/logo.png" description={t('st.brand.logoHint')} status={status(urlError(draft.logo_url))} />
+        <TextInput label={t('st.brand.faviconUrl')} value={draft.favicon_url ?? ''} onChange={(value) => set('favicon_url', value)} isOptional isDisabled={!canEdit}
           placeholder="https://…/favicon.png" status={status(urlError(draft.favicon_url))} />
-        <TextInput label="Үндсэн өнгө" value={draft.primary_color ?? ''} onChange={(value) => set('primary_color', value)} isOptional isDisabled={!canEdit}
+        <TextInput label={t('st.brand.primary')} value={draft.primary_color ?? ''} onChange={(value) => set('primary_color', value)} isOptional isDisabled={!canEdit}
           placeholder="#2d62ec" width={160} status={status(colorError(draft.primary_color))} />
-        <TextInput label="Туслах өнгө" value={draft.secondary_color ?? ''} onChange={(value) => set('secondary_color', value)} isOptional isDisabled={!canEdit}
+        <TextInput label={t('st.brand.secondary')} value={draft.secondary_color ?? ''} onChange={(value) => set('secondary_color', value)} isOptional isDisabled={!canEdit}
           placeholder="#00c885" width={160} status={status(colorError(draft.secondary_color))} />
       </FormLayout>
       <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
         <HStack gap={2} vAlign="center" wrap="wrap">
-          <Text type="supporting">Одоогийн:</Text>
+          <Text type="supporting">{t('st.brand.current')}</Text>
           <Token size="sm" label={preview.name} />
-          {preview.primary_color && <Token size="sm" color="blue" label={`Үндсэн ${preview.primary_color}`} />}
-          {preview.secondary_color && <Token size="sm" color="green" label={`Туслах ${preview.secondary_color}`} />}
+          {preview.primary_color && <Token size="sm" color="blue" label={t('st.brand.primaryToken', { color: preview.primary_color })} />}
+          {preview.secondary_color && <Token size="sm" color="green" label={t('st.brand.secondaryToken', { color: preview.secondary_color })} />}
         </HStack>
-        {canEdit && <Button label="Хадгалах" variant="primary" clickAction={save} isDisabled={!dirty || invalid} />}
+        {canEdit && <Button label={t('st.common.save')} variant="primary" clickAction={save} isDisabled={!dirty || invalid} />}
       </HStack>
     </VStack>
   </Card>

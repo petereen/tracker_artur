@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from './client'
+import i18n from '../i18n'
 
 // --- Auth ---
 export function useLogin() {
@@ -23,20 +24,20 @@ export function useCreateAdminUser() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: { email: string; password: string }) => api.post('/auth/admin-users', data).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-users'] }); toast.success('Админ эрх нэмэгдлээ') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-users'] }); toast.success(i18n.t('api.admin.added')) },
   })
 }
 export function useDeleteAdminUser() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/auth/admin-users/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-users'] }); toast.success('Админ эрх цуцлагдлаа') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-users'] }); toast.success(i18n.t('api.admin.revoked')) },
   })
 }
 export function useChangeOwnPassword() {
   return useMutation({
     mutationFn: (data: { current_password: string; new_password: string }) => api.put('/auth/me/password', data),
-    onSuccess: () => toast.success('Нууц үг солигдлоо'),
+    onSuccess: () => toast.success(i18n.t('api.password.changed')),
   })
 }
 
@@ -60,11 +61,11 @@ export function useCreateEmployee() {
       qc.invalidateQueries({ queryKey: ['employees'] })
       qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
       qc.invalidateQueries({ queryKey: ['v1', 'workers'] })
-      toast.success('Ажилтан нэмэгдлээ')
+      toast.success(i18n.t('api.employee.added'))
     },
     onError: (error: any) => {
       const detail = error?.response?.data?.detail
-      toast.error((typeof detail === 'object' ? detail?.message : detail) || 'Нэмэхэд алдаа гарлаа')
+      toast.error((typeof detail === 'object' ? detail?.message : detail) || i18n.t('api.addFailed'))
     },
   })
 }
@@ -76,7 +77,7 @@ export function useUpdateEmployee() {
       qc.invalidateQueries({ queryKey: ['employees'] })
       qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
       qc.invalidateQueries({ queryKey: ['v1', 'workers'] })
-      toast.success('Хадгалагдлаа')
+      toast.success(i18n.t('api.saved'))
     },
   })
 }
@@ -88,9 +89,9 @@ export function useDeleteEmployee() {
       qc.invalidateQueries({ queryKey: ['employees'] })
       qc.invalidateQueries({ queryKey: ['v1', 'hr'] })
       qc.invalidateQueries({ queryKey: ['v1', 'workers'] })
-      toast.success('Устгагдлаа')
+      toast.success(i18n.t('api.deleted'))
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Ажилтан устгагдсангүй'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.employee.notDeleted')),
   })
 }
 
@@ -102,21 +103,21 @@ export function useCreateQuestion() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (d: any) => api.post('/questions', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success('Асуулт нэмэгдлээ') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success(i18n.t('api.question.added')) },
   })
 }
 export function useUpdateQuestion() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, ...d }: any) => api.put(`/questions/${id}`, d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success('Хадгалагдлаа') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success(i18n.t('api.saved')) },
   })
 }
 export function useDeleteQuestion() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.delete(`/questions/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success('Устгагдлаа') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions'] }); toast.success(i18n.t('api.deleted')) },
   })
 }
 export function useReorderQuestions() {
@@ -135,7 +136,7 @@ export function useUpdateSchedule() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ employee_id, ...d }: any) => api.put(`/schedules/${employee_id}`, d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['schedules'] }); toast.success('Хуваарь хадгалагдлаа') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['schedules'] }); toast.success(i18n.t('api.schedule.saved')) },
   })
 }
 
@@ -230,16 +231,16 @@ export function useCreateCompanyPlanItem() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (data: { source_report_id?: number; title: string; content?: string; plan_month: string; horizon: PlanHorizon; due_date?: string | null }) => api.post('/company-plans/items', data).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['company-plan'] }); qc.invalidateQueries({ queryKey: ['company-plan-suggestions'] }); toast.success('Компаний төлөвлөгөөнд нэмэгдлээ') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['company-plan'] }); qc.invalidateQueries({ queryKey: ['company-plan-suggestions'] }); toast.success(i18n.t('api.plan.addedToCompany')) },
   })
 }
 
 export interface PlanIdea { id: number; plan_month: string; title: string; content: string | null; suggested_due_date: string | null; status: 'pending' | 'approved' | 'rejected' | 'merged'; submitted_by_name: string | null; merged_into_plan_item_id: number | null; source_report_id: number | null; created_at: string; updated_at: string }
 export function usePlanIdeas(month: string) { return useQuery<PlanIdea[]>({ queryKey: ['plan-ideas', month], queryFn: () => api.get('/company-plans/ideas', { params: { month } }).then((r) => r.data) }) }
-export function useCreatePlanIdea() { const qc = useQueryClient(); return useMutation({ mutationFn: (data: { plan_month: string; title: string; content?: string; suggested_due_date?: string | null }) => api.post('/company-plans/ideas', data).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['plan-ideas'] }); toast.success('Санаа илгээгдлээ') } }) }
+export function useCreatePlanIdea() { const qc = useQueryClient(); return useMutation({ mutationFn: (data: { plan_month: string; title: string; content?: string; suggested_due_date?: string | null }) => api.post('/company-plans/ideas', data).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['plan-ideas'] }); toast.success(i18n.t('api.idea.sent')) } }) }
 export function useUpdatePlanIdea() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...data }: { id: number; title?: string; content?: string; suggested_due_date?: string | null; status?: string }) => api.patch(`/company-plans/ideas/${id}`, data).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['plan-ideas'] }) }) }
 export function useDeletePlanIdea() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/company-plans/ideas/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['plan-ideas'] }) }) }
-export function useMergePlanIdeas() { const qc = useQueryClient(); return useMutation({ mutationFn: (data: { idea_ids: number[]; plan_month: string; title: string; content?: string; horizon: PlanHorizon; due_date?: string | null }) => api.post('/company-plans/ideas/merge', data).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['plan-ideas'] }); qc.invalidateQueries({ queryKey: ['company-plan'] }); toast.success('Санаанууд нэг төлөвлөгөө боллоо') } }) }
+export function useMergePlanIdeas() { const qc = useQueryClient(); return useMutation({ mutationFn: (data: { idea_ids: number[]; plan_month: string; title: string; content?: string; horizon: PlanHorizon; due_date?: string | null }) => api.post('/company-plans/ideas/merge', data).then((r) => r.data), onSuccess: () => { qc.invalidateQueries({ queryKey: ['plan-ideas'] }); qc.invalidateQueries({ queryKey: ['company-plan'] }); toast.success(i18n.t('api.idea.merged')) } }) }
 export function useUpdateCompanyPlanItem() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, ...data }: { id: number; title?: string; content?: string; horizon?: PlanHorizon; due_date?: string | null }) => api.patch(`/company-plans/items/${id}`, data).then((r) => r.data), onSuccess: () => qc.invalidateQueries({ queryKey: ['company-plan'] }) }) }
 export function useDeleteCompanyPlanItem() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: number) => api.delete(`/company-plans/items/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['company-plan'] }) }) }
 export function useReorderCompanyPlan() {
@@ -247,7 +248,7 @@ export function useReorderCompanyPlan() {
   return useMutation({
     mutationFn: (data: { plan_month: string; columns: Record<PlanHorizon, number[]> }) => api.put('/company-plans/reorder', data).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['company-plan'] }),
-    onError: () => toast.error('Төлөвлөгөөний дараалал хадгалагдсангүй'),
+    onError: () => toast.error(i18n.t('api.plan.orderNotSaved')),
   })
 }
 
@@ -277,7 +278,7 @@ export function useUpdateManagerSettings() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (d: any) => api.put('/manager-settings', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['manager-settings'] }); toast.success('Тохиргоо хадгалагдлаа') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['manager-settings'] }); toast.success(i18n.t('api.settings.saved')) },
   })
 }
 
@@ -289,7 +290,7 @@ export function useUpdateOnboardingTemplate() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (d: any) => api.put('/onboarding/template', d),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['onboarding'] }); toast.success('Загвар хадгалагдлаа') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['onboarding'] }); toast.success(i18n.t('api.template.saved')) },
   })
 }
 
@@ -327,9 +328,9 @@ export function useCreateKnowledge() {
     mutationFn: (data: KnowledgeInput) => api.post('/knowledge', data).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge'] })
-      toast.success('Өгөгдлийн санд мэдээлэл нэмэгдлээ')
+      toast.success(i18n.t('api.knowledge.added'))
     },
-    onError: () => toast.error('Мэдээлэл нэмэхэд алдаа гарлаа'),
+    onError: () => toast.error(i18n.t('api.knowledge.addFailed')),
   })
 }
 
@@ -347,9 +348,9 @@ export function useCreateKnowledgeWithAttachment() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge'] })
-      toast.success('Файлтай өгөгдлийн санд мэдээлэл нэмэгдлээ')
+      toast.success(i18n.t('api.knowledge.addedWithFile'))
     },
-    onError: () => toast.error('Файл хавсаргах үед алдаа гарлаа'),
+    onError: () => toast.error(i18n.t('api.attachFailed')),
   })
 }
 
@@ -360,9 +361,9 @@ export function useUpdateKnowledge() {
       api.put(`/knowledge/${id}`, data).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge'] })
-      toast.success('Мэдээлэл хадгалагдлаа')
+      toast.success(i18n.t('api.knowledge.saved'))
     },
-    onError: () => toast.error('Мэдээлэл хадгалахад алдаа гарлаа'),
+    onError: () => toast.error(i18n.t('api.knowledge.saveFailed')),
   })
 }
 
@@ -372,9 +373,9 @@ export function useDeleteKnowledge() {
     mutationFn: (id: number) => api.delete(`/knowledge/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge'] })
-      toast.success('Мэдээлэл устгагдлаа')
+      toast.success(i18n.t('api.knowledge.deleted'))
     },
-    onError: () => toast.error('Мэдээлэл устгахад алдаа гарлаа'),
+    onError: () => toast.error(i18n.t('api.knowledge.deleteFailed')),
   })
 }
 
@@ -388,9 +389,9 @@ export function useReplaceKnowledgeAttachment() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge'] })
-      toast.success('Файл хавсрагдлаа')
+      toast.success(i18n.t('api.attached'))
     },
-    onError: () => toast.error('Файл хавсаргах үед алдаа гарлаа'),
+    onError: () => toast.error(i18n.t('api.attachFailed')),
   })
 }
 
@@ -400,9 +401,9 @@ export function useDeleteKnowledgeAttachment() {
     mutationFn: (id: number) => api.delete(`/knowledge/${id}/attachment`).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['knowledge'] })
-      toast.success('Хавсралт устгагдлаа')
+      toast.success(i18n.t('api.attachment.deleted'))
     },
-    onError: () => toast.error('Хавсралт устгахад алдаа гарлаа'),
+    onError: () => toast.error(i18n.t('api.attachment.deleteFailed')),
   })
 }
 
@@ -460,9 +461,9 @@ export function useUpdateUnknownAssistantRequest() {
       api.put(`/assistant-learning/unknown/${id}`, { status }).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assistant-learning', 'unknown'] })
-      toast.success('Хүсэлтийн төлөв шинэчлэгдлээ')
+      toast.success(i18n.t('api.request.statusUpdated'))
     },
-    onError: () => toast.error('Төлөв шинэчлэхэд алдаа гарлаа'),
+    onError: () => toast.error(i18n.t('api.request.statusFailed')),
   })
 }
 
@@ -473,9 +474,9 @@ export function usePromoteUnknownAssistantRequest() {
       api.post(`/assistant-learning/unknown/${id}/promote-context`, data).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assistant-learning'] })
-      toast.success('Контекстийн толь бичигт нэмэгдлээ')
+      toast.success(i18n.t('api.context.addedGlossary'))
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Контекст нэмэхэд алдаа гарлаа'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.context.addFailed')),
   })
 }
 
@@ -485,9 +486,9 @@ export function useCreateAssistantContextExample() {
     mutationFn: (data: AssistantContextInput) => api.post('/assistant-learning/contexts', data).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assistant-learning', 'contexts'] })
-      toast.success('Контекст нэмэгдлээ')
+      toast.success(i18n.t('api.context.added'))
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Контекст нэмэхэд алдаа гарлаа'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.context.addFailed')),
   })
 }
 
@@ -498,9 +499,9 @@ export function useUpdateAssistantContextExample() {
       api.put(`/assistant-learning/contexts/${id}`, data).then((r) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assistant-learning', 'contexts'] })
-      toast.success('Контекст хадгалагдлаа')
+      toast.success(i18n.t('api.context.saved'))
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Контекст хадгалахад алдаа гарлаа'),
+    onError: (error: any) => toast.error(error.response?.data?.detail || i18n.t('api.context.saveFailed')),
   })
 }
 
@@ -510,9 +511,9 @@ export function useDeleteAssistantContextExample() {
     mutationFn: (id: number) => api.delete(`/assistant-learning/contexts/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['assistant-learning', 'contexts'] })
-      toast.success('Контекст устгагдлаа')
+      toast.success(i18n.t('api.context.deleted'))
     },
-    onError: () => toast.error('Контекст устгахад алдаа гарлаа'),
+    onError: () => toast.error(i18n.t('api.context.deleteFailed')),
   })
 }
 
@@ -559,8 +560,8 @@ export function useCreateTask() {
   return useMutation({
     mutationFn: (d: { title: string; description?: string; assignee_id?: number; deadline_at?: string; priority: number }) =>
       api.post('/tasks', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success('Даалгавар үүслээ') },
-    onError: () => toast.error('Даалгавар үүсгэхэд алдаа гарлаа'),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success(i18n.t('api.task.created')) },
+    onError: () => toast.error(i18n.t('api.task.createFailed')),
   })
 }
 
@@ -569,8 +570,8 @@ export function useUpdateTask() {
   return useMutation({
     mutationFn: ({ id, ...d }: { id: number; title?: string; description?: string; assignee_id?: number; deadline_at?: string; priority?: number; status?: string }) =>
       api.patch(`/tasks/${id}`, d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success('Даалгавар шинэчлэгдлээ') },
-    onError: () => toast.error('Даалгавар шинэчлэхэд алдаа гарлаа'),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success(i18n.t('api.task.updated')) },
+    onError: () => toast.error(i18n.t('api.task.updateFailed')),
   })
 }
 

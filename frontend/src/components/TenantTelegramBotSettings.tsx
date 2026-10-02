@@ -19,6 +19,9 @@ import {
   type TenantTelegramBot, tenancyErrorMessage, useConnectTelegramBot, useDisconnectTelegramBot,
   useRenewTelegramHandshake, useTenantTelegramBot,
 } from '../api/tenancy'
+import { intlLocale } from '../utils/locale'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
 import { formatDate } from './TenantLicenseSettings'
 
 const TOKEN_PATTERN = /^\d{5,16}:[A-Za-z0-9_-]{30,64}$/
@@ -26,14 +29,14 @@ const TOKEN_PATTERN = /^\d{5,16}:[A-Za-z0-9_-]{30,64}$/
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('mn-MN', { dateStyle: 'short', timeStyle: 'short' })
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(intlLocale(), { dateStyle: 'short', timeStyle: 'short' })
 }
 
 function statusOf(bot: TenantTelegramBot): { label: string; variant: 'success' | 'warning' | 'error' | 'neutral' } {
-  if (bot.status === 'active') return bot.source === 'platform' ? { label: 'Платформын ботоор холбогдсон', variant: 'success' } : { label: 'Холбогдсон', variant: 'success' }
-  if (bot.status === 'pending') return { label: 'Баталгаажуулалт хүлээж байна', variant: 'warning' }
-  if (bot.status === 'error') return { label: 'Алдаа', variant: 'error' }
-  return { label: 'Холбогдоогүй', variant: 'neutral' }
+  if (bot.status === 'active') return { label: i18n.t(bot.source === 'platform' ? 'st.tg.status.platform' : 'st.tg.status.connected'), variant: 'success' }
+  if (bot.status === 'pending') return { label: i18n.t('st.tg.status.pending'), variant: 'warning' }
+  if (bot.status === 'error') return { label: i18n.t('st.tg.status.error'), variant: 'error' }
+  return { label: i18n.t('st.tg.status.none'), variant: 'neutral' }
 }
 
 function activeStep(bot: TenantTelegramBot) {
@@ -44,6 +47,7 @@ function activeStep(bot: TenantTelegramBot) {
 
 /** Token form: step 1 of the handshake (also used to replace a bot). */
 function TokenForm({ onDone, submitLabel }: { onDone?: () => void; submitLabel: string }) {
+  const { t } = useTranslation()
   const connect = useConnectTelegramBot()
   const [token, setToken] = useState('')
   const trimmed = token.trim()
@@ -52,16 +56,16 @@ function TokenForm({ onDone, submitLabel }: { onDone?: () => void; submitLabel: 
     try {
       await connect.mutateAsync(trimmed)
       setToken('')
-      toast.success('Токен баталгаажлаа. Одоо ботоо Telegram-аас баталгаажуулна уу.')
+      toast.success(t('st.tg.tokenOk'))
       onDone?.()
     } catch (error) {
-      toast.error(tenancyErrorMessage(error, 'Бот холбож чадсангүй'))
+      toast.error(tenancyErrorMessage(error, t('st.tg.connectFailed')))
     }
   }
   return <VStack gap={3}>
-    <TextInput label="BotFather токен" value={token} onChange={setToken} type="password" placeholder="123456789:AAH…"
-      description="Telegram дээр @BotFather → /newbot командаар бот үүсгээд өгсөн токеныг буулгана. Токен шифрлэгдэж хадгалагдана."
-      status={invalid ? { type: 'error', message: 'Токены хэлбэр буруу байна' } : undefined} autoComplete="off" />
+    <TextInput label={t('st.tg.tokenLabel')} value={token} onChange={setToken} type="password" placeholder="123456789:AAH…"
+      description={t('st.tg.tokenHint')}
+      status={invalid ? { type: 'error', message: t('st.tg.tokenInvalid') } : undefined} autoComplete="off" />
     <HStack gap={2} hAlign="end">
       <Button label={submitLabel} variant="primary" icon={<Link2 size={15} />} clickAction={submit} isDisabled={!trimmed || invalid} />
     </HStack>
@@ -74,13 +78,14 @@ function TokenForm({ onDone, submitLabel }: { onDone?: () => void; submitLabel: 
  * and the bot runner receives it through that bot.
  */
 export function TenantTelegramBotSettings() {
+  const { t } = useTranslation()
   const bot = useTenantTelegramBot()
   const renew = useRenewTelegramHandshake()
   const disconnect = useDisconnectTelegramBot()
   const [replacing, setReplacing] = useState(false)
 
   if (bot.isLoading) return <Card padding={5}><Skeleton height={180} /></Card>
-  if (bot.isError || !bot.data) return <Banner status="error" collapsible={false} title={tenancyErrorMessage(bot.error, 'Telegram ботын мэдээллийг ачаалж чадсангүй')} />
+  if (bot.isError || !bot.data) return <Banner status="error" collapsible={false} title={tenancyErrorMessage(bot.error, t('st.tg.loadFailed'))} />
 
   const data = bot.data
   const status = statusOf(data)
@@ -89,19 +94,19 @@ export function TenantTelegramBotSettings() {
   const renewLink = async () => {
     try {
       await renew.mutateAsync()
-      toast.success('Шинэ холбоос үүслээ')
+      toast.success(t('st.tg.linkCreated'))
     } catch (error) {
-      toast.error(tenancyErrorMessage(error, 'Холбоос үүсгэж чадсангүй'))
+      toast.error(tenancyErrorMessage(error, t('st.tg.linkFailed')))
     }
   }
   const remove = async () => {
-    if (!window.confirm('Telegram ботыг салгах уу? Ажилтнууд ботоор мэдэгдэл авахаа болино.')) return
+    if (!window.confirm(t('st.tg.disconnectConfirm'))) return
     try {
       await disconnect.mutateAsync()
       setReplacing(false)
-      toast.success('Бот салгагдлаа')
+      toast.success(t('st.tg.disconnected'))
     } catch (error) {
-      toast.error(tenancyErrorMessage(error, 'Бот салгаж чадсангүй'))
+      toast.error(tenancyErrorMessage(error, t('st.tg.disconnectFailed')))
     }
   }
 
@@ -109,44 +114,44 @@ export function TenantTelegramBotSettings() {
     <VStack gap={4}>
       <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
         <VStack gap={1}>
-          <Heading level={3}>Байгууллагын Telegram бот</Heading>
-          <Text type="supporting">Даалгавар, сануулга, тайлан, цагийн бүртгэлийг танай байгууллагын өөрийн ботоор илгээнэ. Бусад байгууллагын өгөгдөлтэй холилдохгүй.</Text>
+          <Heading level={3}>{t('st.tg.title')}</Heading>
+          <Text type="supporting">{t('st.tg.intro')}</Text>
         </VStack>
         <HStack gap={2} vAlign="center"><StatusDot variant={status.variant} label={status.label} /><Text weight="semibold">{status.label}</Text></HStack>
       </HStack>
 
-      {data.source !== 'platform' && <Stepper activeStep={activeStep(data)} label="Бот холбох алхам" density="compact" horizontalOptions={{ minimumStepWidth: 112, collapsedVariant: 'withLabel' }}>
-        <Step step={0} label="Токен оруулах" description="@BotFather-ийн токен" />
-        <Step step={1} label="Баталгаажуулах" description="Telegram-аас /start" status={data.status === 'error' ? 'error' : undefined} />
-        <Step step={2} label="Ажиллаж байна" description="Мэдэгдэл илгээнэ" />
+      {data.source !== 'platform' && <Stepper activeStep={activeStep(data)} label={t('st.tg.stepsLabel')} density="compact" horizontalOptions={{ minimumStepWidth: 112, collapsedVariant: 'withLabel' }}>
+        <Step step={0} label={t('st.tg.step1')} description={t('st.tg.step1Desc')} />
+        <Step step={1} label={t('st.tg.step2')} description={t('st.tg.step2Desc')} status={data.status === 'error' ? 'error' : undefined} />
+        <Step step={2} label={t('st.tg.step3')} description={t('st.tg.step3Desc')} />
       </Stepper>}
 
-      {data.status === 'error' && <Banner status="error" collapsible={false} title="Бот ажиллахгүй байна"
-        description={data.last_error || 'Telegram токеныг хүлээн авсангүй. BotFather-аас шинэ токен авч дахин холбоно уу.'} />}
+      {data.status === 'error' && <Banner status="error" collapsible={false} title={t('st.tg.errorTitle')}
+        description={data.last_error || t('st.tg.errorDesc')} />}
 
-      {data.status === 'pending' && <Banner status="warning" collapsible={false} title="Сүүлийн алхам: ботоо баталгаажуулна уу"
-        description={`Доорх холбоосыг админы Telegram-аас нээж «Start» дарна уу. Бот хариу өгмөгц энэ хуудас автоматаар шинэчлэгдэнэ.${data.handshake_expires_at ? ` Холбоос ${formatDateTime(data.handshake_expires_at)} хүртэл хүчинтэй.` : ''}`}
+      {data.status === 'pending' && <Banner status="warning" collapsible={false} title={t('st.tg.pendingTitle')}
+        description={`${t('st.tg.pendingDesc')}${data.handshake_expires_at ? ` ${t('st.tg.linkValidUntil', { date: formatDateTime(data.handshake_expires_at) })}` : ''}`}
         endContent={data.handshake_url
-          ? <Link href={data.handshake_url} isExternalLink target="_blank" rel="noreferrer">Telegram-аар нээх</Link>
+          ? <Link href={data.handshake_url} isExternalLink target="_blank" rel="noreferrer">{t('st.tg.openInTelegram')}</Link>
           : undefined} />}
 
       {connected && <MetadataList columns={2}>
-        <MetadataListItem label="Бот">{data.bot_username ? <Link href={`https://t.me/${data.bot_username}`} isExternalLink target="_blank" rel="noreferrer">{`@${data.bot_username}`}</Link> : (data.bot_name || '—')}</MetadataListItem>
-        <MetadataListItem label="Нэр">{data.bot_name || '—'}</MetadataListItem>
-        {data.source === 'tenant' && <MetadataListItem label="Сүүлд идэвхтэй">{data.online ? 'Одоо ажиллаж байна' : formatDateTime(data.last_seen_at)}</MetadataListItem>}
-        {data.source === 'tenant' && <MetadataListItem label="Баталгаажсан">{data.handshake_completed_at ? formatDate(data.handshake_completed_at) : '—'}</MetadataListItem>}
+        <MetadataListItem label={t('st.tg.bot')}>{data.bot_username ? <Link href={`https://t.me/${data.bot_username}`} isExternalLink target="_blank" rel="noreferrer">{`@${data.bot_username}`}</Link> : (data.bot_name || '—')}</MetadataListItem>
+        <MetadataListItem label={t('st.tg.name')}>{data.bot_name || '—'}</MetadataListItem>
+        {data.source === 'tenant' && <MetadataListItem label={t('st.tg.lastSeen')}>{data.online ? t('st.tg.onlineNow') : formatDateTime(data.last_seen_at)}</MetadataListItem>}
+        {data.source === 'tenant' && <MetadataListItem label={t('st.tg.confirmed')}>{data.handshake_completed_at ? formatDate(data.handshake_completed_at) : '—'}</MetadataListItem>}
         {data.bot_id ? <MetadataListItem label="Bot ID"><Code>{String(data.bot_id)}</Code></MetadataListItem> : null}
       </MetadataList>}
 
-      {data.source === 'platform' && <Text type="supporting">Үндсэн байгууллага платформын ботыг ашиглаж байна. Өөрийн бот холбовол түүгээр солигдоно.</Text>}
+      {data.source === 'platform' && <Text type="supporting">{t('st.tg.platformNote')}</Text>}
 
-      {(!connected || replacing || data.status === 'error') && <TokenForm submitLabel={connected ? 'Шинэ токеноор солих' : 'Холбох'} onDone={() => setReplacing(false)} />}
+      {(!connected || replacing || data.status === 'error') && <TokenForm submitLabel={connected ? t('st.tg.replaceWithToken') : t('st.tg.connect')} onDone={() => setReplacing(false)} />}
 
       {connected && <HStack gap={2} hAlign="end" wrap="wrap">
-        {data.status === 'pending' && <Button label="Шинэ холбоос" variant="secondary" icon={<RefreshCw size={15} />} clickAction={renewLink} />}
-        {data.bot_username && data.status === 'active' && <Button label="Ботыг нээх" variant="ghost" icon={<ExternalLink size={15} />} onClick={() => window.open(`https://t.me/${data.bot_username}`, '_blank', 'noopener')} />}
-        {!replacing && data.status !== 'error' && <Button label={data.source === 'platform' ? 'Өөрийн бот холбох' : 'Бот солих'} variant="secondary" icon={<Bot size={15} />} onClick={() => setReplacing(true)} />}
-        {data.source === 'tenant' && <Button label="Салгах" variant="destructive" icon={<Unplug size={15} />} clickAction={remove} />}
+        {data.status === 'pending' && <Button label={t('st.tg.newLink')} variant="secondary" icon={<RefreshCw size={15} />} clickAction={renewLink} />}
+        {data.bot_username && data.status === 'active' && <Button label={t('st.tg.openBot')} variant="ghost" icon={<ExternalLink size={15} />} onClick={() => window.open(`https://t.me/${data.bot_username}`, '_blank', 'noopener')} />}
+        {!replacing && data.status !== 'error' && <Button label={data.source === 'platform' ? t('st.tg.connectOwn') : t('st.tg.replaceBot')} variant="secondary" icon={<Bot size={15} />} onClick={() => setReplacing(true)} />}
+        {data.source === 'tenant' && <Button label={t('st.tg.disconnect')} variant="destructive" icon={<Unplug size={15} />} clickAction={remove} />}
       </HStack>}
     </VStack>
   </Card>

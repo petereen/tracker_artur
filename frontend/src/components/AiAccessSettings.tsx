@@ -9,7 +9,9 @@ import { Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } f
 import { Text } from '@astryxdesign/core/Text'
 import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
+import { useTranslation } from 'react-i18next'
 import { type AiAccessEntry, type AiAccessGroup, useAiAccessSettings, useUpdateAiAccessSettings } from '../api/aiSettings'
+import { catalogText } from '../utils/labelMap'
 
 type Matrix = Record<string, AiAccessEntry>
 
@@ -28,6 +30,7 @@ function setAll(groups: AiAccessGroup[], matrix: Matrix, value: boolean): Matrix
 
 /** Organization-wide limits on which data the OYUNS AI assistant may read or prepare changes in. */
 export function AiAccessSettings() {
+  const { t } = useTranslation()
   const query = useAiAccessSettings()
   const update = useUpdateAiAccessSettings()
   const [draft, setDraft] = useState<Matrix | null>(null)
@@ -38,8 +41,8 @@ export function AiAccessSettings() {
 
   const groups = query.data?.groups ?? []
   const all = useMemo(() => boxes(groups), [groups])
-  if (query.isLoading || !draft) return <Text type="supporting">Ачаалж байна…</Text>
-  if (query.isError || !query.data) return <Banner status="error" title="AI туслахын эрхийг ачаалж чадсангүй" />
+  if (query.isLoading || !draft) return <Text type="supporting">{t('st.common.loading')}</Text>
+  if (query.isError || !query.data) return <Banner status="error" title={t('st.aiAccess.loadFailed')} />
 
   const checked = all.filter((box) => draft[box.key]?.[box.mode]).length
   const dirty = JSON.stringify(draft) !== JSON.stringify(query.data.sections)
@@ -58,23 +61,20 @@ export function AiAccessSettings() {
   return <Card padding={5}>
     <VStack gap={4}>
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <Heading level={3}>AI туслахын хандах эрх</Heading>
+        <Heading level={3}>{t('st.adm.aiAccess')}</Heading>
         <Token size="sm" label={`${checked} / ${all.length}`} color={checked === all.length ? 'green' : checked === 0 ? 'red' : 'blue'} />
       </HStack>
-      <Text type="supporting">
-        OYUNS AI туслах (чат, Telegram, дуут дуудлага) аль хэсгийн өгөгдлийг унших, аль хэсэгт ноорог үүсгэж засахыг байгууллагын хэмжээнд тохируулна.
-        Энэ тохиргоо зөвхөн хязгаарлана: хэрэглэгч бүр өөрийн эрхийн хүрээнээс илүүг AI-аар дамжуулж харахгүй.
-      </Text>
+      <Text type="supporting">{t('st.aiAccess.intro')}</Text>
       <HStack gap={2} wrap="wrap">
-        <Button label="Бүгдийг сонгох" size="sm" isDisabled={checked === all.length} onClick={() => setDraft(setAll(groups, draft, true))} />
-        <Button label="Бүгдийг цуцлах" size="sm" isDisabled={checked === 0} onClick={() => setDraft(setAll(groups, draft, false))} />
+        <Button label={t('st.aiAccess.selectAll')} size="sm" isDisabled={checked === all.length} onClick={() => setDraft(setAll(groups, draft, true))} />
+        <Button label={t('st.aiAccess.clearAll')} size="sm" isDisabled={checked === 0} onClick={() => setDraft(setAll(groups, draft, false))} />
       </HStack>
       <Table density="compact">
         <TableHeader>
           <TableRow>
-            <TableHeaderCell>Хэсэг</TableHeaderCell>
-            <TableHeaderCell>Унших</TableHeaderCell>
-            <TableHeaderCell>Үүсгэх ба засах</TableHeaderCell>
+            <TableHeaderCell>{t('st.aiAccess.section')}</TableHeaderCell>
+            <TableHeaderCell>{t('st.aiAccess.read')}</TableHeaderCell>
+            <TableHeaderCell>{t('st.aiAccess.write')}</TableHeaderCell>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -85,7 +85,7 @@ export function AiAccessSettings() {
             return [
               <TableRow key={`group-${group.key}`}>
                 <TableCell>
-                  <CheckboxInput label={group.label.toUpperCase()} value={groupValue} onChange={() => toggleGroup(group, groupValue !== true)} />
+                  <CheckboxInput label={catalogText(`cat.aiGroup.${group.key}`, group.label).toUpperCase()} value={groupValue} onChange={() => toggleGroup(group, groupValue !== true)} />
                 </TableCell>
                 <TableCell>{null}</TableCell>
                 <TableCell>{null}</TableCell>
@@ -93,16 +93,16 @@ export function AiAccessSettings() {
               ...group.sections.map((section) => <TableRow key={section.key}>
                 <TableCell>
                   <VStack gap={0.5}>
-                    <Text>{section.label}</Text>
-                    <Text type="supporting">{section.description}</Text>
+                    <Text>{catalogText(`cat.aiSection.${section.key}.label`, section.label)}</Text>
+                    <Text type="supporting">{catalogText(`cat.aiSection.${section.key}.description`, section.description)}</Text>
                   </VStack>
                 </TableCell>
                 <TableCell>
-                  <CheckboxInput label={`${section.label}: унших`} isLabelHidden value={Boolean(draft[section.key]?.read)} onChange={(value) => toggle(section.key, 'read', value)} />
+                  <CheckboxInput label={t('st.aiAccess.readAria', { label: catalogText(`cat.aiSection.${section.key}.label`, section.label) })} isLabelHidden value={Boolean(draft[section.key]?.read)} onChange={(value) => toggle(section.key, 'read', value)} />
                 </TableCell>
                 <TableCell>
                   {section.has_write
-                    ? <CheckboxInput label={`${section.label}: үүсгэх ба засах`} isLabelHidden value={Boolean(draft[section.key]?.write)} onChange={(value) => toggle(section.key, 'write', value)} />
+                    ? <CheckboxInput label={t('st.aiAccess.writeAria', { label: catalogText(`cat.aiSection.${section.key}.label`, section.label) })} isLabelHidden value={Boolean(draft[section.key]?.write)} onChange={(value) => toggle(section.key, 'write', value)} />
                     : null}
                 </TableCell>
               </TableRow>),
@@ -110,11 +110,11 @@ export function AiAccessSettings() {
           })}
         </TableBody>
       </Table>
-      {checked === 0 && <Banner status="warning" title="AI туслах компанийн өгөгдөл уншихгүй" description="Бүх хэсгийг хаавал OYUNS зөвхөн ерөнхий асуултад хариулна." />}
+      {checked === 0 && <Banner status="warning" title={t('st.aiAccess.noneTitle')} description={t('st.aiAccess.noneDesc')} />}
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <Button label="Хадгалах" variant="primary" isDisabled={!dirty} isLoading={update.isPending} onClick={() => update.mutate(draft)} />
-        {dirty && <Button label="Буцаах" onClick={() => setDraft(query.data.sections)} />}
-        {!query.data.configured && <Text type="supporting">Одоогоор бүх хэсэг нээлттэй (анхдагч).</Text>}
+        <Button label={t('st.common.save')} variant="primary" isDisabled={!dirty} isLoading={update.isPending} onClick={() => update.mutate(draft)} />
+        {dirty && <Button label={t('st.common.revert')} onClick={() => setDraft(query.data.sections)} />}
+        {!query.data.configured && <Text type="supporting">{t('st.aiAccess.allOpen')}</Text>}
       </HStack>
     </VStack>
   </Card>

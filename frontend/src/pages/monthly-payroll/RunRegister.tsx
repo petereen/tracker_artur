@@ -16,6 +16,10 @@ import {
   rowState, runTitle, shiftMonth, toNumber, useReasonDialog, warningLabel, type RowState,
 } from './shared'
 import { plainNumber } from '../../utils/numbers'
+import { useTranslation } from 'react-i18next'
+import i18n from '../../i18n'
+import { labelMap } from '../../utils/labelMap'
+import { intlLocale } from '../../utils/locale'
 import { RowDrawer } from './RowDrawer'
 import { WorkedHoursInfo } from './WorkedHoursInfo'
 
@@ -30,21 +34,22 @@ type Column = {
 type Draft = Record<string, any>
 
 const BUCKETS = [
-  { key: 'weekday', label: 'Ажлын өдрийн илүү цаг', mark: 'И', law: '109.1' },
-  { key: 'rest_day', label: 'Долоо хоногийн амралтын өдөр', mark: 'А', law: '109.2' },
-  { key: 'public_holiday', label: 'Нийтийн амралтын өдөр', mark: 'Б', law: '109.4' },
+  { key: 'weekday', law: '109.1' },
+  { key: 'rest_day', law: '109.2' },
+  { key: 'public_holiday', law: '109.4' },
 ] as const
-const WEEKDAYS = ['Да', 'Мя', 'Лх', 'Пү', 'Ба', 'Бя', 'Ня']
-const DAY_TYPES: Record<string, string> = { working: 'Ажлын өдөр', weekly_rest: 'Амралтын өдөр', public_holiday: 'Баярын өдөр' }
-const BASIS_LABELS: Record<string, string> = { FIXED: 'Тогтмол дүн', PERCENT: 'Цалингийн хувь', 'WORKED-TO-DATE': 'Ажилласан цагаар' }
-const SALARY_TYPES: Record<string, string> = { PRORATION: 'Цагаар', FIXED: 'Тогтмол' }
-const FILTERS: Array<{ key: string; label: string; test: (row: Row) => boolean }> = [
-  { key: 'all', label: 'Бүгд', test: () => true },
-  { key: 'draft', label: 'Ноорог', test: (row) => row.status !== 'approved' },
-  { key: 'approved', label: 'Батлагдсан', test: (row) => row.status === 'approved' },
-  { key: 'attention', label: 'Анхаарах', test: (row) => row.status === 'flagged' || row.warnings.some((warning) => warning !== 'overtime_work') },
-  { key: 'error', label: 'Алдаатай', test: (row) => rowState(row) === 'error' },
-  { key: 'overtime', label: 'Илүү цагтай', test: (row) => row.warnings.includes('overtime_work') },
+const bucketLabel = (key: string) => i18n.t(`mp.bucket.${key}`)
+const bucketMark = (key: string) => i18n.t(`mp.bucketMark.${key}`)
+const DAY_TYPES: Record<string, string> = labelMap('mp.dayType', ['working', 'weekly_rest', 'public_holiday'])
+const BASIS_LABELS: Record<string, string> = labelMap('mp.basis', ['FIXED', 'PERCENT', 'WORKED-TO-DATE'])
+const SALARY_TYPES: Record<string, string> = labelMap('mp.salaryType', ['PRORATION', 'FIXED'])
+const FILTERS: Array<{ key: string; labelKey: string; test: (row: Row) => boolean }> = [
+  { key: 'all', labelKey: 'mp.filter.all', test: () => true },
+  { key: 'draft', labelKey: 'mp.rowState.draft', test: (row) => row.status !== 'approved' },
+  { key: 'approved', labelKey: 'mp.rowState.approved', test: (row) => row.status === 'approved' },
+  { key: 'attention', labelKey: 'mp.rowState.attention', test: (row) => row.status === 'flagged' || row.warnings.some((warning) => warning !== 'overtime_work') },
+  { key: 'error', labelKey: 'mp.rowState.error', test: (row) => rowState(row) === 'error' },
+  { key: 'overtime', labelKey: 'mp.filter.overtime', test: (row) => row.warnings.includes('overtime_work') },
 ]
 const PROFILE_WARNINGS = ['profile_missing', 'salary_history_missing_or_incomplete', 'profile_incomplete', 'allowance_daily_rate_required']
 
@@ -59,6 +64,7 @@ const displayName = (row: Row) => row.identity.last_name || row.identity.first_n
 const visibleWarnings = (row: Row) => row.warnings.filter((warning) => warning !== 'overtime_work')
 
 function OvertimeInfo({ row, children }: { row: Row; children: ReactNode }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState<CSSProperties>({})
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -78,27 +84,28 @@ function OvertimeInfo({ row, children }: { row: Row; children: ReactNode }) {
   const manualHours = sourceDiffers(row, 'overtime_hours')
   return <span className="mp-ot-anchor" onMouseEnter={show} onMouseLeave={() => setOpen(false)}>
     <button ref={triggerRef} type="button" className="mp-ot-trigger" aria-expanded={open} onClick={() => (open ? setOpen(false) : show())} onBlur={() => setOpen(false)}>
-      {children}<span className="mp-ot-marks" aria-hidden="true">{buckets.map((bucket) => <b key={bucket.key} className={`mp-ot-mark ${bucket.key}`}>{bucket.mark}</b>)}</span>
+      {children}<span className="mp-ot-marks" aria-hidden="true">{buckets.map((bucket) => <b key={bucket.key} className={`mp-ot-mark ${bucket.key}`}>{bucketMark(bucket.key)}</b>)}</span>
     </button>
     {open && <div className="mp-ot-box" role="tooltip" style={position}>
-      <strong>Илүү цаг, амралт, баярын өдрийн ажил</strong>
-      <table><thead><tr><th>Огноо</th><th>Гараг</th><th>Төрөл</th><th>Цаг</th><th>×</th><th>Цагийн үнэлгээ</th><th>Дүн</th></tr></thead><tbody>
+      <strong>{t('mp.ot.title')}</strong>
+      <table><thead><tr><th>{t('mp.hours.col.date')}</th><th>{t('mp.ot.col.weekday')}</th><th>{t('mp.row.col.type')}</th><th>{t('mp.dash.col.hours')}</th><th>×</th><th>{t('mp.ot.col.rate')}</th><th>{t('mp.row.col.value')}</th></tr></thead><tbody>
         {BUCKETS.map((bucket) => {
           const bucketLines = lines.filter((line) => line.bucket === bucket.key)
           if (!bucketLines.length) return null
           return <Fragment key={bucket.key}>
-            {bucketLines.map((line, index) => <tr key={`${bucket.key}-${index}`}><td>{line.date || 'Гараар'}</td><td>{line.weekday !== null && line.weekday !== undefined ? WEEKDAYS[line.weekday] : '—'}</td><td><b className={`mp-ot-mark ${bucket.key}`}>{bucket.mark}</b> {line.day_type ? DAY_TYPES[line.day_type] || line.day_type : bucket.label}</td><td>{formatHours(line.hours)}</td><td>{line.multiplier}</td><td>{formatAmount(line.rate)}</td><td>{formatAmount(line.amount)}</td></tr>)}
-            <tr className="mp-ot-subtotal"><td colSpan={3}>{bucket.label} · ХТХ {bucket.law}</td><td>{formatHours(row.inputs.overtime_hours?.[bucket.key])}</td><td /><td /><td>{formatAmount(month.overtime_by_bucket?.[bucket.key])}</td></tr>
+            {bucketLines.map((line, index) => <tr key={`${bucket.key}-${index}`}><td>{line.date || t('mp.ot.manualDate')}</td><td>{line.weekday !== null && line.weekday !== undefined ? i18n.t(`mp.weekday.${(line.weekday + 1) % 7}`) : '—'}</td><td><b className={`mp-ot-mark ${bucket.key}`}>{bucketMark(bucket.key)}</b> {line.day_type ? DAY_TYPES[line.day_type] || line.day_type : bucketLabel(bucket.key)}</td><td>{formatHours(line.hours)}</td><td>{line.multiplier}</td><td>{formatAmount(line.rate)}</td><td>{formatAmount(line.amount)}</td></tr>)}
+            <tr className="mp-ot-subtotal"><td colSpan={3}>{bucketLabel(bucket.key)} · {t('mp.ot.law', { law: bucket.law })}</td><td>{formatHours(row.inputs.overtime_hours?.[bucket.key])}</td><td /><td /><td>{formatAmount(month.overtime_by_bucket?.[bucket.key])}</td></tr>
           </Fragment>
         })}
-      </tbody><tfoot><tr><td colSpan={6}>Нийт илүү цагийн хөлс</td><td>{formatAmount(month.overtime_pay)}</td></tr></tfoot></table>
-      <small>Цагийн үнэлгээ = үндсэн цалин ÷ {formatHours(row.result.planned_hours)} цаг = {formatAmount(row.result.hourly_rate)} ₮ (Хөдөлмөрийн тухай хууль 109.1, 109.2, 109.4).</small>
-      {manualHours && <small className="mp-manual-note">Тооцоолсон: {formatHours(Object.values(row.inputs._source_snapshot?.overtime_hours || {}).reduce((sum: number, value) => sum + toNumber(value), 0))} цаг · Гараар: {formatHours(overtimeTotal(row))} цаг</small>}
+      </tbody><tfoot><tr><td colSpan={6}>{t('mp.ot.total')}</td><td>{formatAmount(month.overtime_pay)}</td></tr></tfoot></table>
+      <small>{t('mp.ot.rateNote', { hours: formatHours(row.result.planned_hours), rate: formatAmount(row.result.hourly_rate) })}</small>
+      {manualHours && <small className="mp-manual-note">{t('mp.ot.manualNote', { computed: formatHours(Object.values(row.inputs._source_snapshot?.overtime_hours || {}).reduce((sum: number, value) => sum + toNumber(value), 0)), manual: formatHours(overtimeTotal(row)) })}</small>}
     </div>}
   </span>
 }
 
 function Cell({ column, row, index, editing }: { column: Column; row: Row; index: number; editing: boolean }) {
+  const { t } = useTranslation()
   const content = column.render ? column.render(row, editing) : (() => {
     const value = column.value(row, index)
     if (column.kind === 'money') return formatAmount(value)
@@ -114,7 +121,7 @@ function Cell({ column, row, index, editing }: { column: Column; row: Row; index
     column.key === 'net_pay' || column.key === 'advance' ? 'mp-key' : '',
   ].filter(Boolean).join(' ')
   const manual = column.manual?.(row)
-  const body = <>{content}{manual && <span className="mp-manual-dot" title="Гараар зассан" aria-label="Гараар зассан" />}</>
+  const body = <>{content}{manual && <span className="mp-manual-dot" title={t('mp.cell.manualEdit')} aria-label={t('mp.cell.manualEdit')} />}</>
   if (column.sticky === 'index' || column.sticky === 'name') return <th scope="row" className={classes}>{body}</th>
   // Worked hours carry their own per-day breakdown (overtime days included).
   return <td className={classes}>{overtimeCell && column.key !== 'worked_normal_hours' && !editing ? <OvertimeInfo row={row}>{body}</OvertimeInfo> : body}</td>
@@ -124,6 +131,7 @@ type MenuItem = { label: string; icon?: ReactNode; onClick: () => void; disabled
 
 /** Secondary run actions collapsed into one menu so the header stays one line. */
 function ActionMenu({ items }: { items: MenuItem[] }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -137,12 +145,13 @@ function ActionMenu({ items }: { items: MenuItem[] }) {
   const shown = items.filter((item) => !item.hidden)
   if (!shown.length) return null
   return <div className="mp-menu" ref={ref}>
-    <button type="button" className="payroll-v2-button secondary compact" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={14} />Бусад</button>
+    <button type="button" className="payroll-v2-button secondary compact" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={14} />{t('mp.menu.more')}</button>
     {open && <div className="mp-menu-list" role="menu">{shown.map((item) => <button key={item.label} type="button" role="menuitem" className={item.danger ? 'danger' : undefined} disabled={item.disabled} onClick={() => { setOpen(false); item.onClick() }}>{item.icon}{item.label}</button>)}</div>}
   </div>
 }
 
 export function RunRegister({ runId }: { runId: number }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const run = useMonthlyPayrollRun(runId)
@@ -199,20 +208,20 @@ export function RunRegister({ runId }: { runId: number }) {
   const unapprovedCount = rows.length - approvedCount
   const hasWorkedToDate = rows.some((row) => (row.result.advance_basis || row.profile.advance_basis) === 'WORKED-TO-DATE')
 
-  const departments = useMemo(() => Array.from(new Set(rows.map((row) => row.identity.department || 'Бусад'))).sort((a, b) => a.localeCompare(b, 'mn')), [rows])
+  const departments = useMemo(() => Array.from(new Set(rows.map((row) => row.identity.department || t('mp.common.other')))).sort((a, b) => a.localeCompare(b, intlLocale())), [rows])
   const activeFilter = FILTERS.find((item) => item.key === filter) || FILTERS[0]
   const visibleRows = rows.filter((row) => {
     const text = search.trim().toLocaleLowerCase()
     return (!text || `${row.identity.name || ''} ${row.identity.job_title || ''} ${row.identity.rd || ''}`.toLocaleLowerCase().includes(text))
-      && (!department || (row.identity.department || 'Бусад') === department) && activeFilter.test(row)
+      && (!department || (row.identity.department || t('mp.common.other')) === department) && activeFilter.test(row)
   })
   const groups = useMemo(() => {
     const map = new Map<string, Row[]>()
-    for (const row of [...visibleRows].sort((a, b) => (a.identity.name || '').localeCompare(b.identity.name || '', 'mn'))) {
-      const key = row.identity.department || 'Бусад'
+    for (const row of [...visibleRows].sort((a, b) => (a.identity.name || '').localeCompare(b.identity.name || '', intlLocale()))) {
+      const key = row.identity.department || t('mp.common.other')
       map.set(key, [...(map.get(key) || []), row])
     }
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b, 'mn'))
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b, intlLocale()))
   }, [visibleRows])
   const numbering = useMemo(() => new Map(groups.flatMap(([, list]) => list).map((row, position) => [row.employee_id, position + 1])), [groups])
 
@@ -226,7 +235,7 @@ export function RunRegister({ runId }: { runId: number }) {
     })
   }
   const saveEdit = async (row: Row) => {
-    const payload: Record<string, unknown> = { employeeId: row.employee_id, reason: 'Нягтлангийн засвар' }
+    const payload: Record<string, unknown> = { employeeId: row.employee_id, reason: t('mp.reg.accountantEdit') }
     // Blank worked days keeps the server's estimate from hours.
     if (draft.worked_days !== '' && draft.worked_days !== undefined) payload.worked_days = draft.worked_days
     Object.assign(payload, { worked_normal_hours: draft.worked_normal_hours || '0', leave_pay: draft.leave_pay || '0', bonus: draft.bonus || '0', overtime_hours: Object.fromEntries(Object.entries(draft.overtime_hours || {}).map(([key, value]) => [key, value || '0'])) })
@@ -235,66 +244,66 @@ export function RunRegister({ runId }: { runId: number }) {
       if (draft.advance_basis === 'WORKED-TO-DATE') payload.worked_to_date_hours = draft.worked_to_date_hours || '0'
       else if (draft.advance_value !== '' && toNumber(draft.advance_value) > 0) payload[draft.advance_basis === 'PERCENT' ? 'advance_percent' : 'fixed_advance'] = draft.advance_value
     }
-    try { await save.mutateAsync(payload as any); setEditing(null); toast.success('Мөр хадгалагдлаа') } catch (error) { toast.error(requestError(error)) }
+    try { await save.mutateAsync(payload as any); setEditing(null); toast.success(t('mp.reg.rowSaved')) } catch (error) { toast.error(requestError(error)) }
   }
   const setDraftValue = (key: string, value: unknown) => setDraft((current) => ({ ...current, [key]: value }))
   const numberInput = (label: string, value: unknown, onChange: (value: string) => void) => <input className="mp-inline-input" aria-label={label} type="text" inputMode="decimal" value={String(value ?? '')} onChange={(event) => onChange(event.target.value.replace(/[^\d.]/g, ''))} />
 
   // Plan §7.2: Excel order; the name cell carries the job title only when that column is hidden.
-  const nameColumn: Column = { key: 'name', label: 'Овог, Нэр', kind: 'text', short: true, sticky: 'name', value: displayName, render: (row) => <span className="mp-name">{displayName(row)}{preset === 'short' && row.identity.job_title ? <small>{row.identity.job_title}</small> : null}</span> }
+  const nameColumn: Column = { key: 'name', label: t('mp.reg.col.name'), kind: 'text', short: true, sticky: 'name', value: displayName, render: (row) => <span className="mp-name">{displayName(row)}{preset === 'short' && row.identity.job_title ? <small>{row.identity.job_title}</small> : null}</span> }
   const identityColumns: Column[] = [
     { key: 'index', label: '№', kind: 'text', short: true, sticky: 'index', value: (_row, index) => index },
     nameColumn,
-    { key: 'rd', label: 'РД', kind: 'text', value: (row) => row.identity.rd || '—' },
-    { key: 'job_title', label: 'Албан тушаал', kind: 'text', value: (row) => row.identity.job_title || '—' },
-    { key: 'base_salary', label: 'Үндсэн цалин', kind: 'money', value: (row) => row.profile.base_salary },
+    { key: 'rd', label: t('mp.reg.col.rd'), kind: 'text', value: (row) => row.identity.rd || '—' },
+    { key: 'job_title', label: t('mp.reg.col.jobTitle'), kind: 'text', value: (row) => row.identity.job_title || '—' },
+    { key: 'base_salary', label: t('mp.reg.col.baseSalary'), kind: 'money', value: (row) => row.profile.base_salary },
   ]
   // Plan §7.2 Excel order. Advance rows show the same month columns from their
   // full-month projection, so Суутгалын дүн = урьдчилгаа + НДШ + ХХОАТ + хоол унаа + бусад there.
   const advanceTitle = (row: Row) => isFinal
-    ? ((row.result.advance_lines || []).length ? `${row.result.advance_lines.length} батлагдсан урьдчилгааны бодолтоос` : undefined)
+    ? ((row.result.advance_lines || []).length ? t('mp.reg.fromApprovedAdvances', { n: row.result.advance_lines.length }) : undefined)
     : [
-      toNumber(row.result.advance_allowance) > 0 ? `${formatAmount(toNumber(row.result.advance) - toNumber(row.result.advance_allowance))} + хоол унаа ${formatAmount(row.result.advance_allowance)}` : '',
-      toNumber(monthFigures(row).prior_advances) > 0 ? `Өмнөх урьдчилгаа ${formatAmount(monthFigures(row).prior_advances)} ₮ сарын урьдчилгаанд орсон` : '',
+      toNumber(row.result.advance_allowance) > 0 ? t('mp.reg.advanceWithAllowance', { advance: formatAmount(toNumber(row.result.advance) - toNumber(row.result.advance_allowance)), allowance: formatAmount(row.result.advance_allowance) }) : '',
+      toNumber(monthFigures(row).prior_advances) > 0 ? t('mp.reg.priorAdvance', { amount: formatAmount(monthFigures(row).prior_advances) }) : '',
     ].filter(Boolean).join(' · ') || undefined
   const monthColumns: Column[] = [
-    { key: 'planned_days', label: 'Өдөр', group: 'Ажиллах', kind: 'days', value: (row) => row.result.planned_days ?? '—' },
-    { key: 'planned_hours', label: 'Цаг', group: 'Ажиллах', kind: 'hours', value: (row) => row.result.planned_hours },
-    { key: 'worked_normal_hours', label: 'Ажилласан цаг', kind: 'hours', short: true, value: (row) => row.inputs.worked_normal_hours, manual: (row) => sourceDiffers(row, 'worked_normal_hours'), render: (row, isEditing) => isEditing ? numberInput('Ажилласан цаг', draft.worked_normal_hours, (value) => setDraftValue('worked_normal_hours', value)) : <WorkedHoursInfo row={row} isFinal={isFinal} cutoff={data?.cutoff_date}>{formatHours(row.inputs.worked_normal_hours)}</WorkedHoursInfo> },
-    { key: 'worked_days', label: 'Ажилласан өдөр', kind: 'days', value: (row) => row.inputs.worked_days ?? monthFigures(row).allowance_days, manual: (row) => sourceDiffers(row, 'worked_days'), render: (row, isEditing) => isEditing ? numberInput('Ажилласан өдөр', draft.worked_days, (value) => setDraftValue('worked_days', value)) : (row.inputs.worked_days == null ? '—' : formatHours(row.inputs.worked_days)) },
-    { key: 'base_pay', label: 'Тооцсон цалин', kind: 'money', value: (row) => monthFigures(row).base_pay },
-    { key: 'overtime_hours', label: 'Илүү цаг', kind: 'hours', value: overtimeTotal, manual: (row) => sourceDiffers(row, 'overtime_hours'), render: (row, isEditing) => isEditing ? <span className="mp-ot-edit">{BUCKETS.map((bucket) => <label key={bucket.key} title={bucket.label}><b className={`mp-ot-mark ${bucket.key}`}>{bucket.mark}</b><input className="mp-inline-input" aria-label={bucket.label} type="text" inputMode="decimal" value={String(draft.overtime_hours?.[bucket.key] ?? '')} onChange={(event) => setDraftValue('overtime_hours', { ...draft.overtime_hours, [bucket.key]: event.target.value.replace(/[^\d.]/g, '') })} /></label>)}</span> : formatHours(overtimeTotal(row)) },
-    { key: 'overtime_pay', label: 'Илүү цагийн хөлс', kind: 'money', value: (row) => monthFigures(row).overtime_pay },
-    { key: 'leave_pay', label: 'Ээлжийн амралтын мөнгө', kind: 'money', value: (row) => row.inputs.leave_pay, manual: (row) => toNumber(row.inputs.leave_pay) > 0, render: (row, isEditing) => isEditing ? numberInput('Ээлжийн амралтын мөнгө', draft.leave_pay, (value) => setDraftValue('leave_pay', value)) : formatAmount(row.inputs.leave_pay) },
-    { key: 'meal_commute', label: 'Хоол унаа', kind: 'money', value: (row) => monthFigures(row).meal_commute },
-    { key: 'bonus', label: 'Урамшуулал', kind: 'money', value: (row) => row.inputs.bonus, manual: (row) => toNumber(row.inputs.bonus) > 0, render: (row, isEditing) => isEditing ? numberInput('Урамшуулал', draft.bonus, (value) => setDraftValue('bonus', value)) : formatAmount(row.inputs.bonus) },
-    { key: 'gross', label: 'Олговол зохих цалин', kind: 'money', short: true, value: (row) => monthFigures(row).gross, manual: (row) => isFinal && overridden(row, 'gross') },
-    { key: 'employee_shi', label: 'НДШ', group: 'Суутгалууд', kind: 'money', value: (row) => monthFigures(row).employee_shi, manual: (row) => isFinal && overridden(row, 'employee_shi') },
-    { key: 'relief', label: 'ХХОАТ ХӨН', group: 'Суутгалууд', kind: 'money', value: (row) => monthFigures(row).relief },
-    { key: 'pit', label: 'ХХОАТ', group: 'Суутгалууд', kind: 'money', value: (row) => monthFigures(row).pit, manual: (row) => isFinal && overridden(row, 'pit') },
-    { key: 'advance', label: 'Урьдчилгаа', group: 'Суутгалууд', kind: 'money', short: true, value: (row) => row.result.advance, manual: (row) => overridden(row, 'advance') || (!isFinal && Boolean(row.inputs.fixed_advance || row.inputs.advance_percent)), render: (row) => <span title={advanceTitle(row)}>{formatAmount(row.result.advance)}</span> },
+    { key: 'planned_days', label: t('mp.reg.col.days'), group: t('mp.reg.group.planned'), kind: 'days', value: (row) => row.result.planned_days ?? '—' },
+    { key: 'planned_hours', label: t('mp.dash.col.hours'), group: t('mp.reg.group.planned'), kind: 'hours', value: (row) => row.result.planned_hours },
+    { key: 'worked_normal_hours', label: t('mp.explain.worked'), kind: 'hours', short: true, value: (row) => row.inputs.worked_normal_hours, manual: (row) => sourceDiffers(row, 'worked_normal_hours'), render: (row, isEditing) => isEditing ? numberInput(t('mp.explain.worked'), draft.worked_normal_hours, (value) => setDraftValue('worked_normal_hours', value)) : <WorkedHoursInfo row={row} isFinal={isFinal} cutoff={data?.cutoff_date}>{formatHours(row.inputs.worked_normal_hours)}</WorkedHoursInfo> },
+    { key: 'worked_days', label: t('mp.hours.workedDays'), kind: 'days', value: (row) => row.inputs.worked_days ?? monthFigures(row).allowance_days, manual: (row) => sourceDiffers(row, 'worked_days'), render: (row, isEditing) => isEditing ? numberInput(t('mp.hours.workedDays'), draft.worked_days, (value) => setDraftValue('worked_days', value)) : (row.inputs.worked_days == null ? '—' : formatHours(row.inputs.worked_days)) },
+    { key: 'base_pay', label: t('mp.explain.base'), kind: 'money', value: (row) => monthFigures(row).base_pay },
+    { key: 'overtime_hours', label: t('mp.hours.overtime'), kind: 'hours', value: overtimeTotal, manual: (row) => sourceDiffers(row, 'overtime_hours'), render: (row, isEditing) => isEditing ? <span className="mp-ot-edit">{BUCKETS.map((bucket) => <label key={bucket.key} title={bucketLabel(bucket.key)}><b className={`mp-ot-mark ${bucket.key}`}>{bucketMark(bucket.key)}</b><input className="mp-inline-input" aria-label={bucketLabel(bucket.key)} type="text" inputMode="decimal" value={String(draft.overtime_hours?.[bucket.key] ?? '')} onChange={(event) => setDraftValue('overtime_hours', { ...draft.overtime_hours, [bucket.key]: event.target.value.replace(/[^\d.]/g, '') })} /></label>)}</span> : formatHours(overtimeTotal(row)) },
+    { key: 'overtime_pay', label: t('mp.explain.overtimePay'), kind: 'money', value: (row) => monthFigures(row).overtime_pay },
+    { key: 'leave_pay', label: t('mp.reg.col.leavePay'), kind: 'money', value: (row) => row.inputs.leave_pay, manual: (row) => toNumber(row.inputs.leave_pay) > 0, render: (row, isEditing) => isEditing ? numberInput(t('mp.reg.col.leavePay'), draft.leave_pay, (value) => setDraftValue('leave_pay', value)) : formatAmount(row.inputs.leave_pay) },
+    { key: 'meal_commute', label: t('mp.explain.allowance'), kind: 'money', value: (row) => monthFigures(row).meal_commute },
+    { key: 'bonus', label: t('mp.reg.col.bonus'), kind: 'money', value: (row) => row.inputs.bonus, manual: (row) => toNumber(row.inputs.bonus) > 0, render: (row, isEditing) => isEditing ? numberInput(t('mp.reg.col.bonus'), draft.bonus, (value) => setDraftValue('bonus', value)) : formatAmount(row.inputs.bonus) },
+    { key: 'gross', label: t('mp.dash.grossPay'), kind: 'money', short: true, value: (row) => monthFigures(row).gross, manual: (row) => isFinal && overridden(row, 'gross') },
+    { key: 'employee_shi', label: t('mp.dash.employeeShiShort'), group: t('mp.reg.group.deductions'), kind: 'money', value: (row) => monthFigures(row).employee_shi, manual: (row) => isFinal && overridden(row, 'employee_shi') },
+    { key: 'relief', label: t('mp.explain.relief'), group: t('mp.reg.group.deductions'), kind: 'money', value: (row) => monthFigures(row).relief },
+    { key: 'pit', label: t('mp.dash.pit'), group: t('mp.reg.group.deductions'), kind: 'money', value: (row) => monthFigures(row).pit, manual: (row) => isFinal && overridden(row, 'pit') },
+    { key: 'advance', label: t('mp.explain.advance'), group: t('mp.reg.group.deductions'), kind: 'money', short: true, value: (row) => row.result.advance, manual: (row) => overridden(row, 'advance') || (!isFinal && Boolean(row.inputs.fixed_advance || row.inputs.advance_percent)), render: (row) => <span title={advanceTitle(row)}>{formatAmount(row.result.advance)}</span> },
   ]
   const finalColumns: Column[] = [
     ...identityColumns,
     ...monthColumns,
-    { key: 'other_deductions', label: 'Бусад суутгал', group: 'Суутгалууд', kind: 'money', value: (row) => row.result.other_deductions, manual: (row) => (row.inputs.other_deductions || []).length > 0 || overridden(row, 'other_deductions') },
-    { key: 'total_deductions', label: 'Суутгалын дүн', kind: 'money', short: true, value: (row) => row.result.total_deductions },
-    { key: 'net_pay', label: 'Сүүл цалин (Гарт олгох)', kind: 'money', short: true, value: (row) => row.result.net_pay },
-    { key: 'employer_shi', label: 'БНДШ', kind: 'money', value: (row) => row.result.employer_shi, manual: (row) => overridden(row, 'employer_shi') },
+    { key: 'other_deductions', label: t('mp.dash.otherDeductions'), group: t('mp.reg.group.deductions'), kind: 'money', value: (row) => row.result.other_deductions, manual: (row) => (row.inputs.other_deductions || []).length > 0 || overridden(row, 'other_deductions') },
+    { key: 'total_deductions', label: t('mp.explain.totalDeductions'), kind: 'money', short: true, value: (row) => row.result.total_deductions },
+    { key: 'net_pay', label: t('mp.reg.col.netFinal'), kind: 'money', short: true, value: (row) => row.result.net_pay },
+    { key: 'employer_shi', label: t('mp.dash.employerShi'), kind: 'money', value: (row) => row.result.employer_shi, manual: (row) => overridden(row, 'employer_shi') },
   ]
   // Plan §7.1 basis columns first; the cut-off hours column appears only for WORKED-TO-DATE workers.
   const advanceColumns: Column[] = [
     ...identityColumns,
-    { key: 'salary_type', label: 'Төрөл', kind: 'text', value: (row) => SALARY_TYPES[String(row.profile.salary_type)] || row.profile.salary_type },
-    { key: 'advance_basis', label: 'Суурь', group: 'Урьдчилгааны тооцоо', kind: 'text', value: (row) => BASIS_LABELS[row.result.advance_basis] || row.result.advance_basis || '—', render: (row, isEditing) => isEditing ? <select className="mp-inline-input" aria-label="Урьдчилгааны суурь" value={draft.advance_basis} onChange={(event) => setDraftValue('advance_basis', event.target.value)}>{Object.entries(BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : (BASIS_LABELS[row.result.advance_basis] || row.result.advance_basis || '—') },
-    { key: 'advance_value', label: 'Хувь / дүн', group: 'Урьдчилгааны тооцоо', kind: 'text', manual: (row) => Boolean(row.inputs.fixed_advance || row.inputs.advance_percent), value: (row) => row.result.advance_value, render: (row, isEditing) => isEditing ? (draft.advance_basis === 'WORKED-TO-DATE' ? '—' : numberInput('Хувь эсвэл дүн', draft.advance_value, (value) => setDraftValue('advance_value', value))) : row.result.advance_basis === 'PERCENT' ? `${formatHours(row.result.advance_value)}%` : row.result.advance_basis === 'FIXED' ? formatAmount(row.result.advance_value) : '—' },
-    ...(hasWorkedToDate ? [{ key: 'worked_to_date_hours', label: 'Таслах өдөр хүртэл цаг', group: 'Урьдчилгааны тооцоо', kind: 'hours' as Kind, value: (row: Row) => (row.result.advance_basis === 'WORKED-TO-DATE' ? row.inputs.worked_to_date_hours : 0), manual: (row: Row) => sourceDiffers(row, 'worked_to_date_hours'), render: (row: Row, isEditing: boolean) => isEditing && draft.advance_basis === 'WORKED-TO-DATE' ? numberInput('Таслах өдөр хүртэл ажилласан цаг', draft.worked_to_date_hours, (value) => setDraftValue('worked_to_date_hours', value)) : row.result.advance_basis === 'WORKED-TO-DATE' ? formatHours(row.inputs.worked_to_date_hours) : '—' }] : []),
+    { key: 'salary_type', label: t('mp.row.col.type'), kind: 'text', value: (row) => SALARY_TYPES[String(row.profile.salary_type)] || row.profile.salary_type },
+    { key: 'advance_basis', label: t('mp.reg.col.basis'), group: t('mp.reg.group.advanceCalc'), kind: 'text', value: (row) => BASIS_LABELS[row.result.advance_basis] || row.result.advance_basis || '—', render: (row, isEditing) => isEditing ? <select className="mp-inline-input" aria-label={t('mp.reg.aria.advanceBasis')} value={draft.advance_basis} onChange={(event) => setDraftValue('advance_basis', event.target.value)}>{Object.entries(BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : (BASIS_LABELS[row.result.advance_basis] || row.result.advance_basis || '—') },
+    { key: 'advance_value', label: t('mp.reg.col.percentOrAmount'), group: t('mp.reg.group.advanceCalc'), kind: 'text', manual: (row) => Boolean(row.inputs.fixed_advance || row.inputs.advance_percent), value: (row) => row.result.advance_value, render: (row, isEditing) => isEditing ? (draft.advance_basis === 'WORKED-TO-DATE' ? '—' : numberInput(t('mp.reg.aria.percentOrAmount'), draft.advance_value, (value) => setDraftValue('advance_value', value))) : row.result.advance_basis === 'PERCENT' ? `${formatHours(row.result.advance_value)}%` : row.result.advance_basis === 'FIXED' ? formatAmount(row.result.advance_value) : '—' },
+    ...(hasWorkedToDate ? [{ key: 'worked_to_date_hours', label: t('mp.reg.col.hoursToCutoff'), group: t('mp.reg.group.advanceCalc'), kind: 'hours' as Kind, value: (row: Row) => (row.result.advance_basis === 'WORKED-TO-DATE' ? row.inputs.worked_to_date_hours : 0), manual: (row: Row) => sourceDiffers(row, 'worked_to_date_hours'), render: (row: Row, isEditing: boolean) => isEditing && draft.advance_basis === 'WORKED-TO-DATE' ? numberInput(t('mp.reg.aria.workedToDate'), draft.worked_to_date_hours, (value) => setDraftValue('worked_to_date_hours', value)) : row.result.advance_basis === 'WORKED-TO-DATE' ? formatHours(row.inputs.worked_to_date_hours) : '—' }] : []),
     ...monthColumns,
-    { key: 'advance_allowance', label: 'Үүнээс хоол унаа', group: 'Суутгалууд', kind: 'money', value: (row) => row.result.advance_allowance },
-    { key: 'total_deductions', label: 'Суутгалын дүн', kind: 'money', short: true, value: (row) => monthFigures(row).total_deductions },
-    { key: 'net_pay', label: 'Сүүл цалин (тооцоолсон)', kind: 'money', short: true, value: (row) => monthFigures(row).net_pay },
-    { key: 'employer_shi', label: 'БНДШ', kind: 'money', value: (row) => monthFigures(row).employer_shi },
-    { key: 'pay_date', label: 'Төлбөрийн өдөр', kind: 'text', value: (row) => row.identity.pay_date || data?.pay_date },
+    { key: 'advance_allowance', label: t('mp.reg.col.ofWhichAllowance'), group: t('mp.reg.group.deductions'), kind: 'money', value: (row) => row.result.advance_allowance },
+    { key: 'total_deductions', label: t('mp.explain.totalDeductions'), kind: 'money', short: true, value: (row) => monthFigures(row).total_deductions },
+    { key: 'net_pay', label: t('mp.reg.col.netEstimated'), kind: 'money', short: true, value: (row) => monthFigures(row).net_pay },
+    { key: 'employer_shi', label: t('mp.dash.employerShi'), kind: 'money', value: (row) => monthFigures(row).employer_shi },
+    { key: 'pay_date', label: t('mp.row.col.payDate'), kind: 'text', value: (row) => row.identity.pay_date || data?.pay_date },
   ]
   const columns = (isFinal ? finalColumns : advanceColumns).filter((column) => preset === 'full' || column.short)
   const grouped = preset === 'full' && columns.some((column) => column.group)
@@ -308,19 +317,19 @@ export function RunRegister({ runId }: { runId: number }) {
       const result = await approve.mutateAsync(runId)
       const outcome = result.approval_summary || { approved: 0, skipped: [] }
       setSummary(outcome.skipped.length ? outcome : null)
-      toast.success(outcome.skipped.length ? `${outcome.approved} мөр батлагдлаа · ${outcome.skipped.length} мөр шалгалтад үлдлээ` : 'Бүх мөр батлагдлаа')
+      toast.success(outcome.skipped.length ? t('mp.reg.approvedWithSkipped', { approved: outcome.approved, skipped: outcome.skipped.length }) : t('mp.reg.allApproved'))
     } catch (error) { toast.error(requestError(error)) }
   }
-  const flag = async (row: Row) => { const reason = await askReason(`${displayName(row)} — шалгах тэмдэглэгээ`, 'Юуг шалгах вэ?', 'Тэмдэглэх'); if (reason) runAction(flagRow.mutateAsync({ employeeId: row.employee_id, reason }), 'Мөрийг шалгахаар тэмдэглэлээ') }
-  const reopenRun = async () => { const reason = await askReason(data?.status === 'paid' ? 'Төлсөн бодолтыг дахин нээх' : 'Баталсан бодолтыг дахин нээх', 'Шалтгаан', 'Нээх'); if (reason) runAction(reopen.mutateAsync({ id: runId, reason }), 'Бодолт ноорог төлөвт орлоо') }
+  const flag = async (row: Row) => { const reason = await askReason(t('mp.reg.flagTitle', { name: displayName(row) }), t('mp.reg.flagLabel'), t('mp.reg.flagConfirm')); if (reason) runAction(flagRow.mutateAsync({ employeeId: row.employee_id, reason }), t('mp.reg.flagged')) }
+  const reopenRun = async () => { const reason = await askReason(data?.status === 'paid' ? t('mp.reg.reopenPaid') : t('mp.reg.reopenApproved'), t('mp.reason.label'), t('mp.reg.open')); if (reason) runAction(reopen.mutateAsync({ id: runId, reason }), t('mp.reg.reopened')) }
 
-  if (run.isLoading || !data) return <MonthlyShell><div className="payroll-v2-loading">{run.error ? requestError(run.error) : 'Бодолт ачаалж байна…'}</div></MonthlyShell>
+  if (run.isLoading || !data) return <MonthlyShell><div className="payroll-v2-loading">{run.error ? requestError(run.error) : t('mp.reg.loading')}</div></MonthlyShell>
 
   const monthValue = month.data ? monthKey(month.data.year, month.data.month) : data.pay_date.slice(0, 7)
   const removeRun = async () => {
-    const reason = await askReason(`«${runTitle(data)}» бодолтыг устгах`, 'Устгах шалтгаан (бүх мөр, засварын түүх устана)', 'Устгах')
+    const reason = await askReason(t('mp.reg.deleteTitle', { title: runTitle(data) }), t('mp.reg.deleteReason'), t('mp.reg.delete'))
     if (!reason) return
-    try { await deleteRun.mutateAsync({ id: runId, reason }); toast.success('Бодолт устгагдлаа. Шинээр үүсгэж болно.'); navigate(`/erp/payroll/monthly?month=${monthValue}`) } catch (error) { toast.error(requestError(error)) }
+    try { await deleteRun.mutateAsync({ id: runId, reason }); toast.success(t('mp.reg.deleted')); navigate(`/erp/payroll/monthly?month=${monthValue}`) } catch (error) { toast.error(requestError(error)) }
   }
   const incomplete = rows.filter((row) => row.warnings.some((warning) => PROFILE_WARNINGS.includes(warning)))
   const hrChanged = rows.filter((row) => row.warnings.includes('hr_changed'))
@@ -329,10 +338,10 @@ export function RunRegister({ runId }: { runId: number }) {
   const advanceRuns = (month.data?.runs || []).filter((item) => item.run_type === 'advance')
   const withTime = rows.filter((row) => row.inputs.time_source && row.inputs.time_source !== 'manual').length
   const checklist = isFinal ? [
-    { label: 'Урьдчилгаа батлагдсан', done: advanceRuns.every((item) => ['approved', 'paid', 'closed', 'waived'].includes(item.status)), detail: advanceRuns.length ? `${advanceRuns.filter((item) => item.status !== 'draft').length}/${advanceRuns.length}` : 'бодолтгүй' },
-    { label: 'Цаг татсан', done: rows.every((row) => row.inputs.time_source !== 'manual' || toNumber(row.inputs.worked_normal_hours) > 0), detail: `${withTime}/${rows.length}` },
-    { label: 'Илүү цаг', done: true, detail: `${rows.filter((row) => row.warnings.includes('overtime_work')).length}` },
-    { label: 'Гар оролт', done: true, detail: `${rows.filter((row) => toNumber(row.inputs.leave_pay) || toNumber(row.inputs.bonus) || (row.inputs.other_deductions || []).length).length}` },
+    { label: t('mp.reg.check.advancesApproved'), done: advanceRuns.every((item) => ['approved', 'paid', 'closed', 'waived'].includes(item.status)), detail: advanceRuns.length ? `${advanceRuns.filter((item) => item.status !== 'draft').length}/${advanceRuns.length}` : t('mp.reg.check.noRuns') },
+    { label: t('mp.reg.check.timePulled'), done: rows.every((row) => row.inputs.time_source !== 'manual' || toNumber(row.inputs.worked_normal_hours) > 0), detail: `${withTime}/${rows.length}` },
+    { label: t('mp.hours.overtime'), done: true, detail: `${rows.filter((row) => row.warnings.includes('overtime_work')).length}` },
+    { label: t('mp.reg.check.manualInputs'), done: true, detail: `${rows.filter((row) => toNumber(row.inputs.leave_pay) || toNumber(row.inputs.bonus) || (row.inputs.other_deductions || []).length).length}` },
   ] : []
   const drawer = rows.find((row) => row.employee_id === drawerRow)
   const exportDisabled = data.status === 'draft'
@@ -340,41 +349,41 @@ export function RunRegister({ runId }: { runId: number }) {
   const progress = rows.length ? Math.round((approvedCount * 100) / rows.length) : 0
 
   const menu: MenuItem[] = [
-    { label: 'Ажилчид шинэчлэх', icon: <RefreshCw size={13} />, hidden: !editable, disabled: syncWorkers.isPending, onClick: () => syncWorkers.mutate(runId, { onSuccess: (result) => toast.success(`${result.added_workers || 0} ажилтан нэмэгдлээ · ${result.hr_changed_rows || 0} мөрөнд HR өөрчлөлт`), onError: (error) => toast.error(requestError(error)) }) },
-    { label: 'Дахин бодох', icon: <RefreshCw size={13} />, hidden: !editable || !capabilities.calculate, disabled: calculate.isPending, onClick: () => runAction(calculate.mutateAsync(runId), 'Дахин бодлоо (батлагдсан мөр өөрчлөгдөөгүй)') },
-    { label: 'Ажилтан нэмэх', icon: <UserPlus size={13} />, hidden: !editable || isFinal, onClick: () => setAdding((value) => !value) },
-    { label: 'Урьдчилгаа дахин татах', icon: <RefreshCw size={13} />, hidden: !editable || !isFinal, disabled: refreshAdvances.isPending, onClick: () => runAction(refreshAdvances.mutateAsync(runId), 'Урьдчилгаа дахин татагдлаа') },
-    { label: 'Import template татах(Excel)', icon: <Download size={13} />, hidden: !editable || !capabilities.export, onClick: () => { downloadMonthlyPayrollInputTemplate(runId).catch((error) => toast.error(requestError(error))) } },
-    { label: 'Import (Excel)', icon: <Upload size={13} />, hidden: !editable, disabled: importInputs.isPending, onClick: () => fileRef.current?.click() },
-    { label: 'Батлалт цуцлах', hidden: !(data.status === 'approved' && monthOpen && capabilities.approve), disabled: unapprove.isPending, onClick: () => runAction(unapprove.mutateAsync(runId), 'Батлалт цуцлагдлаа') },
-    { label: 'Төлсөнийг буцаах', hidden: !(data.status === 'paid' && monthOpen && capabilities.pay), disabled: unpay.isPending, onClick: () => runAction(unpay.mutateAsync(runId), 'Төлөөгүй болголоо') },
-    { label: 'Дахин нээх', icon: <LockKeyhole size={13} />, hidden: !(['approved', 'paid'].includes(data.status) && monthOpen && capabilities.administer), disabled: reopen.isPending, onClick: reopenRun },
-    { label: 'Сар хаах', icon: <LockKeyhole size={13} />, hidden: !(isFinal && monthOpen), onClick: () => navigate(`/erp/payroll/monthly?month=${monthValue}&close=1`) },
-    { label: 'Архивлах', onClick: () => navigate('/erp/payroll/monthly/archive') },
-    { label: 'Бодолт устгах', icon: <Trash2 size={13} />, danger: true, hidden: !canDelete, disabled: deleteRun.isPending, onClick: removeRun },
+    { label: t('mp.reg.menu.syncWorkers'), icon: <RefreshCw size={13} />, hidden: !editable, disabled: syncWorkers.isPending, onClick: () => syncWorkers.mutate(runId, { onSuccess: (result) => toast.success(t('mp.reg.workersAdded', { added: result.added_workers || 0, changed: result.hr_changed_rows || 0 })), onError: (error) => toast.error(requestError(error)) }) },
+    { label: t('mp.reg.menu.recalculate'), icon: <RefreshCw size={13} />, hidden: !editable || !capabilities.calculate, disabled: calculate.isPending, onClick: () => runAction(calculate.mutateAsync(runId), t('mp.reg.recalculated')) },
+    { label: t('mp.reg.menu.addWorker'), icon: <UserPlus size={13} />, hidden: !editable || isFinal, onClick: () => setAdding((value) => !value) },
+    { label: t('mp.reg.menu.refreshAdvances'), icon: <RefreshCw size={13} />, hidden: !editable || !isFinal, disabled: refreshAdvances.isPending, onClick: () => runAction(refreshAdvances.mutateAsync(runId), t('mp.reg.advancesRefreshed')) },
+    { label: t('mp.reg.menu.downloadTemplate'), icon: <Download size={13} />, hidden: !editable || !capabilities.export, onClick: () => { downloadMonthlyPayrollInputTemplate(runId).catch((error) => toast.error(requestError(error))) } },
+    { label: t('mp.reg.menu.import'), icon: <Upload size={13} />, hidden: !editable, disabled: importInputs.isPending, onClick: () => fileRef.current?.click() },
+    { label: t('mp.reg.menu.unapprove'), hidden: !(data.status === 'approved' && monthOpen && capabilities.approve), disabled: unapprove.isPending, onClick: () => runAction(unapprove.mutateAsync(runId), t('mp.reg.unapproved')) },
+    { label: t('mp.reg.menu.unpay'), hidden: !(data.status === 'paid' && monthOpen && capabilities.pay), disabled: unpay.isPending, onClick: () => runAction(unpay.mutateAsync(runId), t('mp.reg.unpaid')) },
+    { label: t('mp.reg.menu.reopen'), icon: <LockKeyhole size={13} />, hidden: !(['approved', 'paid'].includes(data.status) && monthOpen && capabilities.administer), disabled: reopen.isPending, onClick: reopenRun },
+    { label: t('mp.reg.menu.closeMonth'), icon: <LockKeyhole size={13} />, hidden: !(isFinal && monthOpen), onClick: () => navigate(`/erp/payroll/monthly?month=${monthValue}&close=1`) },
+    { label: t('mp.reg.menu.archive'), onClick: () => navigate('/erp/payroll/monthly/archive') },
+    { label: t('mp.reg.menu.deleteRun'), icon: <Trash2 size={13} />, danger: true, hidden: !canDelete, disabled: deleteRun.isPending, onClick: removeRun },
   ]
 
   const notices: ReactNode[] = []
-  if (incomplete.length) notices.push(<div key="profile" className="mp-strip danger"><CircleAlert size={14} /><span><strong>{incomplete.length} ажилтны цалингийн профайл дутуу</strong> — {incomplete.slice(0, 3).map(displayName).join(', ')}{incomplete.length > 3 ? '…' : ''}</span><Link to="/hr?tab=directory">HR профайл</Link></div>)
-  if (hrChanged.length) notices.push(<div key="hr" className="mp-strip info"><Info size={14} /><span><strong>{hrChanged.length} мөрөнд HR мэдээлэл өөрчлөгдсөн</strong> — мөр бүрийн «HR» товчоор хүлээн авна.</span></div>)
-  if (isFinal && (advanceChanged || advanceMissing)) notices.push(<div key="advance" className="mp-strip warning"><CircleAlert size={14} /><span><strong>Урьдчилгаа: {advanceChanged} өөрчлөгдсөн · {advanceMissing} бодоогүй</strong></span>{editable && advanceChanged > 0 && <button className="payroll-v2-button secondary compact" disabled={refreshAdvances.isPending} onClick={() => runAction(refreshAdvances.mutateAsync(runId), 'Урьдчилгаа дахин татагдлаа')}><RefreshCw size={12} />Дахин татах</button>}</div>)
-  if (summary) notices.push(<div key="summary" className="mp-strip warning"><CircleAlert size={14} /><span><strong>{summary.skipped.length} мөр батлагдаагүй:</strong> {summary.skipped.map((item) => `${item.employee_name || item.employee_id} (${item.message || item.issues.map(warningLabel).join(', ')})`).join(' · ')}</span><button type="button" className="mp-icon-button" aria-label="Хаах" onClick={() => setSummary(null)}><X size={13} /></button></div>)
-  if (adding && editable) notices.push(<div key="adding" className="mp-strip info"><UserPlus size={14} /><label className="mp-add-workers">Нэг удаагийн урьдчилгаа авах ажилтан<select multiple value={addIds.map(String)} onChange={(event) => setAddIds(Array.from(event.currentTarget.selectedOptions, (option) => Number(option.value)))}>{(workers.data || []).filter((worker) => !rows.some((row) => row.employee_id === worker.id)).map((worker) => <option key={worker.id} value={worker.id}>{worker.name}</option>)}</select><small>Ctrl / ⌘ дарж олныг сонгоно.</small></label><button className="payroll-v2-button primary compact" disabled={!addIds.length || addWorkers.isPending} onClick={() => addWorkers.mutate(addIds, { onSuccess: (result) => { toast.success(`${result.added_workers} ажилтан нэмэгдлээ`); setAdding(false); setAddIds([]) }, onError: (error) => toast.error(requestError(error)) })}>Нэмэх</button><button type="button" className="mp-icon-button" aria-label="Хаах" onClick={() => setAdding(false)}><X size={13} /></button></div>)
+  if (incomplete.length) notices.push(<div key="profile" className="mp-strip danger"><CircleAlert size={14} /><span><strong>{t('mp.reg.notice.profileIncomplete', { n: incomplete.length })}</strong> — {incomplete.slice(0, 3).map(displayName).join(', ')}{incomplete.length > 3 ? '…' : ''}</span><Link to="/hr?tab=directory">{t('mp.reg.notice.hrProfile')}</Link></div>)
+  if (hrChanged.length) notices.push(<div key="hr" className="mp-strip info"><Info size={14} /><span><strong>{t('mp.reg.notice.hrChanged', { n: hrChanged.length })}</strong> — {t('mp.reg.notice.hrChangedHint')}</span></div>)
+  if (isFinal && (advanceChanged || advanceMissing)) notices.push(<div key="advance" className="mp-strip warning"><CircleAlert size={14} /><span><strong>{t('mp.reg.notice.advanceStats', { changed: advanceChanged, missing: advanceMissing })}</strong></span>{editable && advanceChanged > 0 && <button className="payroll-v2-button secondary compact" disabled={refreshAdvances.isPending} onClick={() => runAction(refreshAdvances.mutateAsync(runId), t('mp.reg.advancesRefreshed'))}><RefreshCw size={12} />{t('mp.reg.notice.refetch')}</button>}</div>)
+  if (summary) notices.push(<div key="summary" className="mp-strip warning"><CircleAlert size={14} /><span><strong>{t('mp.reg.notice.skipped', { n: summary.skipped.length })}</strong> {summary.skipped.map((item) => `${item.employee_name || item.employee_id} (${item.message || item.issues.map(warningLabel).join(', ')})`).join(' · ')}</span><button type="button" className="mp-icon-button" aria-label={t('mp.common.close')} onClick={() => setSummary(null)}><X size={13} /></button></div>)
+  if (adding && editable) notices.push(<div key="adding" className="mp-strip info"><UserPlus size={14} /><label className="mp-add-workers">{t('mp.reg.notice.addWorkers')}<select multiple value={addIds.map(String)} onChange={(event) => setAddIds(Array.from(event.currentTarget.selectedOptions, (option) => Number(option.value)))}>{(workers.data || []).filter((worker) => !rows.some((row) => row.employee_id === worker.id)).map((worker) => <option key={worker.id} value={worker.id}>{worker.name}</option>)}</select><small>{t('mp.reg.notice.multiSelect')}</small></label><button className="payroll-v2-button primary compact" disabled={!addIds.length || addWorkers.isPending} onClick={() => addWorkers.mutate(addIds, { onSuccess: (result) => { toast.success(t('mp.reg.addedCount', { n: result.added_workers })); setAdding(false); setAddIds([]) }, onError: (error) => toast.error(requestError(error)) })}>{t('mp.reg.notice.add')}</button><button type="button" className="mp-icon-button" aria-label={t('mp.common.close')} onClick={() => setAdding(false)}><X size={13} /></button></div>)
 
   const header = <div className="mp-run-header">
     <div className="mp-month-stepper">
-      <button type="button" className="mp-icon-button" aria-label="Өмнөх сар" onClick={() => navigate(`/erp/payroll/monthly?month=${shiftMonth(monthValue, -1)}`)}>◀</button>
+      <button type="button" className="mp-icon-button" aria-label={t('mp.month.prev')} onClick={() => navigate(`/erp/payroll/monthly?month=${shiftMonth(monthValue, -1)}`)}>◀</button>
       <Link to={`/erp/payroll/monthly?month=${monthValue}`} className="mp-month-link">{monthValue}</Link>
-      <button type="button" className="mp-icon-button" aria-label="Дараах сар" onClick={() => navigate(`/erp/payroll/monthly?month=${shiftMonth(monthValue, 1)}`)}>▶</button>
+      <button type="button" className="mp-icon-button" aria-label={t('mp.month.next')} onClick={() => navigate(`/erp/payroll/monthly?month=${shiftMonth(monthValue, 1)}`)}>▶</button>
     </div>
     <h1>{runTitle(data)}</h1>
     <RunStatusChip status={data.status} />
-    <span className="mp-progress" aria-label="Батлалтын явц"><span className="mp-progress-bar"><i style={{ width: `${progress}%` }} /></span>{approvedCount}/{rows.length} батлагдсан</span>
+    <span className="mp-progress" aria-label={t('mp.reg.approvalProgress')}><span className="mp-progress-bar"><i style={{ width: `${progress}%` }} /></span>{t('mp.reg.approvedOf', { approved: approvedCount, total: rows.length })}</span>
     <div className="mp-run-actions">
-      {editable && <button className="payroll-v2-button secondary compact" disabled={refreshTime.isPending} title="Ажилтны цагийн бүртгэл, ирцээс ажилласан цагийг дахин татна" onClick={() => runAction(refreshTime.mutateAsync(runId), 'Цагийн бүртгэлээс татлаа')}><RefreshCw size={13} />Цагийн бүртгэлээс татах</button>}
-      {canApprove && <button className="payroll-v2-button primary compact" disabled={approve.isPending || unapprovedCount === 0} onClick={approveAll}><Check size={13} />Бүгдийг батлах</button>}
-      {data.status === 'approved' && Boolean(capabilities.pay) && <button className="payroll-v2-button primary compact" disabled={pay.isPending} onClick={() => runAction(pay.mutateAsync(runId), 'Төлсөн гэж тэмдэглэлээ')}>Төлсөн</button>}
-      {Boolean(capabilities.export) && <span title={exportDisabled ? `${unapprovedCount} мөр батлагдаагүй` : undefined}><button className="payroll-v2-button secondary compact" disabled={exportDisabled} onClick={() => downloadMonthlyPayrollExport(runId).catch((error) => toast.error(requestError(error)))}><Download size={13} />Excel татах</button></span>}
+      {editable && <button className="payroll-v2-button secondary compact" disabled={refreshTime.isPending} title={t('mp.reg.pullTimeTitle')} onClick={() => runAction(refreshTime.mutateAsync(runId), t('mp.reg.pulledTime'))}><RefreshCw size={13} />{t('mp.reg.pullTime')}</button>}
+      {canApprove && <button className="payroll-v2-button primary compact" disabled={approve.isPending || unapprovedCount === 0} onClick={approveAll}><Check size={13} />{t('mp.reg.approveAll')}</button>}
+      {data.status === 'approved' && Boolean(capabilities.pay) && <button className="payroll-v2-button primary compact" disabled={pay.isPending} onClick={() => runAction(pay.mutateAsync(runId), t('mp.reg.markedPaid'))}>{t('mp.runStatus.paid')}</button>}
+      {Boolean(capabilities.export) && <span title={exportDisabled ? t('mp.reg.unapprovedRows', { n: unapprovedCount }) : undefined}><button className="payroll-v2-button secondary compact" disabled={exportDisabled} onClick={() => downloadMonthlyPayrollExport(runId).catch((error) => toast.error(requestError(error)))}><Download size={13} />{t('mp.reg.downloadExcel')}</button></span>}
       <ActionMenu items={menu} />
     </div>
   </div>
@@ -382,17 +391,17 @@ export function RunRegister({ runId }: { runId: number }) {
   const rowActions = (row: Row, isEditing: boolean) => {
     const blocking = row.warnings.filter((warning) => BLOCKING_WARNINGS.has(warning))
     if (isEditing) return <>
-      <button type="button" className="mp-icon-button primary" aria-label="Хадгалах" title="Хадгалах (Enter)" disabled={save.isPending} onClick={() => saveEdit(row)}><Check size={13} /></button>
-      <button type="button" className="mp-icon-button" aria-label="Болих" title="Болих (Esc)" onClick={() => setEditing(null)}><X size={13} /></button>
+      <button type="button" className="mp-icon-button primary" aria-label={t('mp.common.save')} title={t('mp.reg.save')} disabled={save.isPending} onClick={() => saveEdit(row)}><Check size={13} /></button>
+      <button type="button" className="mp-icon-button" aria-label={t('mp.common.cancel')} title={t('mp.reg.cancelEsc')} onClick={() => setEditing(null)}><X size={13} /></button>
     </>
     return <>
-      {canApprove && row.status === 'draft' && <button type="button" className="mp-icon-button approve" aria-label="Батлах" title={blocking.length ? `Батлах боломжгүй: ${blocking.map(warningLabel).join(', ')}` : 'Батлах'} disabled={approveRow.isPending || blocking.length > 0} onClick={() => runAction(approveRow.mutateAsync(row.employee_id), 'Мөр батлагдлаа')}><Check size={13} /></button>}
-      {canApprove && row.status === 'approved' && <button type="button" className="mp-icon-button" aria-label="Батлалт цуцлах" title="Батлалт цуцлах" disabled={unapproveRow.isPending} onClick={() => runAction(unapproveRow.mutateAsync(row.employee_id), 'Мөрийн батлалт цуцлагдлаа')}>↺</button>}
-      {editable && row.status === 'draft' && <button type="button" className="mp-icon-button flag" aria-label="Шалгах тэмдэглэх" title="Шалгах тэмдэглэх" onClick={() => flag(row)}><X size={13} /></button>}
-      {editable && row.status === 'flagged' && <button type="button" className="mp-icon-button" aria-label="Тэмдэглэгээ арилгах" title={`Тэмдэглэгээ арилгах: ${row.inputs.flag_reason || ''}`} onClick={() => runAction(unflagRow.mutateAsync(row.employee_id), 'Тэмдэглэгээ арилгалаа')}>⚑</button>}
-      {editable && row.profile.complete !== false && <button type="button" className="mp-icon-button" aria-label="Засах" title={row.status === 'approved' ? 'Засвал мөр дахин ноорог болно' : 'Засах'} onClick={() => startEdit(row)}><Pencil size={12} /></button>}
-      {editable && row.warnings.includes('hr_changed') && <button type="button" className="mp-icon-button" aria-label="HR өөрчлөлт хүлээн авах" title="HR өөрчлөлт хүлээн авах" disabled={acceptHR.isPending} onClick={() => runAction(acceptHR.mutateAsync(row.employee_id), 'HR өөрчлөлтийг хүлээн авлаа')}>HR</button>}
-      <button type="button" className="mp-icon-button" aria-label="Тооцооны дэлгэрэнгүй" title="Тооцооны дэлгэрэнгүй" onClick={() => setDrawerRow(row.employee_id)}><Info size={13} /></button>
+      {canApprove && row.status === 'draft' && <button type="button" className="mp-icon-button approve" aria-label={t('mp.reg.approve')} title={blocking.length ? t('mp.reg.cannotApprove', { reasons: blocking.map(warningLabel).join(', ') }) : t('mp.reg.approve')} disabled={approveRow.isPending || blocking.length > 0} onClick={() => runAction(approveRow.mutateAsync(row.employee_id), t('mp.reg.rowApproved'))}><Check size={13} /></button>}
+      {canApprove && row.status === 'approved' && <button type="button" className="mp-icon-button" aria-label={t('mp.reg.menu.unapprove')} title={t('mp.reg.menu.unapprove')} disabled={unapproveRow.isPending} onClick={() => runAction(unapproveRow.mutateAsync(row.employee_id), t('mp.reg.rowUnapproved'))}>↺</button>}
+      {editable && row.status === 'draft' && <button type="button" className="mp-icon-button flag" aria-label={t('mp.reg.flag')} title={t('mp.reg.flag')} onClick={() => flag(row)}><X size={13} /></button>}
+      {editable && row.status === 'flagged' && <button type="button" className="mp-icon-button" aria-label={t('mp.reg.unflag')} title={t('mp.reg.unflagWithReason', { reason: row.inputs.flag_reason || '' })} onClick={() => runAction(unflagRow.mutateAsync(row.employee_id), t('mp.reg.unflagged'))}>⚑</button>}
+      {editable && row.profile.complete !== false && <button type="button" className="mp-icon-button" aria-label={t('mp.row.fix')} title={row.status === 'approved' ? t('mp.reg.editReopens') : t('mp.row.fix')} onClick={() => startEdit(row)}><Pencil size={12} /></button>}
+      {editable && row.warnings.includes('hr_changed') && <button type="button" className="mp-icon-button" aria-label={t('mp.reg.acceptHr')} title={t('mp.reg.acceptHr')} disabled={acceptHR.isPending} onClick={() => runAction(acceptHR.mutateAsync(row.employee_id), t('mp.row.hrAccepted'))}>HR</button>}
+      <button type="button" className="mp-icon-button" aria-label={t('mp.reg.detail')} title={t('mp.reg.detail')} onClick={() => setDrawerRow(row.employee_id)}><Info size={13} /></button>
     </>
   }
   const stateCell = (row: Row) => {
@@ -418,16 +427,16 @@ export function RunRegister({ runId }: { runId: number }) {
   return <MonthlyShell canAdminister={Boolean(capabilities.administer)}>
     {reasonDialog}
     {header}
-    {isFinal && <ul className="mp-checklist" aria-label="Сүүл цалингийн шалгах жагсаалт">{checklist.map((item) => <li key={item.label} className={item.done ? 'done' : 'pending'}>{item.done ? <Check size={12} /> : <CircleAlert size={12} />}{item.label}<small>{item.detail}</small></li>)}</ul>}
+    {isFinal && <ul className="mp-checklist" aria-label={t('mp.reg.checklistAria')}>{checklist.map((item) => <li key={item.label} className={item.done ? 'done' : 'pending'}>{item.done ? <Check size={12} /> : <CircleAlert size={12} />}{item.label}<small>{item.detail}</small></li>)}</ul>}
     {notices}
-    <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) importInputs.mutate(file, { onSuccess: (result) => result.updated_rows ? toast.success(`${result.updated_rows} мөр шинэчлэгдлээ`) : toast('Өөрчлөгдсөн нүд олдсонгүй'), onError: (error) => toast.error(requestError(error)) }); event.currentTarget.value = '' }} />
+    <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) importInputs.mutate(file, { onSuccess: (result) => result.updated_rows ? toast.success(t('mp.reg.rowsUpdated', { n: result.updated_rows })) : toast(t('mp.reg.noChangedCells')), onError: (error) => toast.error(requestError(error)) }); event.currentTarget.value = '' }} />
 
     <section className="mp-register">
       <div className="mp-register-toolbar">
-        <input className="mp-search" aria-label="Хайх" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Нэр, албан тушаал, РД хайх" />
-        {departments.length > 1 && <select aria-label="Хэлтэс" value={department} onChange={(event) => setDepartment(event.target.value)}><option value="">Бүх хэлтэс</option>{departments.map((name) => <option key={name}>{name}</option>)}</select>}
-        <div className="mp-segmented" role="group" aria-label="Төлвөөр шүүх">{FILTERS.map((item) => { const count = rows.filter(item.test).length; if (item.key !== 'all' && item.key !== filter && !count) return null; return <button key={item.key} type="button" className={filter === item.key ? 'active' : ''} aria-pressed={filter === item.key} onClick={() => { setFilter(item.key); setParams((current) => { const next = new URLSearchParams(current); if (item.key === 'all') next.delete('status'); else next.set('status', item.key); return next }, { replace: true }) }}>{item.label}<small>{count}</small></button> })}</div>
-        <div className="mp-segmented mp-preset" role="group" aria-label="Баганын багц"><button type="button" className={preset === 'full' ? 'active' : ''} aria-pressed={preset === 'full'} onClick={() => setPreset('full')}>Бүрэн</button><button type="button" className={preset === 'short' ? 'active' : ''} aria-pressed={preset === 'short'} onClick={() => setPreset('short')}>Товч</button></div>
+        <input className="mp-search" aria-label={t('mp.common.search')} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('mp.reg.searchPlaceholder')} />
+        {departments.length > 1 && <select aria-label={t('mp.reg.department')} value={department} onChange={(event) => setDepartment(event.target.value)}><option value="">{t('mp.reg.allDepartments')}</option>{departments.map((name) => <option key={name}>{name}</option>)}</select>}
+        <div className="mp-segmented" role="group" aria-label={t('mp.reg.filterByStatus')}>{FILTERS.map((item) => { const count = rows.filter(item.test).length; if (item.key !== 'all' && item.key !== filter && !count) return null; return <button key={item.key} type="button" className={filter === item.key ? 'active' : ''} aria-pressed={filter === item.key} onClick={() => { setFilter(item.key); setParams((current) => { const next = new URLSearchParams(current); if (item.key === 'all') next.delete('status'); else next.set('status', item.key); return next }, { replace: true }) }}>{t(item.labelKey)}<small>{count}</small></button> })}</div>
+        <div className="mp-segmented mp-preset" role="group" aria-label={t('mp.reg.columnPreset')}><button type="button" className={preset === 'full' ? 'active' : ''} aria-pressed={preset === 'full'} onClick={() => setPreset('full')}>{t('mp.reg.presetFull')}</button><button type="button" className={preset === 'short' ? 'active' : ''} aria-pressed={preset === 'short'} onClick={() => setPreset('short')}>{t('mp.reg.presetShort')}</button></div>
       </div>
       <div className="mp-table-wrap">
         <table className={`mp-table${grouped ? ' mp-grouped' : ''}`}>
@@ -436,8 +445,8 @@ export function RunRegister({ runId }: { runId: number }) {
               {groupCells.map((cell, index) => cell.column
                 ? <th key={cell.column.key} scope="col" rowSpan={grouped ? 2 : 1} className={headClass(cell.column)}>{cell.label}</th>
                 : <th key={`group-${index}`} scope="colgroup" colSpan={cell.span} className="mp-group-head">{cell.label}</th>)}
-              <th scope="col" rowSpan={grouped ? 2 : 1} className="mp-text">Төлөв</th>
-              <th scope="col" rowSpan={grouped ? 2 : 1}><span className="sr-only">Үйлдэл</span></th>
+              <th scope="col" rowSpan={grouped ? 2 : 1} className="mp-text">{t('mp.reg.col.status')}</th>
+              <th scope="col" rowSpan={grouped ? 2 : 1}><span className="sr-only">{t('mp.reg.col.actions')}</span></th>
             </tr>
             {grouped && <tr className="mp-subhead">{columns.filter((column) => column.group).map((column) => <th key={column.key} scope="col" className={headClass(column)}>{column.label}</th>)}</tr>}
           </thead>
@@ -450,7 +459,7 @@ export function RunRegister({ runId }: { runId: number }) {
                   {columns.map((column, columnIndex) => columnIndex === 0 ? null : columnIndex === 1
                     ? <th key={column.key} colSpan={2} scope="rowgroup" className="mp-sticky-label"><button type="button" aria-expanded={!closed} onClick={() => setCollapsed((current) => { const next = new Set(current); if (next.has(name)) next.delete(name); else next.add(name); return next })}>{closed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}{name}<small>{groupRows.length}</small></button></th>
                     : <td key={column.key} className="mp-num">{totalCell(groupRows, column)}</td>)}
-                  <td colSpan={2} className="mp-text"><small>{groupRows.filter((row) => row.status === 'approved').length}/{groupRows.length} батлагдсан</small></td>
+                  <td colSpan={2} className="mp-text"><small>{t('mp.reg.approvedOf', { approved: groupRows.filter((row) => row.status === 'approved').length, total: groupRows.length })}</small></td>
                 </tr>}
                 {!closed && groupRows.map((row) => {
                   const index = numbering.get(row.employee_id) || 0
@@ -464,12 +473,12 @@ export function RunRegister({ runId }: { runId: number }) {
                 })}
               </Fragment>
             })}
-            {!visibleRows.length && <tr><td colSpan={columns.length + 2} className="mp-empty">Шүүлтэд тохирох ажилтан алга.</td></tr>}
+            {!visibleRows.length && <tr><td colSpan={columns.length + 2} className="mp-empty">{t('mp.reg.noMatches')}</td></tr>}
           </tbody>
-          <tfoot><tr>{columns.map((column, columnIndex) => columnIndex === 0 ? null : columnIndex === 1 ? <th key={column.key} colSpan={2} className="mp-sticky-label">{visibleRows.length === rows.length ? `Нийт · ${rows.length} ажилтан` : `Нийт · ${visibleRows.length}/${rows.length}`}</th> : <td key={column.key} className="mp-num">{totalCell(visibleRows, column)}</td>)}<td colSpan={2} /></tr></tfoot>
+          <tfoot><tr>{columns.map((column, columnIndex) => columnIndex === 0 ? null : columnIndex === 1 ? <th key={column.key} colSpan={2} className="mp-sticky-label">{visibleRows.length === rows.length ? t('mp.reg.totalAll', { n: rows.length }) : t('mp.reg.totalFiltered', { shown: visibleRows.length, total: rows.length })}</th> : <td key={column.key} className="mp-num">{totalCell(visibleRows, column)}</td>)}<td colSpan={2} /></tr></tfoot>
         </table>
       </div>
-      <p className="mp-legend"><span><b className="mp-ot-mark weekday">И</b>ажлын өдрийн илүү цаг</span><span><b className="mp-ot-mark rest_day">А</b>амралтын өдөр</span><span><b className="mp-ot-mark public_holiday">Б</b>баярын өдөр</span><span><span className="mp-manual-dot" />гараар зассан</span>{!isFinal && <span>Сарын дүн (НДШ, ХХОАТ, сүүл цалин) тооцоолсон төлөв — эцсийн дүн сүүл цалингийн бодолтод гарна.</span>}</p>
+      <p className="mp-legend"><span><b className="mp-ot-mark weekday">{t('mp.bucketMark.weekday')}</b>{t('mp.reg.legend.weekday')}</span><span><b className="mp-ot-mark rest_day">{t('mp.bucketMark.rest_day')}</b>{t('mp.reg.legend.rest')}</span><span><b className="mp-ot-mark public_holiday">{t('mp.bucketMark.public_holiday')}</b>{t('mp.reg.legend.holiday')}</span><span><span className="mp-manual-dot" />{t('mp.reg.legend.manual')}</span>{!isFinal && <span>{t('mp.reg.legend.advanceNote')}</span>}</p>
     </section>
     {drawer && month.data && <RowDrawer row={drawer} run={data} month={month.data} editable={editable} onClose={() => setDrawerRow(null)} askReason={askReason} />}
   </MonthlyShell>

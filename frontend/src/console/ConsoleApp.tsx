@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
+import { useTranslation } from 'react-i18next'
 import { Building2, Layers, LogOut, ScrollText, Server, ShieldCheck, Users } from 'lucide-react'
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { Button } from '@astryxdesign/core/Button'
@@ -20,6 +21,7 @@ import { TenantDetailPage, TenantsPage } from './ConsoleTenants'
 import { AuditPage, OperatorsPage, PlansPage, SystemPage } from './ConsoleCatalog'
 
 function ConsoleLogin() {
+  const { t } = useTranslation()
   const login = useOperatorLogin()
   const setSession = useConsoleSession((state) => state.setSession)
   const [email, setEmail] = useState('')
@@ -34,7 +36,7 @@ function ConsoleLogin() {
         setChallenge(result)
       }
     } catch (error) {
-      toast.error(consoleError(error, 'Нэвтэрч чадсангүй'))
+      toast.error(consoleError(error, t('con.login.failed')))
     }
   }
   const openConsole = (session: OperatorSession) => setSession(session.access_token, session.operator, session.expires_in)
@@ -45,14 +47,14 @@ function ConsoleLogin() {
       {!challenge && <form onSubmit={(event) => { event.preventDefault(); void submit() }}>
         <VStack gap={4}>
           <VStack gap={1}>
-            <Heading level={1}>OYUNS ERP · Операторын консол</Heading>
-            <Text type="supporting">Зөвхөн платформын операторуудад. Байгууллагын хэрэглэгчийн бүртгэл энд ажиллахгүй.</Text>
+            <Heading level={1}>{t('con.title')}</Heading>
+            <Text type="supporting">{t('con.login.notice')}</Text>
           </VStack>
           <FormLayout>
-            <TextInput label="И-мэйл" value={email} onChange={setEmail} type="email" isRequired hasAutoFocus />
-            <TextInput label="Нууц үг" value={password} onChange={setPassword} type="password" isRequired />
+            <TextInput label={t('con.email')} value={email} onChange={setEmail} type="email" isRequired hasAutoFocus />
+            <TextInput label={t('con.password')} value={password} onChange={setPassword} type="password" isRequired />
           </FormLayout>
-          <Button label="Нэвтрэх" variant="primary" type="submit" isDisabled={!email || !password || login.isPending} />
+          <Button label={t('con.signIn')} variant="primary" type="submit" isDisabled={!email || !password || login.isPending} />
         </VStack>
       </form>}
     </Card>
@@ -60,16 +62,17 @@ function ConsoleLogin() {
 }
 
 function ConsoleShell() {
+  const { t } = useTranslation()
   const operator = useConsoleSession((state) => state.operator)
   const logout = useConsoleSession((state) => state.logout)
   const queryClient = useQueryClient()
   const { pathname } = useLocation()
   const items = [
-    { to: '/platform', label: 'Байгууллагууд', icon: Building2, selected: pathname === '/platform' || pathname.startsWith('/platform/tenants') },
-    { to: '/platform/plans', label: 'Багцууд', icon: Layers, selected: pathname.startsWith('/platform/plans') },
-    { to: '/platform/audit', label: 'Аудит', icon: ScrollText, selected: pathname.startsWith('/platform/audit') },
-    { to: '/platform/system', label: 'Систем ба аюулгүй байдал', icon: Server, selected: pathname.startsWith('/platform/system') },
-    ...(operator?.role === 'superadmin' ? [{ to: '/platform/operators', label: 'Операторууд', icon: Users, selected: pathname.startsWith('/platform/operators') }] : []),
+    { to: '/platform', label: t('con.nav.tenants'), icon: Building2, selected: pathname === '/platform' || pathname.startsWith('/platform/tenants') },
+    { to: '/platform/plans', label: t('con.nav.plans'), icon: Layers, selected: pathname.startsWith('/platform/plans') },
+    { to: '/platform/audit', label: t('con.nav.audit'), icon: ScrollText, selected: pathname.startsWith('/platform/audit') },
+    { to: '/platform/system', label: t('con.nav.system'), icon: Server, selected: pathname.startsWith('/platform/system') },
+    ...(operator?.role === 'superadmin' ? [{ to: '/platform/operators', label: t('con.nav.operators'), icon: Users, selected: pathname.startsWith('/platform/operators') }] : []),
   ]
   const signOut = () => {
     queryClient.removeQueries({ queryKey: ['console'] })
@@ -77,12 +80,12 @@ function ConsoleShell() {
   }
   return <AppShell contentPadding={6} sideNav={
     <SideNav
-      header={<SideNavHeading icon={<ShieldCheck size={16} aria-hidden />} heading="OYUNS ERP" subheading="Операторын консол" />}
+      header={<SideNavHeading icon={<ShieldCheck size={16} aria-hidden />} heading="OYUNS ERP" subheading={t('con.subtitle')} />}
       footer={<VStack gap={2}>
-        <Text type="supporting" maxLines={1}>{`${operator?.email ?? ''} · ${operator?.role === 'superadmin' ? 'Superadmin' : 'Support (унших)'}`}</Text>
-        <Button label="Гарах" variant="ghost" size="sm" icon={<LogOut size={14} />} onClick={signOut} />
+        <Text type="supporting" maxLines={1}>{`${operator?.email ?? ''} · ${operator?.role === 'superadmin' ? 'Superadmin' : t('con.supportRole')}`}</Text>
+        <Button label={t('con.signOut')} variant="ghost" size="sm" icon={<LogOut size={14} />} onClick={signOut} />
       </VStack>}>
-      <SideNavSection title="Удирдлага" isHeaderHidden>
+      <SideNavSection title={t('con.navSection')} isHeaderHidden>
         {items.map((item) => <SideNavItem key={item.to} label={item.label} icon={<item.icon size={16} aria-hidden />} href={item.to} as={RouterLink} isSelected={item.selected} />)}
       </SideNavSection>
     </SideNav>

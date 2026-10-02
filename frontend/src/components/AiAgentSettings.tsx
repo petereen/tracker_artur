@@ -26,39 +26,21 @@ import {
   useTestAiConnection,
   useUpdateAiAgentSettings,
 } from '../api/aiSettings'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
+import { labelMap } from '../utils/labelMap'
 import { ChimegeSettings } from './ChimegeSettings'
 import { ElevenLabsSettings } from './ElevenLabsSettings'
 
 const CUSTOM = '__custom__'
 const NO_FALLBACK = '__none__'
 
-const VOICE_PROVIDERS: Record<VoiceCallProvider, { label: string; description: string }> = {
-  auto: { label: 'Автомат', description: 'Монгол хэлэнд Chimege (тохируулсан бол), бусад хэлэнд OpenAI Realtime.' },
-  openai: { label: 'OpenAI Realtime', description: 'Шууд яриа, хамгийн бага хоцролт; монгол хэл сул.' },
-  chimege: { label: 'Chimege', description: 'Зөвхөн монгол хэл; ээлжээр хариулна.' },
-  elevenlabs: { label: 'ElevenLabs', description: 'Урсгал дуу (streaming TTS) + Scribe таних; англи, орос хэлэнд хамгийн байгалийн.' },
-}
-
-const SOURCE_LABEL: Record<Settings['key_source'], { label: string; color: 'green' | 'blue' | 'red' }> = {
-  organization: { label: 'Байгууллагын түлхүүр', color: 'green' },
-  environment: { label: 'Серверийн орчны түлхүүр (env)', color: 'blue' },
-  none: { label: 'Тохируулаагүй', color: 'red' },
-}
-
-const TEST_ERRORS: Record<string, string> = {
-  invalid_key: 'API түлхүүр хүчингүй байна.',
-  forbidden: 'Энэ түлхүүрт тухайн моделийг ашиглах эрх алга.',
-  model_not_found: 'Модель олдсонгүй. Моделийн нэрийг шалгана уу.',
-  rate_limited: 'OpenAI хязгаар/төлбөрийн лимит хүрсэн байна.',
-  not_configured: 'API түлхүүр оруулаагүй байна.',
-  network: 'OpenAI-тай холбогдож чадсангүй.',
-  provider_error: 'OpenAI талд алдаа гарлаа. Дахин оролдоно уу.',
-  rejected: 'OpenAI хүсэлтийг хүлээж авсангүй.',
-}
+const SOURCE_COLORS: Record<Settings['key_source'], 'green' | 'blue' | 'red'> = { organization: 'green', environment: 'blue', none: 'red' }
+const TEST_ERRORS = labelMap('st.ai.testError', ['invalid_key', 'forbidden', 'model_not_found', 'rate_limited', 'not_configured', 'network', 'provider_error', 'rejected'])
 
 function modelOptions(models: string[], ...current: (string | null | undefined)[]) {
   const values = Array.from(new Set([...current.filter((item): item is string => Boolean(item)), ...models]))
-  return [...values.map((value) => ({ value, label: value })), { type: 'divider' as const }, { value: CUSTOM, label: 'Өөр модель (гараар оруулах)' }]
+  return [...values.map((value) => ({ value, label: value })), { type: 'divider' as const }, { value: CUSTOM, label: i18n.t('st.ai.customModel') }]
 }
 
 function ModelField({ label, description, value, models, onChange, allowNone }: {
@@ -69,10 +51,11 @@ function ModelField({ label, description, value, models, onChange, allowNone }: 
   onChange: (value: string | null) => void
   allowNone?: boolean
 }) {
+  const { t } = useTranslation()
   const [custom, setCustom] = useState(false)
   const options = useMemo(() => {
     const base = modelOptions(models, value)
-    return allowNone ? [{ value: NO_FALLBACK, label: 'Нөөц модельгүй' }, ...base] : base
+    return allowNone ? [{ value: NO_FALLBACK, label: t('st.ai.noFallback') }, ...base] : base
   }, [models, value, allowNone])
   return <VStack gap={2}>
     <Selector
@@ -81,18 +64,19 @@ function ModelField({ label, description, value, models, onChange, allowNone }: 
       options={options}
       value={custom ? CUSTOM : value ?? (allowNone ? NO_FALLBACK : undefined)}
       hasSearch
-      searchPlaceholder="Модель хайх…"
+      searchPlaceholder={t('st.ai.searchModel')}
       onChange={(next) => {
         if (next === CUSTOM) { setCustom(true); return }
         setCustom(false)
         onChange(next === NO_FALLBACK ? null : next)
       }}
     />
-    {custom && <TextInput label={`${label}: моделийн ID`} description="Жишээ: gpt-5-mini, gpt-4.1" value={value ?? ''} onChange={(next) => onChange(next.trim() || null)} />}
+    {custom && <TextInput label={t('st.ai.modelIdLabel', { label })} description={t('st.ai.modelIdHint')} value={value ?? ''} onChange={(next) => onChange(next.trim() || null)} />}
   </VStack>
 }
 
 export function AiAgentSettings() {
+  const { t } = useTranslation()
   const settings = useAiAgentSettings()
   const models = useAiModels(Boolean(settings.data && settings.data.key_source !== 'none'))
   const update = useUpdateAiAgentSettings()
@@ -116,11 +100,11 @@ export function AiAgentSettings() {
     })
   }, [settings.data])
 
-  if (settings.isLoading || !draft) return <Text type="supporting">AI тохиргоог ачаалж байна…</Text>
-  if (settings.isError || !settings.data) return <Banner status="error" title="AI тохиргоог ачаалж чадсангүй" />
+  if (settings.isLoading || !draft) return <Text type="supporting">{t('st.ai.loading')}</Text>
+  if (settings.isError || !settings.data) return <Banner status="error" title={t('st.ai.loadFailed')} />
 
   const data = settings.data
-  const source = SOURCE_LABEL[data.key_source]
+  const source = { label: t(`st.ai.source.${data.key_source}`), color: SOURCE_COLORS[data.key_source] }
   const listed = models.data?.models ?? []
   const dirty = Boolean(apiKey.trim())
     || draft.primary_model !== data.primary_model
@@ -164,40 +148,40 @@ export function AiAgentSettings() {
     <Card padding={5}>
       <VStack gap={4}>
         <HStack gap={2} vAlign="center" wrap="wrap">
-          <Heading level={3}>OpenAI API түлхүүр</Heading>
+          <Heading level={3}>{t('st.ai.keyTitle')}</Heading>
           <Token size="sm" color={source.color} label={source.label} />
           {data.has_key && data.key_last4 && <Token size="sm" label={`sk-…${data.key_last4}`} />}
         </HStack>
-        <Text type="supporting">Түлхүүрийг шифрлэж хадгална; хадгалсны дараа дахин харуулахгүй. Байгууллагын түлхүүр серверийн орчны түлхүүрээс давуу эрэмбэтэй.</Text>
+        <Text type="supporting">{t('st.ai.keyHint')}</Text>
         <TextInput
           type="password"
-          label={data.has_key ? 'Шинэ түлхүүрээр солих' : 'API түлхүүр'}
-          description="sk-… хэлбэртэй. Хоосон орхивол одоогийн түлхүүр хэвээр үлдэнэ."
+          label={data.has_key ? t('st.ai.replaceKey') : t('st.ai.apiKey')}
+          description={t('st.ai.keyFormat')}
           value={apiKey}
           onChange={setApiKey}
           isOptional={data.key_source !== 'none'}
         />
         {data.has_key && <HStack gap={2}>
-          <Button label="Байгууллагын түлхүүрийг устгах" variant="destructive" size="sm" isLoading={update.isPending} onClick={() => { if (window.confirm('Байгууллагын API түлхүүрийг устгах уу?')) update.mutate({ clear_api_key: true }) }} />
+          <Button label={t('st.ai.deleteKey')} variant="destructive" size="sm" isLoading={update.isPending} onClick={() => { if (window.confirm(t('st.ai.deleteKeyConfirm'))) update.mutate({ clear_api_key: true }) }} />
         </HStack>}
       </VStack>
     </Card>
 
     <Card padding={5}>
       <VStack gap={4}>
-        <Heading level={3}>Модель ба хариултын тохиргоо</Heading>
-        {models.data?.error && <Banner status="warning" title="Моделийн жагсаалтыг татаж чадсангүй" description={TEST_ERRORS[models.data.error] ?? 'Моделийн ID-г гараар оруулж болно.'} />}
+        <Heading level={3}>{t('st.ai.modelSection')}</Heading>
+        {models.data?.error && <Banner status="warning" title={t('st.ai.modelsFailed')} description={TEST_ERRORS[models.data.error as keyof typeof TEST_ERRORS] ?? t('st.ai.modelsManual')} />}
         <FormLayout>
           <ModelField
-            label="Үндсэн модель"
-            description={`Бүх OYUNS хариултыг энэ модель боловсруулна. Анхдагч: ${data.defaults.primary_model}`}
+            label={t('st.ai.primaryModel')}
+            description={t('st.ai.primaryHint', { model: data.defaults.primary_model })}
             value={draft.primary_model}
             models={listed}
             onChange={(value) => setDraft({ ...draft, primary_model: value || data.defaults.primary_model })}
           />
           <ModelField
-            label="Нөөц модель"
-            description="Үндсэн модель ажиллахгүй үед автоматаар ашиглана."
+            label={t('st.ai.fallbackModel')}
+            description={t('st.ai.fallbackHint')}
             value={draft.fallback_model}
             models={listed}
             allowNone
@@ -205,18 +189,18 @@ export function AiAgentSettings() {
           />
         </FormLayout>
         <VStack gap={1.5}>
-          <Text weight="semibold">Сэтгэх түвшин (reasoning)</Text>
-          <SegmentedControl label="Сэтгэх түвшин" value={draft.reasoning_effort} onChange={(value) => setDraft({ ...draft, reasoning_effort: value as ReasoningEffort })}>
-            <SegmentedControlItem value="none" label="Хамгийн хурдан" />
-            <SegmentedControlItem value="low" label="Хурдан" />
-            <SegmentedControlItem value="medium" label="Дунд" />
-            <SegmentedControlItem value="high" label="Гүнзгий" />
+          <Text weight="semibold">{t('st.ai.reasoningTitle')}</Text>
+          <SegmentedControl label={t('st.ai.reasoning')} value={draft.reasoning_effort} onChange={(value) => setDraft({ ...draft, reasoning_effort: value as ReasoningEffort })}>
+            <SegmentedControlItem value="none" label={t('st.ai.effort.none')} />
+            <SegmentedControlItem value="low" label={t('st.ai.effort.low')} />
+            <SegmentedControlItem value="medium" label={t('st.ai.effort.medium')} />
+            <SegmentedControlItem value="high" label={t('st.ai.effort.high')} />
           </SegmentedControl>
-          <Text type="supporting">Зөвхөн reasoning дэмждэг модельд (gpt-5, o-цуврал) хамаарна. Гүнзгий нь удаан, илүү үнэтэй.</Text>
+          <Text type="supporting">{t('st.ai.reasoningHint')}</Text>
         </VStack>
         <Slider
-          label="Хариултын дээд урт (token)"
-          description="Урт тайлан, дүгнэлтэд илүү их token хэрэгтэй."
+          label={t('st.ai.maxTokens')}
+          description={t('st.ai.maxTokensHint')}
           value={draft.max_output_tokens}
           min={data.limits.min_output_tokens}
           max={data.limits.max_output_tokens}
@@ -225,43 +209,43 @@ export function AiAgentSettings() {
           onChange={(value: number) => setDraft({ ...draft, max_output_tokens: value })}
         />
         <Switch
-          label="Вэб хайлт"
-          description="Компанийн бус, олон нийтийн шинэ мэдээлэлд (мэдээ, үнэ) вэб хайлт ашиглахыг зөвшөөрөх."
+          label={t('st.ai.webSearch')}
+          description={t('st.ai.webSearchHint')}
           value={draft.web_search_enabled}
           onChange={(value) => setDraft({ ...draft, web_search_enabled: value })}
         />
         {draft.realtime_enabled !== undefined && <>
           <Divider />
-          <Heading level={3}>Дуут дуудлага (Realtime)</Heading>
-          <Text type="supporting">Чат дахь OYUNS Agent руу залгахад OYUNS шууд ярьж, компанийн мэдлэг ба өгөгдлийг хэрэглэгчийн эрхийн хүрээнд уншина. Хөдөлгүүр: OpenAI Realtime, Chimege эсвэл ElevenLabs.</Text>
+          <Heading level={3}>{t('st.ai.voiceTitle')}</Heading>
+          <Text type="supporting">{t('st.ai.voiceDesc')}</Text>
           <Switch
-            label="Дуут дуудлага"
-            description="Идэвхгүй бол чат дахь OYUNS Agent-ийн дуудлагын товч ажиллахгүй."
+            label={t('st.ai.voiceCall')}
+            description={t('st.ai.voiceCallHint')}
             value={draft.realtime_enabled}
             onChange={(value) => setDraft({ ...draft, realtime_enabled: value })}
           />
           {draft.voice_call_provider !== undefined && <Selector
-            label="Дуудлагын хөдөлгүүр"
-            description="Дуудлага аль үйлчилгээгээр явагдахыг сонгоно. Хэрэглэгч дуудлагын цонхноос тохируулсан бусад хөдөлгүүр рүү шилжиж болно; бэлэн бус хөдөлгүүр сонгосон бол автомат горимд шилжинэ."
+            label={t('st.ai.engine')}
+            description={t('st.ai.engineHint')}
             options={(data.voice_call_providers ?? ['auto', 'openai', 'chimege', 'elevenlabs']).map((value) => ({
               value,
-              label: VOICE_PROVIDERS[value].label,
-              description: `${VOICE_PROVIDERS[value].description}${(value === 'chimege' && data.chimege && !data.chimege.voice_call_ready) || (value === 'elevenlabs' && data.elevenlabs && !data.elevenlabs.ready) ? ' · Тохируулаагүй' : ''}`,
+              label: t(`st.ai.provider.${value}.label`),
+              description: `${t(`st.ai.provider.${value}.description`)}${(value === 'chimege' && data.chimege && !data.chimege.voice_call_ready) || (value === 'elevenlabs' && data.elevenlabs && !data.elevenlabs.ready) ? ` · ${t('st.ai.source.none')}` : ''}`,
             }))}
             value={draft.voice_call_provider}
             onChange={(value) => setDraft({ ...draft, voice_call_provider: value as VoiceCallProvider })}
           />}
           <FormLayout>
             <ModelField
-              label="Realtime модель"
-              description={`Анхдагч: ${data.defaults.realtime_model ?? 'gpt-realtime'} (OpenAI-ийн хамгийн сүүлийн realtime модель)`}
+              label={t('st.ai.realtimeModel')}
+              description={t('st.ai.realtimeHint', { model: data.defaults.realtime_model ?? 'gpt-realtime' })}
               value={draft.realtime_model ?? null}
               models={realtimeListed}
               onChange={(value) => setDraft({ ...draft, realtime_model: value || data.defaults.realtime_model || 'gpt-realtime' })}
             />
             <Selector
-              label="Дуу хоолой"
-              description="OYUNS-ийн ярих дуу"
+              label={t('st.ai.voice')}
+              description={t('st.ai.voiceHint')}
               options={(data.realtime_voices ?? []).map((voice) => ({ value: voice, label: voice }))}
               value={draft.realtime_voice}
               onChange={(value) => setDraft({ ...draft, realtime_voice: value })}
@@ -270,13 +254,13 @@ export function AiAgentSettings() {
         </>}
         <Divider />
         {testResult && (testResult.ok
-          ? <Banner status="success" title={`Холболт амжилттай: ${testResult.model}`} description={`Хариу өгөх хугацаа ${testResult.latency_ms} мс${testResult.model_listed === false ? ' · модель жагсаалтад харагдахгүй байгаа ч хариулсан' : ''}`} isDismissable onDismiss={() => setTestResult(null)} />
-          : <Banner status="error" title="Холболт амжилтгүй" description={TEST_ERRORS[testResult.error ?? ''] ?? testResult.error ?? 'Тодорхойгүй алдаа'} isDismissable onDismiss={() => setTestResult(null)} />)}
+          ? <Banner status="success" title={t('st.ai.testOk', { model: testResult.model })} description={`${t('st.ai.testLatency', { ms: testResult.latency_ms })}${testResult.model_listed === false ? ` · ${t('st.ai.testNotListed')}` : ''}`} isDismissable onDismiss={() => setTestResult(null)} />
+          : <Banner status="error" title={t('st.ai.connectionFailed')} description={TEST_ERRORS[(testResult.error ?? '') as keyof typeof TEST_ERRORS] ?? testResult.error ?? t('st.ai.unknownError')} isDismissable onDismiss={() => setTestResult(null)} />)}
         <HStack gap={2} vAlign="center" wrap="wrap">
-          <Button label="Хадгалах" variant="primary" isDisabled={!dirty} isLoading={update.isPending} clickAction={save} />
-          <Button label="Холболт шалгах" isLoading={testConnection.isPending} clickAction={runTest} />
-          <StatusDot variant={data.key_source === 'none' ? 'error' : 'success'} label={data.key_source === 'none' ? 'AI идэвхгүй' : 'AI идэвхтэй'} />
-          <Text type="supporting">{data.key_source === 'none' ? 'API түлхүүргүй үед OYUNS зөвхөн баримт бичгээс шууд хайлт хийнэ.' : 'OYUNS идэвхтэй.'}</Text>
+          <Button label={t('st.common.save')} variant="primary" isDisabled={!dirty} isLoading={update.isPending} clickAction={save} />
+          <Button label={t('st.ai.testConnection')} isLoading={testConnection.isPending} clickAction={runTest} />
+          <StatusDot variant={data.key_source === 'none' ? 'error' : 'success'} label={data.key_source === 'none' ? t('st.ai.disabled') : t('st.ai.enabled')} />
+          <Text type="supporting">{data.key_source === 'none' ? t('st.ai.noKeyHint') : t('st.ai.active')}</Text>
         </HStack>
       </VStack>
     </Card>

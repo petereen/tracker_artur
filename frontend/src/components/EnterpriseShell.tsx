@@ -7,13 +7,16 @@ import toast from 'react-hot-toast'
 import { api } from '../api/client'
 import {
   BarChart3, BriefcaseBusiness, Calculator, BookText, Handshake, PiggyBank, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, ScanLine, UserRoundCog,
-  FolderArchive, LayoutDashboard, LayoutGrid, LogOut, MessageCircle, Moon, Search, Send, Settings2, Sparkles, Sun, Users2, X, Upload, UserCircle2,
+  FolderArchive, LayoutDashboard, LayoutGrid, MessageCircle, Search, Send, Settings2, Sparkles, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { isFeatureEnabled, useTenantContext } from '../api/tenancy'
 import { acknowledgeChatReceipt, useActor, useBrandingSettings, useChatUnreadCount, useEnterpriseLogout, useERPAccountPermissions, useERPMetadata, useOpenDirectConversation, useWorkerDirectory, useWorkerPerformance, useWorkerProfile } from '../api/enterprise'
 import { useCRMCapabilities } from '../api/crm'
 import { useBudgetCapabilities } from '../api/budget'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
+import { LANGUAGE_CHOSEN_KEY } from './LanguageSwitcher'
+import { AccountMenu } from './AccountMenu'
+import { LANGUAGES } from '../locales'
 import { periodFromPreset } from './TimePeriodFilter'
 import { WorkspaceModeProvider } from './WorkspaceModeProvider'
 import { WorkspaceModeToggle } from './WorkspaceModeToggle'
@@ -142,6 +145,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
 
 export function EnterpriseShell() {
   const { t, i18n } = useTranslation()
+  const queryClient = useQueryClient()
   const location = useLocation()
   const navigate = useNavigate()
   const token = useAuthStore((state) => state.token)
@@ -276,8 +280,17 @@ export function EnterpriseShell() {
     if (actorQuery.data) setActor(actorQuery.data)
   }, [actorQuery.data, setActor])
   useEffect(() => {
-    if (actorQuery.data?.locale && i18n.language !== actorQuery.data.locale) i18n.changeLanguage(actorQuery.data.locale)
-  }, [actorQuery.data?.locale, i18n])
+    const locale = actorQuery.data?.locale
+    if (!locale) return
+    // A language picked on the login screen becomes the account default once.
+    let chosen = false
+    try { chosen = window.localStorage.getItem(LANGUAGE_CHOSEN_KEY) === '1'; if (chosen) window.localStorage.removeItem(LANGUAGE_CHOSEN_KEY) } catch { /* storage unavailable */ }
+    if (chosen && i18n.language !== locale && (LANGUAGES as readonly string[]).includes(i18n.language)) {
+      void api.patch('/v1/auth/profile', { locale: i18n.language }).then(() => queryClient.invalidateQueries({ queryKey: ['v1', 'actor'] })).catch(() => { /* keep the UI language; the profile stays as is */ })
+      return
+    }
+    if (i18n.language !== locale) i18n.changeLanguage(locale)
+  }, [actorQuery.data?.locale, i18n, queryClient])
   const nav = useMemo(() => {
     const hrItem = NAV.find((item) => item.to === '/hr')
     const payrollItem = { to: '/erp/payroll', label: 'nav.payroll', icon: Calculator, roles: [] }
@@ -386,11 +399,7 @@ export function EnterpriseShell() {
           </nav>
           <div className="sidebar-footer">
             <NavLink to="/company-files" className={({ isActive }) => isActive ? 'sidebar-library-link active' : 'sidebar-library-link'}><FolderArchive size={17} /><span>{t('nav.companyFiles')}</span></NavLink>
-            <div className="sidebar-profile">
-              <button className="avatar" onClick={() => navigate('/profile')} aria-label={t('shell.openProfile')}>{avatarContent}</button>
-              <button className="profile-identity" onClick={() => navigate('/profile')}><strong>{actorQuery.data?.name ?? actorQuery.data?.email ?? '…'}</strong><span>{roles[0] ?? 'member'}</span></button>
-              <button onClick={() => logout.mutate()} aria-label={t('action.logout')}><LogOut size={17} /></button>
-            </div>
+            <AccountMenu actor={actorQuery.data} theme={theme} onToggleTheme={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} onLogout={() => logout.mutate()} />
           </div>
         </aside>
         <main className="workspace-main">
@@ -400,7 +409,6 @@ export function EnterpriseShell() {
             <div className="header-actions">
               <WorkspaceModeToggle />
               <Suspense fallback={null}><LazyNotificationCenter /></Suspense>
-              <button className="theme-toggle" onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} aria-label={t(theme === 'light' ? 'shell.theme.enableDark' : 'shell.theme.enableLight')} title={t(theme === 'light' ? 'shell.theme.dark' : 'shell.theme.light')}>{theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}</button>
               <button className="search-trigger" onClick={() => setCommandOpen(true)}><Search size={16} /><span>{t('action.search')}</span><kbd>⌘K</kbd></button>
               {assistantLicensed && <button className="ai-trigger" onClick={() => setAssistantOpen(true)}><Sparkles size={16} /> OYUNS</button>}
             </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -10,6 +11,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
 import { type TenantNotificationCategory, useTenantNotificationSettings, useUpdateTenantNotificationSettings } from '../api/notificationSettings'
+import { catalogText } from '../utils/labelMap'
 
 type Rule = Pick<TenantNotificationCategory, 'enabled' | 'web' | 'telegram' | 'user_editable'>
 type Draft = Record<string, Rule>
@@ -24,14 +26,15 @@ function toDraft(categories: TenantNotificationCategory[]): Draft {
  * Telegram messages follow exactly these rules.
  */
 export function NotificationSettings() {
+  const { t } = useTranslation()
   const query = useTenantNotificationSettings()
   const update = useUpdateTenantNotificationSettings()
   const [draft, setDraft] = useState<Draft | null>(null)
 
   useEffect(() => { if (query.data) setDraft(toDraft(query.data.categories)) }, [query.data])
 
-  if (query.isLoading || !draft) return <Text type="supporting">Ачаалж байна…</Text>
-  if (query.isError || !query.data) return <Banner status="error" title="Мэдэгдлийн тохиргоог ачаалж чадсангүй" />
+  if (query.isLoading || !draft) return <Text type="supporting">{t('st.common.loading')}</Text>
+  if (query.isError || !query.data) return <Banner status="error" title={t('st.notif.loadFailed')} />
 
   const saved = toDraft(query.data.categories)
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
@@ -41,21 +44,18 @@ export function NotificationSettings() {
   return <Card padding={5}>
     <VStack gap={4}>
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <Heading level={3}>Мэдэгдлийн тохиргоо</Heading>
-        <Token size="sm" label={`${enabledCount} / ${query.data.categories.length} идэвхтэй`} color="blue" />
+        <Heading level={3}>{t('st.notif.title')}</Heading>
+        <Token size="sm" label={t('st.notif.activeCount', { n: enabledCount, total: query.data.categories.length })} color="blue" />
       </HStack>
-      <Text type="supporting">
-        Байгууллагын бүх хэрэглэгчид хамаарна. Ангилал бүрийг унтраах, платформ (хонх) болон Telegram-аар анхдагчаар илгээх эсэх,
-        ажилтан өөрийн профайлаас өөрчилж болох эсэхийг тохируулна. Telegram мэдэгдэл яг энэ тохиргоог дагана.
-      </Text>
+      <Text type="supporting">{t('st.notif.intro')}</Text>
       <Table density="compact">
         <TableHeader>
           <TableRow>
-            <TableHeaderCell>Ангилал</TableHeaderCell>
-            <TableHeaderCell>Идэвхтэй</TableHeaderCell>
-            <TableHeaderCell>Платформ</TableHeaderCell>
-            <TableHeaderCell>Telegram</TableHeaderCell>
-            <TableHeaderCell>Ажилтан өөрчилнө</TableHeaderCell>
+            <TableHeaderCell>{t('st.notif.category')}</TableHeaderCell>
+            <TableHeaderCell>{t('st.notif.active')}</TableHeaderCell>
+            <TableHeaderCell>{t('st.notif.platform')}</TableHeaderCell>
+            <TableHeaderCell>{t('st.notif.telegram')}</TableHeaderCell>
+            <TableHeaderCell>{t('st.notif.userEditable')}</TableHeaderCell>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -65,22 +65,22 @@ export function NotificationSettings() {
             return <TableRow key={category.key}>
               <TableCell>
                 <VStack gap={0.5}>
-                  <HStack gap={1.5} vAlign="center" wrap="wrap"><Text weight="medium">{category.label}</Text>{category.legacy && <Token size="sm" color="gray" label="Хуучин" />}</HStack>
-                  <Text type="supporting">{category.description}</Text>
+                  <HStack gap={1.5} vAlign="center" wrap="wrap"><Text weight="medium">{catalogText(`cat.notif.${category.key}.label`, category.label)}</Text>{category.legacy && <Token size="sm" color="gray" label={t('st.notif.legacy')} />}</HStack>
+                  <Text type="supporting">{catalogText(`cat.notif.${category.key}.description`, category.description)}</Text>
                 </VStack>
               </TableCell>
-              <TableCell><Switch label={`${category.label}: идэвхтэй`} isLabelHidden value={rule.enabled} onChange={(value) => set(category.key, { enabled: value })} /></TableCell>
-              <TableCell><Switch label={`${category.label}: платформ`} isLabelHidden value={rule.web} isDisabled={off} onChange={(value) => set(category.key, { web: value })} /></TableCell>
-              <TableCell><Switch label={`${category.label}: Telegram`} isLabelHidden value={rule.telegram} isDisabled={off} onChange={(value) => set(category.key, { telegram: value })} /></TableCell>
-              <TableCell><Switch label={`${category.label}: ажилтан өөрчилнө`} isLabelHidden value={rule.user_editable} isDisabled={off} onChange={(value) => set(category.key, { user_editable: value })} /></TableCell>
+              <TableCell><Switch label={t('st.notif.activeFor', { label: catalogText(`cat.notif.${category.key}.label`, category.label) })} isLabelHidden value={rule.enabled} onChange={(value) => set(category.key, { enabled: value })} /></TableCell>
+              <TableCell><Switch label={t('st.notif.platformFor', { label: catalogText(`cat.notif.${category.key}.label`, category.label) })} isLabelHidden value={rule.web} isDisabled={off} onChange={(value) => set(category.key, { web: value })} /></TableCell>
+              <TableCell><Switch label={t('st.notif.telegramFor', { label: catalogText(`cat.notif.${category.key}.label`, category.label) })} isLabelHidden value={rule.telegram} isDisabled={off} onChange={(value) => set(category.key, { telegram: value })} /></TableCell>
+              <TableCell><Switch label={t('st.notif.userEditableFor', { label: catalogText(`cat.notif.${category.key}.label`, category.label) })} isLabelHidden value={rule.user_editable} isDisabled={off} onChange={(value) => set(category.key, { user_editable: value })} /></TableCell>
             </TableRow>
           })}
         </TableBody>
       </Table>
-      <Text type="supporting">Чимээгүй цаг, ажлын өдөр болон тоймын цагийг доорх «Мэдэгдэл ба Telegram» хэсгээс тохируулна.</Text>
+      <Text type="supporting">{t('st.notif.quietHint')}</Text>
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <Button label="Хадгалах" variant="primary" isDisabled={!dirty} isLoading={update.isPending} onClick={() => update.mutate({ categories: draft })} />
-        {dirty && <Button label="Буцаах" onClick={() => setDraft(saved)} />}
+        <Button label={t('st.common.save')} variant="primary" isDisabled={!dirty} isLoading={update.isPending} onClick={() => update.mutate({ categories: draft })} />
+        {dirty && <Button label={t('st.common.revert')} onClick={() => setDraft(saved)} />}
       </HStack>
     </VStack>
   </Card>

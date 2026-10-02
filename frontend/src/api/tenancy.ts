@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, publicApi } from './client'
 import { useAuthStore } from '../store/auth'
+import i18n from '../i18n'
 
 /** Licensed feature modules (backend `TENANT_FEATURES`). */
 export type TenantFeatureCode = 'crm' | 'budget' | 'payroll' | 'contracts' | 'ai_assistant' | 'legacy_workspace'
@@ -171,7 +172,8 @@ export function isFeatureEnabled(context: TenantContext | undefined, feature: Te
 }
 
 // ── Telegram bot (per tenant) ───────────────────────────────────────────────
-export const TELEGRAM_BOT_REQUIRED_HINT = 'Telegram бот холбогдоогүй байна. Тохиргоо → Интеграци → Telegram бот хэсэгт холбосны дараа идэвхжинэ.'
+/** Read through the getter so the hint follows the UI language. */
+export const telegramBotRequiredHint = () => i18n.t('st.api.telegramHint')
 
 export type TelegramBotStatus = 'not_connected' | 'pending' | 'active' | 'error' | 'disabled'
 

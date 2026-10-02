@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from './client'
+import i18n from '../i18n'
 
 /** Tenant-wide rule for one notification category (admin settings). */
 export interface TenantNotificationCategory {
@@ -51,9 +52,9 @@ export function useUpdateTenantNotificationSettings() {
     onSuccess: (data) => {
       queryClient.setQueryData(tenantKey, data)
       queryClient.invalidateQueries({ queryKey: personalKey })
-      toast.success('Мэдэгдлийн тохиргоо хадгалагдлаа')
+      toast.success(i18n.t('st.api.notifSaved'))
     },
-    onError: () => toast.error('Мэдэгдлийн тохиргоо хадгалагдсангүй'),
+    onError: () => toast.error(i18n.t('st.api.notifNotSaved')),
   })
 }
 
@@ -66,6 +67,6 @@ export function useUpdatePersonalNotificationPreferences() {
   return useMutation({
     mutationFn: (input: PersonalNotificationInput) => api.put('/v1/auth/preferences/notifications', input).then((response) => response.data as PersonalNotificationPreferences),
     onSuccess: (data) => queryClient.setQueryData(personalKey, data),
-    onError: () => toast.error('Мэдэгдлийн тохиргоо хадгалагдсангүй'),
+    onError: () => toast.error(i18n.t('st.api.notifNotSaved')),
   })
 }

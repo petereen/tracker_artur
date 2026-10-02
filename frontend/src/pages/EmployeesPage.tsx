@@ -9,7 +9,7 @@ import { Badge, Btn, Card, Input, Modal, PageHeader, Select } from '../component
 import { useEmployees, useCreateEmployee, useDeleteEmployee, useEmployeePerformance, useUpdateEmployee } from '../api/hooks'
 import { useAssignERPAccountRole, useERPAccessRoles, useUnassignERPAccountRole } from '../api/enterprise'
 import { useCreateManagedAccount, useManagedAccounts, useUpdateManagedAccount } from '../api/enterprise'
-import { TELEGRAM_BOT_REQUIRED_HINT, tenancyErrorMessage, useTenantContext } from '../api/tenancy'
+import { telegramBotRequiredHint, tenancyErrorMessage, useTenantContext } from '../api/tenancy'
 import { ReportDetailModal } from '../components/ReportDetailModal'
 import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
 import { seatFullWorkerMessage, SeatLimitNotice, useWorkerSeats } from '../components/SeatLimitNotice'
@@ -293,7 +293,7 @@ export function EmployeesPage() {
               </div>
             ) : (
               <Input label="Telegram ID" value={botConnected ? form.telegram_id : ''} onChange={(v) => setForm((f) => ({ ...f, telegram_id: v }))} placeholder="123456789" fullWidth
-                disabled={!botConnected} hint={botConnected ? undefined : TELEGRAM_BOT_REQUIRED_HINT} />
+                disabled={!botConnected} hint={botConnected ? undefined : telegramBotRequiredHint()} />
             )}
             <Input label="Telegram username" value={form.telegram_username} onChange={(v) => setForm((f) => ({ ...f, telegram_username: v }))} placeholder="@username" fullWidth />
             <Select label={t('hr.emp.timezone')} value={form.timezone} onChange={(v) => setForm((f) => ({ ...f, timezone: v }))} options={TZ_OPTIONS} fullWidth />

@@ -12,7 +12,7 @@ export function normalizeRegistrationNumber(raw: string): string {
 
 export function parseRegistrationNumber(raw: string, today = new Date()): DecodedRegistrationNumber | null {
   const value = normalizeRegistrationNumber(raw)
-  const match = /^[А-ЯЁӨҮ]{2}(\d{2})(\d{2})(\d{2})(\d)\d$/.exec(value)
+  const match = /^[А-ЯЁӨҮ]{2}(\d{2})(\d{2})(\d{2})(\d)\d$/.exec(value) // i18n-ignore: Mongolian registry letters
   if (!match) return null
   let year = Number(match[1])
   let month = Number(match[2])
