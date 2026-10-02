@@ -17,6 +17,7 @@ from app.models.models import (
     Employee,
     MobilePushRegistration,
     UserAccount,
+    UserNotification,
 )
 from app.services.attachment_storage import delete_attachment
 from app.services.secret_box import decrypt_secret
@@ -82,27 +83,23 @@ def _apns_token() -> str:
     return token
 
 
-async def _send_fcm(client: httpx.AsyncClient, token: str, *, title: str, body: str, target_url: str, message_id: int, conversation_public_id: str) -> bool:
+async def _fcm_send(client: httpx.AsyncClient, token: str, *, title: str, body: str, data: dict[str, str], channel_id: str, tag: str, sound: str | None = None) -> bool:
     service_account = json.loads(settings.FCM_SERVICE_ACCOUNT_JSON)
     project_id = settings.FCM_PROJECT_ID or service_account.get("project_id")
     if not project_id:
         raise RuntimeError("FCM project ID is not configured")
     access_token = await _fcm_token(client, service_account)
+    notification = {"channel_id": channel_id, "tag": tag}
+    if sound:
+        notification["sound"] = sound
     response = await client.post(
         f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send",
         headers={"Authorization": f"Bearer {access_token}"},
         json={"message": {
             "token": token,
             "notification": {"title": title, "body": body},
-            "data": {"target_url": target_url, "message_id": str(message_id), "conversation_public_id": conversation_public_id},
-            "android": {
-                "priority": "high",
-                "notification": {
-                    "channel_id": "oyuns-chat-v1",
-                    "sound": "oyuns_chat_notification",
-                    "tag": f"chat-message-{message_id}",
-                },
-            },
+            "data": data,
+            "android": {"priority": "high", "notification": notification},
         }},
     )
     if response.status_code in {400, 404} and any(marker in response.text for marker in ("UNREGISTERED", "registration-token-not-registered", "INVALID_ARGUMENT")):
@@ -111,7 +108,7 @@ async def _send_fcm(client: httpx.AsyncClient, token: str, *, title: str, body: 
     return True
 
 
-async def _send_apns(client: httpx.AsyncClient, token: str, *, title: str, body: str, target_url: str, message_id: int, conversation_public_id: str) -> bool:
+async def _apns_send(client: httpx.AsyncClient, token: str, *, title: str, body: str, data: dict, collapse_id: str, thread_id: str, sound: str = "default") -> bool:
     host = "https://api.sandbox.push.apple.com" if settings.APNS_USE_SANDBOX else "https://api.push.apple.com"
     response = await client.post(
         f"{host}/3/device/{token}",
@@ -120,23 +117,83 @@ async def _send_apns(client: httpx.AsyncClient, token: str, *, title: str, body:
             "apns-topic": settings.APNS_BUNDLE_ID,
             "apns-push-type": "alert",
             "apns-priority": "10",
-            "apns-collapse-id": f"chat-message-{message_id}",
+            "apns-collapse-id": collapse_id,
         },
-        json={
-            "aps": {
-                "alert": {"title": title, "body": body},
-                "sound": "public/sounds/oyuns_chat_notification.caf",
-                "thread-id": f"chat-{conversation_public_id}",
-            },
-            "target_url": target_url,
-            "message_id": message_id,
-            "conversation_public_id": conversation_public_id,
-        },
+        json={"aps": {"alert": {"title": title, "body": body}, "sound": sound, "thread-id": thread_id}, **data},
     )
     if response.status_code == 410 or (response.status_code == 400 and any(marker in response.text for marker in ("BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered"))):
         return False
     response.raise_for_status()
     return True
+
+
+async def _send_fcm(client: httpx.AsyncClient, token: str, *, title: str, body: str, target_url: str, message_id: int, conversation_public_id: str) -> bool:
+    return await _fcm_send(
+        client, token, title=title, body=body,
+        data={"target_url": target_url, "message_id": str(message_id), "conversation_public_id": conversation_public_id},
+        channel_id="oyuns-chat-v1", tag=f"chat-message-{message_id}", sound="oyuns_chat_notification",
+    )
+
+
+async def _send_apns(client: httpx.AsyncClient, token: str, *, title: str, body: str, target_url: str, message_id: int, conversation_public_id: str) -> bool:
+    return await _apns_send(
+        client, token, title=title, body=body,
+        data={"target_url": target_url, "message_id": message_id, "conversation_public_id": conversation_public_id},
+        collapse_id=f"chat-message-{message_id}", thread_id=f"chat-{conversation_public_id}",
+        sound="public/sounds/oyuns_chat_notification.caf",
+    )
+
+
+def _fcm_ready() -> bool:
+    return bool(settings.FCM_SERVICE_ACCOUNT_JSON)
+
+
+def _apns_ready() -> bool:
+    return all((settings.APNS_TEAM_ID, settings.APNS_KEY_ID, settings.APNS_PRIVATE_KEY, settings.APNS_BUNDLE_ID))
+
+
+async def deliver_notification_push(db: AsyncSession, notification_id: int) -> None:
+    """Native copy of one bell notification (tasks, reports, worktime, …).
+
+    The bell entry already passed the tenant rules and the recipient's own
+    preferences; one the recipient has read meanwhile is not pushed.
+    """
+    if not settings.MOBILE_PUSH_DELIVERY_ENABLED:
+        return
+    notification = await db.get(UserNotification, notification_id)
+    if notification is None or notification.read_at is not None:
+        return
+    registrations = list((await db.execute(select(MobilePushRegistration).where(
+        MobilePushRegistration.account_id == notification.recipient_account_id,
+        MobilePushRegistration.organization_id == notification.organization_id,
+        MobilePushRegistration.is_active.is_(True),
+    ))).scalars().all())
+    if not registrations:
+        return
+    title, body = notification.title[:120], (notification.body or "")[:180]
+    target_url = notification.target_url if notification.target_url and notification.target_url.startswith("/") and not notification.target_url.startswith("//") else "/"
+    async with httpx.AsyncClient(timeout=20, http2=True) as client:
+        for registration in registrations:
+            token = decrypt_secret(registration.encrypted_token)
+            if registration.provider == "fcm":
+                if not _fcm_ready():
+                    continue
+                valid = await _fcm_send(
+                    client, token, title=title, body=body,
+                    data={"target_url": target_url, "notification_id": str(notification.id), "kind": notification.kind},
+                    channel_id="oyuns-default", tag=f"notification-{notification.id}",
+                )
+            else:
+                if not _apns_ready():
+                    continue
+                valid = await _apns_send(
+                    client, token, title=title, body=body,
+                    data={"target_url": target_url, "notification_id": notification.id, "kind": notification.kind},
+                    collapse_id=f"notification-{notification.id}", thread_id=f"kind-{notification.kind}",
+                )
+            if not valid:
+                registration.is_active = False
+                registration.revoked_at = _now()
 
 
 async def deliver_chat_push(db: AsyncSession, message_id: int, recipient_account_id: int) -> None:

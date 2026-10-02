@@ -6,6 +6,7 @@ import { acceptSession, api, clearAuthenticatedQueryCache, clearSessionCredentia
 import { tenancyErrorMessage } from './tenancy'
 import i18n from '../i18n'
 import { notificationService } from '../platform/notifications'
+import { stopAutoWorktimeOnSignOut } from '../platform/auto-worktime'
 import { getNativeRefreshToken } from '../platform/secure-session'
 import { isNativePlatform, requireWebCapability } from '../platform/runtime'
 import { useAuthStore, Actor } from '../store/auth'
@@ -597,6 +598,7 @@ export function useEnterpriseLogout() {
   return useMutation({
     mutationFn: async () => {
       if (isNativePlatform()) await notificationService.unregister()
+      if (isNativePlatform()) await stopAutoWorktimeOnSignOut()
       const refreshToken = isNativePlatform() ? await getNativeRefreshToken() : null
       try {
         return await api.post('/v1/auth/logout', refreshToken ? { refresh_token: refreshToken } : undefined)

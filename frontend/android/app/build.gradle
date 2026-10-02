@@ -36,6 +36,13 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    // Office geofences, their background upload, and the biometric app lock.
+    implementation "com.google.android.gms:play-services-location:$playServicesLocationVersion"
+    implementation "androidx.work:work-runtime:$androidxWorkVersion"
+    // WorkManager's Java API exposes ListenableFuture. Guava is already on the
+    // runtime classpath (a plugin dependency); this only makes it visible to javac.
+    compileOnly "com.google.guava:guava:33.6.0-android"
+    implementation "androidx.biometric:biometric:$androidxBiometricVersion"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

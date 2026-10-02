@@ -57,6 +57,8 @@ import {
 } from "../api/enterprise";
 import { notificationService, type NotificationPermissionState } from "../platform/notifications";
 import { NotificationPreferencesCard } from "../components/NotificationPreferencesCard";
+import { AutoWorktimeCard } from "../components/AutoWorktimeCard";
+import { BiometricLockCard } from "../components/BiometricLock";
 import { isNativePlatform, resolvePublicAssetUrl } from "../platform/runtime";
 import { desktopChatPermission, previewChatSound, requestDesktopChatPermission } from "../platform/chat-notifications";
 
@@ -622,6 +624,8 @@ export function ProfilePage() {
           </Card>
 
           <NotificationPreferencesCard />
+          <AutoWorktimeCard />
+          <BiometricLockCard />
         </VStack>
       </Grid>
 

@@ -18,6 +18,7 @@ import { RoleBuilder } from '../components/RoleBuilder'
 import { ERPModuleSettings } from '../components/ERPModuleSettings'
 import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
 import { WorktimeMethodsSettings } from '../components/WorktimeMethodsSettings'
+import { WorktimeAutoSettings } from '../components/WorktimeAutoSettings'
 import { TwoFactorSettings } from '../components/TwoFactorSettings'
 import { ReportPolicySettings } from '../components/ReportPolicySettings'
 import { SeatMeter, TenantLicenseSettings } from '../components/TenantLicenseSettings'
@@ -203,6 +204,7 @@ export function CollaborationSettingsPage() {
     <SettingsSection title={t('st.adm.worktimeMethods')} icon={ScanLine} className="settings-embedded"><WorktimeMethodsSettings /></SettingsSection>
     <WorktimeQrKioskPanel />
     <WorktimeGeofencePanel />
+    <SettingsSection title={t('wta.adm.section')} icon={MapPin} className="settings-embedded"><WorktimeAutoSettings /></SettingsSection>
   </SettingsPage>
 }
 

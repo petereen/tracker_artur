@@ -7,7 +7,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // iOS relaunches the app in the background to deliver an office
+        // geofence event; the engine must be listening before that happens.
+        GeofenceEngine.shared.start()
         return true
     }
 

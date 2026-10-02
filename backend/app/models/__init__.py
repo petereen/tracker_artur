@@ -118,3 +118,4 @@ from app.models.platform import (  # noqa: F401
     TenantTelegramBot,
 )
 from app.models.announcements import Announcement  # noqa: F401
+from app.models.worktime_geo import MobileDevice, WorktimeGeoEvent, WorktimeLocationConsent, WorktimeSite  # noqa: F401

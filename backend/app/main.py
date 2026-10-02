@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from app.observability.sentry import init_from_env
 
-init_from_env(server_name="tracker-artur-api")
+init_from_env(server_name="oyuns-erp-api")
 
 from fastapi import FastAPI
 from fastapi.exceptions import HTTPException
@@ -19,7 +19,7 @@ from app.core.tenancy import TENANT_FEATURES, TenantBoundaryViolation, install_t
 from app.core.tenant_middleware import TenantContextMiddleware
 from app.core.localization import request_language, translate_detail
 from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssignment, UserAccount
-from app.routers import ai_settings, announcements, assistant_learning, assistant_voice, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, notification_settings, onboarding, platform, questions, realtime, report_insights, schedules, tasks, tenant, work_reports, worktime_qr, worktime_reports
+from app.routers import ai_settings, announcements, assistant_learning, assistant_voice, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, notification_settings, onboarding, platform, questions, realtime, report_insights, schedules, tasks, tenant, work_reports, worktime_geo, worktime_qr, worktime_reports
 from app.services.tenant_service import is_seat_limit_error
 from app.erp import router as erp
 from app import mcp_executor
@@ -202,6 +202,7 @@ app.include_router(ai_settings.router, prefix="/v1/settings/ai-agent", tags=["v1
 app.include_router(assistant_voice.router, prefix="/v1/assistant/voice", tags=["v1-assistant-voice"])
 app.include_router(enterprise.router, prefix="/v1", tags=["v1-enterprise"])
 app.include_router(worktime_qr.router, prefix="/v1/worktime-qr", tags=["v1-worktime-qr"])
+app.include_router(worktime_geo.router, prefix="/v1", tags=["v1-worktime-geo"])
 app.include_router(erp.router, prefix="/v1/erp", tags=["v1-erp"])
 app.include_router(hr_router, prefix="/v1/hr", tags=["v1-hr"])
 app.include_router(mcp_executor.router, prefix="/v1/mcp-executor", tags=["v1-mcp-executor"])

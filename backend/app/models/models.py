@@ -2979,6 +2979,8 @@ class MobileUpdateBundle(Base):
     storage_key = Column(String(512), nullable=False, unique=True)
     checksum = Column(String(64), nullable=False)
     size = Column(Integer, nullable=False)
+    # Lowest native binary build this web bundle can run on (NULL = any).
+    min_native_version = Column(Integer)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -3882,3 +3884,4 @@ class PayrollStatementLine(Base):
 # them here so every metadata consumer (Alembic, create_all, tests) sees them.
 import app.models.contracts  # noqa: E402,F401
 import app.models.crm  # noqa: E402,F401
+import app.models.worktime_geo  # noqa: E402,F401

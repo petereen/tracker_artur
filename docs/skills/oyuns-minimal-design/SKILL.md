@@ -1,11 +1,11 @@
 ---
 name: oyuns-minimal-design
-description: Build, refactor, or audit tracker_artur frontend UI with a restrained, typography-led OYUNS visual system. Use for React/Vite pages, components, forms, dashboards, navigation, and responsive polish; do not apply to backend-only work.
+description: Build, refactor, or audit OYUNS ERP frontend UI with a restrained, typography-led OYUNS visual system. Use for React/Vite pages, components, forms, dashboards, navigation, and responsive polish; do not apply to backend-only work.
 ---
 
 # OYUNS minimal product design
 
-Use this skill when changing the frontend in `tracker_artur`. It adapts the supplied Codex minimal-design brief to the product that actually exists here: an OYUNS enterprise workspace with dense operational screens, Mongolian-first copy, light/dark themes, and an established token system.
+Use this skill when changing the frontend in `OYUNS ERP`. It adapts the supplied Codex minimal-design brief to the product that actually exists here: an OYUNS enterprise workspace with dense operational screens, Mongolian-first copy, light/dark themes, and an established token system.
 
 The goal is calm, exact, useful UI. Let structure, type, spacing, and content carry the hierarchy. Keep decoration subordinate to the task. Do not copy the source brief's literal black-only palette, Open Sans typography, or editorial-photography assumptions.
 

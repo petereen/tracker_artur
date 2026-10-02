@@ -1,4 +1,5 @@
 import { CapacitorUpdater } from '@capgo/capacitor-updater'
+import { getNativeCapabilities } from './native-capabilities'
 import { getApiBaseUrl, getNativeApiOrigin, isNativePlatform, nativePlatform } from './runtime'
 import { addTelemetryBreadcrumb, captureTelemetryException } from './telemetry'
 
@@ -47,6 +48,8 @@ export async function checkSelfHostedUpdate(): Promise<void> {
         channel: UPDATE_CHANNEL,
         platform,
         current_version: currentVersion,
+        // Lets the server hold back a bundle this binary is too old for.
+        native_version: (await getNativeCapabilities()).nativeVersion,
       }),
     })
     if (!response.ok) throw new Error(`Self-hosted OTA check failed (${response.status})`)

@@ -3,7 +3,7 @@ set -euo pipefail
 
 compose=(docker compose -f docker-compose.yml -f docker-compose.hardening.yml)
 exercise=${1:-validate}
-artifact_dir=${HARDENING_ARTIFACT_DIR:-/private/tmp/tracker-artur-hardening}
+artifact_dir=${HARDENING_ARTIFACT_DIR:-/private/tmp/oyuns-erp-hardening}
 mkdir -p "$artifact_dir"
 
 case "$exercise" in

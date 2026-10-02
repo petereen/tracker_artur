@@ -11,6 +11,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let bridgeViewController = CAPBridgeViewController()
         bridgeViewController.loadViewIfNeeded()
         bridgeViewController.bridge?.registerPluginInstance(AudioRoutePlugin())
+        bridgeViewController.bridge?.registerPluginInstance(NativeCapabilitiesPlugin())
+        bridgeViewController.bridge?.registerPluginInstance(GeofencePlugin())
+        bridgeViewController.bridge?.registerPluginInstance(BiometricAuthPlugin())
         window?.rootViewController = bridgeViewController
         window?.makeKeyAndVisible()
 

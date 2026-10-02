@@ -6,9 +6,11 @@ from typing import Iterable
 from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.models import (
     DomainEvent,
     Employee,
+    JobQueue,
     ManagerSettings,
     NotificationOutbox,
     Organization,
@@ -131,6 +133,10 @@ async def create_notifications(
         db.add(realtime_event)
         await db.flush()
         await db.execute(text("SELECT pg_notify('oyuns_events', :event_id)"), {"event_id": str(realtime_event.id)})
+        if settings.MOBILE_PUSH_DELIVERY_ENABLED:
+            # Native push follows the same quiet hours as the Telegram copy.
+            run_at = datetime.now(timezone.utc) if immediate or not employee else next_allowed(datetime.now(timezone.utc), employee.timezone, policy)
+            db.add(JobQueue(job_type="notification_push", payload={"notification_id": notification.id}, run_at=run_at, dedup_key=f"notification-push:{notification.id}"))
         created.append(notification)
     # Telegram users may be registered employees before they have opened the
     # web app and therefore have no UserAccount yet. They cannot receive an
@@ -228,4 +234,6 @@ def mirror_existing_telegram_notification(
         db.add(event)
         db.flush()
         db.execute(text("SELECT pg_notify('oyuns_events', :event_id)"), {"event_id": str(event.id)})
+        if settings.MOBILE_PUSH_DELIVERY_ENABLED:
+            db.add(JobQueue(job_type="notification_push", payload={"notification_id": notification.id}, dedup_key=f"notification-push:{notification.id}"))
         db.commit()

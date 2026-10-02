@@ -100,6 +100,10 @@ async def execute_job(job_id: int) -> None:
                 from app.services.mobile_push_delivery import deliver_chat_push
 
                 await deliver_chat_push(db, int(job.payload["message_id"]), int(job.payload["recipient_account_id"]))
+            elif job.job_type == "notification_push":
+                from app.services.mobile_push_delivery import deliver_notification_push
+
+                await deliver_notification_push(db, int(job.payload["notification_id"]))
             elif job.job_type in {"voice_transcription", "assistant_action"}:
                 raise RuntimeError(f"{job.job_type} provider is not configured")
             else:
@@ -125,13 +129,29 @@ async def execute_job(job_id: int) -> None:
             await db.commit()
 
 
+async def _geofence_maintenance(name: str) -> None:
+    """Automatic worktime upkeep: exits past their grace, clocks left running
+    overnight, and the location-event retention purge."""
+    from app.services import worktime_auto
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await getattr(worktime_auto, name)(db)
+            await db.commit()
+    except Exception:  # noqa: BLE001 - upkeep must not stop the job loop
+        log.exception("Geofence worktime maintenance %s failed", name)
+
+
 async def run() -> None:
     logging.basicConfig(level=logging.INFO)
-    init_from_env(server_name="tracker-artur-worker")
+    init_from_env(server_name="oyuns-erp-worker")
     last_watch_scan = datetime.min.replace(tzinfo=timezone.utc)
     last_audit_purge = datetime.min.replace(tzinfo=timezone.utc)
     last_index_scan = datetime.min.replace(tzinfo=timezone.utc)
     last_chat_upload_cleanup = datetime.min.replace(tzinfo=timezone.utc)
+    last_geo_exit_scan = datetime.min.replace(tzinfo=timezone.utc)
+    last_geo_sweep = datetime.min.replace(tzinfo=timezone.utc)
+    last_geo_purge = datetime.min.replace(tzinfo=timezone.utc)
     while True:
         now = datetime.now(timezone.utc)
         if now - last_watch_scan >= timedelta(minutes=15):
@@ -174,6 +194,15 @@ async def run() -> None:
                 if await purge_expired_chat_uploads(db):
                     await db.commit()
             last_chat_upload_cleanup = now
+        if now - last_geo_exit_scan >= timedelta(seconds=30):
+            await _geofence_maintenance("finalize_pending_exits")
+            last_geo_exit_scan = now
+        if now - last_geo_sweep >= timedelta(minutes=15):
+            await _geofence_maintenance("close_stale_entries")
+            last_geo_sweep = now
+        if now - last_geo_purge >= timedelta(days=1):
+            await _geofence_maintenance("purge_geo_events")
+            last_geo_purge = now
         job_id = await claim_job()
         if job_id is None:
             await asyncio.sleep(2)

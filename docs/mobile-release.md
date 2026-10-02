@@ -71,6 +71,8 @@ APNS_USE_SANDBOX=false
 
 Never expose these values to the Vite bundle. The backend queues one idempotent `chat_push` worker job per eligible recipient, re-checks conversation membership and mute state at delivery time, and deactivates provider-rejected device tokens.
 
+Every bell notification (tasks, reports, work time, calendar, contracts, HR, CRM, payroll) also gets a native copy: `create_notifications` queues a `notification_push` job per created notification. It follows the tenant rules and the recipient's own notification preferences (the bell entry is only created when they allow it), honours the same quiet hours as the Telegram copy, is skipped when the notification was read meanwhile, and is delivered on the `oyuns-default` channel with the notification's internal `target_url`.
+
 ### iOS/APNs
 
 1. In Apple Developer/Xcode, confirm `mn.oyuns.workspace`, the Push Notifications capability, the correct team, and `aps-environment` entitlement.
@@ -142,6 +144,57 @@ OTA_BUNDLE_VERSION=1.0.0 npm run ota:promote:production
 Verify corrupt/checksum-failed downloads, updater API outage, slow network, and offline launch retain the last working bundle. A newer native store build resets downloaded bundles according to `resetWhenUpdate`.
 
 The upload script runs tests, creates a ZIP from `dist`, and calls `POST /api/v1/mobile-updates/bundles`. Promotion calls `PUT /channels/{channel}/bundle/{version}`; rollback calls `POST /channels/{channel}/rollback`. The backend stores bundles on the persistent volume and serves immutable, checksum-validated downloads. If end-to-end encrypted bundles are needed later, add that signing/encryption layer to this API and ship its public key in a new native binary.
+
+## CI for OTA
+
+- `.github/workflows/ota-staging.yml` runs on every push to `master` that touches `frontend/**`: tests, build, upload as `1.0.<run>.<attempt>`, activate on the `staging` channel. (It used to watch `main`, which does not exist here, so it never ran.)
+- `.github/workflows/ota-production.yml` is manual (`workflow_dispatch`): it promotes an already tested staging version to `production` without rebuilding.
+- Both need the `OTA_UPLOAD_TOKEN` secret in the `staging` / `production` GitHub environments; `OTA_API_URL` is an optional variable.
+
+## Native capabilities and `min_native_version`
+
+The web layer ships over the air and can run on an older binary, so two things keep it safe:
+
+1. **Feature detection.** Every binary from native build 2 on has the `NativeCapabilities` plugin: `getNativeCapabilities()` → `{ nativeVersion, geofence, biometric }` (`src/platform/native-capabilities.ts`). A binary without the plugin is build 1 with no capabilities. Web code must ask before using a native plugin (`geofenceSupported()`, `biometricAvailability()`) and hide the feature otherwise.
+2. **Server-side hold-back.** `frontend/native-requirements.json` holds `min_native_version`, the lowest binary build the bundle can run on at all. The upload script sends it, the server stores it on the bundle, and `/v1/mobile-updates/check` (which now receives `native_version`) does not offer the bundle to an older binary. Leave it at `1` while the bundle feature-detects; raise it only for a bundle that cannot boot on an older binary.
+
+When a store binary adds a native capability, bump `oyunsNativeVersion` (`ios/App/App/GeofenceEngine.swift`) and `GeofenceStore.NATIVE_VERSION` (Android) together, and the capability number the plugin reports.
+
+Rule for the first binary: every permission, `Info.plist` key, receiver and entitlement a later feature may need goes in now, because none of them can be delivered over the air.
+
+## Automatic work time, biometrics and native capabilities
+
+Product rules and the list of what is and is not verified: [`MOBILE APP PLAN.MD`](../MOBILE%20APP%20PLAN.MD).
+
+### How it fits together
+
+```
+Admin: Settings → Ажлын цаг ба процесс → «Автомат цаг бүртгэл» — mode off / shadow / on (employer acknowledgement), office areas
+Employee: Profile → «Автомат цаг бүртгэл» → disclaimer → consent → "always" location → device enrolled
+Phone (native, also with the app closed): registers the areas, reports enter / exit / snapshots with its device credential
+Server: rules → WorkTimeEntry (source_channel = geofence) → audit → bell + push notification
+Worker: finalises exits after the grace, closes clocks left running overnight, purges old events
+```
+
+- **Device credential.** Enrollment returns `"<device id>.<secret>"` once; only its SHA-256 is stored. The web layer hands it to the native plugin, which keeps it in the Keychain (iOS, `AfterFirstUnlockThisDeviceOnly`) or encrypts it with an Android Keystore key. It is sent as `Authorization: Device …` and opens only `GET /v1/mobile/geofences` and `POST /v1/mobile/geo-events`. The session refresh token is never given to native code.
+- **Decisions are server-side** (`backend/app/services/worktime_auto.py`). The phone only registers regions and reports. Sites and the mode come back with every report, so an admin change reaches phones on their next event or 15-minute snapshot.
+- **Shadow mode** records what would have happened (`shadow:start`, `shadow:stop`) and changes nothing. Roll every tenant out in shadow mode first and compare the log with real attendance.
+- **Worker required.** `python -m app.worker` finalises pending exits every 30 seconds, sweeps stale clocks every 15 minutes and purges events daily. Without it exits are only finalised when the same phone reports again.
+
+### Reliability on Android
+
+- Geofences are registered through Google Play services with no initial trigger. They do not survive a reboot, an app update or a Play services reset, so `GeofenceBootReceiver` and a 15-minute periodic `WorkManager` job re-register them and send an inside/outside snapshot, which repairs a transition the system never delivered.
+- The employee card asks for the battery-optimisation exemption right after enrollment (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`) and links to the manufacturer's auto-start screen (Xiaomi, Huawei/Honor, Oppo/Realme, Vivo, Samsung, OnePlus, Asus, Transsion). The server stores what the phone reports (`location_permission`, `location_accuracy`, `battery_unrestricted`); admin and HR see unhealthy phones in the device list.
+- Areas smaller than 100 m are registered as 100 m on both platforms.
+
+### Release checklist for the binary that introduces this
+
+1. iOS: build in Xcode (the Swift sources were not compiled on the machine that wrote them). Confirm the Info.plist purpose strings, `UIBackgroundModes` (`location`, `remote-notification`) and that `GeofenceEngine.shared.start()` runs in `didFinishLaunching`.
+2. Android: `npm run native:sync:android`, build the AAB. New dependencies: `play-services-location`, `work-runtime`, `biometric`.
+3. Bump `versionCode` / `versionName` and `CURRENT_PROJECT_VERSION` / `MARKETING_VERSION`.
+4. Store declarations: Play "background location" declaration with a short video of the consent dialog and the feature; Play justification for the battery-optimisation exemption; App Store review notes explaining region monitoring, the opt-in consent and the QR/manual alternative.
+5. Device tests, each on a physical phone, with the tenant in `shadow` and then `on`: enter and exit with the app in foreground, in background and force-closed; phone rebooted while outside, then entering; airplane mode during an exit, then back online (late report stops the clock at the exit time); step out and back within the grace; permission downgraded to "while using"; consent withdrawn (phone stops within one report); a second phone enrolled (the first one stops); mock-location app on Android (flagged, no clock change). Repeat on at least one Xiaomi/Huawei/Oppo and one Samsung with battery saver on.
+6. Biometric lock: enable in Profile, kill and reopen the app, background for over a minute, fail recognition and fall back to the screen lock, remove the phone's screen lock (the app must not trap the user).
 
 ## Web and security regression gates
 

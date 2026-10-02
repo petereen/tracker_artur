@@ -12,6 +12,7 @@ vi.mock('@capacitor/core', () => ({
     isNativePlatform: () => state.native,
     getPlatform: () => state.platform,
   },
+  registerPlugin: () => ({ getNativeCapabilities: async () => ({ nativeVersion: 2, geofence: 1, biometric: 1 }) }),
 }))
 vi.mock('@capgo/capacitor-updater', () => ({ CapacitorUpdater: updater }))
 vi.mock('@sentry/react', () => ({ addBreadcrumb: vi.fn(), captureException: vi.fn() }))
@@ -55,5 +56,8 @@ describe('self-hosted OTA client', () => {
       url: expect.stringContaining('/bundles/1.0.1'),
     }))
     expect(updater.next).toHaveBeenCalledWith({ id: 'bundle-2' })
+    // The server needs the binary's build to hold back a bundle it cannot run.
+    const request = vi.mocked(fetch).mock.calls[0][1] as RequestInit
+    expect(JSON.parse(String(request.body))).toMatchObject({ platform: 'android', current_version: '1.0.0', native_version: 2 })
   })
 })

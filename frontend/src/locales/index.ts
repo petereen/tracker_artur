@@ -27,12 +27,13 @@ import tasks from './tasks'
 import today from './today'
 import twoFactor from './twoFactor'
 import worktime from './worktime'
+import worktimeAuto from './worktimeAuto'
 
 export const LANGUAGES = ['mn', 'ru', 'en'] as const
 export type Language = (typeof LANGUAGES)[number]
 
 /** Add a new domain file here; `locales.test.ts` checks ru/mn parity and key collisions. */
-export const messageSets = { accounts, api, analytics, assistant, auth, budget, calendar, catalogs, chat, common, console: consoleMessages, contracts, core, crm, files, hr, legal, payroll, payrollRun, plans, profile, projects, reports, settings, shell, tasks, today, twoFactor, worktime }
+export const messageSets = { accounts, api, analytics, assistant, auth, budget, calendar, catalogs, chat, common, console: consoleMessages, contracts, core, crm, files, hr, legal, payroll, payrollRun, plans, profile, projects, reports, settings, shell, tasks, today, twoFactor, worktime, worktimeAuto }
 
 function merge(language: Language): Record<string, string> {
   return Object.assign({}, ...Object.values(messageSets).map((set) => set[language] ?? {}))

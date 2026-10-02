@@ -17,6 +17,9 @@ import { tenancyError, useTenantContext } from './api/tenancy'
 import { LicenseRequiredScreen, WorkspaceUnavailableScreen, isWorkspaceUnavailable, useLicenseGraceNotice } from './components/TenantGate'
 import { TwoFactorGate } from './components/TwoFactorGate'
 import { TWO_FACTOR_REQUIRED_EVENT } from './platform/app-events'
+import { App as NativeApp } from '@capacitor/app'
+import { BiometricLockGate } from './components/BiometricLock'
+import { syncAutoWorktime } from './platform/auto-worktime'
 
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
 const AnnouncementsPage = lazy(() => import('./pages/AnnouncementsPage').then((module) => ({ default: module.AnnouncementsPage })))
@@ -93,6 +96,20 @@ function NativeNotificationBridge() {
   return null
 }
 
+/** Keeps the phone's office geofences and its reported state current. */
+function NativeAutoWorktimeBridge() {
+  const token = useAuthStore((state) => state.token)
+
+  useEffect(() => {
+    if (!token || !isNativePlatform()) return
+    void syncAutoWorktime()
+    const listener = NativeApp.addListener('resume', () => { void syncAutoWorktime() })
+    return () => { void listener.then((handle) => handle.remove()) }
+  }, [token])
+
+  return null
+}
+
 function AuthenticatedApp() {
   const token = useAuthStore((state) => state.token)
   const initialized = useAuthStore((state) => state.initialized)
@@ -152,8 +169,10 @@ function AuthenticatedApp() {
   }
 
   return (
+    <BiometricLockGate>
     <CallProvider>
       <NativeNotificationBridge />
+      <NativeAutoWorktimeBridge />
       <Routes>
       <Route element={<EnterpriseShell />}>
         <Route index element={<EnterpriseDashboardPage />} />
@@ -251,6 +270,7 @@ function AuthenticatedApp() {
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </CallProvider>
+    </BiometricLockGate>
   )
 }
 

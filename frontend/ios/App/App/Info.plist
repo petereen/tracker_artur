@@ -26,6 +26,17 @@
 	<string>OYUNS uses the microphone for voice calls and voice messages.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>OYUNS uses the camera for video calls.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>OYUNS uses your location to confirm you are at the office when you start work.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>If you turn on automatic work time, OYUNS detects when you arrive at and leave the office, even when the app is closed, to start and stop your work clock. Your location is not tracked anywhere else.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>OYUNS uses Face ID to unlock the app and to confirm it is you.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>remote-notification</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

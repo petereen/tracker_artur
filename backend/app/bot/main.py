@@ -34,7 +34,7 @@ from app.observability.sentry import init_from_env
 from app.services import telegram_bots
 from app.services.telegram_bots import TenantBot
 
-init_from_env(server_name="tracker-artur-bot")
+init_from_env(server_name="oyuns-erp-bot")
 # Same isolation layers as the API: ORM guard + ``app.tenant_id`` for RLS.
 install_tenant_guards()
 

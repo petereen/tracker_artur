@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom'
 import { useHREmployeeRoles, useSetHREmployeeRoles, useActor, useArchiveHREmployee, useCreateHRDepartment, useCreateHREmployee, useDecideHRLeave, useDeleteHRDepartment, useDeleteHREmployeePermanently, useHRDepartments, useHREmployees, useHRLeaveBalances, useHRLeaveRequests, useSetHRLeaveBalance, useSubmitHRLeave, useUpdateHRDepartment, useUpdateHREmployee, useUpdateHRLeave } from '../api/enterprise'
 import type { HRDepartment, HREmployee, HREmploymentStatus, HREmploymentType, HRLeaveRequest } from '../api/enterprise'
 import { Badge, Btn, Card, Input, Modal, Select } from '../components/ui'
+import { WorktimeLocationLogCard } from '../components/WorktimeLocationLog'
 import { WorkerActionsMenu } from '../components/WorkerActionsMenu'
 import { SeatLimitNotice } from '../components/SeatLimitNotice'
 import { MonthlyPayrollProfileDrawer } from '../components/MonthlyPayrollProfileDrawer'
@@ -88,6 +89,7 @@ export function HRWorkspacePage() {
     {tab === 'departments' && isHR && <DepartmentsPanel departments={departments.data || []} employees={allEmployees.data?.items || []} />}
     {tab === 'leave' && <LeavePanel isHR={isHR} isManager={isManager} balances={balances.data || []} requests={leave.data || []} employees={employees.data?.items || []} />}
     {tab === 'attendance' && <Card className="hr-attendance-card"><AttendanceGrid canEdit={isManager} onOpenLeave={() => setTab('leave')} /></Card>}
+    {tab === 'attendance' && isHR && <WorktimeLocationLogCard />}
     {tab === 'payroll' && isHR && <PayrollPanel onGoEmployees={() => setTab('directory')} />}
     {selected && <EmployeeDrawer employee={selected} isHR={isHR} canSeeStats={isManager} onClose={() => setSelected(null)} onEdit={() => { setEditing(selected); setSelected(null) }} />}
     {editing && <WorkerFormModal employee={editing === 'new' ? null : editing} departments={departments.data || []} employees={allEmployees.data?.items || []} onClose={() => setEditing(null)} onCreated={(url) => { setEditing(null); if (url) setInvite(url); else toast.success(t('hr.workerAdded')) }} />}

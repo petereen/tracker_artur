@@ -177,6 +177,16 @@ _COPY = {
         "ru": ("Ежемесячный отчёт", "Отправьте ежемесячный отчёт."),
         "en": ("Monthly report", "Please submit your monthly report."),
     },
+    "worktime_auto_started": {
+        "mn": ("Ажлын цаг автоматаар эхэллээ", "Оффисын бүсэд орсон тул ажлын цаг эхэллээ."),
+        "ru": ("Учёт времени начат автоматически", "Вы вошли в зону офиса — учёт рабочего времени начат."),
+        "en": ("Work clock started automatically", "You entered the office area, so your work clock started."),
+    },
+    "worktime_auto_stopped": {
+        "mn": ("Ажлын цаг автоматаар зогслоо", "Оффисын бүсээс гарсан тул ажлын цаг зогслоо."),
+        "ru": ("Учёт времени остановлен автоматически", "Вы вышли из зоны офиса — учёт рабочего времени остановлен."),
+        "en": ("Work clock stopped automatically", "You left the office area, so your work clock stopped."),
+    },
     "periodic_report": {
         "mn": ("Хугацаат тайлан", "Тайлангаа заасан хугацаанд илгээнэ үү."),
         "ru": ("Периодический отчёт", "Отправьте отчёт за указанный период."),

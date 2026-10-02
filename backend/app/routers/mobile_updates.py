@@ -35,6 +35,9 @@ class UpdateCheckInput(BaseModel):
     platform: str = Field(min_length=1, max_length=16)
     current_version: str = Field(default="builtin", max_length=64)
     device_id: str | None = Field(default=None, max_length=128)
+    # Build number of the installed binary's native layer. Binaries that
+    # predate the capability plugin do not send it and count as build 1.
+    native_version: int | None = Field(default=None, ge=1, le=100000)
 
     @field_validator("channel")
     @classmethod
@@ -63,6 +66,7 @@ class BundleOutput(BaseModel):
     checksum: str
     size: int
     storage_url: str
+    min_native_version: int | None = None
 
 
 def _enabled() -> None:
@@ -101,6 +105,11 @@ def _is_newer(candidate: str, current: str) -> bool:
     return candidate_key > current_key
 
 
+def _native_supported(min_native_version: int | None, native_version: int | None) -> bool:
+    """A bundle that needs a newer binary is not offered to an older one."""
+    return min_native_version is None or (native_version or 1) >= min_native_version
+
+
 def _bundle_url(version: str) -> str:
     return f"{settings.OTA_PUBLIC_BASE_URL.rstrip('/')}/bundles/{version}"
 
@@ -128,6 +137,8 @@ async def check_for_update(data: UpdateCheckInput):
         return UpdateCheckOutput()
     bundle, channel = row
     if not _is_newer(bundle.version, data.current_version):
+        return UpdateCheckOutput()
+    if not _native_supported(bundle.min_native_version, data.native_version):
         return UpdateCheckOutput()
     return UpdateCheckOutput(
         update=UpdateDescriptor(
@@ -171,6 +182,7 @@ async def download_bundle(version: str):
 async def upload_bundle(
     version: str = Form(...),
     file: UploadFile = File(...),
+    min_native_version: int | None = Form(default=None, ge=1, le=100000),
     authorization: str | None = Header(default=None),
     x_ota_token: str | None = Header(default=None),
 ):
@@ -209,6 +221,7 @@ async def upload_bundle(
             storage_key=storage_key,
             checksum=checksum,
             size=size,
+            min_native_version=min_native_version,
         )
         db.add(bundle)
         try:
@@ -225,6 +238,7 @@ async def upload_bundle(
         checksum=bundle.checksum,
         size=bundle.size,
         storage_url=_bundle_url(bundle.version),
+        min_native_version=bundle.min_native_version,
     )
 
 

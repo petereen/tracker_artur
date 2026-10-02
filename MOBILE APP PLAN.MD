@@ -1,7 +1,7 @@
 
 # Mobile app plan: biometrics, native push, automatic geofence worktime
 
-Status: **plan, not implemented** (2026-10-02). Approach chosen: **Capacitor shell + OTA for the web layer + thin native plugins**, in this repo. Companion to [`mobile-release.md`](mobile-release.md) (build/OTA/push runbook).
+Status: **implemented in the repo, not yet released** (2026-10-02) — see “Implementation status” at the end for what is done, what was verified, and what still needs a signed binary and real phones. Approach chosen: **Capacitor shell + OTA for the web layer + thin native plugins**, in this repo. Companion to [`mobile-release.md`](mobile-release.md) (build/OTA/push runbook).
 
 Decisions already made:
 - Same repo (`frontend/` holds the Capacitor projects; `backend/` holds API, OTA server, push delivery).
@@ -11,7 +11,7 @@ Decisions already made:
 
 | Area | Exists | Gap |
 |---|---|---|
-| Shell, OTA, rollback | Capacitor 8, `@capgo/capacitor-updater` + self-hosted `/v1/mobile-updates`, `ota:*` scripts | CI does not publish OTA; no native-capability gating |
+| Shell, OTA, rollback | Capacitor 8, `@capgo/capacitor-updater` + self-hosted `/v1/mobile-updates`, `ota:*` scripts, CI workflows `ota-staging.yml` / `ota-production.yml` | Staging workflow watched branch `main` (default is `master`), so it never ran; no native-capability gating |
 | Native push | `@capacitor/push-notifications`, `PUT /v1/mobile/push-registration`, FCM/APNs sender | Only `chat_push` jobs use it; tasks/reports/worktime/etc. do not |
 | Session storage | Keychain/Keystore refresh token (`platform/secure-session.ts`) | No biometric gate |
 | Worktime | `POST /v1/enterprise/clock/start` with one-point org geofence (`worktime_geofence.py`), manual button (`WorkdayStartButton.tsx`), QR, `WorkTimeEntry.source_channel`/`work_location_id` columns | No background detection, one site only, no event log, no consent record |
@@ -45,7 +45,7 @@ Server: validate → rules engine → start/stop WorkTimeEntry (source_channel='
 Reconciliation: app-open + periodic state snapshot + end-of-day sweeper close gaps
 ```
 
-### 3.2 Backend (new migration after head `5b7f1d3e9c26`; update `tests/test_alembic_graph.py`)
+### 3.2 Backend (migration `7d9b3f5a1e48` after head `6c8a2e4f0d37`; `tests/test_alembic_graph.py` updated)
 
 All tables carry `organization_id` + RLS policy (see `docs/multi-tenancy.md`) and are added to the ORM tenant guard.
 
@@ -71,6 +71,40 @@ Endpoints (`routers/mobile.py` or a new `routers/worktime_geo.py`; add the prefi
 ## Decisions I need from you
 - When an employee exits, should it always stop the clock (my default), or count as a break during a lunch window? answer: stop the clock
 - Are these defaults OK: 10-minute exit grace, 90-day retention of location events, 100 m accuracy threshold? answer: yes.
-- Should the native plugin be a thin custom one (my pick: no license, little native code) or a commercial geolocation plugin (more proven on Android battery killers, paid license for Android release builds)? - 
-- Who can see location events? My plan is admin and HR only, with managers seeing just the resulting time entries.
-- Can an employee refuse automatic tracking and fall back to QR/manual (my plan), or is it mandatory by role?
+- Should the native plugin be a thin custom one (my pick: no license, little native code) or a commercial geolocation plugin (more proven on Android battery killers, paid license for Android release builds)? - custom one but should be reliable as commercial on with prevention from android battery killers asking permission to no restriction to battery saver.
+- Who can see location events? My plan is admin and HR only, with managers seeing just the resulting time entries. - yes.
+- Can an employee refuse automatic tracking and fall back to QR/manual (my plan), or is it mandatory by role? - yes.
+
+## Implementation status (2026-10-02)
+
+Runbook: [`docs/mobile-release.md`](docs/mobile-release.md) → “Automatic work time, biometrics and native capabilities”.
+
+**Done**
+
+- OTA: `ota-staging.yml` now runs on pushes to `master` that touch `frontend/**`. Bundles carry `min_native_version` (`frontend/native-requirements.json` → upload script → `mobile_update_bundles.min_native_version`); `/v1/mobile-updates/check` receives `native_version` and withholds a bundle from a binary that is too old (a binary that sends nothing counts as build 1).
+- Capability gating: `NativeCapabilities.getNativeCapabilities()` → `{ nativeVersion: 2, geofence: 1, biometric: 1 }` (`src/platform/native-capabilities.ts`). A bundle on an older binary hides the features instead of calling a missing plugin.
+- Backend (§3.2): the four tables with RLS, the single geofence migrated into the first site (old `/v1/settings/worktime-geofence` endpoints are a facade over it, manual clock-in accepts any active site), settings in `worktime_methods`, all endpoints, rules engine, exit grace, end-of-day sweeper, retention purge, audit, informational notifications.
+- Native push for every bell notification (`notification_push` worker job from `create_notifications`), not only chat.
+- Native: geofence plugin for iOS (`GeofenceEngine.swift`, `GeofencePlugin.swift`) and Android (`geofence/*`), biometric plugin for both, all permissions / Info.plist keys / receivers for the first binary.
+- Web layer: employee card with the disclaimer and consent (Profile), biometric app lock (Profile), admin settings with the employer acknowledgement, sites, phones and the event log (Settings → Ажлын цаг ба процесс; HR sees the log under HR → attendance). mn / ru / en.
+
+**Decisions applied** — exit always stops the clock (also during a break); 10 min exit grace, 90 days retention, 100 m accuracy threshold (all editable by the admin); thin custom plugin, with the Android battery-optimisation exemption request and the manufacturer auto-start screen; location events visible to admin and HR only (reads audited, managers see only time entries); automatic tracking is opt-in per employee, QR and manual stay available.
+
+**Rules worth knowing** (all server-side, `services/worktime_auto.py`)
+
+- Coordinates are never stored. A snapshot sends its position once so the server can reject “inside” reported from far away.
+- A real arrival starts the clock; a periodic “inside” snapshot only repairs a missed arrival and never restarts a clock the employee stopped by hand.
+- A remote session is never touched. Mock location, accuracy worse than the threshold, reports older than 6 hours and position mismatches change nothing and are flagged for review.
+- One reporting phone per account; enrolling another retires the first. Withdrawing consent or signing out stops the phone at once.
+- A clock a geofence started that is still running after local midnight is closed at the last moment the phone was known inside and flagged for review.
+
+**Verified here** — backend unit tests and three PostgreSQL end-to-end scenarios (`tests/test_worktime_auto.py`, `tests/test_worktime_auto_db.py` with `GEO_TEST_DATABASE_URL`), the new migration up/down on PostgreSQL 16, the full frontend test suite, type-check and production build, the Android debug APK build.
+
+**Not verified / still to do before release**
+
+1. **iOS has not been compiled** (Xcode licence not accepted on the build machine). Build in Xcode first; the four new Swift files are already in `project.pbxproj`.
+2. **No real-device test yet.** Region delivery, background relaunch, and behaviour under Xiaomi / Huawei / Oppo / Samsung battery managers must be tested on physical phones. Start every tenant in `shadow` mode.
+3. Store review: background location needs the Play “background location” declaration and a clear in-app disclosure (the consent dialog), and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` needs a Play justification. `UIBackgroundModes: location` is declared as the plan requires, but region monitoring does not strictly need it and App Review may ask why — remove it if they object.
+4. The disclaimer texts (employee and employer, mn / ru / en) are drafts: have a lawyer review them. Changing a text requires a new `POLICY_VERSION`, which asks everyone to consent again.
+5. Bump `versionCode` / `CURRENT_PROJECT_VERSION` and ship the binary; the migration runs on deploy, and the worker service must be running (it finalises exits and sweeps).
+6. Telegram clock-in still checks only the first site; scheduled per-employee shifts are not consulted (only the optional per-site time window).

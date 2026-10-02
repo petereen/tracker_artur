@@ -119,6 +119,7 @@ from app.services.report_policy import (
     worker_frequencies,
 )
 from app.services.worktime_geofence import WORKTIME_GEOFENCE_KEY, WORKTIME_GEOFENCE_MAX_RADIUS_METERS, WORKTIME_GEOFENCE_MIN_RADIUS_METERS, WORKTIME_GEOFENCE_RADIUS_METERS, WORKTIME_METHODS_KEY, configured_worktime_location, configured_worktime_radius, validate_worktime_location, worktime_methods
+from app.services.worktime_auto import site_containing, upsert_primary_site
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable, scan_upload
 from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
@@ -294,6 +295,8 @@ async def update_worktime_geofence_settings(data: WorktimeGeofenceInput, db: Asy
             "radius_meters": data.radius_meters,
         },
     }
+    # The single geofence is the first site of the multi-site model.
+    await upsert_primary_site(db, organization.id, data.latitude, data.longitude, data.radius_meters)
     await record_change(
         db,
         actor=actor,
@@ -359,7 +362,8 @@ async def update_worktime_methods(data: WorktimeMethodsInput, db: AsyncSession =
     organization = await db.get(Organization, actor.organization_id, with_for_update=True)
     before = worktime_methods(organization.settings)
     after = {**before, **data.model_dump(exclude_none=True)}
-    organization.settings = {**(organization.settings or {}), WORKTIME_METHODS_KEY: after}
+    # The same key also holds the automatic-geofence settings; keep them.
+    organization.settings = {**(organization.settings or {}), WORKTIME_METHODS_KEY: {**((organization.settings or {}).get(WORKTIME_METHODS_KEY) or {}), **after}}
     await record_change(db, actor=actor, topic="settings", aggregate_type="organization_worktime_methods", aggregate_id=organization.id, operation="updated", before=before, after=after)
     await db.commit()
     return after
@@ -2614,6 +2618,9 @@ async def clock_start(data: ClockStartInput, db: AsyncSession = Depends(get_db),
                     "message": "Ажил эхлүүлэхийн тулд байршлын зөвшөөрөл шаардлагатай.",
                 },
             )
+        # Outside the first office: any other active site counts as well.
+        if geofence_error == "outside_worktime_geofence" and await site_containing(db, actor.organization_id, data.latitude, data.longitude):
+            geofence_error = None
         if geofence_error == "outside_worktime_geofence":
             raise HTTPException(
                 status_code=403,
