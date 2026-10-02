@@ -87,12 +87,19 @@ def test_member_mode_manager_can_still_switch_back(monkeypatch):
 
 
 def test_me_reports_effective_and_granted_roles(monkeypatch):
+    from app.routers import enterprise_auth
     from app.routers.enterprise_auth import me
 
     class Db:
         async def get(self, *_args, **_kwargs):
-            return SimpleNamespace(name="Болд", metadata_json={})
+            return SimpleNamespace(name="Болд", metadata_json={}, totp_enabled_at=None)
 
+    async def required(_organization_id):
+        return True
+
+    monkeypatch.setattr(enterprise_auth, "tenant_requires_two_factor", required)
     narrowed = apply_workspace_mode(actor("admin"), "member")
-    out = asyncio.run(me(db=Db(), actor=narrowed))
+    out = asyncio.run(me(db=Db(), session_actor=(narrowed, {})))
     assert out.roles == ["member"] and out.account_roles == ["admin"] and out.workspace_mode == "member"
+    # The session still owes the second factor the tenant requires.
+    assert out.two_factor.model_dump() == {"required": True, "enrolled": False, "verified": False}

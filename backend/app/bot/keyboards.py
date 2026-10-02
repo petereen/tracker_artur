@@ -63,16 +63,21 @@ def task_actions_kb(
     timezone_name: str | None = None,
     include_submit_for_review: bool = True,
     task_url: str | None = None,
+    language: str = "mn",
 ) -> InlineKeyboardMarkup:
-    actions = [InlineKeyboardButton(text="✅ Дууссан", callback_data=f"task:done:{task_id}")]
+    labels = {
+        "en": ("✅ Done", "🔎 Submit for review", "⏰ Snooze 1 day", "📋 Open task", "📅 Add to Google Calendar"),
+        "ru": ("✅ Готово", "🔎 Отправить на проверку", "⏰ Отложить на 1 день", "📋 Открыть задачу", "📅 Добавить в Google Календарь"),
+    }.get(language, ("✅ Дууссан", "🔎 Хянахад илгээх", "⏰ 1 өдрөөр хойшлуулах", "📋 Даалгаврыг нээх", "📅 Google Calendar-д нэмэх"))
+    actions = [InlineKeyboardButton(text=labels[0], callback_data=f"task:done:{task_id}")]
     if include_submit_for_review:
-        actions.append(InlineKeyboardButton(text="🔎 Хянахад илгээх", callback_data=f"task:review:{task_id}"))
-    actions.append(InlineKeyboardButton(text="⏰ 1 өдрөөр хойшлуулах", callback_data=f"task:snooze:{task_id}:1440"))
+        actions.append(InlineKeyboardButton(text=labels[1], callback_data=f"task:review:{task_id}"))
+    actions.append(InlineKeyboardButton(text=labels[2], callback_data=f"task:snooze:{task_id}:1440"))
     rows = [actions]
     if task_url:
-        rows.append([InlineKeyboardButton(text="📋 Даалгаврыг нээх", url=task_url)])
+        rows.append([InlineKeyboardButton(text=labels[3], url=task_url)])
     rows.append([InlineKeyboardButton(
-                text="📅 Google Calendar-д нэмэх",
+                text=labels[4],
                 url=google_calendar_task_url(
                     task_id,
                     title=title,

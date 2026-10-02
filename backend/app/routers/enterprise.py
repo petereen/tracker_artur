@@ -82,6 +82,7 @@ from app.models.models import (
     UserNotification,
 )
 from app.services.enterprise_events import record_change
+from app.core.tenancy import SECURITY_SETTINGS_KEY, tenant_directory, two_factor_setting
 from app.services.manager_recipients import manager_settings_for
 from app.services.attachment_storage import delete_attachment, get_attachment, put_attachment
 from app.core.config import settings
@@ -310,6 +311,41 @@ class WorktimeMethodsInput(BaseModel):
     qr_enabled: bool | None = None
     location_enabled: bool | None = None
     qr_rotation_seconds: int | None = Field(default=None, ge=15, le=300)
+
+
+class TwoFactorSettingsInput(BaseModel):
+    required: bool
+
+
+async def _two_factor_settings_out(db: AsyncSession, organization: Organization) -> dict:
+    accounts, enrolled = (await db.execute(
+        select(func.count(UserAccount.id), func.count(UserAccount.totp_enabled_at))
+        .where(UserAccount.organization_id == organization.id, UserAccount.status == "active")
+    )).one()
+    return {"required": two_factor_setting(organization.settings), "accounts": accounts, "enrolled": enrolled}
+
+
+@router.get("/settings/two-factor")
+async def get_two_factor_settings(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin"))):
+    return await _two_factor_settings_out(db, await db.get(Organization, actor.organization_id))
+
+
+@router.put("/settings/two-factor")
+async def update_two_factor_settings(data: TwoFactorSettingsInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(require_roles("admin"))):
+    """Require every account of the tenant to pass a second factor.
+
+    Switching it on takes effect at once: sessions that have not passed it
+    (the administrator's own included) are stopped until they enrol or verify.
+    """
+    organization = await db.get(Organization, actor.organization_id, with_for_update=True)
+    before = two_factor_setting(organization.settings)
+    security = dict((organization.settings or {}).get(SECURITY_SETTINGS_KEY) or {})
+    security["two_factor_required"] = data.required
+    organization.settings = {**(organization.settings or {}), SECURITY_SETTINGS_KEY: security}
+    await record_change(db, actor=actor, topic="settings", aggregate_type="organization_two_factor", aggregate_id=organization.id, operation="updated", before={"required": before}, after={"required": data.required})
+    await db.commit()
+    tenant_directory.invalidate(organization.id)
+    return await _two_factor_settings_out(db, organization)
 
 
 @router.get("/settings/worktime-methods")

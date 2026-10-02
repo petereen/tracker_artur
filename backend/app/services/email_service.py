@@ -29,13 +29,25 @@ def _content(kind: str, action_url: str, locale: str) -> tuple[str, str, str]:
         subject = "OYUNS нэвтрэх эрх" if kind == "invitation" else "OYUNS нууц үг сэргээх"
         heading = "OYUNS ажлын орчинд урьж байна" if kind == "invitation" else "OYUNS нууц үгээ сэргээнэ үү"
         action = "Нууц үг үүсгэх" if kind == "invitation" else "Нууц үг сэргээх"
-    text = f"{heading}\n\n{action}: {action_url}\n\nIf you did not request this, ignore this email."
+    secure_link = "This secure link can be used once and expires automatically."
+    ignore = "If you did not request this, you can ignore this email."
+    if locale == "ru":
+        if kind == "invitation":
+            subject, heading, action = "Приглашение в OYUNS", "Вас пригласили в OYUNS", "Создать пароль"
+        else:
+            subject, heading, action = "Сброс пароля OYUNS", "Сбросьте пароль OYUNS", "Сбросить пароль"
+        secure_link = "Эту защищённую ссылку можно использовать один раз; срок её действия ограничен."
+        ignore = "Если вы не запрашивали это письмо, просто проигнорируйте его."
+    elif locale == "mn":
+        secure_link = "Энэ хамгаалалттай холбоосыг нэг удаа ашиглах бөгөөд хугацаа дуусна."
+        ignore = "Хэрэв та энэ хүсэлтийг гаргаагүй бол энэ имэйлийг үл тоомсорлоно уу."
+    text = f"{heading}\n\n{action}: {action_url}\n\n{ignore}"
     body = (
         '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#172033">'
         f"<h1 style=\"font-size:24px\">{html.escape(heading)}</h1>"
-        '<p>This secure link can be used once and expires automatically.</p>'
+        f"<p>{html.escape(secure_link)}</p>"
         f'<p><a href="{safe_url}" style="display:inline-block;padding:12px 18px;background:#2563eb;color:white;text-decoration:none;border-radius:10px">{html.escape(action)}</a></p>'
-        '<p style="font-size:13px;color:#667085">If you did not request this, you can ignore this email.</p></div>'
+        f'<p style="font-size:13px;color:#667085">{html.escape(ignore)}</p></div>'
     )
     return subject, text, body
 

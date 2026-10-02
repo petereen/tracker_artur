@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
@@ -15,6 +15,8 @@ import { isNativePlatform } from './platform/runtime'
 import { CallProvider } from './components/CallProvider'
 import { tenancyError, useTenantContext } from './api/tenancy'
 import { LicenseRequiredScreen, WorkspaceUnavailableScreen, isWorkspaceUnavailable, useLicenseGraceNotice } from './components/TenantGate'
+import { TwoFactorGate } from './components/TwoFactorGate'
+import { TWO_FACTOR_REQUIRED_EVENT } from './platform/app-events'
 
 const EnterpriseDashboardPage = lazy(() => import('./pages/EnterpriseDashboardPage').then((module) => ({ default: module.EnterpriseDashboardPage })))
 const AnnouncementsPage = lazy(() => import('./pages/AnnouncementsPage').then((module) => ({ default: module.AnnouncementsPage })))
@@ -96,7 +98,12 @@ function AuthenticatedApp() {
   const initialized = useAuthStore((state) => state.initialized)
   const queryClient = useQueryClient()
   const actor = useActor(Boolean(initialized && token))
-  const tenant = useTenantContext(Boolean(token && actor.data))
+  // The tenant requires 2FA and this session has not enrolled / entered a code yet.
+  const twoFactorOwed = Boolean(actor.data?.two_factor?.required && !actor.data.two_factor.verified)
+  // Stays up until the step is finished, so a background refetch cannot close
+  // the dialog while the one-time recovery codes are still on screen.
+  const [twoFactorGate, setTwoFactorGate] = useState(false)
+  const tenant = useTenantContext(Boolean(token && actor.data && !twoFactorOwed))
   const isAdmin = Boolean(actor.data?.account_roles?.includes('admin') ?? actor.data?.roles.includes('admin'))
   useLicenseGraceNotice(tenant.data, isAdmin)
   const previousToken = useRef<string | null>(null)
@@ -113,12 +120,32 @@ function AuthenticatedApp() {
     if (!initialized) bootstrapSession()
   }, [initialized])
 
+  useEffect(() => {
+    if (!token) setTwoFactorGate(false)
+    else if (twoFactorOwed) setTwoFactorGate(true)
+  }, [token, twoFactorOwed])
+
+  const refetchActor = actor.refetch
+  useEffect(() => {
+    // An admin switched 2FA on while this session was open: the API now
+    // refuses its requests, so re-read what the session owes.
+    const recheck = () => { void refetchActor({ cancelRefetch: false }) }
+    window.addEventListener(TWO_FACTOR_REQUIRED_EVENT, recheck)
+    return () => window.removeEventListener(TWO_FACTOR_REQUIRED_EVENT, recheck)
+  }, [refetchActor])
+
   if (!initialized) return <InitialWorkspaceSkeleton />
   if (!token) return <LoginPage />
   const unavailable = tenancyError(actor.error)?.code
   if (actor.isError && !actor.data && isWorkspaceUnavailable(unavailable)) return <WorkspaceUnavailableScreen code={unavailable} />
   if (actor.isError && !actor.data) return <SessionBootstrapError onRetry={() => void actor.refetch()} />
   if (actor.isLoading || !actor.data) return <InitialWorkspaceSkeleton />
+  if (twoFactorOwed || twoFactorGate) {
+    return <>
+      <InitialWorkspaceSkeleton />
+      <TwoFactorGate enrolled={Boolean(actor.data.two_factor?.enrolled)} onDone={() => { void actor.refetch().finally(() => setTwoFactorGate(false)) }} />
+    </>
+  }
   // Without a valid license the API only answers the activation endpoints.
   if (tenant.data && (tenant.data.license.state === 'missing' || tenant.data.license.state === 'expired')) {
     return <LicenseRequiredScreen context={tenant.data} isAdmin={isAdmin} />

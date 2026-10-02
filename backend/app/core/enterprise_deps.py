@@ -159,13 +159,35 @@ async def actor_from_account_id(account_id: int, db: AsyncSession) -> ActorConte
     )
 
 
-async def actor_from_token(token: str, db: AsyncSession) -> ActorContext:
+async def tenant_requires_two_factor(organization_id: int) -> bool:
+    state = await tenant_directory.state(organization_id)
+    return bool(state and state.two_factor_required)
+
+
+async def session_actor_from_token(token: str, db: AsyncSession) -> tuple[ActorContext, dict]:
+    """Actor and token claims, without the second-factor gate.
+
+    Only for the endpoints a session needs before it passed the second factor
+    (``/v1/auth/me``, ``/v1/auth/2fa/*``); everything else uses ``actor_from_token``.
+    """
     payload = decode_token(token)
     if not payload or payload.get("kind") != "enterprise":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
     actor = await actor_from_account_id(int(payload["sub"]), db)
     if actor.organization_id != int(payload.get("organization_id", -1)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access token")
+    return actor, payload
+
+
+async def actor_from_token(token: str, db: AsyncSession) -> ActorContext:
+    actor, payload = await session_actor_from_token(token, db)
+    if not payload.get("mfa") and await tenant_requires_two_factor(actor.organization_id):
+        # The tenant enforces 2FA and this session has not passed it yet (also
+        # sessions opened before the requirement was switched on).
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "two_factor_required", "message": "Two-factor authentication is required"},
+        )
     return actor
 
 
@@ -270,6 +292,16 @@ async def get_actor(
     workspace_mode: str | None = Header(default=None, alias=WORKSPACE_MODE_HEADER),
 ) -> ActorContext:
     return apply_workspace_mode(await actor_from_token(credentials.credentials, db), workspace_mode)
+
+
+async def get_session_actor(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer),
+    db: AsyncSession = Depends(get_db),
+    workspace_mode: str | None = Header(default=None, alias=WORKSPACE_MODE_HEADER),
+) -> tuple[ActorContext, dict]:
+    """Actor plus token claims for a session that may still owe the second factor."""
+    actor, claims = await session_actor_from_token(credentials.credentials, db)
+    return apply_workspace_mode(actor, workspace_mode), claims
 
 
 def require_roles(*allowed: str) -> Callable:

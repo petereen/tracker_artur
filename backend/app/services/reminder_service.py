@@ -103,10 +103,11 @@ def reconcile_task_reminders() -> None:
             log.exception("reconcile: не удалось запланировать напоминания task=%s", task["id"])
 
 
-def _fmt_deadline(dt: datetime | None) -> str:
+def _fmt_deadline(dt: datetime | None, language: str = "mn") -> str:
     if not dt:
-        return "Хугацаагүй"
-    return dt.astimezone(ZoneInfo(DEFAULT_TZ)).strftime("%d.%m %H:%M УБ")
+        return {"en": "No deadline", "ru": "Без срока"}.get(language, "Хугацаагүй")
+    zone_label = {"en": "ULAT", "ru": "УЛАТ"}.get(language, "УБ")
+    return dt.astimezone(ZoneInfo(DEFAULT_TZ)).strftime("%d.%m %H:%M ") + zone_label
 
 
 async def send_task_reminder(task_id: int, minutes_before: int) -> None:
@@ -134,7 +135,8 @@ async def send_task_reminder(task_id: int, minutes_before: int) -> None:
             task_id=task["id"], recipient_tg=telegram_id, kind="task_deadline",
             payload={
                 "title": task["title"], "deadline_iso": _iso(task["deadline_at"]),
-                "when": when, "timezone_name": recipient.get("timezone") or DEFAULT_TZ,
+                "when": when, "minutes_before": minutes_before,
+                "timezone_name": recipient.get("timezone") or DEFAULT_TZ,
             },
             not_before=datetime.now(timezone.utc),
             dedup_key=f"task-reminder:{task['id']}:{minutes_before}:employee:{recipient['id']}",
@@ -243,6 +245,7 @@ def _render_outbox(item: dict):
     from app.services.notification_preferences import category_for
 
     p = item.get("payload") or {}
+    language = p.get("locale") or item.get("locale") or "mn"
     tid = item["task_id"]
     app_url = (item.get("app_url") or settings.PUBLIC_APP_URL).rstrip("/")
     title = p.get("title") or item.get("task_title") or "Task"
@@ -250,52 +253,92 @@ def _render_outbox(item: dict):
     deadline = p.get("deadline_iso")
     deadline_dt = datetime.fromisoformat(deadline) if deadline else item.get("task_deadline_at")
     timezone_name = p.get("timezone_name") or "Asia/Ulaanbaatar"
-    dl_h = _fmt_deadline(deadline_dt) if deadline_dt else "Хугацаагүй"
+    dl_h = _fmt_deadline(deadline_dt, language)
     if item["kind"] == "task_assigned":
         task_url = p.get("task_url") or f"{app_url}/tasks?task={tid}"
         creator_name = p.get("creator_name") or "Тодорхойгүй"
-        text = (f"📌 Танд #{tid} даалгавар оноолоо:\n«{title}»\n"
-                f"Үүсгэсэн: {creator_name}\nХугацаа: {dl_h}\n"
-                f"🔗 Даалгавар харах: {task_url}")
+        if language == "en":
+            text = f"📌 New task assigned to you: #{tid}\n“{title}”\nCreated by: {creator_name}\nDue: {dl_h}\n🔗 View task: {task_url}"
+        elif language == "ru":
+            text = f"📌 Вам назначена новая задача: #{tid}\n«{title}»\nСоздал: {creator_name}\nСрок: {dl_h}\n🔗 Открыть задачу: {task_url}"
+        else:
+            text = (f"📌 Танд #{tid} даалгавар оноолоо:\n«{title}»\n"
+                    f"Үүсгэсэн: {creator_name}\nХугацаа: {dl_h}\n🔗 Даалгавар харах: {task_url}")
         return text, (
             task_actions_kb(
                 tid, title=title, deadline=deadline_dt, description=description,
-                timezone_name=timezone_name, task_url=task_url,
+                timezone_name=timezone_name, task_url=task_url, language=language,
             )
             if tid else None
         )
     if item["kind"] == "task_review_requested":
         task_url = p.get("task_url") or f"{app_url}/tasks?task={tid}"
         assignee = p.get("assignee_name") or "Хариуцагчгүй"
-        text = f"🔎 <b>Хянах шаардлагатай</b>\n\n<b>Даалгавар:</b> #{tid} {title}\n<b>Хариуцагч:</b> {assignee}\n<b>Нээх:</b> {task_url}\n{p.get('text', '')}"
-        return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, description=description, timezone_name=timezone_name, include_submit_for_review=False, task_url=task_url) if tid else None)
+        if language == "en":
+            text = f"🔎 <b>Review requested</b>\n\n<b>Task:</b> #{tid} {title}\n<b>Assignee:</b> {assignee}\n<b>Open:</b> {task_url}\n{p.get('text', '')}"
+        elif language == "ru":
+            text = f"🔎 <b>Требуется проверка</b>\n\n<b>Задача:</b> #{tid} {title}\n<b>Исполнитель:</b> {assignee}\n<b>Открыть:</b> {task_url}\n{p.get('text', '')}"
+        else:
+            text = f"🔎 <b>Хянах шаардлагатай</b>\n\n<b>Даалгавар:</b> #{tid} {title}\n<b>Хариуцагч:</b> {assignee}\n<b>Нээх:</b> {task_url}\n{p.get('text', '')}"
+        return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, description=description, timezone_name=timezone_name, include_submit_for_review=False, task_url=task_url, language=language) if tid else None)
     if item["kind"] == "task_overdue":
         task_url = p.get("task_url") or f"{app_url}/tasks?task={tid}"
-        text = (f"🔴 <b>Даалгаврын хугацаа хэтэрлээ</b>\n\n#{tid} {escape(title)}\n"
-                f"Хугацаа: <b>{dl_h}</b>\nДоорх товчоор дуусгах эсвэл хойшлуулна уу.")
-        return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, timezone_name=timezone_name, task_url=task_url) if tid else None)
+        if language == "en":
+            text = f"🔴 <b>Task overdue</b>\n\n#{tid} {escape(title)}\nDue: <b>{dl_h}</b>\nComplete or snooze it using the buttons below."
+        elif language == "ru":
+            text = f"🔴 <b>Срок задачи истёк</b>\n\n#{tid} {escape(title)}\nСрок: <b>{dl_h}</b>\nЗавершите задачу или отложите её кнопками ниже."
+        else:
+            text = (f"🔴 <b>Даалгаврын хугацаа хэтэрлээ</b>\n\n#{tid} {escape(title)}\n"
+                    f"Хугацаа: <b>{dl_h}</b>\nДоорх товчоор дуусгах эсвэл хойшлуулна уу.")
+        return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, timezone_name=timezone_name, task_url=task_url, language=language) if tid else None)
     if item["kind"] == "task_deadline":
         task_url = p.get("task_url") or f"{app_url}/tasks?task={tid}"
-        text = f"⏰ <b>Даалгаврын сануулга</b>\n\n#{tid} {escape(title)}\nХугацаа: <b>{dl_h}</b> ({p.get('when', 'удахгүй')})"
-        return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, timezone_name=timezone_name, task_url=task_url) if tid else None)
+        minutes_before = p.get("minutes_before")
+        if minutes_before is None:
+            when_label = {"en": "soon", "ru": "скоро"}.get(language, p.get("when", "удахгүй"))
+        elif minutes_before == 0:
+            when_label = {"en": "now", "ru": "сейчас"}.get(language, "яг одоо")
+        elif minutes_before % 1440 == 0:
+            count = minutes_before // 1440
+            when_label = f"in {count} day{'s' if count != 1 else ''}" if language == "en" else f"через {count} дн." if language == "ru" else f"{count} хоногийн дараа"
+        elif minutes_before % 60 == 0:
+            count = minutes_before // 60
+            when_label = f"in {count} hour{'s' if count != 1 else ''}" if language == "en" else f"через {count} ч." if language == "ru" else f"{count} цагийн дараа"
+        else:
+            when_label = f"in {minutes_before} minute{'s' if minutes_before != 1 else ''}" if language == "en" else f"через {minutes_before} мин." if language == "ru" else f"{minutes_before} минутын дараа"
+        if language == "en":
+            text = f"⏰ <b>Task reminder</b>\n\n#{tid} {escape(title)}\nDue: <b>{dl_h}</b> ({when_label})"
+        elif language == "ru":
+            text = f"⏰ <b>Напоминание о задаче</b>\n\n#{tid} {escape(title)}\nСрок: <b>{dl_h}</b> ({when_label})"
+        else:
+            text = f"⏰ <b>Даалгаврын сануулга</b>\n\n#{tid} {escape(title)}\nХугацаа: <b>{dl_h}</b> ({when_label})"
+        return text, (task_actions_kb(tid, title=title, deadline=deadline_dt, timezone_name=timezone_name, task_url=task_url, language=language) if tid else None)
     if item["kind"] in {"calendar_reminder", "event"}:
         starts_at = p.get("starts_at")
         starts_at_dt = datetime.fromisoformat(starts_at) if starts_at else None
         entry_url = p.get("target_url") or f"{app_url}/calendar"
+        start_label = {"en": "Starts", "ru": "Начало"}.get(language, "Эхлэх")
+        unknown = {"en": "Unknown", "ru": "Не указано"}.get(language, "Тодорхойгүй")
         text = (
             f"{'⏰' if item['kind'] == 'calendar_reminder' else '📅'} <b>{title}</b>\n\n"
             f"{p.get('body', '')}\n"
-            f"Эхлэх: <b>{_fmt_deadline(starts_at_dt) if starts_at_dt else 'Тодорхойгүй'}</b>"
+            f"{start_label}: <b>{_fmt_deadline(starts_at_dt, language) if starts_at_dt else unknown}</b>"
         )
         if p.get("location"):
-            text += f"\nБайршил: {p['location']}"
-        return f"{text}\n🔗 <b>Календарь нээх:</b> {entry_url}", None
+            location_label = {"en": "Location", "ru": "Место"}.get(language, "Байршил")
+            text += f"\n{location_label}: {p['location']}"
+        open_label = {"en": "Open calendar", "ru": "Открыть календарь"}.get(language, "Календарь нээх")
+        return f"{text}\n🔗 <b>{open_label}:</b> {entry_url}", None
     # Every other kind: category icon, title, body and an "open" button to
     # the same page the in-app notification opens.
     icon = CATEGORY_ICONS.get(category_for(item["kind"]), "🔔")
     target = _absolute(app_url, p.get("target_url"))
     if p.get("text"):
         return p["text"], _open_button(target)
-    heading = escape(str(p.get("title") or "Мэдэгдэл"))
-    body = escape(str(p.get("body") or ""))
-    return f"{icon} <b>{heading}</b>" + (f"\n\n{body}" if body else ""), _open_button(target)
+    from app.services.notification_localization import render_notification_payload
+
+    heading, body_text = render_notification_payload(item["kind"], p, language)
+    heading = escape(str(heading))
+    body = escape(str(body_text))
+    open_label = {"en": "Open", "ru": "Открыть"}.get(language, "Нээх")
+    return f"{icon} <b>{heading}</b>" + (f"\n\n{body}" if body else ""), _open_button(target, f"🔗 {open_label}")

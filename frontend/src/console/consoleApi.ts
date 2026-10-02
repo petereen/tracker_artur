@@ -2,6 +2,7 @@ import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { create } from 'zustand'
 import { getApiBaseUrl } from '../platform/runtime'
+import i18n from '../i18n'
 import type { LicenseState, TenantBranding, TenantFeatureCode } from '../api/tenancy'
 
 /**
@@ -90,6 +91,7 @@ export const consoleApi = axios.create({ baseURL: getApiBaseUrl(), timeout: 20_0
 consoleApi.interceptors.request.use((config) => {
   const token = useConsoleSession.getState().token
   if (token) config.headers.Authorization = `Bearer ${token}`
+  config.headers['Accept-Language'] = (i18n.resolvedLanguage ?? i18n.language).split('-')[0]
   return config
 })
 
@@ -167,12 +169,23 @@ export interface ConsoleAuditEvent {
   created_at: string
 }
 
+export interface ConsoleTenantAdmin {
+  id: number
+  email: string
+  status: string
+  last_login_at: string | null
+  two_factor_enabled?: boolean
+  locked?: boolean
+}
+
 export interface ConsoleTenantDetail {
   tenant: ConsoleTenant
   seats: { used: number; limit: number | null; available: number | null; unlimited: boolean }
   licenses: ConsoleLicense[]
   domains: ConsoleDomain[]
-  admins: Array<{ id: number; email: string; status: string; last_login_at: string | null }>
+  admins: ConsoleTenantAdmin[]
+  /** The tenant enforces two-factor sign-in for all of its accounts. */
+  two_factor_required?: boolean
   audit: ConsoleAuditEvent[]
 }
 
@@ -281,6 +294,11 @@ const send = <T,>(method: 'post' | 'patch' | 'delete', url: string, body?: unkno
 
 export const useCreateTenant = () => useConsoleMutation((input: TenantCreateInput) => send<{ tenant: ConsoleTenant; admin: { id: number; email: string }; license: ConsoleLicense | null }>('post', '/v1/platform/tenants', input))
 export const useUpdateTenant = () => useConsoleMutation(({ id, ...input }: { id: number } & Record<string, unknown>) => send<ConsoleTenant>('patch', `/v1/platform/tenants/${id}`, input))
+/** Locked-out tenant admin: a temporary password and/or removal of the 2FA enrolment. */
+export const useRecoverTenantAdmin = () => useConsoleMutation(({ tenantId, accountId, ...input }: { tenantId: number; accountId: number; password?: string; reset_two_factor?: boolean }) =>
+  send<ConsoleTenantAdmin>('post', `/v1/platform/tenants/${tenantId}/admins/${accountId}/recover`, input))
+export const useIssueTenantAdmin = () => useConsoleMutation(({ tenantId, ...input }: { tenantId: number; email: string; password: string }) =>
+  send<ConsoleTenantAdmin>('post', `/v1/platform/tenants/${tenantId}/admins`, input))
 export const useTenantLifecycle = () => useConsoleMutation(({ id, action, reason, confirm_slug }: { id: number; action: 'suspend' | 'reactivate' | 'terminate'; reason?: string; confirm_slug?: string }) =>
   send<ConsoleTenant>('post', `/v1/platform/tenants/${id}/${action}`, { reason: reason || null, confirm_slug }))
 export const usePurgeTenant = () => useConsoleMutation(({ id, confirm_slug }: { id: number; confirm_slug: string }) => send('delete', `/v1/platform/tenants/${id}`, undefined, { confirm_slug }))

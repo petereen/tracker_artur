@@ -280,6 +280,9 @@ export function EnterpriseShell() {
     if (actorQuery.data) setActor(actorQuery.data)
   }, [actorQuery.data, setActor])
   useEffect(() => {
+    void queryClient.invalidateQueries()
+  }, [i18n.language, queryClient])
+  useEffect(() => {
     const locale = actorQuery.data?.locale
     if (!locale) return
     // A language picked on the login screen becomes the account default once.

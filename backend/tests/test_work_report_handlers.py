@@ -34,6 +34,25 @@ def test_daily_report_prompt_does_not_include_work_time_prompts():
     assert "дууссан цаг" not in _prompt_text("daily", "daily_report")
 
 
+def test_report_prompts_and_draft_controls_follow_interface_language():
+    assert "Daily check-in" in _prompt_text("daily", "daily_checkin", "en")
+    assert "Ежедневный отчёт" in _prompt_text("daily", "daily_report", "ru")
+    assert "Quarterly report" in _prompt_text("quarterly", language="en")
+    assert "Start check-in" in checkin_keyboard(language="en").inline_keyboard[0][0].text
+    assert "Approve" in draft_keyboard(7, "en").inline_keyboard[0][0].text
+    report = SimpleNamespace(report_type="daily")
+    assert "Daily report — draft" in _draft_text(report, "User's report", "en")
+    assert "User's report" in _draft_text(report, "User's report", "en")
+
+
+def test_work_time_summary_uses_english_labels_and_units():
+    summary = {"total_minutes": 75, "in_person_minutes": 60, "remote_minutes": 15, "entries": []}
+    text = work_report_handlers._work_time_summary_text(summary, None, "en")
+    assert "Today's work time" in text
+    assert "1h 15m" in text
+    assert "Office: 1h 0m" in text
+
+
 def test_daily_prompt_orchestration_starts_with_checkin_only(monkeypatch):
     sent = []
 

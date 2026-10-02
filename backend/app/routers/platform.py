@@ -18,7 +18,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,7 +34,7 @@ from app.core.security import (
     hash_account_password,
     verify_account_password,
 )
-from app.core.tenancy import TENANT_FEATURES, _csv, current_tenant_id, normalize_features, tenant_directory
+from app.core.tenancy import TENANT_FEATURES, _csv, current_tenant_id, normalize_features, tenant_directory, two_factor_setting
 from app.models.models import Organization, RefreshSession, RoleAssignment, UserAccount
 from app.models.platform import PlatformAuditLog, PlatformOperator, SubscriptionPlan, TenantDomain, TenantLicense
 from app.routers.tenant import license_status, license_view
@@ -46,6 +46,8 @@ from app.services.tenant_service import (
     CYCLE_MONTHS,
     SEAT_STATUSES,
     activate_license,
+    clear_account_two_factor,
+    ensure_seat_available,
     add_months,
     audit,
     revoke_license,
@@ -686,7 +688,7 @@ async def get_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: Plat
     licenses = (await db.execute(select(TenantLicense).where(TenantLicense.organization_id == organization.id).order_by(TenantLicense.issued_at.desc()))).scalars().all()
     domains = (await db.execute(select(TenantDomain).where(TenantDomain.organization_id == organization.id).order_by(TenantDomain.hostname))).scalars().all()
     admins = (await db.execute(
-        select(UserAccount.id, UserAccount.email, UserAccount.status, UserAccount.last_login_at)
+        select(UserAccount.id, UserAccount.email, UserAccount.status, UserAccount.last_login_at, UserAccount.totp_enabled_at, UserAccount.locked_until)
         .join(RoleAssignment, RoleAssignment.account_id == UserAccount.id)
         .where(UserAccount.organization_id == organization.id, RoleAssignment.role == "admin")
         .order_by(UserAccount.email)
@@ -697,9 +699,90 @@ async def get_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: Plat
         "seats": usage.as_dict(),
         "licenses": [license_admin_view(row) for row in licenses],
         "domains": [{**custom_domains.domain_view(d), "verification_token": d.verification_token} for d in domains],
-        "admins": [{"id": row.id, "email": row.email, "status": row.status, "last_login_at": row.last_login_at} for row in admins],
+        "admins": [admin_view(row) for row in admins],
+        "two_factor_required": two_factor_setting(organization.settings),
         "audit": [audit_view(event) for event in events],
     }
+
+
+def admin_view(account) -> dict:
+    locked = account.locked_until is not None and account.locked_until > datetime.now(timezone.utc)
+    return {"id": account.id, "email": account.email, "status": account.status, "last_login_at": account.last_login_at,
+            "two_factor_enabled": account.totp_enabled_at is not None, "locked": locked}
+
+
+class AdminRecovery(BaseModel):
+    # A new temporary password (the admin must change it at the next sign-in)
+    # and/or removal of the 2FA enrolment (lost phone and recovery codes).
+    password: str | None = Field(default=None, min_length=10, max_length=128)
+    reset_two_factor: bool = False
+
+    @model_validator(mode="after")
+    def _something_to_do(self) -> "AdminRecovery":
+        if not self.password and not self.reset_two_factor:
+            raise ValueError("Choose a new password, a two-factor reset, or both")
+        return self
+
+
+def _recoverable(organization: Organization) -> None:
+    if organization.status == "terminated":
+        raise HTTPException(status_code=409, detail={"code": "tenant_terminated", "message": "This tenant is closed"})
+
+
+@router.post("/tenants/{tenant_id}/admins", status_code=201)
+async def issue_tenant_admin(tenant_id: int, data: TenantAdminInput, request: Request, db: AsyncSession = Depends(get_db), operator: PlatformOperator = Depends(require_superadmin)):
+    """Issue a fresh administrator account (the tenant lost access to all of its own)."""
+    organization = await _tenant(db, tenant_id, lock=True)
+    _recoverable(organization)
+    if await db.scalar(select(UserAccount.id).where(func.lower(UserAccount.email) == data.email)):
+        raise HTTPException(status_code=409, detail={"code": "admin_login_taken", "message": "This admin login already has an account"})
+    await ensure_seat_available(db, organization.id)
+    admin = UserAccount(
+        organization_id=organization.id,
+        email=data.email,
+        password_hash=hash_account_password(data.password),
+        status="active",
+        locale="mn",
+        must_change_password=True,
+    )
+    db.add(admin)
+    await db.flush()
+    db.add(RoleAssignment(account_id=admin.id, role="admin"))
+    audit(db, "tenant.admin_issued", organization_id=organization.id, operator_id=operator.id, target_type="account", target_id=admin.id,
+          details={"admin": admin.email}, ip_address=_ip(request))
+    await db.commit()
+    return admin_view(admin)
+
+
+@router.post("/tenants/{tenant_id}/admins/{account_id}/recover")
+async def recover_tenant_admin(tenant_id: int, account_id: int, data: AdminRecovery, request: Request, db: AsyncSession = Depends(get_db), operator: PlatformOperator = Depends(require_superadmin)):
+    """Give a locked-out tenant administrator a way back in: a temporary
+    password, removal of the 2FA enrolment, or both. Only accounts that hold
+    the admin role; everyone else is recovered by the tenant's own admin."""
+    organization = await _tenant(db, tenant_id, lock=True)
+    _recoverable(organization)
+    account = await db.get(UserAccount, account_id, with_for_update=True)
+    is_admin = account is not None and account.organization_id == organization.id and await db.scalar(
+        select(RoleAssignment.id).where(RoleAssignment.account_id == account_id, RoleAssignment.role == "admin"))
+    if not is_admin:
+        raise HTTPException(status_code=404, detail="Administrator not found")
+    now = datetime.now(timezone.utc)
+    if account.status not in SEAT_STATUSES:
+        # A disabled administrator takes a seat again.
+        await ensure_seat_available(db, organization.id)
+    account.status = "active"
+    account.failed_login_count = 0
+    account.locked_until = None
+    if data.password:
+        account.password_hash = hash_account_password(data.password)
+        account.must_change_password = True
+        await db.execute(update(RefreshSession).where(RefreshSession.account_id == account.id, RefreshSession.revoked_at.is_(None)).values(revoked_at=now))
+    if data.reset_two_factor:
+        await clear_account_two_factor(db, account)
+    audit(db, "tenant.admin_recovered", organization_id=organization.id, operator_id=operator.id, target_type="account", target_id=account.id,
+          details={"admin": account.email, "password_reset": bool(data.password), "two_factor_reset": data.reset_two_factor}, ip_address=_ip(request))
+    await db.commit()
+    return admin_view(account)
 
 
 @router.patch("/tenants/{tenant_id}")

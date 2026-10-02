@@ -220,20 +220,22 @@ async def _enterprise_route(
     is_manager: bool,
     tg_id: str | None,
     voice_mode: bool = False,
+    language: str = "mn",
 ) -> bool:
     """Run one Telegram turn through the shared OYUNS agent."""
     del state, employee, is_manager
     if not tg_id:
         return False
     detected = detect_language(text).value
+    interface_language = language if language in {"mn", "ru", "en"} else "mn"
     async with AsyncSessionLocal() as db:
         actor = await actor_from_telegram_id(tg_id, db)
         if not actor:
             principal = await file_search_principal_from_telegram_id(tg_id, db)
             if principal and is_file_search_query(text):
-                await _employee_only_file_search(message, db, principal, text, detected)
+                await _employee_only_file_search(message, db, principal, text, interface_language)
                 return True
-            await _answer(message, _t("needs_account", detected))
+            await _answer(message, _t("needs_account", interface_language))
             return True
         chat = getattr(message, "chat", None)
         thread_key = str(getattr(chat, "id", tg_id))
@@ -258,7 +260,7 @@ async def _enterprise_route(
             )
         except GatewayError:
             await db.rollback()
-            await _answer(message, _t("unavailable", detected))
+            await _answer(message, _t("unavailable", interface_language))
             return True
         tool_sources: list[dict] = []
         tool_deliveries: list[dict] = list(routed.deliveries)
@@ -303,19 +305,19 @@ async def _enterprise_route(
         else:
             callback_token = (pending_action or {}).get("token")
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Баталгаажуулах" if detected == "mn" else "✅ Confirm", callback_data=f"ac:{callback_token}"),
-            InlineKeyboardButton(text="❌ Татгалзах" if detected == "mn" else "❌ Reject", callback_data=f"ar:{callback_token}"),
-            InlineKeyboardButton(text="✏️ Засах" if detected == "mn" else "✏️ Edit", callback_data=f"ae:{callback_token}"),
+            InlineKeyboardButton(text="✅ Баталгаажуулах" if interface_language == "mn" else "✅ Confirm" if interface_language == "en" else "✅ Подтвердить", callback_data=f"ac:{callback_token}"),
+            InlineKeyboardButton(text="❌ Татгалзах" if interface_language == "mn" else "❌ Reject" if interface_language == "en" else "❌ Отклонить", callback_data=f"ar:{callback_token}"),
+            InlineKeyboardButton(text="✏️ Засах" if interface_language == "mn" else "✏️ Edit" if interface_language == "en" else "✏️ Изменить", callback_data=f"ae:{callback_token}"),
         ]]) if callback_token else None
-        await _answer(message, routed.answer, reply_markup=keyboard, parse_mode="HTML", language=detected)
+        await _answer(message, routed.answer, reply_markup=keyboard, parse_mode="HTML", language=interface_language)
         if voice_mode and not pending_action and not routed.degraded:
             await _send_voice_answer(message, routed.answer)
         protected_links = [delivery.get("url") for delivery in validated_deliveries if delivery.get("kind") == "authenticated_link" and delivery.get("url")]
         if protected_links:
-            await _answer(message, f"{_t('open_file', detected)}: " + "\n".join(protected_links))
+            await _answer(message, f"{_t('open_file', interface_language)}: " + "\n".join(protected_links))
         for delivery in validated_deliveries:
             if delivery.get("kind") == "company_file_attachment":
-                await _deliver_company_file_attachment(message, db, principal, delivery, language=detected)
+                await _deliver_company_file_attachment(message, db, principal, delivery, language=interface_language)
     return True
 
 
@@ -328,10 +330,11 @@ async def route_and_respond(
     is_manager: bool,
     tg_id: str | None,
     voice_mode: bool,
+    language: str = "mn",
 ) -> None:
-    language = detect_language(text).value
+    language = language if language in {"mn", "ru", "en"} else "mn"
     try:
-        handled = await _enterprise_route(message, state, text, employee=employee, is_manager=is_manager, tg_id=tg_id, voice_mode=voice_mode)
+        handled = await _enterprise_route(message, state, text, employee=employee, is_manager=is_manager, tg_id=tg_id, voice_mode=voice_mode, language=language)
     except Exception:
         log.exception("assistant.telegram_route_failed", extra={"telegram_id": tg_id})
         await _answer(message, _t("unavailable", language))
@@ -347,7 +350,13 @@ async def route_and_respond(
 @router.callback_query(F.data.startswith("ac:"))
 @router.callback_query(F.data.startswith("ar:"))
 @router.callback_query(F.data.startswith("ae:"))
-async def confirm_enterprise_task_update(callback: CallbackQuery, tg_id: str | None = None):
+async def confirm_enterprise_task_update(callback: CallbackQuery, tg_id: str | None = None, language: str = "mn"):
+    language = language if language in {"mn", "ru", "en"} else "mn"
+    copy = {
+        "mn": {"access": "Хандах боломжгүй", "link": "Эхлээд байгууллагын бүртгэлээ холбоно уу", "edit": "Ноорогийг засахын тулд доорх зааврын дагуу хариу бичнэ үү.", "reply": "✏️ Даалгаврын ноорогийг засахын тулд энэ мессежид reply хийж өөрчлөлтөө бичнэ үү. Жишээ: “гарчгийг Борлуулалтын тайлан болго”.", "rejected": "Ноорог татгалзагдлаа", "created": "Даалгавар үүслээ", "updated": "Даалгавар шинэчлэгдлээ", "cancelled": "❌ Даалгаврын ноорог үүсгэлгүй цуцаллаа.", "failed": "Үйлдлийг гүйцэтгэж чадсангүй."},
+        "ru": {"access": "Нет доступа", "link": "Сначала свяжите аккаунт организации", "edit": "Чтобы изменить черновик, ответьте на сообщение с новыми данными.", "reply": "✏️ Ответьте на это сообщение, чтобы изменить черновик задачи. Например: «изменить название на Отчёт по продажам»." , "rejected": "Черновик отклонён", "created": "Задача создана", "updated": "Задача обновлена", "cancelled": "❌ Черновик задачи отменён без создания.", "failed": "Не удалось выполнить действие."},
+        "en": {"access": "Access unavailable", "link": "Link your organization account first", "edit": "Reply below with the changes you want to make to the draft.", "reply": "✏️ Reply to this message with your changes to the task draft. For example: “change the title to Sales report”.", "rejected": "Draft rejected", "created": "Task created", "updated": "Task updated", "cancelled": "❌ The task draft was cancelled without creating a task.", "failed": "Could not complete the action."},
+    }[language]
     data = callback.data or ""
     operation = "confirm"
     if data.startswith("ar:"):
@@ -356,11 +365,11 @@ async def confirm_enterprise_task_update(callback: CallbackQuery, tg_id: str | N
         operation = "edit"
     token = data.split(":", 1)[-1]
     if not tg_id:
-        await callback.answer("Access unavailable", show_alert=True); return
+        await callback.answer(copy["access"], show_alert=True); return
     async with AsyncSessionLocal() as db:
         actor = await actor_from_telegram_id(tg_id, db)
         if not actor:
-            await callback.answer("Link an enterprise account first", show_alert=True); return
+            await callback.answer(copy["link"], show_alert=True); return
         if operation == "edit":
             result = None
         elif operation == "reject":
@@ -369,21 +378,21 @@ async def confirm_enterprise_task_update(callback: CallbackQuery, tg_id: str | N
             result = await enterprise_tools.confirm_task_update(db, actor, token, channel="telegram")
         await db.commit()
     if operation == "edit":
-        await callback.answer("Ноорогийг засахын тулд доорх зааврын дагуу хариу бичнэ үү.")
+        await callback.answer(copy["edit"])
         if callback.message:
-            await callback.message.answer("✏️ Даалгаврын ноорогийг засахын тулд энэ мессежид reply хийж өөрчлөлтөө бичнэ үү. Жишээ: “гарчгийг Борлуулалтын тайлан болго”.")
+            await callback.message.answer(copy["reply"])
         return
     assert result is not None
     outcome = result.get("data", {}).get("created") or result.get("data", {}).get("updated")
     if operation == "reject":
-        success_text = "Ноорог татгалзагдлаа"
+        success_text = copy["rejected"]
     else:
-        success_text = "Даалгавар үүслээ" if result.get("data", {}).get("created") else "Даалгавар шинэчлэгдлээ"
-    await callback.answer(success_text if result["status"] == "ok" else result["data"].get("reason", "Action unavailable"), show_alert=result["status"] != "ok")
+        success_text = copy["created"] if result.get("data", {}).get("created") else copy["updated"]
+    await callback.answer(success_text if result["status"] == "ok" else copy["failed"], show_alert=result["status"] != "ok")
     if callback.message and result["status"] == "ok":
         title = outcome.get("title") if isinstance(outcome, dict) else None
         if operation == "reject":
-            await callback.message.answer("❌ Даалгаврын ноорог үүсгэлгүй цуцаллаа.")
+            await callback.message.answer(copy["cancelled"])
         else:
             await callback.message.answer(f"✅ {success_text}: {title}" if title else f"✅ {success_text}.")
 
@@ -395,9 +404,9 @@ async def msg_assistant_voice(
     employee=None,
     is_manager: bool = False,
     tg_id: str | None = None,
+    language: str = "mn",
 ):
     """Voice → Chimege speech-to-text → the same agent turn as a text message."""
-    language = getattr(employee, "primary_language", None) or "mn"
     language = language if language in {"mn", "ru", "en"} else "mn"
     if not await voice_service.transcription_available():
         await _answer(message, _t("stt_unavailable", language))
@@ -415,8 +424,8 @@ async def msg_assistant_voice(
     if not text:
         await _answer(message, error or _t("not_understood", language))
         return
-    await _answer(message, f"{_t('recognized', detect_language(text).value)}: {text}")
-    await route_and_respond(message, state, text, employee=employee, is_manager=is_manager, tg_id=tg_id, voice_mode=True)
+    await _answer(message, f"{_t('recognized', language)}: {text}")
+    await route_and_respond(message, state, text, employee=employee, is_manager=is_manager, tg_id=tg_id, voice_mode=True, language=language)
 
 
 @router.message(StateFilter(None, TaskDraft.confirming), F.text & ~F.text.startswith("/"))
@@ -426,10 +435,12 @@ async def msg_assistant_text(
     employee=None,
     is_manager: bool = False,
     tg_id: str | None = None,
+    language: str = "mn",
 ):
+    language = language if language in {"mn", "ru", "en"} else "mn"
     # Report replies are workflow input, not conversational prompts. Keep this
     # guard immediately before AI routing as a fallback for updates that were
     # not claimed by the report router above.
-    if await claim_report_text(message, state, employee=employee):
+    if await claim_report_text(message, state, employee=employee, language=language):
         return
-    await route_and_respond(message, state, message.text or "", employee=employee, is_manager=is_manager, tg_id=tg_id, voice_mode=False)
+    await route_and_respond(message, state, message.text or "", employee=employee, is_manager=is_manager, tg_id=tg_id, voice_mode=False, language=language)

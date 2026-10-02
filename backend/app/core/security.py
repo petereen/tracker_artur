@@ -48,7 +48,14 @@ def create_access_token(data: dict) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_enterprise_access_token(account_id: int, organization_id: int, auth_method: str | None = None) -> str:
+def create_enterprise_access_token(
+    account_id: int,
+    organization_id: int,
+    auth_method: str | None = None,
+    *,
+    session_id: int | None = None,
+    mfa: bool = False,
+) -> str:
     now = int(time.time())
     claims = {
         "sub": str(account_id),
@@ -61,6 +68,12 @@ def create_enterprise_access_token(account_id: int, organization_id: int, auth_m
         # How this session signed in ("password", "telegram"): Telegram
         # sessions may set a username/password without knowing the old one.
         claims["amr"] = auth_method
+    if session_id is not None:
+        # The refresh session behind this token (where a passed second factor is recorded).
+        claims["sid"] = session_id
+    if mfa:
+        # The session passed the second factor; required while the tenant enforces 2FA.
+        claims["mfa"] = True
     return jwt.encode(claims, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 

@@ -19,6 +19,8 @@ def test_menus_follow_the_tenant_and_hide_test_commands():
     for is_manager in (True, False):
         assert not _commands(commands_for(is_manager, primary=False)) & CHECKIN_COMMANDS
     assert "dashboard" not in _commands(commands_for(False))
+    assert next(item for item in commands_for(False, language="en") if item.command == "worktime").description == "View today’s work time"
+    assert next(item for item in commands_for(False, language="ru") if item.command == "worktime").description == "Посмотреть рабочее время за сегодня"
 
 
 def test_chat_menu_tracks_the_erp_role_and_only_calls_telegram_on_change():
@@ -39,9 +41,11 @@ def test_chat_menu_tracks_the_erp_role_and_only_calls_telegram_on_change():
 
     async def run():
         bot = Bot()
+        menu._chat_menus.pop((bot.id, 7), None)
         await menu.sync_chat_menu(bot, 7, is_manager=True, primary=True)
         await menu.sync_chat_menu(bot, 7, is_manager=True, primary=True)
+        await menu.sync_chat_menu(bot, 7, is_manager=True, primary=True, language="en")
         await menu.sync_chat_menu(bot, 7, is_manager=False, primary=True)
 
     asyncio.run(run())
-    assert calls == [("set", 7, len(MANAGER_COMMANDS)), ("reset", 7)]
+    assert calls == [("set", 7, len(MANAGER_COMMANDS)), ("set", 7, len(MANAGER_COMMANDS)), ("set", 7, len(EMPLOYEE_COMMANDS))]

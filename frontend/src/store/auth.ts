@@ -12,6 +12,8 @@ export interface Actor {
   workspace_mode?: 'member' | 'manager' | null
   name?: string | null
   avatar_url?: string | null
+  /** What the session owes before the API opens up (tenant-enforced 2FA). */
+  two_factor?: { required: boolean; enrolled: boolean; verified: boolean } | null
 }
 
 export const EMPTY_ROLES: string[] = []

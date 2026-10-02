@@ -5,13 +5,17 @@ from app.bot.db import get_session
 from app.models.models import Answer, Question, Streak, SurveySession
 
 
-def build_checkin_summary(session_id: int) -> str:
+def build_checkin_summary(session_id: int, language: str = "mn") -> str:
     """HTML-сводка по завершённому чек-ину: ответы + текущая серия."""
     with get_session() as s:
         answers = list(
             s.execute(select(Answer).where(Answer.session_id == session_id)).scalars()
         )
-        lines = ["✅ <b>Чек-ин бөглөгдлөө!</b> Өнөөдөр та:"]
+        headings = {
+            "en": "✅ <b>Check-in complete.</b> Today, you:",
+            "ru": "✅ <b>Опрос завершён.</b> Сегодня вы:",
+        }
+        lines = [headings.get(language, "✅ <b>Чек-ин бөглөгдлөө!</b> Өнөөдөр та:")]
         for a in answers:
             q = s.get(Question, a.question_id)
             if q and a.value_numeric is not None:
@@ -25,6 +29,8 @@ def build_checkin_summary(session_id: int) -> str:
                 select(Streak).where(Streak.employee_id == sess.employee_id)
             ).scalar_one_or_none()
             if streak and streak.current_streak > 1:
-                lines.append(f"\n🔥 Цуврал: {streak.current_streak} өдөр дараалан!")
+                streak_label = {"en": "Streak", "ru": "Серия"}.get(language, "Цуврал")
+                day_label = {"en": "days in a row", "ru": "дней подряд"}.get(language, "өдөр дараалан")
+                lines.append(f"\n🔥 {streak_label}: {streak.current_streak} {day_label}!")
 
     return "\n".join(lines)

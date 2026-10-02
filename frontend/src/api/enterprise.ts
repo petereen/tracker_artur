@@ -527,6 +527,7 @@ export interface ManagedAccount {
   locale: string
   roles: string[]
   status: 'active' | 'invited' | 'locked' | 'disabled'
+  two_factor_enabled?: boolean | null
 }
 
 export function useManagedAccounts() {

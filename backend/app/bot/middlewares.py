@@ -25,6 +25,7 @@ from app.bot.db import get_employee_by_tg, is_primary_tenant, link_employee_tele
 from app.bot.menu import sync_chat_menu
 from app.core.roles import TELEGRAM_MANAGEMENT_ROLES
 from app.core.tenancy import tenant_scope
+from app.core.localization import resolve_language
 from app.services.telegram_bots import HANDSHAKE_PREFIX
 
 log = logging.getLogger(__name__)
@@ -36,6 +37,30 @@ FOREIGN_TENANT = (
     "Өөрийн байгууллагын ботыг ашиглана уу. Хэрэв танай байгууллага Telegram бот холбоогүй бол ERP админдаа хандана уу."
 )
 INVITE_PREFIX = "invite_"
+
+
+def _notice(key: str, language: str) -> str:
+    messages = {
+        "en": {
+            "unavailable": "⛔️ This organization is unavailable (suspended or license expired). Contact your administrator.",
+            "not_connected": "⚠️ This bot is not connected to an OYUNS ERP organization. Contact your ERP administrator.",
+            "foreign": "ℹ️ Your Telegram account is connected to another organization’s OYUNS ERP.\n\nUse your organization’s bot. If your organization has not connected a Telegram bot, contact your ERP administrator.",
+            "pending": "ℹ️ The Telegram bot for “{name}” has not finished connecting to OYUNS ERP.\n\nContact your organization’s ERP administrator.",
+            "unregistered": "👋 This is the OYUNS ERP assistant bot for “{name}”.\n\nOnly employees registered in this organization can use it. Your Telegram account is not linked to an employee profile.\n\nIf you work here, ask your ERP administrator or HR to link your Telegram ID to your profile.",
+        },
+        "ru": {
+            "unavailable": "⛔️ Организация недоступна (приостановлена или срок лицензии истёк). Обратитесь к администратору.",
+            "not_connected": "⚠️ Этот бот не подключён ни к одной организации OYUNS ERP. Обратитесь к администратору ERP.",
+            "foreign": "ℹ️ Ваш аккаунт Telegram связан с другой организацией OYUNS ERP.\n\nИспользуйте бот своей организации. Если организация ещё не подключила бота Telegram, обратитесь к администратору ERP.",
+            "pending": "ℹ️ Подключение бота Telegram для организации «{name}» к OYUNS ERP ещё не завершено.\n\nОбратитесь к администратору ERP вашей организации.",
+            "unregistered": "👋 Это помощник OYUNS ERP организации «{name}».\n\nБотом могут пользоваться только сотрудники, зарегистрированные в этой организации. Ваш аккаунт Telegram не связан с профилем сотрудника.\n\nЕсли вы работаете в этой организации, попросите администратора ERP или HR связать ваш Telegram ID с профилем.",
+        },
+    }
+    return messages.get(language, {}).get(key, {
+        "unavailable": WORKSPACE_UNAVAILABLE,
+        "not_connected": BOT_NOT_CONNECTED,
+        "foreign": FOREIGN_TENANT,
+    }.get(key, ""))
 
 
 def _bot_tenant(data: dict[str, Any]) -> int | None:
@@ -86,16 +111,20 @@ def _bot_delivers(data: dict[str, Any]) -> bool:
     return tenant_bot is None or tenant_bot.delivers
 
 
-async def _unregistered_text(data: dict[str, Any], tenant_id: int, tg_id: str | None) -> str:
+async def _unregistered_text(data: dict[str, Any], tenant_id: int, tg_id: str | None, language: str = "mn") -> str:
     if data["foreign_tenant"]:
-        return FOREIGN_TENANT
+        return _notice("foreign", language)
     name = html.escape(await _tenant_name(tenant_id))
     if not _bot_delivers(data):
+        if language in {"en", "ru"}:
+            return _notice("pending", language).format(name=name)
         return (
             f"ℹ️ «{name}» байгууллага Telegram ботоо OYUNS ERP-тэй бүрэн холбож дуусаагүй байна.\n\n"
             "Байгууллагынхаа ERP админд хандана уу."
         )
     identity = f"\n\n🆔 Таны Telegram ID: <code>{tg_id}</code>" if tg_id else ""
+    if language in {"en", "ru"}:
+        return _notice("unregistered", language).format(name=name) + (f"\n\n🆔 Telegram ID: <code>{tg_id}</code>" if tg_id else "")
     return (
         f"👋 Энэ бол «{name}» байгууллагын OYUNS ERP-ийн туслах бот.\n\n"
         "Ботыг зөвхөн тус байгууллагын ERP-д бүртгэлтэй ажилтнууд ашиглана. "
@@ -134,16 +163,17 @@ class EmployeeMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         tenant_id = _bot_tenant(data)
+        user = data.get("event_from_user")
+        data["language"] = resolve_language(getattr(user, "language_code", None))
         if tenant_id is None:
             log.error("bot.update_without_tenant")
-            await _reply(event, BOT_NOT_CONNECTED)
+            await _reply(event, _notice("not_connected", data["language"]))
             return None
         data["bot_tenant_id"] = tenant_id
         data["foreign_tenant"] = False
         if not await _tenant_operational(tenant_id):
-            await _reply(event, WORKSPACE_UNAVAILABLE)
+            await _reply(event, _notice("unavailable", data["language"]))
             return None
-        user = data.get("event_from_user")
         tg_id = str(user.id) if user is not None else None
         emp = None
         if tg_id is not None:
@@ -159,13 +189,14 @@ class EmployeeMiddleware(BaseMiddleware):
             actor = await _erp_actor(tg_id) if emp is not None else None
             roles = actor.roles if actor else frozenset()
             data["actor"] = actor
+            data["language"] = resolve_language(actor.locale if actor else None, emp.primary_language if emp else None, getattr(user, "language_code", None))
             data["roles"] = roles
             data["is_manager"] = bool(roles & TELEGRAM_MANAGEMENT_ROLES)
             if emp is None and not _open_to_unregistered(event):
-                await _reply(event, await _unregistered_text(data, tenant_id, tg_id))
+                await _reply(event, await _unregistered_text(data, tenant_id, tg_id, data["language"]))
                 return None
             chat = data.get("event_chat")
             bot = data.get("bot")
             if emp is not None and bot is not None and getattr(chat, "type", None) == "private":
-                await sync_chat_menu(bot, chat.id, is_manager=data["is_manager"], primary=is_primary_tenant(tenant_id))
+                await sync_chat_menu(bot, chat.id, is_manager=data["is_manager"], primary=is_primary_tenant(tenant_id), language=data["language"])
             return await handler(event, data)

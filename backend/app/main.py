@@ -5,6 +5,8 @@ from app.observability.sentry import init_from_env
 init_from_env(server_name="tracker-artur-api")
 
 from fastapi import FastAPI
+from fastapi.exceptions import HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
@@ -15,6 +17,7 @@ from app.core.database import AsyncSessionLocal, engine
 from app.core.security import hash_password
 from app.core.tenancy import TENANT_FEATURES, TenantBoundaryViolation, install_tenant_guards
 from app.core.tenant_middleware import TenantContextMiddleware
+from app.core.localization import request_language, translate_detail
 from app.models.models import AdminUser, ManagerSettings, Organization, RoleAssignment, UserAccount
 from app.routers import ai_settings, announcements, assistant_learning, assistant_voice, auth, calls, chat, company_files, company_plans, contracts, dashboard, employees, enterprise, enterprise_auth, journal, knowledge, manager, mobile, mobile_updates, notification_settings, onboarding, platform, questions, realtime, report_insights, schedules, tasks, tenant, work_reports, worktime_qr, worktime_reports
 from app.services.tenant_service import is_seat_limit_error
@@ -125,13 +128,21 @@ app = FastAPI(title="OYUNS ERP — API", lifespan=lifespan)
 async def tenant_boundary_violation(request: Request, exc: TenantBoundaryViolation):
     # A query reached another tenant's row: refuse instead of leaking. The
     # guard already logged the details for investigation.
-    return JSONResponse(status_code=403, content={"detail": {"code": "tenant_boundary", "message": "Хандах эрхгүй өгөгдөл."}})
+    detail = translate_detail({"code": "tenant_boundary", "message": "Хандах эрхгүй өгөгдөл."}, request_language(request.headers.get("accept-language")))
+    return JSONResponse(status_code=403, content=jsonable_encoder({"detail": detail}))
+
+
+@app.exception_handler(HTTPException)
+async def http_error(request: Request, exc: HTTPException):
+    detail = translate_detail(exc.detail, request_language(request.headers.get("accept-language")))
+    return JSONResponse(status_code=exc.status_code, content=jsonable_encoder({"detail": detail}), headers=exc.headers)
 
 
 @app.exception_handler(DBAPIError)
 async def database_error(request: Request, exc: DBAPIError):
     if is_seat_limit_error(exc):
-        return JSONResponse(status_code=409, content={"detail": {"code": "seat_limit_reached", "message": "Лицензийн хэрэглэгчийн хязгаар дүүрсэн байна. Багцаа өргөтгөнө үү."}})
+        detail = translate_detail({"code": "seat_limit_reached", "message": "Лицензийн хэрэглэгчийн хязгаар дүүрсэн байна. Багцаа өргөтгөнө үү."}, request_language(request.headers.get("accept-language")))
+        return JSONResponse(status_code=409, content=jsonable_encoder({"detail": detail}))
     raise exc
 
 
@@ -139,7 +150,9 @@ async def database_error(request: Request, exc: DBAPIError):
 async def retire_legacy_payroll_api(request: Request, call_next):
     path = request.url.path
     if path.startswith("/v1/erp/payroll/") and not path.startswith("/v1/erp/payroll/monthly/") and path != "/v1/erp/payroll/capabilities":
-        return JSONResponse(status_code=410, content={"detail": {"code": "payroll_workflow_retired", "message": "Хуучин цалингийн урсгал хаагдсан. Сарын цалингийн самбарыг ашиглана уу.", "monthly_path": "/v1/erp/payroll/monthly"}})
+        detail = {"code": "payroll_workflow_retired", "message": "Хуучин цалингийн урсгал хаагдсан. Сарын цалингийн самбарыг ашиглана уу.", "monthly_path": "/v1/erp/payroll/monthly"}
+        translated_detail = translate_detail(detail, request_language(request.headers.get("accept-language")))
+        return JSONResponse(status_code=410, content=jsonable_encoder({"detail": translated_detail}))
     return await call_next(request)
 
 cors_origins = {

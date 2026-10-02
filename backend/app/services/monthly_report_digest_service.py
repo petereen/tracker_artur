@@ -224,23 +224,34 @@ async def _send_tenant_digest(
 
     analysis = await _ai_summary(reports) or _fallback_summary(reports)
     submitted_names = ", ".join(html.escape(name) for name, _ in reports)
-    message = (
-        f"{'🧪 ТЕСТ — ' if test_mode else ''}📅 <b>{period.year} оны {period.month:02d}-р сарын AI хураангуй</b>\n\n"
-        f"✅ Тайлан баталсан: <b>{len(reports)}/{len(worker_names)}</b> ажилтан\n"
-        f"👥 Илгээсэн: {submitted_names}\n\n"
-        f"<b>Нэгтгэл</b>\n{html.escape(analysis)}"
-    )
-    # Telegram permits at most 4096 characters per message. Keep the useful
-    # deterministic completion information even for unusually large reports.
-    if len(message) > 4000:
-        message = f"{message[:3999]}…"
-
     from app.bot.scheduler import _make_bot
     bot = _make_bot(organization_id)
     if bot is None:
         return False
     try:
-        results = await asyncio.gather(*(bot.send_message(recipient, message) for recipient in recipients), return_exceptions=True)
+        async def send_for_recipient(recipient: str):
+            from app.bot.scheduler import _telegram_language
+
+            language = _telegram_language(recipient, organization_id)
+            test_label = {"en": "TEST — ", "ru": "ТЕСТ — "}.get(language, "ТЕСТ — ") if test_mode else ""
+            heading = {
+                "en": f"{period.year}-{period.month:02d} AI report summary",
+                "ru": f"AI-сводка отчётов за {period.month:02d}.{period.year}",
+            }.get(language, f"{period.year} оны {period.month:02d}-р сарын AI хураангуй")
+            approved = {"en": "Reports approved", "ru": "Отчёты утверждены"}.get(language, "Тайлан баталсан")
+            submitted = {"en": "Submitted", "ru": "Отправили"}.get(language, "Илгээсэн")
+            summary_label = {"en": "Summary", "ru": "Итоги"}.get(language, "Нэгтгэл")
+            message = (
+                f"{test_label}📅 <b>{heading}</b>\n\n"
+                f"✅ {approved}: <b>{len(reports)}/{len(worker_names)}</b>\n"
+                f"👥 {submitted}: {submitted_names}\n\n"
+                f"<b>{summary_label}</b>\n{html.escape(analysis)}"
+            )
+            if len(message) > 4000:
+                message = f"{message[:3999]}…"
+            return await bot.send_message(recipient, message)
+
+        results = await asyncio.gather(*(send_for_recipient(recipient) for recipient in recipients), return_exceptions=True)
         for recipient, result in zip(recipients, results):
             if isinstance(result, Exception):
                 log.exception("monthly digest send failed for recipient=%s", recipient, exc_info=result)

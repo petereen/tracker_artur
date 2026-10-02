@@ -263,6 +263,8 @@ class TenantState:
     features: frozenset[str]
     plan_code: str | None = None
     branding: dict = field(default_factory=dict, compare=False, hash=False)
+    # Tenant setting: every session must pass a second factor (TOTP).
+    two_factor_required: bool = False
 
     def has_feature(self, feature: str) -> bool:
         if feature in PRIMARY_ONLY_FEATURES and not self.is_primary:
@@ -360,6 +362,15 @@ def client_ip_allowed(client_ip: str | None) -> bool:
     return False
 
 
+SECURITY_SETTINGS_KEY = "security"
+
+
+def two_factor_setting(organization_settings) -> bool:
+    """``organization.settings["security"]["two_factor_required"]`` (off by default)."""
+    security = (organization_settings or {}).get(SECURITY_SETTINGS_KEY) if isinstance(organization_settings, dict) else None
+    return bool(isinstance(security, dict) and security.get("two_factor_required"))
+
+
 def state_from_organization(org) -> TenantState:
     return TenantState(
         id=org.id,
@@ -374,6 +385,7 @@ def state_from_organization(org) -> TenantState:
         features=frozenset(normalize_features(org.features)),
         plan_code=org.plan_code,
         branding=dict(org.branding or {}),
+        two_factor_required=two_factor_setting(getattr(org, "settings", None)),
     )
 
 

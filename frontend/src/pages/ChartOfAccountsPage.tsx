@@ -113,9 +113,9 @@ function AccountDialog({ account, accounts, catalog, usage, onClose }: {
           description={t('accounts.dialog.codeHint')} />
         <TextInput label={t('accounts.dialog.name')} value={draft.name} onChange={(name) => set('name', name)} isRequired placeholder={t('accounts.dialog.namePlaceholder')} />
         <Selector label={t('accounts.dialog.classification')} value={draft.classification} onChange={pickClassification} isDisabled={locked} disabledMessage={lockMessage}
-          options={catalog.classifications.map((row) => ({ value: row.key, label: row.label, description: row.normal_side === 'debit' ? t('accounts.dialog.debitNature') : t('accounts.dialog.creditNature') }))} />
+          options={catalog.classifications.map((row) => ({ value: row.key, label: t(`accounts.class.${row.key}`), description: row.normal_side === 'debit' ? t('accounts.dialog.debitNature') : t('accounts.dialog.creditNature') }))} />
         <Selector label={t('accounts.dialog.purpose')} value={draft.purpose} onChange={(purpose) => set('purpose', purpose ?? 'general')} isDisabled={locked} disabledMessage={lockMessage}
-          options={purposes.map((row) => ({ value: row.key, label: row.label }))}
+          options={purposes.map((row) => ({ value: row.key, label: t(`accounts.purpose.${row.key}`) }))}
           description={t('accounts.dialog.purposeHint')} />
         <Selector label={t('accounts.dialog.parent')} value={draft.parent_id ? String(draft.parent_id) : null} onChange={(value) => set('parent_id', value ? Number(value) : null)} hasClear hasSearch isOptional
           options={parents.map((row) => ({ value: String(row.id), label: accountLabel(row) }))} emptyText={t('accounts.dialog.parentEmpty')} placeholder="—" />

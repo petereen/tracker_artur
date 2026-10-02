@@ -61,6 +61,7 @@ def test_monthly_digest_summarizes_dummy_reports_and_sends_once(monkeypatch):
     from app.bot import scheduler
 
     monkeypatch.setattr(scheduler, "_make_bot", lambda organization_id=None: bot)
+    monkeypatch.setattr(scheduler, "_telegram_language", lambda recipient, organization_id=None: "mn")
 
     assert asyncio.run(digest.try_send_monthly_report_digest(date(2026, 8, 4), organization_id=1)) is True
     assert reserved == [(date(2026, 7, 1), 1)]
@@ -72,6 +73,34 @@ def test_monthly_digest_summarizes_dummy_reports_and_sends_once(monkeypatch):
     assert "Тайлан баталсан: <b>2/2</b> ажилтан" in message
     assert "Бат: Шинэ борлуулалтын тайлангийн самбар" in message
     assert "Саруул: Нөөцийн бүртгэлийг шинэчилж" in message
+
+
+def test_monthly_digest_uses_each_manager_language(monkeypatch):
+    worker_names, reports = dummy_reports()
+    bot = FakeBot()
+    monkeypatch.setattr(digest, "_reports_for_period", lambda period, report_type="monthly", organization_id=None: (worker_names, reports))
+    monkeypatch.setattr(digest, "_reserve", lambda period, organization_id: True)
+    monkeypatch.setattr(digest, "get_manager_settings", lambda organization_id=None: SimpleNamespace())
+    monkeypatch.setattr(digest, "manager_telegram_ids", lambda *_args, **_kwargs: ["manager-en", "manager-ru"])
+
+    async def summary(_reports):
+        return "AI analysis text"
+
+    monkeypatch.setattr(digest, "_ai_summary", summary)
+    monkeypatch.setattr("app.bot.db.is_primary_tenant", lambda organization_id: True)
+    from app.bot import scheduler
+
+    monkeypatch.setattr(scheduler, "_make_bot", lambda organization_id=None: bot)
+    languages = {"manager-en": "en", "manager-ru": "ru"}
+    monkeypatch.setattr(scheduler, "_telegram_language", lambda recipient, organization_id=None: languages[recipient])
+
+    assert asyncio.run(digest.try_send_monthly_report_digest(date(2026, 8, 4), organization_id=1)) is True
+    sent = dict(bot.sent)
+    assert "2026-07 AI report summary" in sent["manager-en"]
+    assert "Reports approved: <b>2/2</b>" in sent["manager-en"]
+    assert "AI-сводка отчётов за 07.2026" in sent["manager-ru"]
+    assert "Отчёты утверждены: <b>2/2</b>" in sent["manager-ru"]
+    assert "AI analysis text" in sent["manager-en"] and "AI analysis text" in sent["manager-ru"]
 
 
 def test_monthly_digest_waits_until_every_active_worker_has_submitted(monkeypatch):

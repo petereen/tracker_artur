@@ -18,6 +18,7 @@ import { RoleBuilder } from '../components/RoleBuilder'
 import { ERPModuleSettings } from '../components/ERPModuleSettings'
 import { WorktimeMapPicker } from '../components/WorktimeMapPicker'
 import { WorktimeMethodsSettings } from '../components/WorktimeMethodsSettings'
+import { TwoFactorSettings } from '../components/TwoFactorSettings'
 import { ReportPolicySettings } from '../components/ReportPolicySettings'
 import { SeatMeter, TenantLicenseSettings } from '../components/TenantLicenseSettings'
 import { TenantBrandingSettings } from '../components/TenantBrandingSettings'
@@ -394,6 +395,7 @@ export function AdminAccessSettingsPage() {
   const { t } = useTranslation()
   return <SettingsPage categoryId="security" activeTab="/administration/security/authentication" title={t('st.tab.authentication')}>
     <SettingsSection title={t('st.adm.adminUserPassword')} icon={KeyRound} className="settings-embedded admin-access-settings"><div className="settings-form-stack"><AdminAccessPanel /></div></SettingsSection>
+    <SettingsSection title={t('tfa.set.section')} icon={ShieldCheck} className="settings-embedded"><TwoFactorSettings /></SettingsSection>
   </SettingsPage>
 }
 

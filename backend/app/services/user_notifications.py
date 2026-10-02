@@ -16,7 +16,9 @@ from app.models.models import (
     UserNotification,
     DEFAULT_PRIORITY_NOTIFICATION_KINDS,
 )
+from app.core.localization import resolve_language
 from app.services.manager_recipients import manager_settings_for
+from app.services.notification_localization import notification_copy
 from app.services.notification_policy import load_policy, next_allowed
 from app.services.notification_preferences import resolve_category, category_for, tenant_rules, user_choices
 
@@ -65,6 +67,15 @@ async def create_notifications(
         delivery = resolve_category(rules, user_choices(account.preferences), category)
         if not delivery.any:
             continue
+        language = resolve_language(account.locale if account else None, employee.primary_language if employee else None)
+        localized_title, localized_body = notification_copy(kind, title, body, language)
+        stored_payload = dict(payload or {})
+        stored_payload.setdefault("template_key", f"notification.{kind}")
+        stored_payload.setdefault("template_params", {"source_title": title, "source_body": body})
+        stored_payload.update({"title": localized_title, "body": localized_body})
+        if target_url is not None:
+            stored_payload["target_url"] = target_url
+        stored_payload["locale"] = language
         scoped_key = f"{dedup_key}:account:{account.id}"
         existing = await db.scalar(select(UserNotification.id).where(UserNotification.dedup_key == scoped_key))
         if existing:
@@ -76,7 +87,7 @@ async def create_notifications(
                 not_before = datetime.now(timezone.utc) if immediate else next_allowed(datetime.now(timezone.utc), employee.timezone, policy)
                 db.add(NotificationOutbox(
                     event_id=source_event_id, task_id=task_id, recipient_tg=str(employee.telegram_id), kind=kind,
-                    payload={"title": title, "body": body, "target_url": target_url, **(payload or {})},
+                    payload=stored_payload,
                     not_before=not_before, status="pending", dedup_key=f"telegram:{scoped_key}",
                 ))
             continue
@@ -86,10 +97,10 @@ async def create_notifications(
             recipient_employee_id=account.employee_id,
             event_id=source_event_id,
             kind=kind,
-            title=title,
-            body=body,
+            title=localized_title,
+            body=localized_body,
             target_url=target_url,
-            payload=payload or {},
+            payload=stored_payload,
             telegram_status="queued" if telegram_available else "unavailable",
             dedup_key=scoped_key,
             is_priority=kind in DEFAULT_PRIORITY_NOTIFICATION_KINDS,
@@ -104,7 +115,7 @@ async def create_notifications(
                 task_id=task_id,
                 recipient_tg=str(employee.telegram_id),
                 kind=kind,
-                payload={"title": title, "body": body, "target_url": target_url, **(payload or {})},
+                payload=stored_payload,
                 not_before=not_before,
                 status="pending",
                 dedup_key=f"telegram:{scoped_key}",
@@ -134,10 +145,18 @@ async def create_notifications(
             exists = await db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedup_key == scoped_key))
             if exists:
                 continue
+            language = resolve_language(employee.primary_language)
+            localized_title, localized_body = notification_copy(kind, title, body, language)
+            stored_payload = dict(payload or {})
+            stored_payload.setdefault("template_key", f"notification.{kind}")
+            stored_payload.setdefault("template_params", {"source_title": title, "source_body": body})
+            stored_payload.update({"title": localized_title, "body": localized_body, "locale": language})
+            if target_url is not None:
+                stored_payload["target_url"] = target_url
             not_before = datetime.now(timezone.utc) if immediate else next_allowed(datetime.now(timezone.utc), employee.timezone, policy)
             db.add(NotificationOutbox(
                 event_id=source_event_id, task_id=task_id, recipient_tg=str(employee.telegram_id),
-                kind=kind, payload={"title": title, "body": body, "target_url": target_url, **(payload or {})},
+                kind=kind, payload=stored_payload,
                 not_before=not_before, status="pending", dedup_key=scoped_key,
             ))
     return created
@@ -165,6 +184,17 @@ def mirror_existing_telegram_notification(
         account = db.execute(select(UserAccount).where(UserAccount.employee_id == employee_id, UserAccount.status == "active")).scalar_one_or_none()
         if not account:
             return
+        employee = db.get(Employee, employee_id)
+        language = resolve_language(account.locale, employee.primary_language if employee else None)
+        localized_title, localized_body = notification_copy(kind, title, body, language)
+        stored_payload = dict(payload or {})
+        stored_payload.setdefault("template_key", f"notification.{kind}")
+        stored_payload.setdefault("template_params", {"source_title": title, "source_body": body})
+        stored_payload["title"] = localized_title
+        stored_payload["body"] = localized_body
+        stored_payload["locale"] = language
+        if target_url is not None:
+            stored_payload.setdefault("target_url", target_url)
         scoped_key = f"{dedup_key}:account:{account.id}"
         existing = db.execute(select(UserNotification).where(UserNotification.dedup_key == scoped_key)).scalar_one_or_none()
         if existing:
@@ -177,10 +207,10 @@ def mirror_existing_telegram_notification(
             recipient_account_id=account.id,
             recipient_employee_id=employee_id,
             kind=kind,
-            title=title,
-            body=body,
+            title=localized_title,
+            body=localized_body,
             target_url=target_url,
-            payload=payload or {},
+            payload=stored_payload,
             telegram_status=telegram_status,
             dedup_key=scoped_key,
             is_priority=kind in DEFAULT_PRIORITY_NOTIFICATION_KINDS,

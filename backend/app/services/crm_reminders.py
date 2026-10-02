@@ -73,7 +73,7 @@ async def reconcile_crm_activity_reminders(now: datetime | None = None) -> None:
         await db.commit()
 
 
-def crm_digest_lines(employee_id: int, now: datetime, local_day_end: datetime) -> list[str]:
+def crm_digest_lines(employee_id: int, now: datetime, local_day_end: datetime, language: str = "mn") -> list[str]:
     """Morning-digest section: the employee's overdue and due-today CRM work."""
     from app.bot.db import get_session
 
@@ -93,9 +93,11 @@ def crm_digest_lines(employee_id: int, now: datetime, local_day_end: datetime) -
     today = [(row, name) for row, name in rows if row.due_at >= now]
     lines: list[str] = []
     if overdue:
-        lines.append(f"\n🔴 CRM — хугацаа хэтэрсэн ({len(overdue)}):")
+        label = {"en": "overdue", "ru": "просрочено"}.get(language, "хугацаа хэтэрсэн")
+        lines.append(f"\n🔴 CRM — {label} ({len(overdue)}):")
         lines += [f"  • {escape(_label(row, name))}" for row, name in overdue]
     if today:
-        lines.append(f"\n🤝 CRM — өнөөдөр ({len(today)}):")
+        label = {"en": "due today", "ru": "срок сегодня"}.get(language, "өнөөдөр")
+        lines.append(f"\n🤝 CRM — {label} ({len(today)}):")
         lines += [f"  • {escape(_label(row, name))}" for row, name in today]
     return lines

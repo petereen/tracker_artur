@@ -59,32 +59,60 @@ MANAGER_COMMANDS: list[BotCommand] = [
 # Check-in surveys predate tenancy and exist for the primary tenant only.
 CHECKIN_COMMANDS = frozenset({"today", "my_stats", "leaderboard", "summary", "week", "blockers"})
 
-# Last menu pushed to a private chat by this process: (manager, primary).
-_chat_menus: dict[tuple[int, int], tuple[bool, bool]] = {}
+# Last menu pushed to a private chat by this process: (manager, primary, locale).
+_chat_menus: dict[tuple[int, int], tuple[bool, bool, str]] = {}
+
+_COMMAND_LABELS = {
+    "app": ("Open workspace", "Открыть рабочее пространство"),
+    "today": ("Complete today’s check-in", "Заполнить опрос за сегодня"),
+    "daystart": ("Record work start", "Отметить начало работы"),
+    "dayend": ("Record work end", "Отметить окончание работы"),
+    "remotestart": ("Start remote work", "Начать удалённую работу"),
+    "remoteend": ("Finish remote work", "Завершить удалённую работу"),
+    "daypause": ("Pause work time", "Приостановить учёт времени"),
+    "worktime": ("View today’s work time", "Посмотреть рабочее время за сегодня"),
+    "mytasks": ("My active tasks", "Мои активные задачи"),
+    "done": ("Mark task complete", "Отметить задачу выполненной"),
+    "snooze": ("Postpone a task", "Отложить задачу"),
+    "myid": ("My Telegram ID", "Мой Telegram ID"),
+    "help": ("Command help", "Справка по командам"),
+    "my_stats": ("My statistics", "Моя статистика"),
+    "leaderboard": ("Team leaderboard", "Рейтинг команды"),
+    "task": ("Create a task", "Создать задачу"),
+    "assigned": ("Tasks I assigned", "Задачи, назначенные мной"),
+    "dashboard": ("Task oversight dashboard", "Панель контроля задач"),
+    "summary": ("Yesterday’s check-in summary", "Сводка опроса за вчера"),
+    "week": ("Weekly check-in statistics", "Статистика опросов за неделю"),
+    "blockers": ("Key monthly blockers", "Основные проблемы за месяц"),
+    "monthly_digest": ("Get monthly report summary", "Получить сводку месячных отчётов"),
+}
 
 
-def commands_for(is_manager: bool, primary: bool = True) -> list[BotCommand]:
+def commands_for(is_manager: bool, primary: bool = True, language: str = "mn") -> list[BotCommand]:
     """Menu for a role inside a tenant (management = ERP roles, see middleware)."""
     commands = MANAGER_COMMANDS if is_manager else EMPLOYEE_COMMANDS
-    return commands if primary else [item for item in commands if item.command not in CHECKIN_COMMANDS]
+    visible = commands if primary else [item for item in commands if item.command not in CHECKIN_COMMANDS]
+    if language == "mn":
+        return visible
+    index = 0 if language == "en" else 1
+    return [BotCommand(command=item.command, description=_COMMAND_LABELS.get(item.command, (item.description, item.description))[index]) for item in visible]
 
 
-async def sync_chat_menu(bot: Bot, chat_id: int, *, is_manager: bool, primary: bool) -> None:
+async def sync_chat_menu(bot: Bot, chat_id: int, *, is_manager: bool, primary: bool, language: str = "mn") -> None:
     """Keep a worker's private-chat menu in step with their current ERP role.
 
     Called on every update; Telegram is only contacted when the role changed
     (or once after a restart), so a promotion or demotion in the ERP shows up
     on the worker's next message."""
-    key, wanted = (bot.id, chat_id), (is_manager, primary)
+    key, wanted = (bot.id, chat_id), (is_manager, primary, language)
     if _chat_menus.get(key) == wanted:
         return
     try:
         scope = BotCommandScopeChat(chat_id=chat_id)
         if is_manager:
-            await bot.set_my_commands(commands_for(True, primary), scope=scope)
+            await bot.set_my_commands(commands_for(True, primary, language), scope=scope)
         else:
-            # Back to the bot's default (employee) menu.
-            await bot.delete_my_commands(scope=scope)
+            await bot.set_my_commands(commands_for(False, primary, language), scope=scope)
         _chat_menus[key] = wanted
     except Exception:
         log.exception("bot.chat_menu_failed chat=%s", chat_id)

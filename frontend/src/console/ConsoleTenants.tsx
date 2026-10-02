@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { ArrowLeft, Ban, Copy, KeyRound, Play, Plus, RefreshCw, ShieldOff, Trash2 } from 'lucide-react'
+import { ArrowLeft, Ban, Copy, KeyRound, Play, Plus, RefreshCw, ShieldOff, Trash2, UserPlus } from 'lucide-react'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -34,9 +34,9 @@ import { RouterLink } from '../components/budget/shared'
 import { LICENSE_STATE, formatDate } from '../components/TenantLicenseSettings'
 import {
   type BillingCycle, type ConsoleLicense, type ConsoleTenant, type LicenseIssueInput, type TenantStatus,
-  type ConsoleDomain,
+  type ConsoleDomain, type ConsoleTenantAdmin,
   consoleError, fetchLicenseToken, useAddDomain, useConsoleSession, useConsoleTenant, useConsoleTenants, useCreateTenant,
-  useFeatureCatalog, useIssueLicense, useOperatorActivateLicense, usePlans, usePurgeTenant, useRemoveDomain, useRenewLicense,
+  useFeatureCatalog, useIssueLicense, useIssueTenantAdmin, useOperatorActivateLicense, useRecoverTenantAdmin, usePlans, usePurgeTenant, useRemoveDomain, useRenewLicense,
   useRevokeLicense, useTenantLifecycle, useUpdateTenant, useVerifyDomain,
 } from './consoleApi'
 
@@ -421,6 +421,78 @@ function DomainsCard({ tenantId, domains, hosts, canEdit }: { tenantId: number; 
   </Card>
 }
 
+/** Re-issue an admin's password (optionally dropping 2FA), or issue a brand-new admin account. */
+function AdminAccessDialog({ tenantId, admin, onClose }: { tenantId: number; admin: ConsoleTenantAdmin | null; onClose: () => void }) {
+  const { t } = useTranslation()
+  const recover = useRecoverTenantAdmin()
+  const issue = useIssueTenantAdmin()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [removeTwoFactor, setRemoveTwoFactor] = useState(false)
+  const title = admin ? t('ct.adm.reissueTitle') : t('ct.adm.issueTitle')
+  const ready = password.length >= 10 && (admin !== null || email.trim().length >= 3)
+  const submit = async () => {
+    try {
+      if (admin) {
+        await recover.mutateAsync({ tenantId, accountId: admin.id, password, reset_two_factor: removeTwoFactor })
+        toast.success(t('ct.adm.reissued'))
+      } else {
+        await issue.mutateAsync({ tenantId, email: email.trim(), password })
+        toast.success(t('ct.adm.issued'))
+      }
+      onClose()
+    } catch (error) { toast.error(consoleError(error, t('ct.failed'))) }
+  }
+  return <Dialog isOpen onOpenChange={(open) => { if (!open) onClose() }} width={480} purpose="form" maxHeight="90dvh">
+    <DialogHeader title={title} subtitle={admin?.email} onOpenChange={(open) => { if (!open) onClose() }} />
+    <DialogScrollBody label={title} actions={<>
+      <Button label={t('ct.cancel')} variant="ghost" onClick={onClose} />
+      <Button label={t('ct.adm.issue')} variant="primary" clickAction={submit} isDisabled={!ready || recover.isPending || issue.isPending} />
+    </>}>
+      {!admin && <Text type="supporting">{t('ct.adm.issueHint')}</Text>}
+      {!admin && <TextInput label={t('ct.adm.login')} value={email} onChange={setEmail} autoComplete="off" isRequired />}
+      <TextInput label={t('ct.adm.tempPassword')} description={t('ct.adm.tempPasswordHint')} value={password} onChange={setPassword} type="password" autoComplete="new-password" isRequired />
+      {admin?.two_factor_enabled && <CheckboxInput label={t('ct.adm.alsoRemoveTf')} value={removeTwoFactor} onChange={setRemoveTwoFactor} />}
+    </DialogScrollBody>
+  </Dialog>
+}
+
+/** Tenant administrators and the recovery actions for one that is locked out. */
+export function AdminsCard({ tenantId, admins, twoFactorRequired, canEdit }: { tenantId: number; admins: ConsoleTenantAdmin[]; twoFactorRequired: boolean; canEdit: boolean }) {
+  const { t } = useTranslation()
+  const recover = useRecoverTenantAdmin()
+  // `null` = issue a new admin; an admin = re-issue that account.
+  const [dialog, setDialog] = useState<{ admin: ConsoleTenantAdmin | null } | null>(null)
+  const removeTwoFactor = async (admin: ConsoleTenantAdmin) => {
+    if (!window.confirm(t('ct.adm.removeTfConfirm', { email: admin.email }))) return
+    try { await recover.mutateAsync({ tenantId, accountId: admin.id, reset_two_factor: true }); toast.success(t('ct.adm.tfRemoved')) } catch (error) { toast.error(consoleError(error, t('ct.failed'))) }
+  }
+  return <Card padding={5}>
+    <VStack gap={3}>
+      <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
+        <Heading level={3}>{t('ct.admins')}</Heading>
+        {canEdit && <Button label={t('ct.adm.issueNew')} variant="secondary" size="sm" icon={<UserPlus size={14} />} onClick={() => setDialog({ admin: null })} />}
+      </HStack>
+      <Text type="supporting">{twoFactorRequired ? `${t('ct.adm.tfRequired')} ${t('ct.adm.hint')}` : t('ct.adm.hint')}</Text>
+      {admins.length === 0 && <Text type="supporting">{t('ct.adm.none')}</Text>}
+      {admins.map((admin) => <HStack key={admin.id} gap={2} hAlign="between" vAlign="center" wrap="wrap">
+        <VStack gap={0}>
+          <Text weight="semibold">{admin.email}</Text>
+          <Text type="supporting">{admin.last_login_at ? new Date(admin.last_login_at).toLocaleString(intlLocale()) : '—'}</Text>
+        </VStack>
+        <HStack gap={1} vAlign="center" wrap="wrap">
+          {admin.status !== 'active' && <Token size="sm" color="orange" label={admin.status} />}
+          {admin.locked && <Token size="sm" color="red" label={t('ct.adm.locked')} />}
+          <Token size="sm" color={admin.two_factor_enabled ? 'green' : 'gray'} label={admin.two_factor_enabled ? t('ct.adm.tfOn') : t('ct.adm.tfOff')} />
+          {canEdit && admin.two_factor_enabled && <Button label={t('ct.adm.removeTf')} aria-label={t('ct.adm.removeTfAria', { email: admin.email })} size="sm" variant="ghost" icon={<ShieldOff size={14} />} isDisabled={recover.isPending} onClick={() => { void removeTwoFactor(admin) }} />}
+          {canEdit && <Button label={t('ct.adm.reissue')} aria-label={t('ct.adm.reissueAria', { email: admin.email })} size="sm" variant="ghost" icon={<KeyRound size={14} />} onClick={() => setDialog({ admin })} />}
+        </HStack>
+      </HStack>)}
+    </VStack>
+    {dialog && <AdminAccessDialog tenantId={tenantId} admin={dialog.admin} onClose={() => setDialog(null)} />}
+  </Card>
+}
+
 export function TenantDetailPage() {
   const { t } = useTranslation()
   const { tenantId } = useParams()
@@ -431,7 +503,7 @@ export function TenantDetailPage() {
   const [action, setAction] = useState<LifecycleAction | null>(null)
   if (detail.isLoading) return <Skeleton height={320} />
   if (detail.isError || !detail.data) return <Banner status="error" collapsible={false} title={consoleError(detail.error, t('ct.notFound'))} />
-  const { tenant, seats, licenses, domains, admins, audit } = detail.data
+  const { tenant, seats, licenses, domains, admins, audit, two_factor_required: twoFactorRequired } = detail.data
   const canEdit = superadmin && tenant.status !== 'terminated'
   return <VStack gap={4}>
     <HStack><Button label={t('ct.allTenants')} variant="ghost" size="sm" icon={<ArrowLeft size={14} />} href="/platform" as={RouterLink} /></HStack>
@@ -464,6 +536,7 @@ export function TenantDetailPage() {
       </Card>
       <DomainsCard tenantId={tenant.id} domains={domains} hosts={tenant.hosts} canEdit={canEdit} />
     </Grid>
+    <AdminsCard tenantId={tenant.id} admins={admins} twoFactorRequired={Boolean(twoFactorRequired)} canEdit={canEdit} />
     <SubscriptionCard tenant={tenant} canEdit={canEdit} />
     <LicensesCard tenant={tenant} licenses={licenses} canEdit={superadmin} />
     <Card padding={5}>

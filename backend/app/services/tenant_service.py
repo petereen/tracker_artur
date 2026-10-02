@@ -18,13 +18,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.tenancy import normalize_features, tenant_directory
-from app.models.models import Organization, UserAccount
+from app.models.models import Organization, RefreshSession, UserAccount
 from app.models.platform import PlatformAuditLog, TenantLicense
 from app.services.licensing import LicenseError, token_fingerprint, verify_token
 
@@ -168,6 +168,21 @@ def apply_license(organization: Organization, license_row: TenantLicense) -> Non
     organization.billing_cycle = license_row.billing_cycle or organization.billing_cycle
     if organization.status == "pending_activation":
         organization.status = "active"
+
+
+async def clear_account_two_factor(db: AsyncSession, account: UserAccount) -> None:
+    """Drop the TOTP enrolment (lost phone): the account sets 2FA up again.
+
+    Its sessions lose the "second factor passed" mark and the failed-attempt
+    lock is lifted, since this is an explicit recovery action.
+    """
+    account.totp_secret_enc = None
+    account.totp_enabled_at = None
+    account.totp_last_step = None
+    account.totp_recovery_codes = []
+    account.failed_login_count = 0
+    account.locked_until = None
+    await db.execute(update(RefreshSession).where(RefreshSession.account_id == account.id).values(mfa_verified_at=None))
 
 
 def audit(db: AsyncSession, action: str, *, organization_id: int | None, operator_id: int | None = None,

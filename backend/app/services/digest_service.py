@@ -92,11 +92,11 @@ def _digest_allowed_on_day(day: date, work_weekdays, has_task: bool) -> bool:
     return day.isoweekday() in set(work_weekdays) or has_task
 
 
-def _line(t: dict, *, with_assignee: bool = False) -> str:
+def _line(t: dict, *, with_assignee: bool = False, language: str = "mn") -> str:
     em = _PRI.get(t["priority"], "🟡")
     who = f" → {t['assignee_name']}" if with_assignee and t.get("assignee_name") else ""
     dl = _deadline(t)
-    dls = dl.astimezone(timezone.utc).strftime("%d.%m %H:%M") if dl else "Хугацаагүй"
+    dls = dl.astimezone(timezone.utc).strftime("%d.%m %H:%M") if dl else {"en": "No deadline", "ru": "Без срока"}.get(language, "Хугацаагүй")
     return f"{em} #{t['id']} {t['title']}{who} — {dls}"
 
 
@@ -107,26 +107,28 @@ def _get_employee(emp_id: int):
 
 # ─── Сотрудник: утро ────────────────────────────────────────────────────────────
 
-def build_employee_morning(emp_id: int, tz: str | None) -> str | None:
+def build_employee_morning(emp_id: int, tz: str | None, language: str = "mn") -> str | None:
     now = _now_utc()
     tasks = task_service.list_assigned_to(emp_id, only_active=True)
     overdue = [t for t in tasks if _is_overdue(t, now)]
     today = [t for t in tasks if _is_due_today(t, tz, now)]
-    crm_lines = _crm_morning_lines(emp_id, tz, now)
+    crm_lines = _crm_morning_lines(emp_id, tz, now, language)
     if not overdue and not today and not crm_lines:
         return None
-    lines = ["🌅 <b>Өглөөний мэнд! Өнөөдрийн даалгавар</b>"]
+    lines = [{"en": "🌅 <b>Good morning! Today's tasks</b>", "ru": "🌅 <b>Доброе утро! Задачи на сегодня</b>"}.get(language, "🌅 <b>Өглөөний мэнд! Өнөөдрийн даалгавар</b>")]
     if overdue:
-        lines.append(f"\n🔴 Хугацаа хэтэрсэн ({len(overdue)}):")
-        lines += [f"  {_line(t)}" for t in overdue]
+        label = {"en": "Overdue", "ru": "Просрочено"}.get(language, "Хугацаа хэтэрсэн")
+        lines.append(f"\n🔴 {label} ({len(overdue)}):")
+        lines += [f"  {_line(t, language=language)}" for t in overdue]
     if today:
-        lines.append(f"\n📌 Өнөөдөр дуусах хугацаатай ({len(today)}):")
-        lines += [f"  {_line(t)}" for t in today]
+        label = {"en": "Due today", "ru": "Срок сегодня"}.get(language, "Өнөөдөр дуусах хугацаатай")
+        lines.append(f"\n📌 {label} ({len(today)}):")
+        lines += [f"  {_line(t, language=language)}" for t in today]
     lines += crm_lines
     return "\n".join(lines)
 
 
-def _crm_morning_lines(emp_id: int, tz: str | None, now: datetime) -> list[str]:
+def _crm_morning_lines(emp_id: int, tz: str | None, now: datetime, language: str = "mn") -> list[str]:
     """CRM follow-ups are optional; a CRM failure must never block the task digest."""
     from datetime import timedelta
 
@@ -135,7 +137,7 @@ def _crm_morning_lines(emp_id: int, tz: str | None, now: datetime) -> list[str]:
     zone = pytz.timezone(tz or "Asia/Ulaanbaatar")
     day_end = zone.localize(datetime.combine(_local_today(tz) + timedelta(days=1), datetime.min.time()))
     try:
-        return crm_digest_lines(emp_id, now, day_end.astimezone(timezone.utc))
+        return crm_digest_lines(emp_id, now, day_end.astimezone(timezone.utc), language)
     except Exception:
         log.warning("digest.crm_section_failed", exc_info=True)
         return []
@@ -143,20 +145,22 @@ def _crm_morning_lines(emp_id: int, tz: str | None, now: datetime) -> list[str]:
 
 # ─── Сотрудник: вечер ─────────────────────────────────────────────────────────
 
-def build_employee_evening(emp_id: int, tz: str | None) -> str | None:
+def build_employee_evening(emp_id: int, tz: str | None, language: str = "mn") -> str | None:
     now = _now_utc()
     active = task_service.list_assigned_to(emp_id, only_active=True)
     done_today = _done_today(emp_id, tz)
     if not active and not done_today:
         return None
-    lines = ["🌆 <b>Өдрийн дүн</b>"]
+    lines = [{"en": "🌆 <b>End-of-day summary</b>", "ru": "🌆 <b>Итоги дня</b>"}.get(language, "🌆 <b>Өдрийн дүн</b>")]
     if done_today:
-        lines.append(f"\n✅ Өнөөдөр дуусгасан даалгаврын тоо: {done_today}")
+        label = {"en": "Tasks completed today", "ru": "Задач выполнено сегодня"}.get(language, "Өнөөдөр дуусгасан даалгаврын тоо")
+        lines.append(f"\n✅ {label}: {done_today}")
     if active:
-        lines.append(f"\n📋 Үлдсэн даалгавар ({len(active)}):")
-        lines += [f"  {_line(t)}" for t in active[:10]]
+        label = {"en": "Remaining tasks", "ru": "Осталось задач"}.get(language, "Үлдсэн даалгавар")
+        lines.append(f"\n📋 {label} ({len(active)}):")
+        lines += [f"  {_line(t, language=language)}" for t in active[:10]]
         if len(active) > 10:
-            lines.append(f"  …мөн {len(active) - 10}")
+            lines.append(f"  …{'and' if language == 'en' else 'и' if language == 'ru' else 'мөн'} {len(active) - 10}")
     return "\n".join(lines)
 
 
@@ -173,7 +177,7 @@ def _done_today(emp_id: int, tz: str | None) -> int:
 
 # ─── Руководитель: утренний обзор ────────────────────────────────────────────────
 
-def build_manager_overview() -> str | None:
+def build_manager_overview(language: str = "mn") -> str | None:
     now = _now_utc()
     policy = _policy()
     groups = task_service.all_active_grouped_by_assignee()
@@ -185,17 +189,20 @@ def build_manager_overview() -> str | None:
         t for t in overdue_all
         if _deadline(t) and working_days_between(_deadline(t), now, policy) >= policy.escalation_days
     ]
-    lines = [f"👔 <b>Багийн даалгаврын тойм ({total})</b>"]
+    heading = {"en": "Team task overview", "ru": "Обзор задач команды"}.get(language, "Багийн даалгаврын тойм")
+    lines = [f"👔 <b>{heading} ({total})</b>"]
     for name, items in groups.items():
         od = [t for t in items if _is_overdue(t, now)]
         td = [t for t in items if _is_due_today(t, t.get("assignee_tz"), now)]
         if not od and not td:
             continue
         lines.append(f"\n👤 <b>{name}</b>:")
-        lines += [f"  {_line(t)}" for t in od + td]
+        lines += [f"  {_line(t, language=language)}" for t in od + td]
     if escalate:
-        lines.append(f"\n🚨 <b>Анхаарал шаардлагатай</b> (&gt; {policy.escalation_days} ажлын өдөр):")
-        lines += [f"  {_line(t, with_assignee=True)}" for t in escalate]
+        label = {"en": "Needs attention", "ru": "Требует внимания"}.get(language, "Анхаарал шаардлагатай")
+        days = {"en": "business days", "ru": "рабочих дней"}.get(language, "ажлын өдөр")
+        lines.append(f"\n🚨 <b>{label}</b> (&gt; {policy.escalation_days} {days}):")
+        lines += [f"  {_line(t, with_assignee=True, language=language)}" for t in escalate]
     if len(lines) == 1:
         return None
     return "\n".join(lines)
@@ -220,7 +227,9 @@ async def send_employee_morning_digest(emp_id: int) -> None:
     emp = _get_employee(emp_id)
     if not emp or not _policy(emp.organization_id).enabled or not _digest_allowed_for(emp_id):
         return
-    message = build_employee_morning(emp_id, emp.timezone)
+    from app.bot.scheduler import _employee_language
+    language = _employee_language(emp.id, emp.primary_language)
+    message = build_employee_morning(emp_id, emp.timezone, language)
     from app.bot.db import get_schedule
     from app.bot.scheduler import _schedule_weekdays
     local_day = _local_today(emp.timezone)
@@ -237,7 +246,9 @@ async def send_employee_evening_digest(emp_id: int) -> None:
     emp = _get_employee(emp_id)
     if not emp or not _policy(emp.organization_id).enabled or not _digest_allowed_for(emp_id):
         return
-    message = build_employee_evening(emp_id, emp.timezone)
+    from app.bot.scheduler import _employee_language
+    language = _employee_language(emp.id, emp.primary_language)
+    message = build_employee_evening(emp_id, emp.timezone, language)
     from app.bot.db import get_schedule
     from app.bot.scheduler import _schedule_weekdays
     local_day = _local_today(emp.timezone)
@@ -268,9 +279,12 @@ async def send_manager_task_digest() -> None:
                 local_day = _local_today("Asia/Ulaanbaatar")
                 if not _digest_allowed_on_day(local_day, policy.work_weekdays, _has_manager_task_on_day(local_day)):
                     continue
-                message = build_manager_overview()
                 recipients = manager_telegram_ids(ms, primary=is_primary_tenant(organization_id))
             for recipient in recipients:
+                from app.bot.scheduler import _telegram_language
+                language = _telegram_language(recipient, organization_id)
+                with tenant_scope(organization_id):
+                    message = build_manager_overview(language)
                 await _send(recipient, message, organization_id)
         except Exception:  # noqa: BLE001 - one tenant must not block the others
             log.exception("digest.manager_digest_failed tenant=%s", organization_id)

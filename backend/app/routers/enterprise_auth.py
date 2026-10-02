@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.enterprise_deps import WORKSPACE_MODE_ROLES, ActorContext, get_account_actor, get_actor, require_roles
+from app.core.enterprise_deps import WORKSPACE_MODE_ROLES, ActorContext, get_account_actor, get_actor, get_session_actor, require_roles, tenant_requires_two_factor
 from app.core.security import (
     create_enterprise_access_token,
     decode_token,
@@ -30,14 +30,15 @@ from app.core.telegram_auth import verify_tenant_init_data
 from app.models.models import Department, Employee, EmployeeDetails, JobQueue, Organization, PasswordResetToken, RefreshSession, RoleAssignment, TelegramOAuthState, UserAccount
 from app.core.roles import SYSTEM_ROLES
 from app.services.email_service import email_is_configured
-from app.services.secret_box import encrypt_secret
+from app.services.secret_box import decrypt_secret, encrypt_secret
+from app.services import totp
 from app.services.avatar_storage import InvalidAvatar, read_avatar, save_avatar
 from app.services.malware_scanner import MalwareDetected, MalwareScanUnavailable
 from app.services import telegram_oidc
 from app.services.enterprise_events import record_change
 from app.hr.service import can_manage_hr, ensure_details
 from app.core.tenancy import TenantBoundaryViolation, current_tenant_id, tenant_directory
-from app.services.tenant_service import SEAT_STATUSES, ensure_seat_available, identity_in_use
+from app.services.tenant_service import SEAT_STATUSES, clear_account_two_factor, ensure_seat_available, identity_in_use
 
 
 router = APIRouter()
@@ -88,6 +89,18 @@ class RefreshInput(BaseModel):
     refresh_token: str | None = Field(default=None, min_length=32, max_length=512)
 
 
+class TwoFactorState(BaseModel):
+    # The tenant enforces 2FA / this account enrolled an authenticator app /
+    # the calling session already passed the second factor.
+    required: bool
+    enrolled: bool
+    verified: bool
+
+
+class TwoFactorCode(BaseModel):
+    code: str = Field(min_length=6, max_length=32)
+
+
 class AccountOut(BaseModel):
     id: int
     email: str
@@ -102,6 +115,10 @@ class AccountOut(BaseModel):
     # workspace mode); ``account_roles`` are the roles actually granted.
     account_roles: list[str] | None = None
     workspace_mode: Literal["member", "manager"] | None = None
+    # ``/me`` only: what the session still owes before the API opens up.
+    two_factor: TwoFactorState | None = None
+    # Account administration only.
+    two_factor_enabled: bool | None = None
 
 
 class AccountCreate(BaseModel):
@@ -330,19 +347,37 @@ def _is_native_origin(origin: str | None) -> bool:
     return bool(origin and origin in _native_origins())
 
 
-def _access(account: UserAccount, refresh_token: str | None = None, auth_method: str | None = None) -> AccessTokenOut:
+def _access(account: UserAccount, refresh_token: str | None = None, auth_method: str | None = None, session: RefreshSession | None = None) -> AccessTokenOut:
     return AccessTokenOut(
-        access_token=create_enterprise_access_token(account.id, account.organization_id, auth_method),
+        access_token=create_enterprise_access_token(
+            account.id, account.organization_id, auth_method,
+            session_id=session.id if session is not None else None,
+            mfa=bool(session is not None and session.mfa_verified_at is not None),
+        ),
         expires_in=settings.ENTERPRISE_ACCESS_TOKEN_MINUTES * 60,
         refresh_token=refresh_token,
     )
 
 
-def _complete_session(response: Response, account: UserAccount, token: str, expires_at: datetime, origin: str | None, auth_method: str | None = None):
+def _complete_session(response: Response, account: UserAccount, token: str, expires_at: datetime, origin: str | None, auth_method: str | None = None, session: RefreshSession | None = None):
     if _is_native_origin(origin):
-        return _access(account, refresh_token=token, auth_method=auth_method)
+        return _access(account, refresh_token=token, auth_method=auth_method, session=session)
     _set_refresh_cookie(response, token, expires_at)
-    return _access(account, auth_method=auth_method)
+    return _access(account, auth_method=auth_method, session=session)
+
+
+async def _awaits_second_factor(account: UserAccount) -> bool:
+    """The password (or Telegram) step alone does not finish this sign-in.
+
+    While it is true the failed-attempt counter is left alone: it is cleared
+    by a correct code, so signing in again cannot buy more code guesses.
+    """
+    if getattr(account, "totp_enabled_at", None) is None:
+        return False
+    try:
+        return await tenant_requires_two_factor(account.organization_id)
+    except Exception:  # lookup outage: keep the counter
+        return True
 
 
 async def _current_session(db: AsyncSession, account_id: int, authorization: str | None, refresh_cookie: str | None) -> tuple[str | None, RefreshSession | None]:
@@ -450,22 +485,22 @@ async def login(
     if needs_rehash:
         account.password_hash = hash_account_password(data.password)
     account.status = "active"
-    account.failed_login_count = 0
+    if not await _awaits_second_factor(account):
+        account.failed_login_count = 0
     account.locked_until = None
     account.last_login_at = now
     refresh_token, token_hash = new_refresh_token()
     refresh_expires_at = now + timedelta(days=settings.REFRESH_TOKEN_DAYS)
-    db.add(
-        RefreshSession(
-            account_id=account.id,
-            token_hash=token_hash,
-            device_label=data.device_label,
-            auth_method="password",
-            expires_at=refresh_expires_at,
-        )
+    session = RefreshSession(
+        account_id=account.id,
+        token_hash=token_hash,
+        device_label=data.device_label,
+        auth_method="password",
+        expires_at=refresh_expires_at,
     )
+    db.add(session)
     await db.commit()
-    return _complete_session(response, account, refresh_token, refresh_expires_at, origin, auth_method="password")
+    return _complete_session(response, account, refresh_token, refresh_expires_at, origin, auth_method="password", session=session)
 
 
 async def _telegram_session(
@@ -554,8 +589,9 @@ async def _telegram_session(
         raise HTTPException(status_code=403, detail="Account is disabled")
     await _ensure_workspace_usable(account)
     account.status = "active"
-    account.failed_login_count = 0
-    account.locked_until = None
+    if not await _awaits_second_factor(account):
+        account.failed_login_count = 0
+        account.locked_until = None
     account.last_login_at = datetime.now(timezone.utc)
     roles = (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all()
     if not roles:
@@ -564,15 +600,16 @@ async def _telegram_session(
     now = datetime.now(timezone.utc)
     refresh_expires_at = now + timedelta(days=settings.TELEGRAM_REFRESH_TOKEN_DAYS)
     refresh_token, token_hash = new_refresh_token()
-    db.add(RefreshSession(
+    session = RefreshSession(
         account_id=account.id,
         token_hash=token_hash,
         device_label=device_label,
         auth_method="telegram",
         expires_at=refresh_expires_at,
-    ))
+    )
+    db.add(session)
     await db.commit()
-    return _complete_session(response, account, refresh_token, refresh_expires_at, origin, auth_method="telegram")
+    return _complete_session(response, account, refresh_token, refresh_expires_at, origin, auth_method="telegram", session=session)
 
 
 @router.get("/capabilities", response_model=AuthCapabilities)
@@ -852,15 +889,17 @@ async def refresh(
     session.last_used_at = now
     token, token_hash = new_refresh_token()
     expires_at = session.expires_at if session.auth_method == "telegram" else now + timedelta(days=settings.REFRESH_TOKEN_DAYS)
-    db.add(RefreshSession(
+    rotated = RefreshSession(
         account_id=account.id,
         token_hash=token_hash,
         device_label=session.device_label,
         auth_method=session.auth_method,
         expires_at=expires_at,
-    ))
+        mfa_verified_at=session.mfa_verified_at,
+    )
+    db.add(rotated)
     await db.commit()
-    return _complete_session(response, account, token, expires_at, origin, auth_method=session.auth_method)
+    return _complete_session(response, account, token, expires_at, origin, auth_method=session.auth_method, session=rotated)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -883,14 +922,171 @@ async def logout(
 
 
 @router.get("/me", response_model=AccountOut)
-async def me(db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
+async def me(db: AsyncSession = Depends(get_db), session_actor: tuple[ActorContext, dict] = Depends(get_session_actor)):
+    # Not behind the second-factor gate: the client learns from here that the
+    # session still has to enrol or enter a code.
+    actor, claims = session_actor
     employee = await db.get(Employee, actor.employee_id) if actor.employee_id else None
+    account = await db.get(UserAccount, actor.account_id)
     return AccountOut(
         id=actor.account_id, email=actor.email, employee_id=actor.employee_id, locale=actor.locale,
         roles=sorted(actor.roles), status="active", name=employee.name if employee else actor.email,
         avatar_url=(employee.metadata_json or {}).get("avatar_url") if employee else None,
         account_roles=sorted(actor.granted_roles), workspace_mode=actor.workspace_mode,
+        two_factor=TwoFactorState(
+            required=await tenant_requires_two_factor(actor.organization_id),
+            enrolled=bool(account and account.totp_enabled_at is not None),
+            verified=bool(claims.get("mfa")),
+        ),
     )
+
+
+TWO_FACTOR_MAX_FAILURES = 5
+TWO_FACTOR_LOCK_MINUTES = 15
+
+
+async def _two_factor_account(db: AsyncSession, actor: ActorContext, now: datetime) -> UserAccount:
+    account = await db.get(UserAccount, actor.account_id, with_for_update=True)
+    if not account:
+        raise HTTPException(status_code=401, detail="Account unavailable")
+    if account.locked_until and account.locked_until > now:
+        raise HTTPException(status_code=423, detail={"code": "account_locked", "message": "Account is temporarily locked"})
+    return account
+
+
+async def _two_factor_session(db: AsyncSession, account_id: int, claims: dict, refresh_cookie: str | None, now: datetime) -> RefreshSession:
+    """The live refresh session behind the caller's access token.
+
+    Named by the ``sid`` claim; tokens issued before that claim existed fall
+    back to the web refresh cookie.
+    """
+    live = (RefreshSession.account_id == account_id, RefreshSession.revoked_at.is_(None), RefreshSession.expires_at > now)
+    session = None
+    if claims.get("sid") is not None:
+        session = await db.scalar(select(RefreshSession).where(RefreshSession.id == int(claims["sid"]), *live))
+    if session is None and refresh_cookie:
+        session = await db.scalar(select(RefreshSession).where(RefreshSession.token_hash == hash_refresh_token(refresh_cookie), *live))
+    if session is None:
+        # The token outlived its session (rotated meanwhile): refresh and retry.
+        raise HTTPException(status_code=409, detail={"code": "session_refresh_required", "message": "Refresh the session and try again"})
+    return session
+
+
+def _two_factor_issuer(name: str | None) -> str:
+    return (name or "").strip()[:60] or "OYUNS ERP"
+
+
+@router.post("/2fa/setup")
+async def two_factor_setup(db: AsyncSession = Depends(get_db), session_actor: tuple[ActorContext, dict] = Depends(get_session_actor)):
+    """Secret for the authenticator app. Repeatable until the first code is
+    accepted, so a reload shows the same QR code."""
+    actor, _ = session_actor
+    account = await _two_factor_account(db, actor, datetime.now(timezone.utc))
+    if account.totp_enabled_at is not None:
+        raise HTTPException(status_code=409, detail={"code": "two_factor_already_enabled", "message": "Two-factor authentication is already set up"})
+    secret = None
+    if account.totp_secret_enc:
+        try:
+            secret = decrypt_secret(account.totp_secret_enc)
+        except ValueError:
+            secret = None
+    if secret is None:
+        secret = totp.generate_secret()
+        account.totp_secret_enc = encrypt_secret(secret)
+        await db.commit()
+    state = await tenant_directory.state(actor.organization_id)
+    issuer = _two_factor_issuer(state.name if state else None)
+    return {
+        "secret": secret,
+        "otpauth_uri": totp.provisioning_uri(secret, account.email, issuer),
+        "issuer": issuer,
+        "account": account.email,
+        "digits": totp.DIGITS,
+        "period": totp.PERIOD,
+    }
+
+
+@router.post("/2fa/enable")
+async def two_factor_enable(
+    data: TwoFactorCode,
+    db: AsyncSession = Depends(get_db),
+    session_actor: tuple[ActorContext, dict] = Depends(get_session_actor),
+    oyuns_refresh: str | None = Cookie(default=None),
+):
+    """Confirm the first code: 2FA is on, this session is verified, and the
+    recovery codes are returned (shown once)."""
+    actor, claims = session_actor
+    now = datetime.now(timezone.utc)
+    account = await _two_factor_account(db, actor, now)
+    if account.totp_enabled_at is not None:
+        raise HTTPException(status_code=409, detail={"code": "two_factor_already_enabled", "message": "Two-factor authentication is already set up"})
+    if not account.totp_secret_enc:
+        raise HTTPException(status_code=409, detail={"code": "two_factor_setup_not_started", "message": "Start the setup first"})
+    session = await _two_factor_session(db, account.id, claims, oyuns_refresh, now)
+    step = totp.verify(decrypt_secret(account.totp_secret_enc), data.code)
+    if step is None:
+        raise HTTPException(status_code=400, detail={"code": "invalid_code", "message": "The code is not valid"})
+    recovery_codes = totp.generate_recovery_codes()
+    account.totp_enabled_at = now
+    account.totp_last_step = step
+    account.totp_recovery_codes = [totp.hash_recovery_code(code) for code in recovery_codes]
+    session.mfa_verified_at = now
+    await record_change(db, actor=actor, topic="security", aggregate_type="account_two_factor", aggregate_id=account.id, operation="enabled")
+    await db.commit()
+    return {**_access(account, auth_method=session.auth_method, session=session).model_dump(exclude_none=True), "recovery_codes": recovery_codes}
+
+
+@router.post("/2fa/verify")
+async def two_factor_verify(
+    data: TwoFactorCode,
+    db: AsyncSession = Depends(get_db),
+    session_actor: tuple[ActorContext, dict] = Depends(get_session_actor),
+    oyuns_refresh: str | None = Cookie(default=None),
+):
+    """Second step of a sign-in: a code from the app, or a one-time recovery code."""
+    actor, claims = session_actor
+    now = datetime.now(timezone.utc)
+    account = await _two_factor_account(db, actor, now)
+    if account.totp_enabled_at is None or not account.totp_secret_enc:
+        raise HTTPException(status_code=409, detail={"code": "two_factor_not_enabled", "message": "Two-factor authentication is not set up"})
+    session = await _two_factor_session(db, account.id, claims, oyuns_refresh, now)
+    step = totp.verify(decrypt_secret(account.totp_secret_enc), data.code, last_step=account.totp_last_step)
+    if step is not None:
+        account.totp_last_step = step
+    else:
+        remaining = totp.consume_recovery_code(list(account.totp_recovery_codes or []), data.code)
+        if remaining is None:
+            account.failed_login_count = (account.failed_login_count or 0) + 1
+            locked = account.failed_login_count >= TWO_FACTOR_MAX_FAILURES
+            if locked:
+                account.locked_until = now + timedelta(minutes=TWO_FACTOR_LOCK_MINUTES)
+            await db.commit()
+            if locked:
+                raise HTTPException(status_code=423, detail={"code": "account_locked", "message": "Account is temporarily locked"})
+            raise HTTPException(status_code=400, detail={"code": "invalid_code", "message": "The code is not valid"})
+        account.totp_recovery_codes = remaining
+    _clear_login_lock(account)
+    session.mfa_verified_at = now
+    await db.commit()
+    return {
+        **_access(account, auth_method=session.auth_method, session=session).model_dump(exclude_none=True),
+        "recovery_codes_left": len(account.totp_recovery_codes or []),
+    }
+
+
+@router.post("/accounts/{account_id}/two-factor/reset", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_account_two_factor(
+    account_id: int,
+    db: AsyncSession = Depends(get_db),
+    actor: ActorContext = Depends(require_roles("admin")),
+):
+    """Lost phone: drop the enrolment so the account sets 2FA up again."""
+    account = await db.get(UserAccount, account_id, with_for_update=True)
+    if not account or account.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Account not found")
+    await clear_account_two_factor(db, account)
+    await record_change(db, actor=actor, topic="security", aggregate_type="account_two_factor", aggregate_id=account.id, operation="reset")
+    await db.commit()
 
 
 async def _profile_out(db: AsyncSession, actor: ActorContext, account: UserAccount, employee: Employee | None, password_setup_required: bool, telegram_session: bool = False) -> dict:
@@ -1254,7 +1450,7 @@ async def list_accounts(
     for account in accounts:
         roles = (await db.execute(select(RoleAssignment.role).where(RoleAssignment.account_id == account.id))).scalars().all()
         employee = await db.get(Employee, account.employee_id) if account.employee_id else None
-        output.append(AccountOut(id=account.id, email=account.email, employee_id=account.employee_id, locale=account.locale, roles=sorted(set(roles)), status=account.status, telegram_id=employee.telegram_id if employee else None))
+        output.append(AccountOut(id=account.id, email=account.email, employee_id=account.employee_id, locale=account.locale, roles=sorted(set(roles)), status=account.status, telegram_id=employee.telegram_id if employee else None, two_factor_enabled=account.totp_enabled_at is not None))
     return output
 
 

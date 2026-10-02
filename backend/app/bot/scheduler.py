@@ -22,6 +22,39 @@ _DEFAULT_SCHEDULE_WEEKDAYS = (1, 2, 3, 4, 5)
 BIRTHDAY_MESSAGE = "🎂 Танд төрсөн өдрийн мэнд хүргэе! 🎉 Ажлын амжилтаар дүүрэн, эрүүл энх, гэр бүл нь аз жаргалаар элбэг байж, сайн сайхан бүхнийг хүсье! 😊"
 
 
+def _employee_language(employee_id: int, primary_language: str | None = None) -> str:
+    from app.bot.db import get_session
+    from app.core.localization import resolve_language
+    from app.core.tenancy import system_scope
+    from app.models.models import UserAccount
+
+    with system_scope(), get_session() as db:
+        account = db.query(UserAccount).filter(UserAccount.employee_id == employee_id, UserAccount.status == "active").one_or_none()
+        return resolve_language(account.locale if account else None, primary_language)
+
+
+def _telegram_language(telegram_id: str, organization_id: int | None = None) -> str:
+    from app.bot.db import get_session
+    from app.core.tenancy import system_scope
+    from app.models.models import Employee
+
+    with system_scope(), get_session() as db:
+        query = db.query(Employee).filter(Employee.telegram_id == str(telegram_id), Employee.is_active.is_(True))
+        if organization_id is not None:
+            query = query.filter(Employee.organization_id == organization_id)
+        employee = query.order_by(Employee.id).first()
+        employee_id = employee.id if employee else None
+        primary_language = employee.primary_language if employee else None
+    return _employee_language(employee_id, primary_language) if employee_id is not None else "mn"
+
+
+def _birthday_message(language: str) -> str:
+    return {
+        "en": "🎂 Happy birthday! 🎉 Wishing you success at work, good health, and a year filled with happiness and wonderful moments! 😊",
+        "ru": "🎂 Поздравляем с днём рождения! 🎉 Желаем успехов в работе, крепкого здоровья, счастья и всего самого доброго! 😊",
+    }.get(language, BIRTHDAY_MESSAGE)
+
+
 def _schedule_weekdays(schedule) -> tuple[int, ...]:
     """Return configured ISO weekdays, defaulting to the normal workweek."""
     return tuple((schedule.weekdays if schedule else None) or _DEFAULT_SCHEDULE_WEEKDAYS)
@@ -404,6 +437,8 @@ async def send_reminder(employee_id: int, num: int):
     with get_session() as s:
         emp = s.get(Employee, employee_id)
         organization_id = emp.organization_id if emp else None
+        primary_language = emp.primary_language if emp else None
+    language = _employee_language(employee_id, primary_language) if emp else "mn"
     bot = _make_bot(organization_id) if emp and emp.telegram_id else None
     if bot is None:
         return
@@ -442,7 +477,17 @@ async def send_reminder(employee_id: int, num: int):
         if not report_complete:
             missing.append("өдрийн тайлан")
         if missing:
-            reminder_text = f"⚠️ Сануулга #{num}: " + " болон ".join(missing) + "-аа бөглөхөө мартав аа!"
+            missing_labels = {
+                "en": {"чек-ин (/today)": "check-in (/today)", "өдрийн тайлан": "daily report"},
+                "ru": {"чек-ин (/today)": "опрос (/today)", "өдрийн тайлан": "ежедневный отчёт"},
+            }.get(language, {})
+            items = [missing_labels.get(item, item) for item in missing]
+            if language == "en":
+                reminder_text = f"⚠️ Reminder #{num}: Please remember to complete your " + " and ".join(items) + "."
+            elif language == "ru":
+                reminder_text = f"⚠️ Напоминание №{num}: Заполните " + " и ".join(items) + "."
+            else:
+                reminder_text = f"⚠️ Сануулга #{num}: " + " болон ".join(missing) + "-аа бөглөхөө мартав аа!"
             await bot.send_message(telegram_id, reminder_text)
             from app.services.user_notifications import mirror_existing_telegram_notification
             mirror_existing_telegram_notification(
@@ -467,6 +512,7 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str, reminder
         telegram_id = emp.telegram_id
         timezone_name = emp.timezone
         organization_id = emp.organization_id
+        primary_language = emp.primary_language
         schedule = s.query(Schedule).filter(Schedule.employee_id == employee_id).one_or_none()
     from app.services.notification_preferences import delivery_for_employee_sync
 
@@ -482,25 +528,32 @@ async def send_work_time_reminder(employee_id: int, reminder_type: str, reminder
         if local_day.isoweekday() not in active_weekdays:
             return
         state = work_report_service.work_time_status(employee_id, local_day)
+        language = _employee_language(employee_id, primary_language)
         if reminder_type == "start":
             if state["started"]:
                 return
-            message = (
+            message = ({
+                "en": "🕛 <b>Remember to track your work time</b>\n\nIf you have started work today, record your start time:\n🏢 Office: <b>/daystart</b>\n🏠 Remote: <b>/remotestart</b>",
+                "ru": "🕛 <b>Не забудьте учесть рабочее время</b>\n\nЕсли вы уже начали работу сегодня, отметьте время начала:\n🏢 Офис: <b>/daystart</b>\n🏠 Удалённо: <b>/remotestart</b>",
+            }.get(language) or (
                 "🕛 <b>Ажлын цагаа бүртгээрэй</b>\n\n"
                 "Өнөөдөр ажлаа эхлүүлсэн бол эхэлсэн цагаа бүртгэнэ үү:\n"
                 "🏢 Оффис: <b>/daystart</b>\n"
                 "🏠 Remote: <b>/remotestart</b>"
-            )
+            ))
         else:
             if not state["active"]:
                 return
             end_command = "/dayend" if state["mode"] == "in_person" else "/remoteend"
-            mode_label = "оффисын" if state["mode"] == "in_person" else "remote"
-            message = (
+            mode_label = ("office" if state["mode"] == "in_person" else "remote") if language == "en" else ("офисный" if state["mode"] == "in_person" else "удалённый") if language == "ru" else ("оффисын" if state["mode"] == "in_person" else "remote")
+            message = ({
+                "en": f"🌙 <b>Your work session is still open</b>\n\nYour {mode_label} work session is still open. Use <b>{end_command}</b> when you finish.",
+                "ru": f"🌙 <b>Рабочая сессия не завершена</b>\n\nВаша {mode_label} рабочая сессия всё ещё активна. Завершите её командой <b>{end_command}</b>.",
+            }.get(language) or (
                 "🌙 <b>Ажлын цаг нээлттэй байна</b>\n\n"
                 f"Таны {mode_label} ажлын цаг одоогоор нээлттэй байна. "
                 f"Дуусгахдаа <b>{end_command}</b> командыг ашиглана уу."
-            )
+            ))
         await bot.send_message(telegram_id, message, parse_mode="HTML")
         from app.services.user_notifications import mirror_existing_telegram_notification
         mirror_existing_telegram_notification(
@@ -557,8 +610,10 @@ async def mark_missed_job(employee_ids: list[int]):
         async with tenant_bot(organization_id) as bot:
             if bot is None:
                 continue
-            message = "Өнөөдөр чек-ин бөглөөгүй ажилтан: " + ", ".join(missing_names)
             for recipient in recipients:
+                language = _telegram_language(recipient, organization_id)
+                heading = {"en": "Employees who have not completed today's check-in: ", "ru": "Сотрудники, не прошедшие сегодняшний опрос: "}.get(language, "Өнөөдөр чек-ин бөглөөгүй ажилтан: ")
+                message = heading + ", ".join(missing_names)
                 await bot.send_message(recipient, message)
 
 
@@ -622,6 +677,7 @@ async def send_periodic_report_prompts(employee_id: int, default_hour: int | Non
         telegram_id = emp.telegram_id
         timezone_name = emp.timezone
         organization_id = emp.organization_id
+        primary_language = emp.primary_language
     local_now = _local_now(timezone_name)
     local_day = local_now.date()
     scope = work_report_service.employee_report_scope(employee_id)
@@ -710,7 +766,7 @@ async def send_birthday_greeting(employee_id: int):
     bot = _make_bot(organization_id) if telegram_id and delivery_for_employee_sync(employee_id, "birthday").telegram else None
     if bot is not None:
         try:
-            await bot.send_message(str(telegram_id), BIRTHDAY_MESSAGE)
+            await bot.send_message(str(telegram_id), _birthday_message(_employee_language(employee_id, primary_language)))
             telegram_status = "sent"
         except Exception:  # noqa: BLE001
             telegram_status = "failed"
@@ -775,15 +831,17 @@ async def morning_summary():
         return
 
     data = get_yesterday_summary()
-    lines = [f"📊 <b>{data['date']}-ны хураангуй</b>\n"]
-    for q_text, val in data["totals"].items():
-        lines.append(f"• {q_text[:40]}: <b>{val}</b>")
-    if data["missed"]:
-        lines.append(f"\n⚠️ Бөглөөгүй: {', '.join(data['missed'])}")
-
     # Check-in summaries are a primary-tenant (legacy) feature.
     async with tenant_bot(None) as bot:
         if bot is None:
             return
         for recipient in recipients:
+            language = _telegram_language(recipient)
+            heading = {"en": "summary", "ru": "сводка"}.get(language, "хураангуй")
+            lines = [f"📊 <b>{data['date']} {heading}</b>\n"]
+            for q_text, val in data["totals"].items():
+                lines.append(f"• {q_text[:40]}: <b>{val}</b>")
+            if data["missed"]:
+                missing_label = {"en": "Not completed", "ru": "Не заполнено"}.get(language, "Бөглөөгүй")
+                lines.append(f"\n⚠️ {missing_label}: {', '.join(data['missed'])}")
             await bot.send_message(recipient, "\n".join(lines), parse_mode="HTML")

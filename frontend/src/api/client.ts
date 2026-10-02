@@ -4,6 +4,8 @@ import { clearNativeRefreshToken, getNativeRefreshToken, setNativeRefreshToken }
 import { getApiBaseUrl, isNativePlatform } from '../platform/runtime'
 import { useAuthStore } from '../store/auth'
 import { workspaceModeHeader } from '../store/workspaceMode'
+import i18n from '../i18n'
+import { TWO_FACTOR_REQUIRED_EVENT } from '../platform/app-events'
 
 const apiBaseUrl = getApiBaseUrl()
 
@@ -80,10 +82,22 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+for (const client of [api, publicApi, refreshClient]) {
+  client.interceptors.request.use((config) => {
+    config.headers['Accept-Language'] = (i18n.resolvedLanguage ?? i18n.language).split('-')[0]
+    return config
+  })
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const config = error.config as (InternalAxiosRequestConfig & { _sessionRetried?: boolean }) | undefined
+    const detail = (error.response?.data as { detail?: { code?: string } } | undefined)?.detail
+    if (error.response?.status === 403 && detail?.code === 'two_factor_required' && typeof window !== 'undefined') {
+      // The tenant switched 2FA on while this session was open: the app shell shows the setup dialog.
+      window.dispatchEvent(new Event(TWO_FACTOR_REQUIRED_EVENT))
+    }
     const sessionEndpoint = ['/v1/auth/login', '/v1/auth/refresh', '/v1/auth/logout', '/v1/auth/telegram'].some((path) => config?.url?.includes(path))
     if (error.response?.status !== 401 || !config || sessionEndpoint || config._sessionRetried) throw error
     config._sessionRetried = true

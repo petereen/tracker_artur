@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.bot.db import get_session
 from app.core.config import settings
+from app.core.localization import resolve_language
 from app.core.tenancy import current_tenant_id
 from app.models.models import (
     DEFAULT_REMINDER_INTERVALS_MIN,
@@ -508,12 +509,15 @@ def fetch_due_outbox(limit: int = 25) -> list[dict]:
                 organization_id = notification.organization_id if notification else None
             if organization_id is None:
                 organization_id = s.execute(select(Employee.organization_id).where(Employee.telegram_id == r.recipient_tg)).scalar_one_or_none()
+            recipient_employee = s.execute(select(Employee).where(Employee.telegram_id == r.recipient_tg, Employee.organization_id == organization_id)).scalar_one_or_none() if organization_id is not None else None
+            recipient_account = s.execute(select(UserAccount).where(UserAccount.employee_id == recipient_employee.id, UserAccount.status == "active")).scalar_one_or_none() if recipient_employee else None
+            language = resolve_language(recipient_account.locale if recipient_account else None, recipient_employee.primary_language if recipient_employee else None)
             out.append({
                 "id": r.id, "recipient_tg": r.recipient_tg, "kind": r.kind,
                 "organization_id": organization_id,
                 "user_notification_id": r.user_notification_id,
                 "attempt_count": r.attempt_count,
-                "payload": r.payload or {}, "task_id": r.task_id,
+                "payload": {**(r.payload or {}), "locale": language}, "locale": language, "task_id": r.task_id,
                 "task_title": task.title if task else None,
                 "task_description": task.description if task else None,
                 "task_deadline_at": task.deadline_at if task else None,

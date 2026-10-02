@@ -3,6 +3,7 @@ from datetime import date, datetime, time
 
 from sqlalchemy import (
     ARRAY,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -720,6 +721,12 @@ class UserAccount(Base):
     failed_login_count = Column(Integer, nullable=False, server_default="0", default=0)
     locked_until = Column(DateTime(timezone=True))
     last_login_at = Column(DateTime(timezone=True))
+    # Second factor (TOTP), enrolled when the tenant requires it: encrypted
+    # secret, last accepted time step (replay guard), hashed recovery codes.
+    totp_secret_enc = Column(Text)
+    totp_enabled_at = Column(DateTime(timezone=True))
+    totp_last_step = Column(BigInteger)
+    totp_recovery_codes = Column(JSONB, nullable=False, server_default=sa_text("'[]'::jsonb"), default=list)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -940,6 +947,8 @@ class RefreshSession(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     revoked_at = Column(DateTime(timezone=True))
     last_used_at = Column(DateTime(timezone=True))
+    # The second factor was passed on this session; carried across rotation.
+    mfa_verified_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

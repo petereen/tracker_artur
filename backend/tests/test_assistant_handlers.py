@@ -13,6 +13,8 @@ from app.core.enterprise_deps import build_actor_context
 from app.services import voice_service
 from app.bot.tasks_handlers import (
     _ambiguous_roster_names,
+    _draft_kb,
+    _fmt_deadline,
     _resolve_roster_name,
     _resolve_roster_names,
     _structure_from_tool_arguments,
@@ -175,7 +177,7 @@ def test_telegram_linked_account_sends_gateway_answer_and_keeps_memory(monkeypat
     monkeypatch.setattr(assistant_handlers, "actor_from_telegram_id", _linked_actor)
     monkeypatch.setattr(assistant_handlers.ai_gateway, "execute_turn", execute_turn)
 
-    message = FakeMessage("What can you help me with?")
+    message = FakeMessage("Надад юугаар туслах вэ?")
     handled = asyncio.run(assistant_handlers._enterprise_route(message, FakeState(), message.text, employee=EMPLOYEE, is_manager=False, tg_id="77"))
 
     assert handled is True
@@ -306,6 +308,7 @@ def test_telegram_route_reports_unexpected_failure_instead_of_silence(monkeypatc
             is_manager=False,
             tg_id="77",
             voice_mode=False,
+            language="en",
         )
     )
 
@@ -664,3 +667,22 @@ def test_chimege_success_skips_openai(monkeypatch):
     monkeypatch.setattr(voice_service, "_transcribe_chimege", chimege)
     monkeypatch.setattr(voice_service, "_transcribe_openai", openai)
     assert asyncio.run(voice_service.transcribe(b"audio")) == ("Маргааш хурал", None)
+
+
+def test_task_draft_preview_and_controls_use_english_labels():
+    draft = {
+        "title": "Prepare report",
+        "description": "Review the customer data",
+        "assignee_name": "Alex",
+        "assignee_ids": [4],
+        "reviewer_name": None,
+        "priority": 2,
+        "deadline_at": None,
+    }
+    text = task_draft_text(draft, "en")
+    assert "Task draft" in text
+    assert "Assignee: <b>Alex</b>" in text
+    assert "Reviewer: <b>Unassigned</b>" in text
+    assert "Due: <b>No deadline</b>" in text
+    assert [button.text for button in _draft_kb("en").inline_keyboard[0]] == ["✅ Create", "✏️ Edit", "❌ Delete"]
+    assert _fmt_deadline(None, "en") == "No deadline"

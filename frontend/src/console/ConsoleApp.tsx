@@ -15,6 +15,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { VStack } from '@astryxdesign/core/VStack'
 import { RouterLink } from '../components/budget/shared'
+import { LanguageSwitcher } from '../components/LanguageSwitcher'
 import { type OperatorSession, type TwoFactorChallenge, consoleError, useConsoleSession, useOperatorLogin } from './consoleApi'
 import { TwoFactorSetup, TwoFactorVerify } from './ConsoleTwoFactor'
 import { TenantDetailPage, TenantsPage } from './ConsoleTenants'
@@ -42,6 +43,7 @@ function ConsoleLogin() {
   const openConsole = (session: OperatorSession) => setSession(session.access_token, session.operator, session.expires_in)
   return <Center minHeight="100dvh" padding={6}>
     <Card padding={6} width="100%" maxWidth={challenge?.two_factor === 'setup' ? 520 : 420}>
+      <LanguageSwitcher />
       {challenge?.two_factor === 'setup' && <TwoFactorSetup mfaToken={challenge.mfa_token} onSession={openConsole} onRestart={() => setChallenge(null)} />}
       {challenge?.two_factor === 'verify' && <TwoFactorVerify mfaToken={challenge.mfa_token} onSession={openConsole} onRestart={() => setChallenge(null)} />}
       {!challenge && <form onSubmit={(event) => { event.preventDefault(); void submit() }}>
@@ -83,6 +85,7 @@ function ConsoleShell() {
       header={<SideNavHeading icon={<ShieldCheck size={16} aria-hidden />} heading="OYUNS ERP" subheading={t('con.subtitle')} />}
       footer={<VStack gap={2}>
         <Text type="supporting" maxLines={1}>{`${operator?.email ?? ''} · ${operator?.role === 'superadmin' ? 'Superadmin' : t('con.supportRole')}`}</Text>
+        <LanguageSwitcher />
         <Button label={t('con.signOut')} variant="ghost" size="sm" icon={<LogOut size={14} />} onClick={signOut} />
       </VStack>}>
       <SideNavSection title={t('con.navSection')} isHeaderHidden>
