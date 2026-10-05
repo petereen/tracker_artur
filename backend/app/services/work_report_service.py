@@ -633,16 +633,6 @@ def summarize_work_time(entries: list[WorkTimeEntry], now: datetime | None = Non
     }
 
 
-def report_is_approved(employee_id: int, report_type: str, local_day: date) -> bool:
-    with get_session() as s:
-        return bool(s.execute(
-            select(WorkReport.id).where(
-                *_personal_report_clause(employee_id, report_type, period_for(report_type, local_day)),
-                WorkReport.status == "approved",
-            )
-        ).scalar_one_or_none())
-
-
 def report_needs_submission(employee_id: int, report_type: str, local_day: date) -> bool:
     """Return whether the owner still needs to submit this reporting period.
 

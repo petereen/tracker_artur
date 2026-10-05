@@ -12,7 +12,6 @@ from app.core.security import decode_token
 from app.core.tenancy import TenantBoundaryViolation, bind_tenant, current_tenant_id, tenant_directory
 from app.models.models import Employee, ERPAccessRole, ERPAccountRole, ERPTeamRole, RoleAssignment, TeamMember, UserAccount
 from app.services.file_search_service import FileSearchPrincipal
-from app.core.config import settings
 
 
 bearer = HTTPBearer()

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -172,14 +172,6 @@ def merge_user_choices(preferences: dict | None, rules: dict[str, dict], categor
         if choice:
             choices[key] = {**choices.get(key, {}), **choice}
     return {**(preferences or {}), USER_KEY: {"categories": choices}}
-
-
-def catalog_rows(keys: Iterable[str] | None = None) -> list[dict]:
-    wanted = set(keys) if keys is not None else None
-    return [
-        {"key": category.key, "label": category.label, "description": category.description, "legacy": category.legacy}
-        for category in CATEGORIES if wanted is None or category.key in wanted
-    ]
 
 
 # ── Synchronous lookups for the bot (scheduler, outbox drain) ──────────────

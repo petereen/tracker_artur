@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font
+from openpyxl.styles import Font
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +37,7 @@ from .monthly_input_template import TemplateError, build_input_template, parse_i
 from .monthly_engine import (
     AdvanceBasis, AllowanceBasis, CalendarDayType, PayrollProfile, PayrollRunType, PayrollRules, apply_computed_overrides,
     SalarySegment, amount, calculate_monthly_run, classify_work_hours, default_2026_rules, month_calendar,
-    overtime_day_lines, whole_tugrik,
+    overtime_day_lines,
 )
 
 

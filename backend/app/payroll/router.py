@@ -50,13 +50,11 @@ from .service import (
     delete_component_master, archive_component_master, component_master_out, component_master_usage, delete_salary_structure, delete_statutory_profile, load_rules, post_run, preflight_run, profile_out, publish_profile, reconcile_run, reverse_run,
     posting_preview, refreshed_run_inputs, reverse_payment_allocation, update_component_master, update_salary_structure, update_statutory_profile, validate_overtime_rules,
 )
-from .calculator import CalculationInput, ComponentDefinition, _SafeFormula, _relief_for_income, calculate_payslip, compute_progressive_pit, compute_shi, money
+from .calculator import CalculationInput, ComponentDefinition, _SafeFormula, _relief_for_income, calculate_payslip, compute_progressive_pit, compute_shi
 from .frappe_service import (
     additional_salary_out, bank_entry_out, cancel_additional_salary,
     create_additional_salary, create_assignment, create_bulk_assignments,
-    create_payroll_entry, create_payroll_period, create_salary_slips, get_employees,
-    make_bank_entry, period_out, submit_additional_salary, submit_bank_entry,
-    submit_salary_slips,
+    create_payroll_period, period_out, submit_additional_salary,
 )
 from .monthly_workflow import router as monthly_workflow_router
 
@@ -1466,11 +1464,6 @@ async def cancel_additional_salary_route(salary_id: int, db: AsyncSession = Depe
 async def create_payroll_entry_route(data: PayrollEntryInput, response: Response, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     _mark_deprecated(response)
     raise HTTPException(status_code=410, detail={"code": "payroll_legacy_write_gone", "successor": "/v1/erp/payroll/runs"})
-    await payroll_capability(db, actor, "create")
-    run = await create_payroll_entry(db, actor, data)
-    await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_entry", aggregate_id=run.id, operation="created", after={"number": run.run_number, "workflow_version": run.workflow_version})
-    await db.commit(); await db.refresh(run)
-    return _run_out(run)
 
 
 @router.get("/payroll-entries")
@@ -1500,124 +1493,36 @@ async def get_payroll_entry(entry_id: int, response: Response, db: AsyncSession 
 @router.post("/payroll-entries/{entry_id}/get-employees")
 async def get_payroll_entry_employees(entry_id: int, data: GetEmployeesInput = GetEmployeesInput(), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     raise HTTPException(status_code=410, detail={"code": "payroll_legacy_write_gone", "successor": "/v1/erp/payroll/runs/preflight"})
-    await payroll_capability(db, actor, "create")
-    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == entry_id, PayrollRun.organization_id == actor.organization_id, PayrollRun.workflow_version == "frappe_v1").with_for_update())
-    if not run:
-        raise HTTPException(status_code=404, detail="Payroll Entry not found")
-    result = await get_employees(db, actor, run, data)
-    await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_entry", aggregate_id=run.id, operation="employees_selected", after={"employee_ids": result["employee_ids"], "errors": len(result["errors"]), "warnings": len(result["warnings"])})
-    await db.commit(); await db.refresh(run)
-    return {"payroll_entry": _run_out(run), "payroll_entry_id": run.id, **result}
 
 
 @router.post("/payroll-entries/{entry_id}/create-salary-slips")
 async def create_payroll_entry_salary_slips(entry_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     raise HTTPException(status_code=410, detail={"code": "payroll_legacy_write_gone", "successor": "/v1/erp/payroll/runs/{run_id}/calculate"})
-    await payroll_capability(db, actor, "create")
-    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == entry_id, PayrollRun.organization_id == actor.organization_id, PayrollRun.workflow_version == "frappe_v1").with_for_update())
-    if not run:
-        raise HTTPException(status_code=404, detail="Payroll Entry not found")
-    slips = await create_salary_slips(db, actor, run)
-    await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_entry", aggregate_id=run.id, operation="salary_slips_created", after={"count": len(slips), "total_net": str(run.total_net)})
-    await db.commit(); await db.refresh(run)
-    serialized_slips = [_slip_out(row) for row in slips]
-    return {**_run_out(run), "salary_slips": serialized_slips, "payslips": serialized_slips}
 
 
 @router.post("/payroll-entries/{entry_id}/submit-salary-slips")
 async def submit_payroll_entry_salary_slips(entry_id: int, data: PayslipPublicationInput = PayslipPublicationInput(), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     raise HTTPException(status_code=410, detail={"code": "payroll_legacy_write_gone", "successor": "/v1/erp/payroll/runs/{run_id}/publish-payslips"})
-    await payroll_capability(db, actor, "post")
-    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == entry_id, PayrollRun.organization_id == actor.organization_id, PayrollRun.workflow_version == "frappe_v1").with_for_update())
-    if not run:
-        raise HTTPException(status_code=404, detail="Payroll Entry not found")
-    await submit_salary_slips(db, actor, run)
-    if data.notify_employees:
-        employee_ids = list((await db.execute(select(Payslip.employee_id).where(Payslip.payroll_run_id == run.id))).scalars().all())
-        await create_notifications(db, organization_id=actor.organization_id, kind="event", title="Your payslip is ready", body=f"Payslip for {run.period_start:%Y-%m-%d} to {run.period_end:%Y-%m-%d} is available in Payroll.", dedup_key=f"payroll-payslips:{run.id}", employee_ids=employee_ids, target_url="/erp/payroll", payload={"payroll_run_id": run.id})
-    await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_entry", aggregate_id=run.id, operation="salary_slips_submitted", after={"erp_document_id": run.erp_document_id, "notified": data.notify_employees})
-    await db.commit(); await db.refresh(run)
-    return _run_out(run)
 
 
 @router.post("/payroll-entries/{entry_id}/make-bank-entry", status_code=status.HTTP_201_CREATED)
 async def make_payroll_entry_bank_entry(entry_id: int, data: BankEntryInput = BankEntryInput(), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     raise HTTPException(status_code=410, detail={"code": "payroll_legacy_write_gone", "successor": "/v1/erp/payroll/runs/{run_id}/payments"})
-    await payroll_capability(db, actor, "post")
-    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == entry_id, PayrollRun.organization_id == actor.organization_id, PayrollRun.workflow_version == "frappe_v1").with_for_update())
-    if not run:
-        raise HTTPException(status_code=404, detail="Payroll Entry not found")
-    row = await make_bank_entry(db, actor, run, data)
-    await record_change(db, actor=actor, topic="payroll", aggregate_type="bank_entry", aggregate_id=row.id, operation="created", after={"payroll_entry_id": run.id, "amount": str(row.amount)})
-    await db.commit(); await db.refresh(row)
-    return bank_entry_out(row)
 
 
 @router.post("/bank-entries/{bank_entry_id}/submit")
 async def submit_payroll_bank_entry(bank_entry_id: int, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     raise HTTPException(status_code=410, detail={"code": "payroll_legacy_write_gone", "successor": "/v1/erp/payroll/runs/{run_id}/payments"})
-    await payroll_capability(db, actor, "post")
-    row = await db.scalar(select(PayrollBankEntry).where(PayrollBankEntry.id == bank_entry_id, PayrollBankEntry.organization_id == actor.organization_id).with_for_update())
-    if not row:
-        raise HTTPException(status_code=404, detail="Bank Entry not found")
-    await submit_bank_entry(db, actor, row)
-    await record_change(db, actor=actor, topic="payroll", aggregate_type="bank_entry", aggregate_id=row.id, operation="submitted", after={"erp_document_id": row.erp_document_id, "amount": str(row.amount)})
-    await db.commit(); await db.refresh(row)
-    return bank_entry_out(row)
 
 
 @router.post("/payroll-entries/{entry_id}/cancel")
 async def cancel_payroll_entry(entry_id: int, data: PayrollCancelInput = PayrollCancelInput(), db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     raise HTTPException(status_code=410, detail={"code": "payroll_legacy_write_gone", "successor": "/v1/erp/payroll/runs/{run_id}/reverse"})
-    await payroll_capability(db, actor, "post")
-    run = await db.scalar(select(PayrollRun).where(PayrollRun.id == entry_id, PayrollRun.organization_id == actor.organization_id, PayrollRun.workflow_version == "frappe_v1").with_for_update())
-    if not run:
-        raise HTTPException(status_code=404, detail="Payroll Entry not found")
-    if run.document_status == "cancelled":
-        return _run_out(run)
-    if run.status in {"draft", "calculated"}:
-        run.status = "cancelled"; run.document_status = "cancelled"
-        slips = (await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all()
-        for slip in slips:
-            slip.document_status = "cancelled"; slip.cancelled_at = datetime.now(timezone.utc)
-        await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_entry", aggregate_id=run.id, operation="cancelled", after={"reason": data.reason})
-        await db.commit(); await db.refresh(run)
-        return _run_out(run)
-    reversal = await reverse_run(db, actor, run)
-    reversal.workflow_version = "legacy"
-    reversal.document_status = "submitted"
-    await post_run(db, actor, reversal)
-    # Keep the submitted source immutable while moving its document state to
-    # cancelled.  The reversal carries the negative GL/accumulator entries.
-    run.status = "cancelled"
-    run.document_status = "cancelled"
-    cancelled_at = datetime.now(timezone.utc)
-    if run.bank_entry_id:
-        bank_entry = await db.scalar(select(PayrollBankEntry).where(PayrollBankEntry.id == run.bank_entry_id, PayrollBankEntry.organization_id == actor.organization_id).with_for_update())
-        if bank_entry and bank_entry.status == "draft":
-            bank_entry.status = "cancelled"
-    source_slips = (await db.execute(select(Payslip).where(Payslip.payroll_run_id == run.id))).scalars().all()
-    for slip in source_slips:
-        slip.document_status = "cancelled"
-        slip.cancelled_at = cancelled_at
-    await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_entry", aggregate_id=run.id, operation="cancelled_by_reversal", after={"reason": data.reason, "reversal_id": reversal.id})
-    await db.commit(); await db.refresh(reversal)
-    return {"cancelled_entry_id": run.id, "reversal": _run_out(reversal)}
 
 
 @router.post("/payroll-entries/{entry_id}/amend", status_code=status.HTTP_201_CREATED)
 async def amend_payroll_entry(entry_id: int, data: PayrollEntryInput, db: AsyncSession = Depends(get_db), actor: ActorContext = Depends(get_actor)):
     raise HTTPException(status_code=410, detail={"code": "payroll_legacy_write_gone", "successor": "/v1/erp/payroll/runs/{run_id}/replace"})
-    await payroll_capability(db, actor, "create")
-    source = await db.scalar(select(PayrollRun).where(PayrollRun.id == entry_id, PayrollRun.organization_id == actor.organization_id, PayrollRun.workflow_version == "frappe_v1"))
-    if not source or source.status not in {"posted", "paid"}:
-        raise HTTPException(status_code=409, detail={"code": "payroll_entry_requires_submitted_for_amend"})
-    replacement = await create_payroll_entry(db, actor, data)
-    replacement.replacement_of_run_id = source.id
-    replacement.input_snapshot = {**(replacement.input_snapshot or {}), "replacement_of_run_id": source.id}
-    await record_change(db, actor=actor, topic="payroll", aggregate_type="payroll_entry", aggregate_id=replacement.id, operation="amended", after={"replacement_of_run_id": source.id})
-    await db.commit(); await db.refresh(replacement)
-    return _run_out(replacement)
 
 
 @router.get("/salary-slips")

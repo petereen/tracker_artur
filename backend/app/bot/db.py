@@ -304,7 +304,6 @@ def _update_streak(s: Session, employee_id: int):
     today = date.today()
     if streak.last_filled_date == today:
         return
-    from datetime import timedelta
     if streak.last_filled_date and (today - streak.last_filled_date).days == 1:
         streak.current_streak += 1
     else:

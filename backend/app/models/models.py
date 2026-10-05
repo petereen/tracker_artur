@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, time
+from datetime import time
 
 from sqlalchemy import (
     ARRAY,

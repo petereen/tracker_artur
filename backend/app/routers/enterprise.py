@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 
 from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -51,7 +51,6 @@ from app.models.models import (
     JobQueue,
     KeyResult,
     Milestone,
-    ManagerSettings,
     Objective,
     PersonalTimeBlock,
     Project,
@@ -88,8 +87,6 @@ from app.services.attachment_storage import delete_attachment, get_attachment, p
 from app.core.config import settings
 from app.services import voice_service
 from app.services.google_calendar import (
-    account_from_state,
-    authorization_url as google_authorization_url,
     consume_oauth_state as google_consume_oauth_state,
     create_oauth_state as google_create_oauth_state,
     exchange_code as google_exchange_code,
@@ -125,7 +122,7 @@ from app.services.user_notifications import create_notifications
 from app.services.collaboration_permissions import ALL_EMPLOYEE_ROLES, SETTINGS_KEY, actor_can_assign_tasks, configured_assignment_roles
 from app.services import enterprise_tools
 from app.services.file_search_service import FileSearchPrincipal, FileSearchServiceError, search_files
-from app.services.ai_gateway import AIGateway, GatewayError, GatewayRequest
+from app.services.ai_gateway import AIGateway, GatewayError
 from app.services.ai_gateway.runtime import resolve_ai_runtime
 
 log = logging.getLogger(__name__)

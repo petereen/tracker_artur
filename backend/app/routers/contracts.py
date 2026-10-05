@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.enterprise_deps import ActorContext, get_actor, require_roles
+from app.core.enterprise_deps import ActorContext, get_actor
 from app.models.contracts import ContractArchiveAccess, ContractArchiveEntry, ContractArchiveFolder, ContractComment, ContractDocument, ContractFile, ContractGroup, ContractReview, ContractRevision
 from app.models.crm import ERPPaymentTerm
 from app.models.models import AuditLog, Employee, ERPParty, ERPUnitOfMeasure, Project, RoleAssignment, Task, UserAccount, UserNotification

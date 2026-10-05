@@ -428,7 +428,6 @@ async def send_survey(employee_id: int):
 
 
 async def send_reminder(employee_id: int, num: int):
-    from datetime import date as d
     from sqlalchemy import select
     from app.models.models import Employee, SurveySession
     from app.bot.db import canonical_checkin_complete, get_manager_settings, get_session

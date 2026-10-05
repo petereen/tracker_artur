@@ -12,7 +12,6 @@ import json
 import logging
 import re
 import secrets
-import math
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -22,7 +21,7 @@ import aiohttp
 import aiofiles
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -31,7 +30,7 @@ from app.core.security import create_action_preview_token, decode_action_preview
 from app.models.models import (
     AssistantPendingAction, AssistantToolAudit, CalendarEntry, CompanyKnowledge, CompanyPlanItem,
     CompanyLibraryItem, KnowledgeChunk, KnowledgeDocument, Milestone,
-    PersonalTimeBlock, Project, ProjectMember, ResourceGrant, ResourcePolicy,
+    PersonalTimeBlock, Project, ProjectMember, ResourcePolicy,
     Employee, ERPDocument, ERPStockLedgerEntry, Task, TaskAssignee, TaskReviewer, TeamMember, UserAccount, WorkReport, WorkTimeEntry,
 )
 from app.services.attachment_storage import get_attachment
@@ -471,191 +470,6 @@ async def index_company_knowledge(db: AsyncSession, entry: CompanyKnowledge) -> 
     except Exception as exc:
         document.index_status = "failed"; document.content_available = False; document.last_error = type(exc).__name__
     return document
-
-
-async def _legacy_file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInput) -> dict:
-    """Deprecated compatibility shim; new callers use ``search_files``."""
-    if data.operation == "list":
-        rows = []
-        items = list((await db.execute(select(CompanyLibraryItem).where(
-            CompanyLibraryItem.organization_id == actor.organization_id,
-            CompanyLibraryItem.deleted_at.is_(None),
-            CompanyLibraryItem.parent_id == data.folder_id,
-        ).order_by(CompanyLibraryItem.kind, CompanyLibraryItem.name))).scalars().all())
-        for item in items:
-            if item.kind == "file" and data.file_types and Path(item.name).suffix.casefold().lstrip(".") not in {value.casefold().lstrip(".") for value in data.file_types}:
-                continue
-            policy = await _policy_for_file(db, item)
-            if not await can_read_policy(db, actor, policy):
-                continue
-            classification = policy.classification if policy else "internal"
-            source_id = f"company_file:{item.id}"
-            rows.append({"source_id": source_id, "title": item.name, "kind": item.kind, "parent_id": item.parent_id, "content_type": item.content_type, "size": item.size, "classification": classification})
-            if len(rows) >= data.limit:
-                break
-        return _result("ok" if rows else "empty", {"query": data.query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"]} for row in rows], deliveries=_file_deliveries(rows, data.delivery))
-    if not data.query:
-        return _result("denied", {"reason": "A search query is required."})
-    query = data.query.casefold().strip()
-    # The company library is the source of truth for file names. Do not make
-    # filename discovery depend on the asynchronous content index: uploads,
-    # image-only slide decks, and files with an extraction error must still be
-    # searchable by their stored name.
-    storage_items = list((await db.execute(select(CompanyLibraryItem).where(
-        CompanyLibraryItem.organization_id == actor.organization_id,
-        CompanyLibraryItem.kind == "file",
-        CompanyLibraryItem.deleted_at.is_(None),
-    ))).scalars().all())
-    if data.folder_id is not None:
-        storage_items = [item for item in storage_items if item.parent_id == data.folder_id]
-    if data.file_types:
-        allowed_types = {value.casefold().lstrip(".") for value in data.file_types}
-        storage_items = [item for item in storage_items if Path(item.name).suffix.casefold().lstrip(".") in allowed_types]
-    visible_storage: list[tuple[CompanyLibraryItem, str]] = []
-    for item in storage_items:
-        policy = await _policy_for_file(db, item)
-        if await can_read_policy(db, actor, policy):
-            visible_storage.append((item, policy.classification if policy else "internal"))
-
-    def metadata_score(name: str) -> int:
-        normalized_name = re.sub(r"[^\w]+", " ", name.casefold()).strip()
-        normalized_query = re.sub(r"[^\w]+", " ", query).strip()
-        name_terms = set(normalized_name.split())
-        query_terms = [term for term in normalized_query.split() if term]
-        if not normalized_query or not query_terms:
-            return 0
-        if normalized_query in normalized_name:
-            return 1000
-        matched = sum(term in name_terms or term in normalized_name for term in query_terms)
-        return matched * 100 if matched == len(query_terms) else matched
-
-    metadata_matches = sorted(
-        ((item, classification, metadata_score(item.name)) for item, classification in visible_storage),
-        key=lambda value: (-value[2], value[0].name.casefold()),
-    )
-    metadata_matches = [value for value in metadata_matches if value[2] > 0]
-    documents = list((await db.execute(select(KnowledgeDocument).where(KnowledgeDocument.organization_id == actor.organization_id, KnowledgeDocument.index_status == "ready"))).scalars().all())
-    candidate_ids: list[int] = []
-    titles: dict[int, str] = {}
-    source_by_doc: dict[int, tuple[str, int, str]] = {}
-    for document in documents:
-        if document.source_type == "company_file":
-            item = await db.get(CompanyLibraryItem, document.source_id)
-            if not item or item.organization_id != actor.organization_id or item.deleted_at or (data.folder_id is not None and item.parent_id != data.folder_id) or not await can_read_policy(db, actor, await _policy_for_file(db, item)):
-                continue
-            if data.file_types and Path(item.name).suffix.casefold().lstrip(".") not in {value.casefold().lstrip(".") for value in data.file_types}: continue
-            source_by_doc[document.id] = ("company_file", item.id, (await _policy_for_file(db, item)).classification if await _policy_for_file(db, item) else "internal")
-        else:
-            entry = await db.get(CompanyKnowledge, document.source_id)
-            if not entry or entry.organization_id != actor.organization_id or not entry.is_active:
-                continue
-            policy = await db.scalar(select(ResourcePolicy).where(ResourcePolicy.organization_id == actor.organization_id, ResourcePolicy.resource_type == "company_knowledge", ResourcePolicy.resource_id == document.source_id))
-            if not await can_read_policy(db, actor, policy): continue
-            source_by_doc[document.id] = ("company_knowledge", document.source_id, policy.classification if policy else "internal")
-        candidate_ids.append(document.id); titles[document.id] = document.title
-    if not candidate_ids:
-        rows = [{
-            "source_id": f"company_file:{item.id}",
-            "title": item.name,
-            "excerpt": "",
-            "locator": {"kind": "title"},
-            "score": score,
-            "classification": classification,
-        } for item, classification, score in metadata_matches[:data.limit]]
-        if not rows:
-            return _result("empty", {"query": data.query, "results": []})
-        deliveries = _file_deliveries(rows, data.delivery)
-        return _result("ok", {"query": data.query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"], "locator": row["locator"]} for row in rows], deliveries=deliveries)
-    chunks = list((await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.document_id.in_(candidate_ids)))).scalars().all())
-    # A repository search must match both content and the file/entry title.
-    # Filename-only requests such as "presentation template" otherwise score
-    # zero when the document body does not repeat its filename.
-    query_terms = [token for token in query.split() if token]
-    def keyword_score(chunk: KnowledgeChunk) -> int:
-        body = chunk.content.casefold()
-        title = titles.get(chunk.document_id, "").casefold()
-        body_score = body.count(query) * 10 + sum(body.count(token) for token in query_terms)
-        title_score = title.count(query) * 40 + sum(title.count(token) for token in query_terms) * 12
-        return title_score + body_score
-    keyword_ranked = sorted(((chunk, keyword_score(chunk)) for chunk in chunks), key=lambda pair: pair[1], reverse=True)
-    query_embedding = await _embed(data.query) if data.search_mode in {"hybrid", "semantic"} else None
-    def cosine(left, right) -> float:
-        try:
-            dot = sum(float(a) * float(b) for a, b in zip(left, right))
-            return dot / max(math.sqrt(sum(float(a) ** 2 for a in left)) * math.sqrt(sum(float(b) ** 2 for b in right)), 1e-12)
-        except (TypeError, ValueError):
-            return 0.0
-    # Embeddings may be returned as lists or NumPy-like arrays. Never use an
-    # array in a boolean expression: multi-value arrays raise the ambiguous
-    # truth-value error and turn an otherwise valid keyword/semantic search
-    # into an unavailable tool response.
-    semantic_ranked = sorted(
-        (
-            (chunk, cosine(query_embedding, chunk.embedding))
-            for chunk in chunks
-            if query_embedding is not None and chunk.embedding is not None
-        ),
-        key=lambda pair: pair[1],
-        reverse=True,
-    )
-    if data.search_mode == "keyword" or not semantic_ranked:
-        ranked = keyword_ranked
-    elif data.search_mode == "semantic":
-        ranked = [(chunk, score) for chunk, score in semantic_ranked if score >= 0.30]
-    else:
-        # Reciprocal-rank fusion keeps a precise keyword hit competitive with a
-        # semantically related multilingual chunk without exposing raw vectors.
-        fused: dict[int, tuple[KnowledgeChunk, float]] = {}
-        for position, (chunk, score) in enumerate(keyword_ranked[:40], 1):
-            if score > 0: fused[chunk.id] = (chunk, 1 / (60 + position))
-        for position, (chunk, score) in enumerate(semantic_ranked[:40], 1):
-            if score >= 0.30:
-                prior = fused.get(chunk.id, (chunk, 0))[1]
-                fused[chunk.id] = (chunk, prior + 1 / (60 + position))
-        ranked = sorted(fused.values(), key=lambda pair: pair[1], reverse=True)
-    rows = []
-    for chunk, score in ranked:
-        if score <= 0 and data.search_mode == "keyword": continue
-        source_type, source_id, classification = source_by_doc[chunk.document_id]
-        source_id_public = f"{source_type}:{source_id}"
-        rows.append({"source_id": source_id_public, "title": titles[chunk.document_id], "excerpt": chunk.content[:900], "locator": chunk.locator, "score": score, "classification": classification})
-        if len(rows) >= data.limit: break
-    # A valid, authorized file can contain no extractable text (for example a
-    # slide deck made only of images). Still return it when its title matches;
-    # callers can then open/download it through the trusted file flow.
-    if not rows:
-        for document_id in candidate_ids:
-            title = titles[document_id].casefold()
-            if query not in title and not all(token in title for token in query_terms):
-                continue
-            source_type, source_id, classification = source_by_doc[document_id]
-            rows.append({
-                "source_id": f"{source_type}:{source_id}", "title": titles[document_id],
-                "excerpt": "", "locator": {"kind": "title"}, "score": 1,
-                "classification": classification,
-            })
-            if len(rows) >= data.limit:
-                break
-    existing_sources = {row["source_id"] for row in rows}
-    for item, classification, score in metadata_matches:
-        source_id = f"company_file:{item.id}"
-        if source_id in existing_sources:
-            continue
-        rows.append({
-            "source_id": source_id,
-            "title": item.name,
-            "excerpt": "",
-            "locator": {"kind": "title"},
-            "score": score,
-            "classification": classification,
-        })
-        existing_sources.add(source_id)
-        if len(rows) >= data.limit:
-            break
-    if not rows:
-        return _result("empty", {"query": data.query, "results": []})
-    deliveries = _file_deliveries(rows, data.delivery)
-    return _result("ok", {"query": data.query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"], "locator": row["locator"]} for row in rows], deliveries=deliveries)
 
 
 async def file_search(db: AsyncSession, actor: ActorContext, data: FileSearchInput) -> dict:

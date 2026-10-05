@@ -289,12 +289,6 @@ async def sync_task(db: AsyncSession, account_id: int, task_id: int) -> None:
         await sync_entity(db, connection.id, "task", task_id)
 
 
-async def sync_calendar_entry(db: AsyncSession, account_id: int, entry_id: int, operation: str = "upsert") -> None:
-    connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == account_id, CalendarConnection.provider == "google", CalendarConnection.status == "active"))).scalar_one_or_none()
-    if connection:
-        await sync_entity(db, connection.id, "calendar_entry", entry_id, operation)
-
-
 async def queue_entity_sync(db: AsyncSession, account_id: int, entity_type: str, entity_id: int, version: int | None, operation: str = "upsert") -> None:
     connection = (await db.execute(select(CalendarConnection).where(CalendarConnection.account_id == account_id, CalendarConnection.provider == "google", CalendarConnection.status == "active"))).scalar_one_or_none()
     if not connection:

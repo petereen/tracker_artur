@@ -6,7 +6,7 @@ import logging
 import re
 from typing import Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.bot.db import get_session
@@ -121,18 +121,3 @@ def list_active_knowledge(*, organization_id: int) -> list[dict]:
         return []
 
 
-def search_knowledge(terms: Iterable[str], *, organization_id: int, limit: int = 5) -> list[dict]:
-    return rank_knowledge(list_active_knowledge(organization_id=organization_id), terms, limit=limit)
-
-
-def active_knowledge_count(*, organization_id: int) -> int:
-    try:
-        with get_session() as session:
-            return int(
-                session.execute(
-                    select(func.count()).where(CompanyKnowledge.organization_id == organization_id, CompanyKnowledge.is_active.is_(True))
-                ).scalar_one()
-            )
-    except SQLAlchemyError:
-        log.exception("knowledge.count_failed")
-        return 0

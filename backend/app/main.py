@@ -13,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from starlette.requests import Request
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal, engine
+from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
 from app.core.tenancy import TENANT_FEATURES, TenantBoundaryViolation, install_tenant_guards
 from app.core.tenant_middleware import TenantContextMiddleware

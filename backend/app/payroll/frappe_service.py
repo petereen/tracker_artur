@@ -13,7 +13,7 @@ from typing import Any
 import warnings
 
 from fastapi import HTTPException
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enterprise_deps import ActorContext
@@ -34,7 +34,6 @@ from app.models.models import (
     PayrollSalaryComponentMaster,
     Payslip,
     StatutoryConfigProfile,
-    WorkTimeEntry,
 )
 from .schemas import (
     AdditionalSalaryInput,

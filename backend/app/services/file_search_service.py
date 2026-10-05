@@ -13,7 +13,6 @@ import unicodedata
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Literal, Sequence
 
 from sqlalchemy import bindparam, select, text
@@ -858,12 +857,3 @@ async def search_files(db: AsyncSession, principal: FileSearchPrincipal, data: A
     return _result(status, {"query": query, "results": rows}, sources=[{"id": row["source_id"], "title": row["title"], "locator": row["locator"]} for row in rows], deliveries=deliveries, warnings=warnings, diagnostics=diagnostics)
 
 
-async def list_authorized_items(db: AsyncSession, principal: FileSearchPrincipal, folder_id: int | None = None) -> list[CompanyLibraryItem]:
-    """Common browser/archive listing helper with the same ACL semantics."""
-    request = SimpleNamespace(
-        operation="list", query=None, search_mode="keyword", file_types=[],
-        limit=500, delivery="none", folder_id=folder_id,
-    )
-    result = await search_files(db, principal, request)
-    ids = [int(row["source_id"].split(":", 1)[1]) for row in result["data"].get("results", [])]
-    return [item for item_id in ids if (item := await db.get(CompanyLibraryItem, item_id))]

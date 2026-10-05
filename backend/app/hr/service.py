@@ -8,7 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -19,9 +19,7 @@ from app.hr.identity import WORKING_STATUSES
 from app.services.tenant_service import SEAT_STATUSES, ensure_seat_available, identity_in_use
 from app.models.models import (
     AttendanceLog,
-    Department,
     Employee,
-    EmployeeCompensationItem,
     EmployeeDetails,
     HolidayRecord,
     LeaveBalance,
@@ -325,12 +323,3 @@ async def suggested_attendance_range(db: AsyncSession, employees: list[Employee]
     return output
 
 
-async def suggested_attendance(db: AsyncSession, employee: Employee, local_day: date) -> dict[str, Any]:
-    return (await suggested_attendance_range(db, [employee], local_day, local_day))[(employee.id, local_day)]
-    if local_day >= date.today():
-        summary["suggested_status"] = None
-        return summary
-    schedule = await db.scalar(select(Schedule).where(Schedule.employee_id == employee.id))
-    if schedule and schedule.morning_time:
-        summary["suggested_status"] = "absent"
-    return summary

@@ -11,7 +11,6 @@ from app.models.models import (
     DomainEvent,
     Employee,
     JobQueue,
-    ManagerSettings,
     NotificationOutbox,
     Organization,
     UserAccount,

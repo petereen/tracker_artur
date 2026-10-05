@@ -9,7 +9,7 @@ from app.core.tenancy import tenant_scope
 from app.services.ai_gateway.access_policy import AccessPolicy
 from app.services.ai_gateway.runtime import resolve_ai_runtime
 from app.services.mcp import adapters
-from app.services.mcp.catalog import CATALOG, ToolDefinition, get_tool, tool_list
+from app.services.mcp.catalog import CATALOG, ToolDefinition, tool_list
 
 ToolResult = dict[str, Any]
 

@@ -697,11 +697,6 @@ async def begin_task_draft(
     }
 
 
-def task_draft_keyboard(language: str = "mn") -> InlineKeyboardMarkup:
-    """Confirmation controls used after the model synthesizes a draft."""
-    return _draft_kb(language)
-
-
 @router.callback_query(F.data == "taskdraft:confirm", TaskDraft.confirming)
 async def cb_draft_confirm(cb: CallbackQuery, state: FSMContext, tg_id: str | None = None, language: str = "mn"):
     d = (await state.get_data()).get("draft")

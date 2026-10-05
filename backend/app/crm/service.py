@@ -26,7 +26,6 @@ from app.models.crm import (
     ERPPaymentTerm,
     ERPStatus,
 )
-from app.models.contracts import ContractDocument
 from app.models.models import (
     ERPDocument,
     ERPModuleConfig,
@@ -147,10 +146,6 @@ def field_changes(before: dict[str, Any], after: dict[str, Any], fields: Iterabl
         if old != new:
             changes[field] = {"from": old, "to": new}
     return changes
-
-
-def format_party_code(number: int) -> str:
-    return f"{number:05d}"
 
 
 def local_today(timezone_name: str | None) -> date:
@@ -332,5 +327,3 @@ async def assert_group_is_not_descendant(db: AsyncSession, organization_id: int,
         current = await db.scalar(select(ERPPartyGroup.parent_id).where(ERPPartyGroup.id == current, ERPPartyGroup.organization_id == organization_id))
 
 
-async def contract_exists(db: AsyncSession, organization_id: int, contract_id: int) -> bool:
-    return bool(await db.scalar(select(ContractDocument.id).where(ContractDocument.id == contract_id, ContractDocument.organization_id == organization_id)))

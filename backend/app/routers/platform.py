@@ -51,7 +51,6 @@ from app.services.tenant_service import (
     add_months,
     audit,
     revoke_license,
-    seat_clauses,
     seat_usage,
 )
 

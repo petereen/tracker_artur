@@ -40,20 +40,6 @@ def google_calendar_task_url(
     return "https://calendar.google.com/calendar/render?" + urlencode(params)
 
 
-def task_reminder_kb(task_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Дууссан", callback_data=f"task:done:{task_id}"),
-            ],
-            [
-                InlineKeyboardButton(text="⏰ 1 цагаар хойшлуулах", callback_data=f"task:snooze:{task_id}:60"),
-                InlineKeyboardButton(text="⏰ 1 өдрөөр хойшлуулах", callback_data=f"task:snooze:{task_id}:1440"),
-            ],
-        ]
-    )
-
-
 def task_actions_kb(
     task_id: int,
     *,
