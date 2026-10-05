@@ -640,7 +640,8 @@ export function ChatWorkspacePage() {
     if (!mobile || !drawerOpen) return
     const previous = document.activeElement as HTMLElement | null
     const drawer = drawerRef.current
-    drawer?.querySelector<HTMLInputElement>('input')?.focus()
+    // Focus a button, never the search field: focusing a text input raises the on-screen keyboard as the page opens.
+    drawer?.querySelector<HTMLElement>('button:not(:disabled), a[href]')?.focus({ preventScroll: true })
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { setDrawerOpen(false); return }
       if (event.key !== 'Tab' || !drawer) return

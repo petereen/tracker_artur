@@ -8,9 +8,8 @@ import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog'
 import { Heading } from '@astryxdesign/core/Heading'
-import { HStack } from '@astryxdesign/core/HStack'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { StackItem } from '@astryxdesign/core/Stack'
+import { Switch } from '@astryxdesign/core/Switch'
 import { Text } from '@astryxdesign/core/Text'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Token } from '@astryxdesign/core/Token'
@@ -68,15 +67,15 @@ export function geoKindKey(kind: GeoEvent['kind']) {
 }
 
 function StatusRow({ label, ok, okLabel, problem, action }: { label: string; ok: boolean; okLabel: string; problem: string; action?: React.ReactNode }) {
-  return <HStack gap={3} vAlign="center" wrap="wrap">
-    <StackItem size="fill">
-      <VStack gap={0.5}>
-        <Text weight="medium">{label}</Text>
-        {!ok && <Text type="supporting">{problem}</Text>}
-      </VStack>
-    </StackItem>
-    {ok ? <Token size="sm" color="green" label={okLabel} /> : action}
-  </HStack>
+  const { t } = useTranslation()
+  return <div className={ok ? 'wta-status-row' : 'wta-status-row is-problem'}>
+    <div className="wta-status-main">
+      <Text weight="semibold">{label}</Text>
+      <Token size="sm" color={ok ? 'green' : 'yellow'} label={ok ? okLabel : t('wta.status.attention')} />
+    </div>
+    {!ok && <Text>{problem}</Text>}
+    {!ok && action && <div className="wta-status-action">{action}</div>}
+  </div>
 }
 
 function ConsentDialog({ onClose, onAccepted }: { onClose: () => void; onAccepted: () => Promise<void> }) {
@@ -121,8 +120,8 @@ function ConsentDialog({ onClose, onAccepted }: { onClose: () => void; onAccepte
   </Dialog>
 }
 
-/** Profile: the employee's own switch for automatic (geofence) work time on this phone. */
-export function AutoWorktimeCard() {
+/** Worktime (app only) and Profile: the employee's own switch for automatic (geofence) work time on this phone. */
+export function AutoWorktimeCard({ nativeOnly = false }: { nativeOnly?: boolean }) {
   const { t } = useTranslation()
   const status = useAutoWorktimeStatus()
   const enroll = useEnrollDevice()
@@ -146,8 +145,9 @@ export function AutoWorktimeCard() {
   }, [readNative])
 
   const data = status.data
-  // Nothing to offer and nothing to withdraw.
-  if (!data || !data.employee_linked || (data.mode === 'off' && !data.consent)) return null
+  // Only people without an employee record have nothing to switch.
+  // Live location only exists in the mobile/tablet app; on the web the worktime page has nothing to offer.
+  if (!data || !data.employee_linked || (nativeOnly && !isNativePlatform())) return null
 
   const deviceId = data.device?.id
   const report = async (value: GeofenceStatus | null) => {
@@ -208,61 +208,71 @@ export function AutoWorktimeCard() {
 
   const onThisPhone = Boolean(native?.enrolled && data.device)
   const android = geofencePlatform() === 'android'
+  const consented = Boolean(data.consent)
+  // Turning on needs the organization's switch and a phone that can run the geofence; withdrawing is always possible.
+  const switchDisabled = busy || (!consented && (data.mode === 'off' || supported !== true))
+  const changeSwitch = (next: boolean) => {
+    if (next) setConsentOpen(true)
+    else void turnOff()
+  }
 
   return <Card padding={5}>
     <VStack gap={4}>
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <MapPinned size={18} aria-hidden />
-        <StackItem size="fill"><Heading level={3}>{t('wta.title')}</Heading></StackItem>
+      <div className="wta-head">
+        <MapPinned size={20} aria-hidden />
+        <Heading level={3}>{t('wta.title')}</Heading>
         {data.mode === 'shadow' && <Token size="sm" color="yellow" label={t('wta.mode.shadow')} />}
         {onThisPhone && data.mode === 'on' && <Token size="sm" color="green" label={t('wta.active')} />}
-      </HStack>
-      <Text type="supporting">{t('wta.intro')}</Text>
+      </div>
+      <Text>{t('wta.intro')}</Text>
 
-      {data.mode === 'off' && <Banner status="info" title={t('wta.offByOrgTitle')} description={t('wta.offByOrg')} collapsible={false} />}
+      <div className="wta-panel wta-switch-panel">
+        <Switch label={t('wta.switch.label')} description={t('wta.switch.hint')} value={consented} onChange={changeSwitch} isDisabled={switchDisabled} />
+      </div>
+
+      {data.mode === 'off' && (consented
+        ? <Banner status="info" title={t('wta.offByOrgTitle')} description={t('wta.offByOrg')} collapsible={false} />
+        : <Banner status="info" title={t('wta.offByOrgNoConsentTitle')} description={t('wta.offByOrgNoConsent')} collapsible={false} />)}
       {data.mode === 'shadow' && <Banner status="info" title={t('wta.shadowTitle')} description={t('wta.shadowHint')} collapsible={false} />}
 
       {supported === false && <Banner status="info" collapsible={false}
         title={isNativePlatform() ? t('wta.updateAppTitle') : t('wta.mobileOnlyTitle')}
         description={isNativePlatform() ? t('wta.updateApp') : t('wta.mobileOnly')} />}
 
-      {supported && data.mode !== 'off' && !onThisPhone && <VStack gap={2}>
+      {supported && data.mode !== 'off' && consented && !onThisPhone && <VStack gap={3}>
         {data.device && <Banner status="warning" title={t('wta.otherPhoneTitle')} description={t('wta.otherPhone')} collapsible={false} />}
-        <HStack gap={2}>
-          <Button label={data.device ? t('wta.useThisPhone') : t('wta.turnOn')} variant="primary" isLoading={busy}
-            onClick={() => { if (data.consent) void turnOnThisPhone(); else setConsentOpen(true) }} />
-        </HStack>
+        <Button label={data.device ? t('wta.useThisPhone') : t('wta.turnOn')} variant="primary" isLoading={busy}
+          onClick={() => { void turnOnThisPhone() }} />
       </VStack>}
 
-      {supported && onThisPhone && native && <VStack gap={3}>
-        <StatusRow label={t('wta.permission.label')} ok={native.permission === 'always'} okLabel={t('wta.permission.always')} problem={t('wta.permission.alwaysNeeded')}
-          action={<Button size="sm" label={t('wta.permission.fix')} isLoading={busy} onClick={() => { void fix(async () => { const next = await requestGeofencePermissions(); if (next.permission !== 'always') await openLocationSettings() }) }} />} />
-        <StatusRow label={t('wta.accuracy.label')} ok={native.accuracy === 'precise'} okLabel={t('wta.accuracy.precise')} problem={t('wta.accuracy.needed')}
-          action={<Button size="sm" label={t('wta.openSettings')} onClick={() => { void fix(openLocationSettings) }} />} />
-        {android && <StatusRow label={t('wta.battery.label')} ok={native.batteryUnrestricted} okLabel={t('wta.battery.unrestricted')} problem={t('wta.battery.needed')}
-          action={<Button size="sm" label={t('wta.battery.allow')} isLoading={busy} onClick={() => { void fix(requestBatteryExemption) }} />} />}
-        {android && <HStack gap={3} vAlign="center" wrap="wrap">
-          <StackItem size="fill"><Text type="supporting">{t('wta.battery.vendorHint')}</Text></StackItem>
-          <Button size="sm" variant="ghost" label={t('wta.battery.vendor')} onClick={() => { void openBackgroundSettings() }} />
-        </HStack>}
+      {supported && onThisPhone && native && <section className="wta-section" aria-labelledby="wta-phone-title">
+        <Heading level={4} id="wta-phone-title">{t('wta.phone.title')}</Heading>
+        <div className="wta-panel">
+          <StatusRow label={t('wta.permission.label')} ok={native.permission === 'always'} okLabel={t('wta.permission.always')} problem={t('wta.permission.alwaysNeeded')}
+            action={<Button size="sm" label={t('wta.permission.fix')} isLoading={busy} onClick={() => { void fix(async () => { const next = await requestGeofencePermissions(); if (next.permission !== 'always') await openLocationSettings() }) }} />} />
+          <StatusRow label={t('wta.accuracy.label')} ok={native.accuracy === 'precise'} okLabel={t('wta.accuracy.precise')} problem={t('wta.accuracy.needed')}
+            action={<Button size="sm" label={t('wta.openSettings')} onClick={() => { void fix(openLocationSettings) }} />} />
+          {android && <StatusRow label={t('wta.battery.label')} ok={native.batteryUnrestricted} okLabel={t('wta.battery.unrestricted')} problem={t('wta.battery.needed')}
+            action={<Button size="sm" label={t('wta.battery.allow')} isLoading={busy} onClick={() => { void fix(requestBatteryExemption) }} />} />}
+          {android && <div className="wta-status-row">
+            <Text type="supporting">{t('wta.battery.vendorHint')}</Text>
+            <div className="wta-status-action"><Button size="sm" variant="secondary" label={t('wta.battery.vendor')} onClick={() => { void openBackgroundSettings() }} /></div>
+          </div>}
+        </div>
         {native.lastError === 'device_revoked' && <Banner status="warning" title={t('wta.revokedTitle')} description={t('wta.revoked')} collapsible={false} />}
-      </VStack>}
+      </section>}
 
-      {data.recent_events.length > 0 && <VStack gap={1.5}>
-        <Text weight="semibold">{t('wta.recent')}</Text>
-        {data.recent_events.slice(0, 5).map((event) => <HStack key={event.id} gap={2} vAlign="center" wrap="wrap">
-          <Timestamp value={event.occurred_at} format="date_time" />
-          <Text type="supporting">{t(geoKindKey(event.kind))}{event.site_name ? ` · ${event.site_name}` : ''}</Text>
-          <StackItem size="fill"><Text>{t(geoResultKey(event.result))}</Text></StackItem>
-        </HStack>)}
-      </VStack>}
+      {data.recent_events.length > 0 && <section className="wta-section" aria-labelledby="wta-recent-title">
+        <Heading level={4} id="wta-recent-title">{t('wta.recent')}</Heading>
+        <ul className="wta-events">
+          {data.recent_events.slice(0, 5).map((event) => <li key={event.id}>
+            <Text weight="medium">{t(geoResultKey(event.result))}</Text>
+            <Text type="supporting">{t(geoKindKey(event.kind))}{event.site_name ? ` · ${event.site_name}` : ''} · <Timestamp value={event.occurred_at} format="date_time" /></Text>
+          </li>)}
+        </ul>
+      </section>}
 
-      {data.consent && <HStack gap={3} vAlign="center" wrap="wrap">
-        <StackItem size="fill">
-          <Text type="supporting">{t('wta.consentGiven', { days: data.geo_retention_days })} <Timestamp value={data.consent.accepted_at} format="date" /></Text>
-        </StackItem>
-        <Button size="sm" variant="secondary" label={t('wta.turnOff')} isLoading={busy && revoke.isPending} onClick={() => { void turnOff() }} />
-      </HStack>}
+      {data.consent && <Text type="supporting">{t('wta.consentGiven', { days: data.geo_retention_days })} <Timestamp value={data.consent.accepted_at} format="date" /></Text>}
     </VStack>
     {consentOpen && <ConsentDialog onClose={() => setConsentOpen(false)} onAccepted={async () => { setConsentOpen(false); await turnOnThisPhone() }} />}
   </Card>

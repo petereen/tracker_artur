@@ -61,8 +61,29 @@ describe('AutoWorktimeCard', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
-  it('stays out of the way while the organization has it off', () => {
+  it('shows a disabled switch while the organization has it off', async () => {
+    mocks.supported = true
     mocks.status.data = { ...STATUS, mode: 'off' }
+    render(<AutoWorktimeCard />)
+    expect(await screen.findByText('Байгууллага асаагаагүй байна')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: /Байршлаар автомат цаг бүртгэх/ })).toBeDisabled()
+  })
+
+  it('is hidden on the web when it is app-only', () => {
+    mocks.supported = false
+    const { container } = render(<AutoWorktimeCard nativeOnly />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('shows in the app when it is app-only', async () => {
+    mocks.supported = true
+    mocks.native = { ...NATIVE_STATUS }
+    render(<AutoWorktimeCard nativeOnly />)
+    expect(await screen.findByRole('switch', { name: /Байршлаар автомат цаг бүртгэх/ })).toBeEnabled()
+  })
+
+  it('renders nothing for an account without an employee record', () => {
+    mocks.status.data = { ...STATUS, employee_linked: false }
     const { container } = render(<AutoWorktimeCard />)
     expect(container).toBeEmptyDOMElement()
   })
@@ -73,7 +94,7 @@ describe('AutoWorktimeCard', () => {
     render(<AutoWorktimeCard />)
     expect(await screen.findByText('Гар утасны апп шаардлагатай')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Асаах' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Зөвшөөрлөө цуцлах' }))
+    fireEvent.click(screen.getByRole('switch', { name: /Байршлаар автомат цаг бүртгэх/ }))
     await waitFor(() => expect(mocks.revoke).toHaveBeenCalled())
     expect(mocks.disableGeofence).toHaveBeenCalled()
   })
@@ -87,7 +108,7 @@ describe('AutoWorktimeCard', () => {
     mocks.enrollGeofence.mockResolvedValue({ ...NATIVE_STATUS, enrolled: true, permission: 'always', batteryUnrestricted: false })
     mocks.battery.mockResolvedValue({ ...NATIVE_STATUS, enrolled: true, permission: 'always', batteryUnrestricted: true })
     render(<AutoWorktimeCard />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Асаах' }))
+    fireEvent.click(await screen.findByRole('switch', { name: /Байршлаар автомат цаг бүртгэх/ }))
     // Nothing is requested from the phone before the disclaimer is accepted.
     expect(mocks.permissions).not.toHaveBeenCalled()
     expect(await screen.findByText('Таны газарзүйн координат хадгалагдахгүй.')).toBeInTheDocument()
@@ -108,7 +129,7 @@ describe('AutoWorktimeCard', () => {
     mocks.native = { ...NATIVE_STATUS }
     mocks.authenticate.mockResolvedValue(false)
     render(<AutoWorktimeCard />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Асаах' }))
+    fireEvent.click(await screen.findByRole('switch', { name: /Байршлаар автомат цаг бүртгэх/ }))
     fireEvent.click(await screen.findByLabelText('Би дээрхийг уншиж, ойлголоо'))
     fireEvent.click(screen.getByRole('button', { name: 'Зөвшөөрч байна' }))
     await waitFor(() => expect(mocks.authenticate).toHaveBeenCalled())

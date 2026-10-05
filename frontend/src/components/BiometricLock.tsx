@@ -21,10 +21,11 @@ const RELOCK_AFTER_MS = 60_000
 
 /**
  * App lock for the native app: Face ID / fingerprint (or the phone's screen
- * lock) on a cold start and after the app was in the background. The session
+ * lock) on a cold start and after the app was in the background. `active` is false while
+ * signed out, so the login screen is never behind the lock. The session
  * itself stays in the Keychain/Keystore; this only gates the screen.
  */
-export function BiometricLockGate({ children }: { children: ReactNode }) {
+export function BiometricLockGate({ children, active = true }: { children: ReactNode; active?: boolean }) {
   const { t } = useTranslation()
   const logout = useEnterpriseLogout()
   const [locked, setLocked] = useState(() => isNativePlatform() && isBiometricLockEnabled())
@@ -48,11 +49,14 @@ export function BiometricLockGate({ children }: { children: ReactNode }) {
     }
   }, [t])
 
+  // Nothing to protect while signed out (login screen): the lock waits for a session.
+  useEffect(() => { if (!active) setLocked(false) }, [active])
+
   useEffect(() => {
-    if (locked) void unlock()
+    if (locked && active) void unlock()
     // Prompt once when the lock appears; "Unlock" retries.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locked])
+  }, [locked, active])
 
   useEffect(() => {
     if (!isNativePlatform()) return
@@ -68,7 +72,7 @@ export function BiometricLockGate({ children }: { children: ReactNode }) {
     return () => { void listener.then((handle) => handle.remove()) }
   }, [])
 
-  if (!locked) return children
+  if (!active || !locked) return children
   return <>
     <InitialWorkspaceSkeleton />
     <Dialog isOpen onOpenChange={() => undefined} purpose="required" width={360}>

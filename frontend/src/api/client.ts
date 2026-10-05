@@ -1,6 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import type { QueryClient } from '@tanstack/react-query'
-import { clearNativeRefreshToken, getNativeRefreshToken, setNativeRefreshToken } from '../platform/secure-session'
+import { clearNativeRefreshToken, getNativeRefreshToken, isSessionOnlyRefreshToken, setNativeRefreshToken } from '../platform/secure-session'
 import { getApiBaseUrl, isNativePlatform } from '../platform/runtime'
 import { useAuthStore } from '../store/auth'
 import { workspaceModeHeader } from '../store/workspaceMode'
@@ -22,9 +22,16 @@ const refreshClient = axios.create({ baseURL: apiBaseUrl, withCredentials: true,
 let refreshPromise: Promise<string> | null = null
 let proactiveTimer: number | undefined
 
-export async function acceptSession(data: { access_token: string; expires_in?: number; refresh_token?: string | null }, { preserveIdentity = false }: { preserveIdentity?: boolean } = {}) {
+/** The server answered and refused the refresh token. Network failures and 5xx do not end a session. */
+export function isSessionRejected(error: unknown) {
+  const status = (error as AxiosError | undefined)?.response?.status
+  return status === 400 || status === 401 || status === 403
+}
+
+export async function acceptSession(data: { access_token: string; expires_in?: number; refresh_token?: string | null }, { preserveIdentity = false, remember }: { preserveIdentity?: boolean; remember?: boolean } = {}) {
   const expiresIn = data.expires_in ?? 15 * 60
-  if (isNativePlatform() && data.refresh_token) await setNativeRefreshToken(data.refresh_token)
+  // A rotation keeps the choice made at sign-in.
+  if (isNativePlatform() && data.refresh_token) await setNativeRefreshToken(data.refresh_token, { persist: remember ?? !isSessionOnlyRefreshToken() })
   const store = useAuthStore.getState()
   if (preserveIdentity) store.setRefreshedSession(data.access_token, expiresIn)
   else store.setSession(data.access_token, expiresIn)
@@ -105,8 +112,12 @@ api.interceptors.response.use(
       config.headers.Authorization = `Bearer ${await refreshAccessToken()}`
       return api.request(config)
     } catch (refreshError) {
-      await clearSessionCredentials()
-      useAuthStore.getState().logout()
+      // Only a refusal ends the session. A dropped connection (phone just woke, tunnel) keeps the
+      // stored credentials, so the next request or the next launch signs in without the login screen.
+      if (isSessionRejected(refreshError)) {
+        await clearSessionCredentials()
+        useAuthStore.getState().logout()
+      }
       throw refreshError
     }
   },

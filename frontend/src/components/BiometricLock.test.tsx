@@ -47,6 +47,12 @@ describe('BiometricLockGate', () => {
     expect(mocks.authenticate).not.toHaveBeenCalled()
   })
 
+  it('does not put the login screen behind the lock while signed out', () => {
+    render(<BiometricLockGate active={false}><p>login</p></BiometricLockGate>)
+    expect(screen.getByText('login')).toBeInTheDocument()
+    expect(mocks.authenticate).not.toHaveBeenCalled()
+  })
+
   it('hides the workspace until the owner is confirmed', async () => {
     render(<BiometricLockGate><p>workspace</p></BiometricLockGate>)
     expect(screen.queryByText('workspace')).not.toBeInTheDocument()

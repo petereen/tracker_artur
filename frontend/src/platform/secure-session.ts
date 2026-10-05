@@ -35,6 +35,24 @@ export async function removeSecureValue(key: string) {
   await SecureStorage.removeItem(key)
 }
 
-export const getNativeRefreshToken = () => readSecureValue(REFRESH_TOKEN_KEY)
-export const setNativeRefreshToken = (token: string) => writeSecureValue(REFRESH_TOKEN_KEY, token)
-export const clearNativeRefreshToken = () => removeSecureValue(REFRESH_TOKEN_KEY)
+// A sign-in without "remember me" keeps its refresh token in memory only, so it ends with the app process.
+let sessionOnlyToken: string | null = null
+
+export const isSessionOnlyRefreshToken = () => sessionOnlyToken !== null
+export const getNativeRefreshToken = async () => sessionOnlyToken ?? readSecureValue(REFRESH_TOKEN_KEY)
+
+export async function setNativeRefreshToken(token: string, { persist = true }: { persist?: boolean } = {}) {
+  if (!isNativePlatform()) return
+  if (persist) {
+    sessionOnlyToken = null
+    await writeSecureValue(REFRESH_TOKEN_KEY, token)
+  } else {
+    sessionOnlyToken = token
+    await removeSecureValue(REFRESH_TOKEN_KEY)
+  }
+}
+
+export async function clearNativeRefreshToken() {
+  sessionOnlyToken = null
+  await removeSecureValue(REFRESH_TOKEN_KEY)
+}

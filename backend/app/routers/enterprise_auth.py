@@ -57,6 +57,8 @@ class LoginInput(BaseModel):
     email: str
     password: str
     device_label: str | None = Field(default=None, max_length=200)
+    # Unchecked "remember me": the web refresh cookie lasts for the browser session only.
+    remember_me: bool = True
 
     @field_validator("email")
     @classmethod
@@ -312,8 +314,13 @@ class AccountInvite(BaseModel):
         return email
 
 
-def _set_refresh_cookie(response: Response, token: str, expires_at: datetime) -> None:
-    max_age = max(1, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
+def _is_session_only(session: RefreshSession) -> bool:
+    """Sessions opened without "remember me" are short-lived; rotation keeps them that way."""
+    return session.auth_method != "telegram" and session.expires_at - session.created_at <= timedelta(hours=settings.SESSION_REFRESH_TOKEN_HOURS + 1)
+
+
+def _set_refresh_cookie(response: Response, token: str, expires_at: datetime, persistent: bool = True) -> None:
+    max_age = max(1, int((expires_at - datetime.now(timezone.utc)).total_seconds())) if persistent else None
     response.set_cookie(
         REFRESH_COOKIE,
         token,
@@ -359,10 +366,10 @@ def _access(account: UserAccount, refresh_token: str | None = None, auth_method:
     )
 
 
-def _complete_session(response: Response, account: UserAccount, token: str, expires_at: datetime, origin: str | None, auth_method: str | None = None, session: RefreshSession | None = None):
+def _complete_session(response: Response, account: UserAccount, token: str, expires_at: datetime, origin: str | None, auth_method: str | None = None, session: RefreshSession | None = None, persistent: bool = True):
     if _is_native_origin(origin):
         return _access(account, refresh_token=token, auth_method=auth_method, session=session)
-    _set_refresh_cookie(response, token, expires_at)
+    _set_refresh_cookie(response, token, expires_at, persistent)
     return _access(account, auth_method=auth_method, session=session)
 
 
@@ -490,7 +497,7 @@ async def login(
     account.locked_until = None
     account.last_login_at = now
     refresh_token, token_hash = new_refresh_token()
-    refresh_expires_at = now + timedelta(days=settings.REFRESH_TOKEN_DAYS)
+    refresh_expires_at = now + (timedelta(days=settings.REFRESH_TOKEN_DAYS) if data.remember_me else timedelta(hours=settings.SESSION_REFRESH_TOKEN_HOURS))
     session = RefreshSession(
         account_id=account.id,
         token_hash=token_hash,
@@ -500,7 +507,7 @@ async def login(
     )
     db.add(session)
     await db.commit()
-    return _complete_session(response, account, refresh_token, refresh_expires_at, origin, auth_method="password", session=session)
+    return _complete_session(response, account, refresh_token, refresh_expires_at, origin, auth_method="password", session=session, persistent=data.remember_me)
 
 
 async def _telegram_session(
@@ -888,7 +895,13 @@ async def refresh(
     session.revoked_at = now
     session.last_used_at = now
     token, token_hash = new_refresh_token()
-    expires_at = session.expires_at if session.auth_method == "telegram" else now + timedelta(days=settings.REFRESH_TOKEN_DAYS)
+    session_only = _is_session_only(session)
+    if session.auth_method == "telegram":
+        expires_at = session.expires_at
+    elif session_only:
+        expires_at = now + timedelta(hours=settings.SESSION_REFRESH_TOKEN_HOURS)
+    else:
+        expires_at = now + timedelta(days=settings.REFRESH_TOKEN_DAYS)
     rotated = RefreshSession(
         account_id=account.id,
         token_hash=token_hash,
@@ -899,7 +912,7 @@ async def refresh(
     )
     db.add(rotated)
     await db.commit()
-    return _complete_session(response, account, token, expires_at, origin, auth_method=session.auth_method, session=rotated)
+    return _complete_session(response, account, token, expires_at, origin, auth_method=session.auth_method, session=rotated, persistent=not session_only)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

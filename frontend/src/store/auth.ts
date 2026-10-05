@@ -24,11 +24,14 @@ interface AuthState {
   actor: Actor | null
   sessionVersion: number
   initialized: boolean
+  /** The stored session could not be restored only because the server was unreachable. */
+  bootstrapFailed: boolean
   setToken: (token: string | null) => void
   setSession: (token: string, expiresIn: number) => void
   setRefreshedSession: (token: string, expiresIn: number) => void
   setActor: (actor: Actor | null) => void
   setInitialized: (initialized: boolean) => void
+  setBootstrapFailed: (failed: boolean) => void
   logout: () => void
 }
 
@@ -38,10 +41,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   actor: null,
   sessionVersion: 0,
   initialized: false,
+  bootstrapFailed: false,
   setToken: (token) => set({ token, expiresAt: token ? Date.now() + 14 * 60_000 : null }),
   setSession: (token, expiresIn) => set((state) => ({ token, expiresAt: Date.now() + expiresIn * 1000, actor: null, sessionVersion: state.sessionVersion + 1 })),
   setRefreshedSession: (token, expiresIn) => set({ token, expiresAt: Date.now() + expiresIn * 1000 }),
   setActor: (actor) => set({ actor }),
   setInitialized: (initialized) => set({ initialized }),
+  setBootstrapFailed: (bootstrapFailed) => set({ bootstrapFailed }),
   logout: () => set({ token: null, expiresAt: null, actor: null, initialized: true }),
 }))

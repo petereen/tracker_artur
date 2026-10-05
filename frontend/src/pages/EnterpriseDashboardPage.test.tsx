@@ -321,6 +321,20 @@ describe("Today work-hour timer", () => {
     expect(container.querySelector(".today-canvas.is-editing")).not.toBeInTheDocument();
   });
 
+  it("puts Edit below the widgets and the editing controls at the top while editing", () => {
+    const { container } = renderDashboard();
+    const canvas = container.querySelector(".today-canvas") as HTMLElement;
+    expect(container.querySelector(".today-toolbar")).not.toBeInTheDocument();
+    const edit = screen.getByRole("button", { name: "Засварлах" });
+    expect(canvas.compareDocumentPosition(edit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(edit);
+    const toolbar = container.querySelector(".today-toolbar") as HTMLElement;
+    expect(toolbar.compareDocumentPosition(canvas) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const name of ["Анхны байдал", "Виджет нэмэх", "Болсон"]) expect(within(toolbar).getByRole("button", { name })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Засварлах" })).not.toBeInTheDocument();
+  });
+
   it("adds the hidden check-in widget from the searchable library", async () => {
     vi.useRealTimers(); // the library is lazy-loaded
     const { container } = renderDashboard();

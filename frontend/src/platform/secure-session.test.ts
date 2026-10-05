@@ -42,4 +42,17 @@ describe('native secure session', () => {
     expect(storage.setKeyPrefix).toHaveBeenCalledWith('mn.oyuns.workspace.')
     expect(storage.setSynchronize).toHaveBeenCalledWith(false)
   })
+
+  it('keeps a sign-in without "remember me" in memory only', async () => {
+    state.native = true
+    const session = await import('./secure-session')
+    await session.setNativeRefreshToken('kept')
+    await session.setNativeRefreshToken('temporary', { persist: false })
+    expect(await session.getNativeRefreshToken()).toBe('temporary')
+    expect(session.isSessionOnlyRefreshToken()).toBe(true)
+    expect(values.has('native_refresh_token')).toBe(false)
+    // A new process finds nothing to restore.
+    vi.resetModules()
+    expect(await (await import('./secure-session')).getNativeRefreshToken()).toBeNull()
+  })
 })

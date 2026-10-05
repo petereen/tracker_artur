@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_HOURS: int = 24
     ENTERPRISE_ACCESS_TOKEN_MINUTES: int = 15
     REFRESH_TOKEN_DAYS: int = 30
+    # Sign-in without "remember me": session cookie, and the server drops it after this much inactivity.
+    SESSION_REFRESH_TOKEN_HOURS: int = 12
     # Telegram Mini App sessions use a one-year absolute refresh lifetime.
     TELEGRAM_REFRESH_TOKEN_DAYS: int = 365
     TELEGRAM_OIDC_CLIENT_ID: str = ""

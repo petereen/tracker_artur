@@ -2,23 +2,21 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { IScannerControls } from '@zxing/browser'
-import { Camera, CheckCircle2, Coffee, Laptop2, LocateFixed, LogIn, LogOut, MapPin, RefreshCw, ScanLine, X } from 'lucide-react'
+import { Camera, CheckCircle2, Coffee, Laptop2, MapPin, RefreshCw, ScanLine } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
-import { Grid } from '@astryxdesign/core/Grid'
 import { Heading } from '@astryxdesign/core/Heading'
 import { HStack } from '@astryxdesign/core/HStack'
 import { List, ListItem } from '@astryxdesign/core/List'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Text } from '@astryxdesign/core/Text'
 import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
 import { useClock, useWorktimeMethods, useWorktimeQrClock, type ClockEntry } from '../api/enterprise'
-import { WorkdayStartButton } from '../components/WorkdayStartButton'
+import { AutoWorktimeCard } from '../components/AutoWorktimeCard'
 import i18n from '../i18n'
 
 type ScanResult = { action: string; replayed: boolean; at: string }
@@ -62,13 +60,16 @@ export function WorktimePage() {
   const controlsRef = useRef<IScannerControls | null>(null)
   const handledRef = useRef(false)
   const [scanning, setScanning] = useState(false)
+  // True once the first camera frame is playing; until then the viewport shows its own loader instead of the browser's grey play placeholder.
+  const [cameraReady, setCameraReady] = useState(false)
+  const resumeOnVisibleRef = useRef(false)
+  const autoStartedRef = useRef(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<ScanResult | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const scanRef = useRef(scan)
   scanRef.current = scan
   const qrEnabled = methods.data?.qr_enabled ?? false
-  const locationEnabled = methods.data?.location_enabled ?? false
 
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(timer) }, [])
   useEffect(() => () => { controlsRef.current?.stop(); controlsRef.current = null }, [])
@@ -79,23 +80,46 @@ export function WorktimePage() {
     const stream = videoRef.current?.srcObject as MediaStream | null
     stream?.getTracks().forEach((track) => track.stop())
     if (videoRef.current) videoRef.current.srcObject = null
+    setCameraReady(false)
     setScanning(false)
   }
 
   const startScanner = () => {
     setCameraError(null)
     setLastResult(null)
+    setCameraReady(false)
     handledRef.current = false
     setScanning(true)
   }
 
-  // Dashboard «Оффис эхлэх» lands here with ?scan=1 when QR is the office method.
+  // The camera opens as soon as the page does: there is nothing else to do here when QR is the method.
   useEffect(() => {
-    if (params.get('scan') !== '1' || !qrEnabled) return
+    if (!qrEnabled || autoStartedRef.current) return
+    autoStartedRef.current = true
     startScanner()
+  }, [qrEnabled])
+  // Older links carried ?scan=1 to open the camera; it is on anyway now.
+  useEffect(() => {
+    if (params.get('scan') !== '1') return
     setParams((current) => { const next = new URLSearchParams(current); next.delete('scan'); return next }, { replace: true })
-  }, [params, qrEnabled, setParams])
+  }, [params, setParams])
   useEffect(() => { if (!qrEnabled && scanning) stopScanner() }, [qrEnabled, scanning])
+
+  // The phone suspends the camera in the background; release it, and reopen it on return.
+  const scanningRef = useRef(scanning)
+  scanningRef.current = scanning
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (scanningRef.current) { resumeOnVisibleRef.current = true; stopScanner() }
+      } else if (resumeOnVisibleRef.current) {
+        resumeOnVisibleRef.current = false
+        startScanner()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
 
   useEffect(() => {
     if (!scanning || !videoRef.current) return
@@ -125,6 +149,7 @@ export function WorktimePage() {
         else controlsRef.current = controls
       } catch (error: any) {
         if (cancelled) return
+        setCameraReady(false)
         setScanning(false)
         setCameraError(error?.name === 'NotAllowedError' ? t('worktime.camera.denied') : t('worktime.camera.failed'))
       }
@@ -140,57 +165,28 @@ export function WorktimePage() {
     }
   }, [scanning])
 
-  const active = clock.data?.active
   const timezone = clock.data?.timezone
   const entries = clock.data?.today_entries ?? []
   const workedMinutes = useMemo(() => entries.filter((entry) => entry.entry_type === 'work').reduce((sum, entry) => sum + entryMinutes(entry, now), 0), [entries, now])
-  const officeActive = active?.entry_type === 'work' && active.mode === 'in_person'
-  const state = !active ? { label: t('worktime.status.notStarted'), variant: 'neutral' as const } : active.entry_type === 'break' ? { label: t('worktime.break'), variant: 'warning' as const } : active.mode === 'remote' ? { label: t('worktime.status.remote'), variant: 'accent' as const } : { label: t('worktime.status.office'), variant: 'success' as const }
-  const plainStart = methods.isSuccess && !qrEnabled && !locationEnabled
 
   return <div className="worktime-page">
-    <Card padding={5}>
-      <VStack gap={4}>
-        <HStack gap={4} hAlign="between" vAlign="center" wrap="wrap">
-          <VStack gap={1}>
-            <HStack gap={2} vAlign="center"><StatusDot variant={state.variant} label={state.label} isPulsing={Boolean(active && active.entry_type === 'work')} /><Text type="label" weight="semibold">{state.label}</Text></HStack>
-            <Heading level={2}>{active ? t('worktime.activeSince', { time: formatTime(active.started_at, timezone), duration: formatDuration(entryMinutes(active, now)) }) : t('worktime.startDay')}</Heading>
-            <Text type="supporting">{active ? t('worktime.hint.scanAgainToEnd') : qrEnabled && locationEnabled ? t('worktime.hint.qrOrLocation') : qrEnabled ? t('worktime.hint.qrOnly') : locationEnabled ? t('worktime.hint.locationOnly') : t('worktime.hint.pressToStart')}</Text>
-          </VStack>
-          <HStack gap={2} wrap="wrap" vAlign="center">
-            {qrEnabled && !scanning && <Button variant={active && !officeActive ? 'secondary' : 'primary'} label={officeActive ? t('worktime.action.scanToEnd') : t('worktime.action.scan')} icon={officeActive ? <LogOut size={16} /> : <ScanLine size={16} />} onClick={startScanner} isDisabled={scan.isPending || active?.entry_type === 'break'} tooltip={active?.entry_type === 'break' ? t('worktime.action.endBreakFirst') : undefined} />}
-            {(locationEnabled || plainStart) && !active && <WorkdayStartButton className={qrEnabled ? 'secondary-action' : 'primary-action'}>{plainStart ? <><LogIn size={16} />{t('worktime.action.start')}</> : <><LocateFixed size={16} />{t('worktime.action.startByLocation')}</>}</WorkdayStartButton>}
-          </HStack>
-        </HStack>
-        <Grid columns={{ minWidth: 140 }} gap={3}>
-          <VStack gap={0.5}><Text type="supporting">{t('worktime.workedToday')}</Text><Text type="large" weight="semibold" hasTabularNumbers>{formatDuration(workedMinutes)}</Text></VStack>
-          <VStack gap={0.5}><Text type="supporting">{t('worktime.entries')}</Text><Text type="large" weight="semibold" hasTabularNumbers>{entries.length}</Text></VStack>
-          <VStack gap={0.5}><Text type="supporting">{t('worktime.method')}</Text><HStack gap={1} wrap="wrap">{methods.isLoading ? <Skeleton width={90} height={22} /> : <>{qrEnabled && <Token size="sm" color="blue" label="QR" />}{locationEnabled && <Token size="sm" color="green" label={t('worktime.method.location')} />}{plainStart && <Token size="sm" label={t('worktime.method.simple')} />}</>}</HStack></VStack>
-        </Grid>
-      </VStack>
-    </Card>
     <div className={qrEnabled ? 'worktime-grid' : undefined}>
       {qrEnabled && <Card padding={5}>
         <VStack gap={3}>
           <HStack gap={2} hAlign="between" vAlign="center">
             <VStack gap={0.5}><Heading level={3}>{t('worktime.scanTitle')}</Heading><Text type="supporting">{t('worktime.scanSubtitle')}</Text></VStack>
-            {scanning && <Button variant="ghost" label={t('worktime.cancel')} icon={<X size={16} />} onClick={stopScanner} />}
+            {!scanning && lastResult && <Button variant="secondary" label={t('worktime.action.scanAgain')} icon={<ScanLine size={16} />} onClick={startScanner} isDisabled={scan.isPending} isLoading={scan.isPending} />}
           </HStack>
-          <div className={`scanner-viewport ${scanning ? 'scanning' : ''} ${lastResult && !scanning ? 'scanned' : ''}`}>
-            {scanning ? <><video ref={videoRef} autoPlay muted playsInline onLoadedMetadata={(event) => { void event.currentTarget.play().catch(() => undefined) }} aria-label={t('worktime.cameraLabel')} /><div className="scanner-frame" aria-hidden="true"><i /></div></>
-              : lastResult ? <div className="scanner-placeholder"><CheckCircle2 size={44} /><Heading level={3} color="inherit">{scanMessage(lastResult)}</Heading><Text color="inherit">{formatTime(lastResult.at, timezone)}</Text></div>
-              : <div className="scanner-placeholder"><Camera size={36} /><Text color="inherit">{t('worktime.scanInstructions')}</Text></div>}
+          <div className={`scanner-viewport ${scanning ? 'scanning' : ''} ${scanning && cameraReady ? 'live' : ''} ${lastResult && !scanning ? 'scanned' : ''}`}>
+            {/* Mounted for the whole page life and invisible until it plays, so the browser's grey placeholder never shows. */}
+            <video ref={videoRef} autoPlay muted playsInline disablePictureInPicture controls={false} onPlaying={() => setCameraReady(true)} onLoadedMetadata={(event) => { void event.currentTarget.play().catch(() => undefined) }} aria-label={t('worktime.cameraLabel')} />
+            {scanning && cameraReady && <div className="scanner-frame" aria-hidden="true"><i /></div>}
+            {scanning && !cameraReady && <div className="scanner-placeholder" role="status"><span className="scanner-spinner" aria-hidden="true" /><Text color="inherit">{t('worktime.camera.starting')}</Text></div>}
+            {!scanning && lastResult && <div className="scanner-placeholder"><CheckCircle2 size={44} /><Heading level={3} color="inherit">{scanMessage(lastResult)}</Heading><Text color="inherit">{formatTime(lastResult.at, timezone)}</Text></div>}
+            {!scanning && !lastResult && <div className="scanner-placeholder"><Camera size={36} /><Text color="inherit">{t('worktime.scanInstructions')}</Text></div>}
           </div>
-          {scanning && <Text type="supporting" justify="center">{t('worktime.frameHint')}</Text>}
+          {scanning && cameraReady && <Text type="supporting" justify="center">{t('worktime.frameHint')}</Text>}
           {cameraError && <Banner status="error" title={t('worktime.scan.notRegisteredShort')} description={cameraError} collapsible={false} endContent={<Button size="sm" label={t('worktime.retry')} icon={<RefreshCw size={14} />} onClick={startScanner} />} />}
-          {!scanning && <HStack gap={2} hAlign="between" vAlign="center" wrap="wrap">
-            <List listStyle="decimal" density="compact">
-              <ListItem label={t('worktime.step.aim')} />
-              <ListItem label={t('worktime.step.frame')} />
-              <ListItem label={t('worktime.step.auto')} />
-            </List>
-            <Button variant="primary" label={lastResult ? t('worktime.action.scanAgain') : t('worktime.action.openCamera')} icon={<ScanLine size={16} />} onClick={startScanner} isDisabled={scan.isPending} isLoading={scan.isPending} />
-          </HStack>}
         </VStack>
       </Card>}
       <Card padding={5}>
@@ -208,6 +204,7 @@ export function WorktimePage() {
         </VStack>
       </Card>
     </div>
+    <AutoWorktimeCard nativeOnly />
   </div>
 }
 

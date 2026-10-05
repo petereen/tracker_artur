@@ -113,6 +113,7 @@ function NativeAutoWorktimeBridge() {
 function AuthenticatedApp() {
   const token = useAuthStore((state) => state.token)
   const initialized = useAuthStore((state) => state.initialized)
+  const bootstrapFailed = useAuthStore((state) => state.bootstrapFailed)
   const queryClient = useQueryClient()
   const actor = useActor(Boolean(initialized && token))
   // The tenant requires 2FA and this session has not enrolled / entered a code yet.
@@ -151,127 +152,132 @@ function AuthenticatedApp() {
     return () => window.removeEventListener(TWO_FACTOR_REQUIRED_EVENT, recheck)
   }, [refetchActor])
 
-  if (!initialized) return <InitialWorkspaceSkeleton />
-  if (!token) return <LoginPage />
-  const unavailable = tenancyError(actor.error)?.code
-  if (actor.isError && !actor.data && isWorkspaceUnavailable(unavailable)) return <WorkspaceUnavailableScreen code={unavailable} />
-  if (actor.isError && !actor.data) return <SessionBootstrapError onRetry={() => void actor.refetch()} />
-  if (actor.isLoading || !actor.data) return <InitialWorkspaceSkeleton />
-  if (twoFactorOwed || twoFactorGate) {
-    return <>
-      <InitialWorkspaceSkeleton />
-      <TwoFactorGate enrolled={Boolean(actor.data.two_factor?.enrolled)} onDone={() => { void actor.refetch().finally(() => setTwoFactorGate(false)) }} />
-    </>
-  }
-  // Without a valid license the API only answers the activation endpoints.
-  if (tenant.data && (tenant.data.license.state === 'missing' || tenant.data.license.state === 'expired')) {
-    return <LicenseRequiredScreen context={tenant.data} isAdmin={isAdmin} />
+  // The lock sits outside the session checks: on a cold start it prompts at once while the
+  // stored session is restored behind it, and the login screen never waits for a fingerprint.
+  const content = () => {
+    if (!initialized) return <InitialWorkspaceSkeleton />
+    if (!token && bootstrapFailed) return <SessionBootstrapError onRetry={() => { useAuthStore.getState().setInitialized(false) }} />
+    if (!token) return <LoginPage />
+    const unavailable = tenancyError(actor.error)?.code
+    if (actor.isError && !actor.data && isWorkspaceUnavailable(unavailable)) return <WorkspaceUnavailableScreen code={unavailable} />
+    if (actor.isError && !actor.data) return <SessionBootstrapError onRetry={() => void actor.refetch()} />
+    if (actor.isLoading || !actor.data) return <InitialWorkspaceSkeleton />
+    if (twoFactorOwed || twoFactorGate) {
+      return <>
+        <InitialWorkspaceSkeleton />
+        <TwoFactorGate enrolled={Boolean(actor.data.two_factor?.enrolled)} onDone={() => { void actor.refetch().finally(() => setTwoFactorGate(false)) }} />
+      </>
+    }
+    // Without a valid license the API only answers the activation endpoints.
+    if (tenant.data && (tenant.data.license.state === 'missing' || tenant.data.license.state === 'expired')) {
+      return <LicenseRequiredScreen context={tenant.data} isAdmin={isAdmin} />
+    }
+
+    return (
+      <CallProvider>
+        <NativeNotificationBridge />
+        <NativeAutoWorktimeBridge />
+        <Routes>
+        <Route element={<EnterpriseShell />}>
+          <Route index element={<EnterpriseDashboardPage />} />
+          <Route path="worktime" element={<WorktimePage />} />
+          <Route path="hr" element={<HRWorkspacePage />} />
+          <Route path="projects" element={<ProjectsWorkspacePage />} />
+          <Route path="tasks" element={<EnterpriseTasksPage />} />
+          <Route path="calendar" element={<CalendarWorkspacePage />} />
+          <Route path="reports" element={<EnterpriseReportsPage />} />
+          <Route path="capacity" element={<CapacityWorkspacePage />} />
+          <Route path="plans" element={<PlansPage />} />
+          <Route path="contracts" element={<ContractsWorkspacePage />} />
+          <Route path="contracts/archive" element={<ContractArchiveWorkspace />} />
+          <Route path="contracts/:publicId" element={<ContractsWorkspacePage />} />
+          <Route path="okrs" element={<Navigate to="/plans" replace />} />
+          <Route path="analytics" element={<StatsWorkspacePage />} />
+          {/* ERP modules are switched on in Settings → Modules; there is no ERP hub page. */}
+          <Route path="erp" element={<Navigate to="/administration/organization/modules" replace />} />
+          {/* CRM is authorized by ERP capabilities (e.g. the Sales role), not system roles. */}
+          <Route path="erp/crm" element={<CRMWorkspacePage />} />
+          <Route path="erp/crm/customers" element={<CRMWorkspacePage />} />
+          <Route path="erp/crm/customers/:partyId" element={<CRMWorkspacePage />} />
+          <Route path="erp/crm/settings" element={<CRMWorkspacePage />} />
+          {/* Budget is authorized by ERP capabilities (budget / budget_settings), like CRM. */}
+          {/* Chart of accounts is authorized by the ERP `accounts` capability (Accountant, admin; manager/team_lead view). */}
+          <Route path="erp/accounts" element={<ChartOfAccountsPage />} />
+          <Route path="erp/budget" element={<BudgetWorkspacePage />} />
+          <Route path="erp/budget/analysis" element={<BudgetWorkspacePage />} />
+          <Route path="erp/budget/accounts" element={<BudgetWorkspacePage />} />
+          <Route path="erp/budget/:budgetId" element={<BudgetWorkspacePage />} />
+          <Route element={<RequireRoles allowedRoles={PAYROLL_ROLES} />}>
+            <Route path="erp/payroll" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/setup" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/inputs" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/reports" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/monthly" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/monthly/reports" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/monthly/runs/:runId" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/monthly/settings" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/monthly/archive" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/tax-benefits" element={<Navigate to="/erp/payroll" replace />} />
+            <Route path="erp/payroll/runs/new" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/runs/:runId" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/payroll-entries" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/payroll-entries/new" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/payroll-entries/:entryId" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/salary-components" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/payroll-periods" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/salary-structures" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/accounting" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/additional-salaries" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/assignments" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/salary-slips" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/reports/salary-register" element={<PayrollWorkspacePage />} />
+            <Route path="erp/payroll/reports/bank-remittance" element={<PayrollWorkspacePage />} />
+          </Route>
+          <Route element={<RequireRoles allowedRoles={MANAGEMENT_ROLES} />}>
+            <Route path="announcements" element={<AnnouncementsPage />} />
+            <Route path="administration" element={<AdministrationHubPage />} />
+            <Route path="administration/organization/profile" element={<WorkspaceIdentitySettingsPage />} />
+            <Route path="administration/workflows/worktime" element={<CollaborationSettingsPage />} />
+            <Route path="administration/workflows/reports" element={<ReportSettingsPage />} />
+            <Route path="administration/integrations/overview" element={<AutomationSettingsPage />} />
+          </Route>
+          <Route path="administration/ai/knowledge" element={<OyunsAssistantSettingsPage />} />
+          <Route element={<RequireRoles allowedRoles={['admin']} />}>
+            <Route path="administration/people/users" element={<AccessControlSettingsPage />} />
+            <Route path="administration/organization/modules" element={<ERPSettingsPage />} />
+            <Route path="administration/organization/domains" element={<DomainSettingsPage />} />
+            <Route path="administration/security/authentication" element={<AdminAccessSettingsPage />} />
+            <Route path="administration/security/license" element={<LicenseSettingsPage />} />
+          </Route>
+          <Route element={<RequireRoles allowedRoles={['admin', 'manager']} />}>
+            <Route path="administration/people/permissions" element={<PermissionsSettingsPage />} />
+          </Route>
+          <Route path="profile" element={<ProfilePage />} />
+          <Route path="company-files" element={<CompanyFilesPage />} />
+          <Route path="chat/:conversationId?" element={<ChatWorkspacePage />} />
+          <Route path="administration/workspace" element={<Navigate to="/administration/organization/profile" replace />} />
+          <Route path="administration/collaboration" element={<Navigate to="/administration/workflows/worktime" replace />} />
+          <Route path="administration/automation" element={<Navigate to="/administration/integrations/overview" replace />} />
+          <Route path="administration/oyuns" element={<Navigate to="/administration/ai/knowledge" replace />} />
+          <Route path="administration/access" element={<Navigate to="/administration/people/users" replace />} />
+          <Route path="administration/erp" element={<Navigate to="/administration/organization/modules" replace />} />
+          <Route path="administration/admin-access" element={<Navigate to="/administration/security/authentication" replace />} />
+          <Route path="legacy/employees" element={<Navigate to="/administration/people/users" replace />} />
+          <Route path="legacy/questions" element={<Navigate to="/administration/workflows/worktime" replace />} />
+          <Route path="legacy/schedule" element={<Navigate to="/administration/workflows/worktime" replace />} />
+          <Route path="legacy/manager" element={<Navigate to="/administration/integrations/overview" replace />} />
+          <Route path="legacy/knowledge" element={<Navigate to="/administration/ai/knowledge" replace />} />
+          <Route path="legacy/onboarding" element={<Navigate to="/administration/people/users" replace />} />
+          <Route path="legacy/developer" element={<Navigate to="/administration/ai/knowledge" replace />} />
+        </Route>
+        <Route path="contracts/:publicId/print" element={<ContractPrintPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </CallProvider>
+    )
   }
 
-  return (
-    <BiometricLockGate>
-    <CallProvider>
-      <NativeNotificationBridge />
-      <NativeAutoWorktimeBridge />
-      <Routes>
-      <Route element={<EnterpriseShell />}>
-        <Route index element={<EnterpriseDashboardPage />} />
-        <Route path="worktime" element={<WorktimePage />} />
-        <Route path="hr" element={<HRWorkspacePage />} />
-        <Route path="projects" element={<ProjectsWorkspacePage />} />
-        <Route path="tasks" element={<EnterpriseTasksPage />} />
-        <Route path="calendar" element={<CalendarWorkspacePage />} />
-        <Route path="reports" element={<EnterpriseReportsPage />} />
-        <Route path="capacity" element={<CapacityWorkspacePage />} />
-        <Route path="plans" element={<PlansPage />} />
-        <Route path="contracts" element={<ContractsWorkspacePage />} />
-        <Route path="contracts/archive" element={<ContractArchiveWorkspace />} />
-        <Route path="contracts/:publicId" element={<ContractsWorkspacePage />} />
-        <Route path="okrs" element={<Navigate to="/plans" replace />} />
-        <Route path="analytics" element={<StatsWorkspacePage />} />
-        {/* ERP modules are switched on in Settings → Modules; there is no ERP hub page. */}
-        <Route path="erp" element={<Navigate to="/administration/organization/modules" replace />} />
-        {/* CRM is authorized by ERP capabilities (e.g. the Sales role), not system roles. */}
-        <Route path="erp/crm" element={<CRMWorkspacePage />} />
-        <Route path="erp/crm/customers" element={<CRMWorkspacePage />} />
-        <Route path="erp/crm/customers/:partyId" element={<CRMWorkspacePage />} />
-        <Route path="erp/crm/settings" element={<CRMWorkspacePage />} />
-        {/* Budget is authorized by ERP capabilities (budget / budget_settings), like CRM. */}
-        {/* Chart of accounts is authorized by the ERP `accounts` capability (Accountant, admin; manager/team_lead view). */}
-        <Route path="erp/accounts" element={<ChartOfAccountsPage />} />
-        <Route path="erp/budget" element={<BudgetWorkspacePage />} />
-        <Route path="erp/budget/analysis" element={<BudgetWorkspacePage />} />
-        <Route path="erp/budget/accounts" element={<BudgetWorkspacePage />} />
-        <Route path="erp/budget/:budgetId" element={<BudgetWorkspacePage />} />
-        <Route element={<RequireRoles allowedRoles={PAYROLL_ROLES} />}>
-          <Route path="erp/payroll" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/setup" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/inputs" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/reports" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/monthly" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/monthly/reports" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/monthly/runs/:runId" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/monthly/settings" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/monthly/archive" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/tax-benefits" element={<Navigate to="/erp/payroll" replace />} />
-          <Route path="erp/payroll/runs/new" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/runs/:runId" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/payroll-entries" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/payroll-entries/new" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/payroll-entries/:entryId" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/salary-components" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/payroll-periods" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/salary-structures" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/accounting" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/additional-salaries" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/assignments" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/salary-slips" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/reports/salary-register" element={<PayrollWorkspacePage />} />
-          <Route path="erp/payroll/reports/bank-remittance" element={<PayrollWorkspacePage />} />
-        </Route>
-        <Route element={<RequireRoles allowedRoles={MANAGEMENT_ROLES} />}>
-          <Route path="announcements" element={<AnnouncementsPage />} />
-          <Route path="administration" element={<AdministrationHubPage />} />
-          <Route path="administration/organization/profile" element={<WorkspaceIdentitySettingsPage />} />
-          <Route path="administration/workflows/worktime" element={<CollaborationSettingsPage />} />
-          <Route path="administration/workflows/reports" element={<ReportSettingsPage />} />
-          <Route path="administration/integrations/overview" element={<AutomationSettingsPage />} />
-        </Route>
-        <Route path="administration/ai/knowledge" element={<OyunsAssistantSettingsPage />} />
-        <Route element={<RequireRoles allowedRoles={['admin']} />}>
-          <Route path="administration/people/users" element={<AccessControlSettingsPage />} />
-          <Route path="administration/organization/modules" element={<ERPSettingsPage />} />
-          <Route path="administration/organization/domains" element={<DomainSettingsPage />} />
-          <Route path="administration/security/authentication" element={<AdminAccessSettingsPage />} />
-          <Route path="administration/security/license" element={<LicenseSettingsPage />} />
-        </Route>
-        <Route element={<RequireRoles allowedRoles={['admin', 'manager']} />}>
-          <Route path="administration/people/permissions" element={<PermissionsSettingsPage />} />
-        </Route>
-        <Route path="profile" element={<ProfilePage />} />
-        <Route path="company-files" element={<CompanyFilesPage />} />
-        <Route path="chat/:conversationId?" element={<ChatWorkspacePage />} />
-        <Route path="administration/workspace" element={<Navigate to="/administration/organization/profile" replace />} />
-        <Route path="administration/collaboration" element={<Navigate to="/administration/workflows/worktime" replace />} />
-        <Route path="administration/automation" element={<Navigate to="/administration/integrations/overview" replace />} />
-        <Route path="administration/oyuns" element={<Navigate to="/administration/ai/knowledge" replace />} />
-        <Route path="administration/access" element={<Navigate to="/administration/people/users" replace />} />
-        <Route path="administration/erp" element={<Navigate to="/administration/organization/modules" replace />} />
-        <Route path="administration/admin-access" element={<Navigate to="/administration/security/authentication" replace />} />
-        <Route path="legacy/employees" element={<Navigate to="/administration/people/users" replace />} />
-        <Route path="legacy/questions" element={<Navigate to="/administration/workflows/worktime" replace />} />
-        <Route path="legacy/schedule" element={<Navigate to="/administration/workflows/worktime" replace />} />
-        <Route path="legacy/manager" element={<Navigate to="/administration/integrations/overview" replace />} />
-        <Route path="legacy/knowledge" element={<Navigate to="/administration/ai/knowledge" replace />} />
-        <Route path="legacy/onboarding" element={<Navigate to="/administration/people/users" replace />} />
-        <Route path="legacy/developer" element={<Navigate to="/administration/ai/knowledge" replace />} />
-      </Route>
-      <Route path="contracts/:publicId/print" element={<ContractPrintPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </CallProvider>
-    </BiometricLockGate>
-  )
+  return <BiometricLockGate active={!initialized || Boolean(token)}>{content()}</BiometricLockGate>
 }
 
 function SessionBootstrapError({ onRetry }: { onRetry: () => void }) {

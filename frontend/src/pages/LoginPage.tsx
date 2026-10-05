@@ -4,17 +4,20 @@ import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
 import { useAuthCapabilities, useEnterpriseLogin } from '../api/enterprise'
 import { tenancyErrorMessage, useTenantBranding } from '../api/tenancy'
-import { isNativePlatform } from '../platform/runtime'
+import { isNativePlatform, safeLocalStorage } from '../platform/runtime'
 import { startNativeTelegramLogin, subscribeToNativeTelegramAuth, type NativeTelegramAuthState } from '../platform/telegram-auth'
 import Grainient from '../components/Grainient'
 import { LanguageSwitcher } from '../components/LanguageSwitcher'
 
+const REMEMBER_KEY = 'oyuns.remember-me'
 const TELEGRAM_ERROR_CODES = ['cancelled', 'invalid_state', 'invalid_callback', 'token_exchange_failed', 'invalid_id_token', 'not_configured', 'provider_unavailable', 'provider_error', 'account_unavailable', 'login_failed']
 
 export function LoginPage() {
   const { t } = useTranslation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  // Kept signed in by default; the last choice on this device is remembered.
+  const [remember, setRemember] = useState(() => safeLocalStorage().get(REMEMBER_KEY) !== '0')
   const login = useEnterpriseLogin()
   const native = isNativePlatform()
   const capabilities = useAuthCapabilities()
@@ -41,7 +44,8 @@ export function LoginPage() {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     try {
-      await login.mutateAsync({ email: username, password })
+      safeLocalStorage().set(REMEMBER_KEY, remember ? '1' : '0')
+      await login.mutateAsync({ email: username, password, remember_me: remember })
     } catch (error: any) {
       toast.error(tenancyErrorMessage(error, t('auth.login.badCredentials')))
     }
@@ -80,7 +84,10 @@ export function LoginPage() {
               <span>{t('auth.login.password')}</span>
               <div className="field-with-icon"><LockKeyhole size={16} aria-hidden /><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></div>
             </label>
-            <div className="auth-form-options"><a href="/forgot-password">{t('auth.login.forgot')}</a></div>
+            <div className="auth-form-options">
+              <label className="auth-remember"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /><span>{t('auth.login.remember')}</span></label>
+              <a href="/forgot-password">{t('auth.login.forgot')}</a>
+            </div>
             <button className="secondary-action" type="submit" disabled={login.isPending}>
               {login.isPending ? t('auth.login.submitting') : t('auth.login.submit')} <ArrowRight size={16} aria-hidden />
             </button>

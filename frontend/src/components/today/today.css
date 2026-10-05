@@ -24,6 +24,11 @@
   font-size: var(--font-size-xs);
   margin-right: auto;
 }
+.today-edit-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--spacing-2);
+}
 
 /* ---- canvas ---------------------------------------------------------------- */
 
@@ -474,6 +479,22 @@
   flex: 1 1 110px;
   justify-content: center;
   min-height: 36px;
+}
+.today-widget-card .today-worktime .clock-actions > .worktime-link {
+  flex: 0 0 auto;
+  height: 36px;
+  justify-content: center;
+  margin-left: auto;
+  min-height: 36px;
+  padding: 0;
+  width: 36px;
+}
+@media (max-width: 800px) {
+  .today-widget-card .today-worktime .clock-actions > .worktime-link {
+    height: 44px;
+    min-height: 44px;
+    width: 44px;
+  }
 }
 .today-widget-card .today-worktime .clock-recovery {
   font-size: var(--font-size-xs);

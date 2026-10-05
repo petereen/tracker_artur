@@ -155,6 +155,7 @@ export function WorktimeAutoSettings() {
   if (settings.isError) return <Banner status="error" title={t('wta.adm.loadFailed')} collapsible={false} />
   if (!data || !numbers) return <Skeleton height={160} />
 
+  const enabled = data.auto_geofence_mode !== 'off'
   const acknowledged = data.employer_disclaimer_ack?.policy_version === data.policy_version
   const dirty = numbers.exit_grace_minutes !== data.exit_grace_minutes || numbers.min_accuracy_meters !== data.min_accuracy_meters || numbers.geo_retention_days !== data.geo_retention_days
   const numbersValid = Object.values(numbers).every((value) => Number.isInteger(value))
@@ -181,11 +182,11 @@ export function WorktimeAutoSettings() {
   return <VStack gap={4}>
     <Text type="supporting">{t('wta.adm.intro')}</Text>
     <VStack gap={1.5}>
-      <SegmentedControl label={t('wta.adm.modeLabel')} value={data.auto_geofence_mode} isDisabled={!canEdit || update.isPending} onChange={(value) => changeMode(value as AutoWorktimeMode)}>
-        <SegmentedControlItem value="off" label={t('wta.adm.mode.off')} />
+      <Switch label={t('wta.adm.switchLabel')} description={t('wta.adm.switchHint')} value={enabled} isDisabled={!canEdit || update.isPending} onChange={(next) => changeMode(next ? 'on' : 'off')} />
+      {enabled && <SegmentedControl label={t('wta.adm.modeLabel')} value={data.auto_geofence_mode} isDisabled={!canEdit || update.isPending} onChange={(value) => changeMode(value as AutoWorktimeMode)}>
         <SegmentedControlItem value="shadow" label={t('wta.adm.mode.shadow')} />
         <SegmentedControlItem value="on" label={t('wta.adm.mode.on')} />
-      </SegmentedControl>
+      </SegmentedControl>}
       <Text type="supporting">{t(`wta.adm.modeHint.${data.auto_geofence_mode}`)}</Text>
       {!canEdit && <Text type="supporting">{t('wta.adm.adminOnly')}</Text>}
     </VStack>

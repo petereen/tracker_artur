@@ -2,7 +2,7 @@ import { InfiniteData, keepPreviousData, useInfiniteQuery, useMutation, useQueri
 import axios from 'axios'
 import { useRef } from 'react'
 import toast from 'react-hot-toast'
-import { acceptSession, api, clearAuthenticatedQueryCache, clearSessionCredentials, publicApi, refreshAccessToken } from './client'
+import { acceptSession, api, clearAuthenticatedQueryCache, clearSessionCredentials, isSessionRejected, publicApi, refreshAccessToken } from './client'
 import { tenancyErrorMessage } from './tenancy'
 import i18n from '../i18n'
 import { notificationService } from '../platform/notifications'
@@ -474,10 +474,10 @@ export async function recordContractArchivePrint(entry: ContractArchiveEntry) { 
 export function useEnterpriseLogin() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { email: string; password: string }) => api.post('/v1/auth/login', input).then((response) => response.data),
-    onSuccess: async (data) => {
+    mutationFn: (input: { email: string; password: string; remember_me?: boolean }) => api.post('/v1/auth/login', input).then((response) => ({ ...response.data, remember: input.remember_me ?? true })),
+    onSuccess: async ({ remember, ...data }) => {
       await clearAuthenticatedQueryCache(queryClient)
-      await acceptSession(data)
+      await acceptSession(data, { remember })
     },
   })
 }
@@ -570,15 +570,34 @@ export function useInviteAccount() {
   })
 }
 
+const BOOTSTRAP_RETRY_DELAYS_MS = [800, 2000, 4000]
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+/**
+ * Restores the stored session at launch. Only a refusal from the server means "show the login
+ * screen"; a missing connection is retried and then offered as a retry, so a phone that wakes
+ * without signal does not drop the person at the login form.
+ */
 export async function bootstrapSession() {
   const store = useAuthStore.getState()
-  try {
-    await refreshAccessToken()
-  } catch {
-    store.setToken(null)
-  } finally {
-    store.setInitialized(true)
+  store.setBootstrapFailed(false)
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await refreshAccessToken()
+      break
+    } catch (error) {
+      if (!isSessionRejected(error)) {
+        if (attempt < BOOTSTRAP_RETRY_DELAYS_MS.length) {
+          await wait(BOOTSTRAP_RETRY_DELAYS_MS[attempt])
+          continue
+        }
+        store.setBootstrapFailed(true)
+      }
+      store.setToken(null)
+      break
+    }
   }
+  store.setInitialized(true)
 }
 
 export const actorQueryKey = (sessionVersion: number) => ['v1', 'actor', sessionVersion] as const

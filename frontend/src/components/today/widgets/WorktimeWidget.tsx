@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Coffee, House, Laptop2, Pause, Play, Timer } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Coffee, House, Laptop2, Pause, Play, ScanLine, Timer } from 'lucide-react'
 import { useClock, useClockAction } from '../../../api/enterprise'
 import { useAuthStore } from '../../../store/auth'
 import { intlLocale } from '../../../utils/locale'
@@ -25,6 +26,7 @@ function formatLocalTime(value: string, timezone: string) {
 /** Today's work-hour clock: start (office/remote), break, resume, stop. */
 export function WorktimeWidget() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const employeeId = useAuthStore((state) => state.actor?.employee_id)
   const clock = useClock(employeeId != null)
   const action = useClockAction()
@@ -128,6 +130,7 @@ export function WorktimeWidget() {
           <button className="clock-button office" onClick={() => action.mutate({ action: 'resume' })}><Play />{t('today.worktime.resume')}</button>
           <button className="clock-button stop" onClick={() => action.mutate({ action: 'stop' })}><Pause />{t('today.worktime.finishDay')}</button>
         </>}
+        <button type="button" className="clock-button worktime-link" onClick={() => navigate('/worktime')} aria-label={t('nav.worktime')} title={t('nav.worktime')}><ScanLine /></button>
       </div>
     </section>
   )

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import * as axe from 'axe-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '../i18n'
@@ -18,7 +18,7 @@ function renderLogin() {
 }
 
 describe('enterprise login', () => {
-  beforeEach(() => mutateAsync.mockReset())
+  beforeEach(() => { mutateAsync.mockReset(); window.localStorage.removeItem('oyuns.remember-me') })
   afterEach(async () => { await i18n.changeLanguage('mn') })
 
   it('shows the browser Telegram login button', () => {
@@ -32,6 +32,19 @@ describe('enterprise login', () => {
     expect(screen.getByLabelText('Нэвтрэх нэр')).toHaveAttribute('autocomplete', 'username')
     expect(screen.getByLabelText('Нууц үг')).toHaveAttribute('autocomplete', 'current-password')
     expect(screen.getByRole('button', { name: /Нэвтрэх/ })).toBeEnabled()
+  })
+
+  it('keeps the person signed in by default and lets them opt out', async () => {
+    mutateAsync.mockResolvedValue({})
+    renderLogin()
+    const remember = screen.getByRole('checkbox', { name: 'Намайг сана' })
+    expect(remember).toBeChecked()
+    fireEvent.change(screen.getByLabelText('Нэвтрэх нэр'), { target: { value: 'me' } })
+    fireEvent.change(screen.getByLabelText('Нууц үг'), { target: { value: 'secret' } })
+    fireEvent.click(remember)
+    fireEvent.click(screen.getByRole('button', { name: /^Нэвтрэх/ }))
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ email: 'me', password: 'secret', remember_me: false }))
+    expect(window.localStorage.getItem('oyuns.remember-me')).toBe('0')
   })
 
   it('switches the page to Russian and remembers the choice', async () => {

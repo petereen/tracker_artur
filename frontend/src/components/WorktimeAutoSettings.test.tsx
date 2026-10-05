@@ -44,14 +44,14 @@ describe('WorktimeAutoSettings', () => {
   it('asks for the employer acknowledgement before switching anything on', async () => {
     render(<WorktimeAutoSettings />)
     expect(screen.getByText(/Дор хаяж нэг оффисын бүс нэмэх хүртэл/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('radio', { name: 'Туршилт' }))
+    fireEvent.click(screen.getByRole('switch', { name: /Байршлаар автомат цаг бүртгэх/ }))
     expect(mocks.update).not.toHaveBeenCalled()
     expect(await screen.findByText('Ажил олгогчийн хариуцлага')).toBeInTheDocument()
     const confirm = screen.getByRole('button', { name: 'Баталгаажуулж асаах' })
     expect(confirm).toBeDisabled()
     fireEvent.click(screen.getByLabelText('Байгууллагын нэрийн өмнөөс дээрхийг хүлээн зөвшөөрч байна'))
     fireEvent.click(confirm)
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith({ auto_geofence_mode: 'shadow', acknowledge_employer_disclaimer: true }))
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith({ auto_geofence_mode: 'on', acknowledge_employer_disclaimer: true }))
   })
 
   it('changes the mode directly once the current notice is acknowledged', async () => {
@@ -61,6 +61,13 @@ describe('WorktimeAutoSettings', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Асаалттай' }))
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith({ auto_geofence_mode: 'on', acknowledge_employer_disclaimer: undefined }))
     expect(screen.queryByText('Ажил олгогчийн хариуцлага')).not.toBeInTheDocument()
+  })
+
+  it('turns tracking off with the switch without asking again', async () => {
+    mocks.settings.data = { ...mocks.settings.data, auto_geofence_mode: 'on', employer_disclaimer_ack: { account_id: 1, email: 'admin@oyuns.mn', acknowledged_at: '2026-10-02T03:00:00Z', policy_version: '2026-10-02' } }
+    render(<WorktimeAutoSettings />)
+    fireEvent.click(screen.getByRole('switch', { name: /Байршлаар автомат цаг бүртгэх/ }))
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith({ auto_geofence_mode: 'off', acknowledge_employer_disclaimer: undefined }))
   })
 
   it('warns when the notice changed after it was acknowledged', () => {
@@ -74,8 +81,7 @@ describe('WorktimeAutoSettings', () => {
     render(<WorktimeAutoSettings />)
     expect(screen.getByText('Зөвхөн админ өөрчилнө')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Бүс нэмэх/ })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('radio', { name: 'Туршилт' }))
-    expect(mocks.update).not.toHaveBeenCalled()
+    expect(screen.getByRole('switch', { name: /Байршлаар автомат цаг бүртгэх/ })).toBeDisabled()
     expect(screen.queryByText('Ажил олгогчийн хариуцлага')).not.toBeInTheDocument()
   })
 })

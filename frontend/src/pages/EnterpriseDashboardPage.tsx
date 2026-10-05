@@ -100,7 +100,12 @@ export function EnterpriseDashboardPage() {
     window.requestAnimationFrame(() => document.querySelector(`[data-widget-id="${widget.id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
   }, [commitPositions, items])
 
-  const startEditing = useCallback(() => setEditing(true), [])
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  // The edit button sits below the widgets; the editing controls are at the top, so bring them into view.
+  const startEditing = useCallback(() => {
+    setEditing(true)
+    window.requestAnimationFrame(() => toolbarRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }))
+  }, [])
   const finishEditing = useCallback(() => { setEditing(false); setLibraryOpen(false) }, [])
   useEffect(() => {
     if (!isEditing || libraryOpen || settingsId) return
@@ -123,16 +128,12 @@ export function EnterpriseDashboardPage() {
 
   return (
     <div className={`today-page${libraryOpen ? ' has-library' : ''}`}>
-      <div className="today-toolbar" role="toolbar" aria-label={t('today.toolbar.aria')}>
-        {isEditing ? <>
-          <span className="today-toolbar-hint">{t('today.toolbar.hint')}</span>
-          <Button label={t('today.toolbar.reset')} size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={() => { if (window.confirm(t('today.toolbar.resetConfirm'))) layout.resetToDefault() }} isDisabled={!layout.isCustomized} />
-          <Button label={t('today.library.title')} size="sm" icon={<Plus size={14} />} onClick={() => setLibraryOpen(true)} />
-          <Button label={t('today.toolbar.done')} size="sm" variant="primary" icon={<Check size={14} />} onClick={finishEditing} />
-        </> : (
-          <Button label={t('today.toolbar.edit')} size="sm" variant="ghost" icon={<LayoutGrid size={14} />} onClick={startEditing} tooltip={t('today.toolbar.editTooltip')} />
-        )}
-      </div>
+      {isEditing && <div className="today-toolbar" role="toolbar" aria-label={t('today.toolbar.aria')} ref={toolbarRef}>
+        <span className="today-toolbar-hint">{t('today.toolbar.hint')}</span>
+        <Button label={t('today.toolbar.reset')} size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={() => { if (window.confirm(t('today.toolbar.resetConfirm'))) layout.resetToDefault() }} isDisabled={!layout.isCustomized} />
+        <Button label={t('today.library.title')} size="sm" icon={<Plus size={14} />} onClick={() => setLibraryOpen(true)} />
+        <Button label={t('today.toolbar.done')} size="sm" variant="primary" icon={<Check size={14} />} onClick={finishEditing} />
+      </div>}
       {layout.isLoading ? (
         <div className="today-canvas-loading" aria-label={t('today.loading')}><span className="skeleton" /><span className="skeleton" /><span className="skeleton" /></div>
       ) : items.length === 0 && !isEditing ? (
@@ -152,6 +153,9 @@ export function EnterpriseDashboardPage() {
           renderItem={renderItem}
         />
       )}
+      {!isEditing && !layout.isLoading && <div className="today-edit-footer">
+        <Button label={t('today.toolbar.edit')} size="sm" variant="ghost" icon={<LayoutGrid size={14} />} onClick={startEditing} tooltip={t('today.toolbar.editTooltip')} />
+      </div>}
       {libraryOpen && <Suspense fallback={null}>
         <WidgetLibrary
           widgets={library}
