@@ -1,5 +1,5 @@
 import { LANGUAGE_NAMES } from '../components/LanguageSwitcher'
-import { LANGUAGES } from '../locales'
+import { LANGUAGES } from '../locales/languages'
 import i18n from '../i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from "react";

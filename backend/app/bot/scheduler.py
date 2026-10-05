@@ -755,6 +755,7 @@ async def send_birthday_greeting(employee_id: int):
         timezone_name = emp.timezone
         employee_name = emp.name
         organization_id = emp.organization_id
+        primary_language = emp.primary_language
 
     local_day = _local_today(timezone_name)
     if not _birthday_occurs_on_day(birthday, local_day):

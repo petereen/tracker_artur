@@ -1476,7 +1476,7 @@ export function useChatContacts(search = '', enabled = true) {
     queryKey: ['v1', 'chat', 'contacts', search],
     queryFn: () => api.get('/v1/chat/contacts', { params: { q: search || undefined, limit: 100 } }).then((response) => response.data),
     enabled,
-    refetchInterval: 20_000,
+    // Presence and membership changes arrive over the shell WebSocket, which invalidates ['v1', 'chat'].
   })
 }
 
@@ -1486,7 +1486,8 @@ export function useChatConversations(search = '', filter: ChatConversationFilter
   return useQuery<ChatConversationPage>({
     queryKey: ['v1', 'chat', 'conversations', search, filter],
     queryFn: () => api.get('/v1/chat/conversations', { params: { q: search || undefined, filter, limit: 50 } }).then((response) => response.data),
-    refetchInterval: 20_000,
+    // Realtime events invalidate this; the interval only covers a dropped socket.
+    refetchInterval: 60_000,
   })
 }
 
@@ -1496,9 +1497,9 @@ export function useChatUnreadCount(enabled = true) {
     queryFn: () => api.get('/v1/chat/unread-count').then((response) => response.data),
     enabled,
     // Realtime events invalidate this instantly; the interval only covers a
-    // dropped socket so the nav badge never goes stale.
-    refetchInterval: enabled ? 30_000 : false,
-    refetchIntervalInBackground: true,
+    // dropped socket so the nav badge never goes stale. Hidden tabs skip it
+    // (nothing shows the count there, and the tab refetches on focus).
+    refetchInterval: enabled ? 60_000 : false,
   })
 }
 
@@ -1507,7 +1508,7 @@ export function useChatConversation(publicId?: string) {
     queryKey: ['v1', 'chat', 'conversation', publicId],
     queryFn: () => api.get(`/v1/chat/conversations/${publicId}`).then((response) => response.data),
     enabled: Boolean(publicId),
-    refetchInterval: 20_000,
+    refetchInterval: 60_000,
   })
 }
 

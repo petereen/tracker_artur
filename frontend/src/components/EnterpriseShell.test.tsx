@@ -47,9 +47,9 @@ describe('enterprise sidebar', () => {
     expect(link.parentElement).toHaveClass('sidebar-footer')
   })
 
-  it('opens the account menu with theme switch, profile, docs placeholder and log out', async () => {
+  it('opens the account menu with theme switch, profile, docs and log out', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /><Route path="profile" element={<div>Profile page</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
+    const { container } = render(<QueryClientProvider client={client}><MemoryRouter><Routes><Route element={<EnterpriseShell />}><Route index element={<div>Today</div>} /><Route path="profile" element={<div>Profile page</div>} /><Route path="docs" element={<div>Docs page</div>} /></Route></Routes></MemoryRouter></QueryClientProvider>)
     expect(container.querySelector('.workspace-header .theme-toggle')).toBeNull()
     const trigger = screen.getByRole('button', { name: 'Бүртгэлийн цэс нээх' })
     expect(trigger).toHaveTextContent('Manager')
@@ -57,7 +57,7 @@ describe('enterprise sidebar', () => {
     fireEvent.click(trigger)
     const menu = screen.getByRole('menu', { name: 'Миний бүртгэл' })
     expect(within(menu).getByRole('menuitem', { name: 'Профайл' })).toBeInTheDocument()
-    expect(within(menu).getByRole('menuitem', { name: /Заавар/ })).toHaveAttribute('aria-disabled', 'true')
+    expect(within(menu).getByRole('menuitem', { name: 'Заавар' })).not.toHaveAttribute('aria-disabled')
     expect(within(menu).getByRole('menuitem', { name: 'Гарах' })).toBeInTheDocument()
     expect(within(menu).getByRole('button', { name: /Харанхуй горимд шилжих|Гэрэлтэй горимд шилжих/ })).toBeInTheDocument()
 
@@ -72,6 +72,11 @@ describe('enterprise sidebar', () => {
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Профайл' }))
     expect(screen.queryByRole('menu')).toBeNull()
     expect(screen.getByText('Profile page')).toBeInTheDocument()
+
+    fireEvent.click(trigger)
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Заавар' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.getByText('Docs page')).toBeInTheDocument()
   })
 
   it('keeps five thumb-reachable mobile destinations and a More control', () => {

@@ -36,6 +36,7 @@ export function AccountMenu({ actor, theme, onToggleTheme, onLogout }: Props) {
 
   const close = () => setOpen(false)
   const openProfile = () => { close(); navigate('/profile') }
+  const openDocs = () => { close(); navigate('/docs') }
   const logout = () => { close(); onLogout() }
 
   const onTriggerKey = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
@@ -64,9 +65,7 @@ export function AccountMenu({ actor, theme, onToggleTheme, onLogout }: Props) {
       </div>
       <div className="account-menu-list">
         <button type="button" role="menuitem" className="account-menu-item" onClick={openProfile}><UserCircle2 size={17} strokeWidth={1.8} aria-hidden /><span>{t('shell.account.profile')}</span></button>
-        <button type="button" role="menuitem" className="account-menu-item" aria-disabled="true" title={t('shell.account.docsSoon')} onClick={(event) => event.preventDefault()}>
-          <BookOpen size={17} strokeWidth={1.8} aria-hidden /><span>{t('shell.account.docs')}</span><em>{t('shell.account.soon')}</em>
-        </button>
+        <button type="button" role="menuitem" className="account-menu-item" onClick={openDocs}><BookOpen size={17} strokeWidth={1.8} aria-hidden /><span>{t('shell.account.docs')}</span></button>
       </div>
       <div className="account-menu-list account-menu-foot">
         <button type="button" role="menuitem" className="account-menu-item danger" onClick={logout}><LogOut size={17} strokeWidth={1.8} aria-hidden /><span>{t('action.logout')}</span></button>

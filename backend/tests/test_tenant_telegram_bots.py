@@ -195,7 +195,7 @@ def _companion(monkeypatch, *, worker=None, roles=frozenset()):
         return True
 
     async def actor(_tg_id):
-        return SimpleNamespace(roles=frozenset(roles), tenant=current_tenant_id())
+        return SimpleNamespace(roles=frozenset(roles), tenant=current_tenant_id(), locale=None)
 
     async def name(_tenant_id):
         return "Acme <LLC>"
@@ -218,7 +218,7 @@ def _companion(monkeypatch, *, worker=None, roles=frozenset()):
 
 
 def test_bot_middleware_ignores_workers_of_other_tenants_and_binds_the_bot_tenant(monkeypatch):
-    worker = SimpleNamespace(id=5, organization_id=1, name="Primary worker")
+    worker = SimpleNamespace(id=5, organization_id=1, name="Primary worker", primary_language=None)
     middlewares, message, answers, linked = _companion(monkeypatch, worker=worker, roles={"member"})
     seen = {}
 
@@ -241,7 +241,7 @@ def test_bot_middleware_ignores_workers_of_other_tenants_and_binds_the_bot_tenan
     ({"member"}, False), ({"team_lead"}, False), ({"member", "manager"}, True), ({"admin"}, True), (set(), False),
 ])
 def test_bot_management_scope_comes_from_erp_roles(monkeypatch, roles, is_manager):
-    worker = SimpleNamespace(id=5, organization_id=2, name="Worker")
+    worker = SimpleNamespace(id=5, organization_id=2, name="Worker", primary_language=None)
     middlewares, message, _answers, _linked = _companion(monkeypatch, worker=worker, roles=roles)
     # The legacy env allowlist no longer grants anything in the bot.
     monkeypatch.setattr(settings, "MANAGER_TG_ID", "100")

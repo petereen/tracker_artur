@@ -109,7 +109,7 @@ def test_calculated_lookup_by_title_and_all_calculated(monkeypatch):
     second = _entry(source="Тооцоолсон", pair="ТРИКУЭТРА", kind="calculated", key="formula:triquetra")
     _mock(monkeypatch, [calculated, second])
     title = asyncio.run(exchange_rate_service.get_exchange_rate(provider="Тооцоолсон", pair="Делькрадо", request_type="calculated"))
-    assert title["pair"] == "ДЕЛЬКРАДО"
+    assert [item["pair"] for item in title["rates"]] == ["ДЕЛЬКРАДО"]
     listed = asyncio.run(exchange_rate_service.get_exchange_rate(provider="rates", pair="all calculated"))
     assert len(listed["rates"]) == 2
     assert all(item["kind"] == "calculated" for item in listed["rates"])

@@ -14,10 +14,11 @@ import { initializeRuntimeClass } from './platform/runtime'
 import { NativeBootBoundary } from './platform/updater'
 import { installNativeTelegramAuth } from './platform/telegram-auth'
 import { startTelemetry } from './platform/telemetry'
+import './fonts.css'
 import './index.css'
 import './workspace-features.css'
 import './unified-controls.css'
-import './i18n'
+import { i18nReady } from './i18n'
 
 initializeRuntimeClass()
 void installNativeTelegramAuth()
@@ -63,13 +64,16 @@ function AppToaster() {
   />
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ThemedRoot>
-        <NativeBootBoundary><App /></NativeBootBoundary>
-        <AppToaster />
-      </ThemedRoot>
-    </QueryClientProvider>
-  </StrictMode>,
-)
+// Render once the active language's catalogue has arrived (a failed load still renders, with keys).
+void i18nReady.catch(() => undefined).then(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <ThemedRoot>
+          <NativeBootBoundary><App /></NativeBootBoundary>
+          <AppToaster />
+        </ThemedRoot>
+      </QueryClientProvider>
+    </StrictMode>,
+  )
+})

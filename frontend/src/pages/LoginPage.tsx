@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { ArrowRight, LockKeyhole, Mail, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
@@ -6,8 +6,11 @@ import { useAuthCapabilities, useEnterpriseLogin } from '../api/enterprise'
 import { tenancyErrorMessage, useTenantBranding } from '../api/tenancy'
 import { isNativePlatform, safeLocalStorage } from '../platform/runtime'
 import { startNativeTelegramLogin, subscribeToNativeTelegramAuth, type NativeTelegramAuthState } from '../platform/telegram-auth'
-import Grainient from '../components/Grainient'
 import { LanguageSwitcher } from '../components/LanguageSwitcher'
+
+// Decorative WebGL backdrop (ogl, ~43 KB): loaded after the form so signed-in
+// sessions never download it. The aside's CSS gradient shows until it mounts.
+const Grainient = lazy(() => import('../components/Grainient'))
 
 /** Mixes two rgb() strings; null when either can't be read (jsdom, unresolved variables). */
 function mixColors(a: string, b: string, weightA: number) {
@@ -134,7 +137,7 @@ export function LoginPage() {
         </div>
       </section>
       <aside className="auth-brand-side" aria-label={t('auth.login.brandAria')}>
-        <Grainient className="auth-grainient" />
+        <Suspense fallback={null}><Grainient className="auth-grainient" /></Suspense>
         <div className="auth-brand-content">
           <div className="auth-brand-copy">
             <span className="auth-brand-label">{t('auth.login.brandLabel')}</span>

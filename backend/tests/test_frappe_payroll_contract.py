@@ -58,7 +58,6 @@ def test_payroll_entry_recheck_preserves_selection_and_refreshes_canonical_input
     service = (ROOT / "app/payroll/frappe_service.py").read_text()
     router = (ROOT / "app/payroll/router.py").read_text()
     inputs = (ROOT / "app/payroll/inputs.py").read_text()
-    hr_router = (ROOT / "app/hr/router.py").read_text()
     assert '"employee_ids" in data.model_fields_set' in service
     assert '"manual_overrides"' in service
     assert '"canonical_inputs": overrides' in service
@@ -66,4 +65,4 @@ def test_payroll_entry_recheck_preserves_selection_and_refreshes_canonical_input
     assert '"payroll_entry_id": run.id' in router
     assert '"attendance_policy"' in inputs
     assert 'Employee.organization_id == org' in inputs
-    assert '"unpaid_leave_ids": leaves' in hr_router
+    assert '"unpaid_leave_ids": sorted(unpaid_leave_ids)' in inputs

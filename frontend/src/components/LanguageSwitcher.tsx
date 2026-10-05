@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check } from 'lucide-react'
-import { LANGUAGES, type Language } from '../locales'
+import { LANGUAGES, type Language } from '../locales/languages'
 
 export const LANGUAGE_NAMES: Record<Language, { short: string; full: string }> = {
   mn: { short: 'МН', full: 'Монгол' },

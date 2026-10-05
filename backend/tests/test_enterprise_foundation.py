@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -346,6 +347,8 @@ def test_task_serialization_exempts_review_tasks_from_overdue_state():
         estimate_minutes=30,
         work_location_type="office",
         work_location="HQ",
+        is_all_day=False,
+        created_by_id=None,
         sort_position=1,
         version=3,
         is_archived=False,
@@ -369,7 +372,7 @@ def test_tasks_expose_an_optional_reviewer_for_the_review_workflow():
 def test_calendar_items_support_locations_and_normalized_collaborators():
     assert "location" in Base.metadata.tables["calendar_entries"].c
     collaborators = Base.metadata.tables["calendar_entry_collaborators"]
-    assert {"organization_id", "calendar_entry_id", "employee_id"}.issubset(collaborators.c)
+    assert {"organization_id", "calendar_entry_id", "employee_id"}.issubset(collaborators.c.keys())
     assert CalendarEntry.__tablename__ == "calendar_entries"
     assert CalendarEntryCollaborator.__tablename__ == "calendar_entry_collaborators"
 
@@ -394,7 +397,7 @@ def test_planning_migration_follows_current_head_and_models_nullable_location():
     assert migration.down_revision == "t8u9v0w1x2y3"
     assert tasks.c.work_location_type.nullable is True
     assert tasks.c.work_location.nullable is True
-    assert {"organization_id", "account_id", "starts_at", "ends_at", "version"}.issubset(blocks.c)
+    assert {"organization_id", "account_id", "starts_at", "ends_at", "version"}.issubset(blocks.c.keys())
 
 
 def test_work_time_summary_excludes_breaks_from_productive_total():

@@ -65,6 +65,9 @@ class FakeState:
     async def update_data(self, **kwargs):
         self.data.update(kwargs)
 
+    async def get_data(self):
+        return dict(self.data)
+
 
 EMPLOYEE = SimpleNamespace(
     id=7,
@@ -388,6 +391,7 @@ def test_task_draft_uses_the_required_mongolian_format():
         "<b>Оюукаад хуралтай тухай мэдээлэл</b>\n"
         "📝 Оюукаад маргааш 18 цагаас хуралтай гэж хэлэх.\n"
         "👤 Гүйцэтгэгч: <b>Оюукаа</b>\n"
+        "🔎 Хянагч: <b>Сонгоогүй</b>\n"
         "🟡 Тэргүүлэх зэрэг: 2\n"
         "🕒 Хугацаа: <b>24.07 18:00 УБ</b>"
     )

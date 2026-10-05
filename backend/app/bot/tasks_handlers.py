@@ -366,7 +366,7 @@ def task_draft_text(draft: dict, language: str = "mn") -> str:
     desc = f"\n📝 {escape(str(draft['description']))}" if draft.get("description") else ""
     title = escape(str(draft.get("title") or "—"))
     assignee = escape(str(draft.get("assignee_name") or "—"))
-    reviewer = escape(str(draft.get("reviewer_name") or _t("unassigned", language)))
+    reviewer = escape(str(draft.get("reviewer_name") or (_t("unassigned", language) if language == "en" else "Сонгоогүй")))
     plural = draft.get("assign_to_all") or len(draft.get("assignee_ids") or []) > 1
     assignee_label = ("Assignees" if plural else "Assignee") if language == "en" else ("Гүйцэтгэгчид" if plural else "Гүйцэтгэгч")
     if language == "en":

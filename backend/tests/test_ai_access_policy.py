@@ -1,6 +1,7 @@
 """Organization-wide OYUNS AI assistant access rights."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -71,8 +72,7 @@ def test_visible_definitions_and_model_catalog_exclude_disabled_sections():
     assert "CRM clients/partners and activities" not in gateway._available_data(admin(), sensitive_allowed=True, access=runtime.access)
 
 
-@pytest.mark.asyncio
-async def test_dispatch_rechecks_the_organization_policy(monkeypatch):
+def test_dispatch_rechecks_the_organization_policy(monkeypatch):
     runtime = runtime_with_access({"hr": {"read": False}})
 
     async def resolve(_db, _organization_id):
@@ -83,7 +83,7 @@ async def test_dispatch_rechecks_the_organization_policy(monkeypatch):
 
     monkeypatch.setattr(registry_module, "resolve_ai_runtime", resolve)
     monkeypatch.setattr(registry_module.adapters, "execute", execute)
-    result = await registry_module.default_registry.dispatch_tool("oyuns_hr_get", {}, admin(), db=None)
+    result = asyncio.run(registry_module.default_registry.dispatch_tool("oyuns_hr_get", {}, admin(), db=None))
     assert result["status"] == "denied"
     assert "access settings" in result["summary"]
 

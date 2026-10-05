@@ -61,6 +61,7 @@ def test_leave_lifecycle_notifies_requester_and_hr_and_emits_hr_events():
     frontend_api = (ROOT.parent / "frontend/src/api/enterprise.ts").read_text()
     realtime = (ROOT.parent / "frontend/src/components/EnterpriseShell.tsx").read_text()
     page = (ROOT.parent / "frontend/src/pages/HRWorkspacePage.tsx").read_text()
+    hr_locale = (ROOT.parent / "frontend/src/locales/hr.ts").read_text()
 
     assert "async def _hr_account_ids" in router
     assert 'kind="hr_leave_requested"' in router
@@ -71,20 +72,24 @@ def test_leave_lifecycle_notifies_requester_and_hr_and_emits_hr_events():
     assert "hr: 'hr'" in realtime
     assert "detail.code === 'leave_balance_insufficient'" in page
     assert "useUpdateHRLeave" in frontend_api
-    assert "Edit leave request" in page
+    assert "t('hr.leave.edit')" in page
+    assert "'hr.leave.edit': 'Edit leave request'" in hr_locale
     assert "isHR && editing.status === 'approved'" in page
-    assert "value: 'rejected', label: 'Татгалзсан'" in page
+    assert "value: 'rejected', label: t('hr.leave.status.rejected')" in page
+    assert "'hr.leave.status.rejected': 'Татгалзсан'" in hr_locale
 
 
 def test_hr_ui_can_set_annual_leave_days_for_new_and_existing_workers():
     api = (ROOT.parent / "frontend/src/api/enterprise.ts").read_text()
     page = (ROOT.parent / "frontend/src/pages/HRWorkspacePage.tsx").read_text()
     ui = (ROOT.parent / "frontend/src/components/ui.tsx").read_text()
+    hr_locale = (ROOT.parent / "frontend/src/locales/hr.ts").read_text()
 
     assert "useSetHRLeaveBalance" in api
     assert "/leave-balance" in api
     assert "annual_leave_days" in page
-    assert "Баланс тохируулах" in page
+    assert "t('hr.leave.balanceTitle')" in page
+    assert "'hr.leave.balanceTitle': 'Баланс тохируулах'" in hr_locale
     assert "entitled_days" in page
     assert "min?: string | number" in ui
 
@@ -103,7 +108,8 @@ def test_monthly_payroll_profile_schedule_validation_and_shared_preview_contract
     assert "calculate_monthly_run(PayrollRunType.FINAL" in router
     assert "calculate_monthly_run(PayrollRunType.ADVANCE" in router
     assert "useMonthlyPayrollPreview" in frontend
-    assert "Цалингийн тохиргоо" in frontend
+    assert "t('mp.pd.kicker')" in frontend
+    assert "'mp.pd.kicker': 'ЦАЛИНГИЙН ТОХИРГОО'" in (ROOT.parent / "frontend/src/locales/payrollRun.ts").read_text()
 
 
 def test_profile_department_comes_from_hr_departments_and_locks_after_assignment():

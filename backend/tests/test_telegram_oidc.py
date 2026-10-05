@@ -69,6 +69,7 @@ def test_browser_authorization_uses_oidc_pkce_without_legacy_parameters(monkeypa
         return {"authorization_endpoint": "https://oauth.telegram.org/auth"}
 
     monkeypatch.setattr(telegram_oidc, "discovery", discovery)
+    monkeypatch.setattr(settings, "TELEGRAM_OIDC_CLIENT_ID", "test-client-id")
     url = asyncio.run(telegram_oidc.authorization_url("state", "nonce", "verifier", redirect_uri="https://example.com/callback"))
     params = parse_qs(urlparse(url).query)
     assert params["client_id"] == [settings.TELEGRAM_OIDC_CLIENT_ID]
@@ -179,13 +180,13 @@ def test_successful_browser_callback_validates_state_and_issues_existing_session
         assert nonce == "nonce"
         return {"sub": "123", "preferred_username": "alice"}
 
-    async def session(response, _db, telegram_id, username, device_label, origin):
+    async def session(response, _db, telegram_id, username, device_label, origin, oidc_subject=None, profile=None):
         captured.update(telegram_id=telegram_id, username=username, device_label=device_label, origin=origin)
 
     monkeypatch.setattr(telegram_oidc, "exchange_code", exchange)
     monkeypatch.setattr(telegram_oidc, "validate_id_token", validate)
     monkeypatch.setattr("app.routers.enterprise_auth._telegram_session", session)
-    response = asyncio.run(telegram_web_callback(code="authorization-code", state=state, state_cookie=telegram_oidc.encrypt_state(state), db=db))
+    response = asyncio.run(telegram_web_callback(code="authorization-code", state=state, provider_error=None, state_cookie=telegram_oidc.encrypt_state(state), db=db))
     assert response.headers["location"] == "/"
     assert captured["telegram_id"] == "123"
     assert captured["device_label"] == "telegram-oidc-web"
@@ -198,7 +199,7 @@ def test_browser_callback_rejects_invalid_state_before_database_lookup(monkeypat
             raise AssertionError("invalid state must not query the transaction")
 
     monkeypatch.setattr(telegram_oidc, "is_configured", lambda: True)
-    response = asyncio.run(telegram_web_callback(state="s" * 48, state_cookie=telegram_oidc.encrypt_state("different"), db=NoLookupDb()))
+    response = asyncio.run(telegram_web_callback(state="s" * 48, provider_error=None, state_cookie=telegram_oidc.encrypt_state("different"), db=NoLookupDb()))
     assert "telegram_auth_error=invalid_state" in response.headers["location"]
 
 
@@ -211,12 +212,12 @@ def test_browser_callback_reports_token_exchange_failure(monkeypatch):
         raise telegram_oidc.TelegramOIDCError("provider rejected code")
 
     monkeypatch.setattr(telegram_oidc, "exchange_code", exchange)
-    response = asyncio.run(telegram_web_callback(code="bad-code", state=state, state_cookie=telegram_oidc.encrypt_state(state), db=db))
+    response = asyncio.run(telegram_web_callback(code="bad-code", state=state, provider_error=None, state_cookie=telegram_oidc.encrypt_state(state), db=db))
     assert "telegram_auth_error=token_exchange_failed" in response.headers["location"]
 
 
 def test_telegram_session_creates_and_reuses_accounts_by_existing_telegram_identity():
-    employee = SimpleNamespace(id=7, telegram_id="123", telegram_username="alice", email=None, is_active=True, primary_language="mn")
+    employee = SimpleNamespace(id=7, telegram_id="123", telegram_username="alice", email=None, is_active=True, primary_language="mn", first_name=None, last_name=None, photo_url=None, organization_id=1)
     existing = SimpleNamespace(id=9, status="active", failed_login_count=2, locked_until=None, last_login_at=None, organization_id=1)
 
     class Roles:
@@ -262,8 +263,12 @@ def test_telegram_session_creates_and_reuses_accounts_by_existing_telegram_ident
     assert any(getattr(item, "email", None) == "telegram-123" for item in new_db.added)
 
 
-def test_oidc_subject_reuses_existing_account_and_is_persisted_for_new_account():
-    employee = SimpleNamespace(id=7, telegram_id="456", telegram_username="bob", email=None, is_active=True, primary_language="mn")
+def test_oidc_subject_reuses_existing_account_and_is_persisted_for_new_account(monkeypatch):
+    async def seat_available(_db, _organization_id):
+        return None
+
+    monkeypatch.setattr("app.routers.enterprise_auth.ensure_seat_available", seat_available)
+    employee = SimpleNamespace(id=7, telegram_id="456", telegram_username="bob", email=None, is_active=True, primary_language="mn", first_name=None, last_name=None, photo_url=None, organization_id=1)
     existing = SimpleNamespace(id=10, employee_id=7, telegram_oidc_subject="stable-subject", status="active", failed_login_count=0, locked_until=None, last_login_at=None, organization_id=1)
 
     class Roles:

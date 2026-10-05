@@ -26,7 +26,8 @@ def test_v2_api_has_preflight_usage_preview_reversal_and_legacy_sunset():
         assert marker in router
     assert "payroll_legacy_write_gone" in router
     assert "payroll_worktime_overlap" in service
-    assert "payroll_gl_mapping_incomplete" in service
+    assert "payroll_gl_mapping_unconfigured" in service
+    assert "payroll_gl_mapping_invalid" in service
 
 
 def test_v2_frontend_only_queries_unified_runs():

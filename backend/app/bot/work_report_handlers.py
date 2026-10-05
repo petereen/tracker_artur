@@ -90,8 +90,12 @@ def _prompt_text(report_type: str, prompt_type: str | None = None, language: str
         is_en = language == "en"
         if report_type in {"daily", "daily_test"}:
             if prompt_type in {"daily_checkin", "test_daily_checkin"}:
-                return f"{test_prefix}⏰ <b>Daily check-in</b>\n\nTap the button below to answer today's questions."
-            return f"{test_prefix}📝 <b>Daily work report</b>\n\nReply to this message with a summary of the work you completed today."
+                if is_en:
+                    return f"{test_prefix}⏰ <b>Daily check-in</b>\n\nTap the button below to answer today's questions."
+                return f"{test_prefix}⏰ <b>Ежедневный опрос</b>\n\nНажмите кнопку ниже, чтобы ответить на сегодняшние вопросы."
+            if is_en:
+                return f"{test_prefix}📝 <b>Daily work report</b>\n\nReply to this message with a summary of the work you completed today."
+            return f"{test_prefix}📝 <b>Ежедневный отчёт</b>\n\nОтветьте на это сообщение и кратко опишите работу, которую вы выполнили сегодня."
         if report_type in {"monthly", "monthly_test"}:
             heading = "Monthly report" if is_en else "Ежемесячный отчёт"
             body = "Reply to this message with your report for the month." if is_en else "Ответьте на это сообщение и напишите отчёт за месяц."
@@ -251,11 +255,11 @@ def _draft_text(report: WorkReport, text: str, language: str = "mn") -> str:
             "monthly_test": {"en": "Monthly report test", "ru": "Тест ежемесячного отчёта"},
             "next_month_plan_test": {"en": "Next-month plan test", "ru": "Тест плана на следующий месяц"},
         }
-        label = localized.get(report.report_type, _REPORT_LABELS.get(report.report_type, {}).get(language, "Report" if language == "en" else "Отчёт"))
+        label = (localized.get(report.report_type) or _REPORT_LABELS.get(report.report_type) or {}).get(language, "Report" if language == "en" else "Отчёт")
         heading_suffix = "draft" if language == "en" else "черновик"
         action_hint = "Use the buttons below to approve, edit, or delete this draft." if language == "en" else "Используйте кнопки ниже, чтобы утвердить, изменить или удалить черновик."
-        return f"📝 <b>{label} — {heading_suffix}</b>\n\n{escape(text)}\n\n{action_hint}"
-    return f"📝 <b>{label} — ноорог</b>\n\n{escape(text)}\n\nДоорх товчоор батлах, засах эсвэл устгана уу."
+        return f"📝 <b>{label} — {heading_suffix}</b>\n\n{escape(text, quote=False)}\n\n{action_hint}"
+    return f"📝 <b>{label} — ноорог</b>\n\n{escape(text, quote=False)}\n\nДоорх товчоор батлах, засах эсвэл устгана уу."
 
 
 class ReportPromptReply(Filter):

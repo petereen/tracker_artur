@@ -63,8 +63,9 @@ def test_work_time_summary_splits_remote_and_in_person_intervals():
     summary = work_report_service.summarize_work_time(entries, now=now)
 
     assert summary["in_person_minutes"] == 150
-    assert summary["remote_minutes"] == 120
-    assert summary["total_minutes"] == 270
+    # The open remote entry keeps counting up to `now` (06:00 -> 10:00 = 240 min).
+    assert summary["remote_minutes"] == 300
+    assert summary["total_minutes"] == 450
     assert summary["complete_entries"] == 2
     assert summary["incomplete_entries"] == 1
     assert summary["entries"][-1]["open"] is True

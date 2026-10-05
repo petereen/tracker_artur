@@ -173,7 +173,11 @@ def test_workflow_validation_requires_safe_terminal_states_and_role_references()
     workflow = {
         "initial_state": "draft",
         "states": [{"key": "draft"}, {"key": "approved", "terminal": True}, {"key": "rejected", "terminal": True}, {"key": "cancelled", "terminal": True}],
-        "transitions": [{"from": "draft", "to": "approved", "label": "Approve", "role_ids": [4]}],
+        "transitions": [
+            {"from": "draft", "to": "approved", "label": "Approve", "role_ids": [4]},
+            {"from": "draft", "to": "rejected", "label": "Reject", "role_ids": [4]},
+            {"from": "draft", "to": "cancelled", "label": "Cancel", "role_ids": [4]},
+        ],
     }
     assert validate_workflow(workflow, {4}, posting_capable=True)["initial_state"] == "draft"
     with pytest.raises(HTTPException) as error:

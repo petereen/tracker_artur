@@ -6,7 +6,7 @@ import i18nInstance from '../i18n'
 import toast from 'react-hot-toast'
 import { api } from '../api/client'
 import {
-  BarChart3, BriefcaseBusiness, Calculator, BookText, Handshake, PiggyBank, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, ScanLine, UserRoundCog,
+  BarChart3, BookOpen, BriefcaseBusiness, Calculator, BookText, Handshake, PiggyBank, CalendarDays, CheckSquare2, ChevronLeft, ChevronRight, FileCheck2, FileSignature, Goal, KeyRound, ScanLine, UserRoundCog,
   FolderArchive, LayoutDashboard, LayoutGrid, MessageCircle, Search, Send, Settings2, Sparkles, Users2, X, Upload, UserCircle2,
 } from 'lucide-react'
 import { isFeatureEnabled, useTenantContext } from '../api/tenancy'
@@ -16,7 +16,7 @@ import { useBudgetCapabilities } from '../api/budget'
 import { EMPTY_ROLES, useAuthStore } from '../store/auth'
 import { LANGUAGE_CHOSEN_KEY } from './LanguageSwitcher'
 import { AccountMenu } from './AccountMenu'
-import { LANGUAGES } from '../locales'
+import { LANGUAGES } from '../locales/languages'
 import { periodFromPreset } from './TimePeriodFilter'
 import { WorkspaceModeProvider } from './WorkspaceModeProvider'
 import { WorkspaceModeToggle } from './WorkspaceModeToggle'
@@ -77,6 +77,7 @@ const TITLES: Record<string, string> = {
   '/administration/ai/knowledge': 'shell.title.aiKnowledge',
   '/profile': 'shell.title.profile',
   '/company-files': 'shell.title.companyFiles',
+  '/docs': 'shell.title.docs',
 }
 
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
@@ -334,6 +335,7 @@ export function EnterpriseShell() {
       ...(roles.includes('admin') ? [{ id: 'access-settings', type: 'feature' as const, title: t('shell.command.access'), subtitle: t('shell.command.accessHint'), icon: Settings2, run: () => navigate('/administration/people/users') }] : []),
     ] : []),
     { id: 'profile', type: 'feature' as const, title: t('shell.command.profile'), subtitle: t('shell.command.profileHint'), icon: UserCircle2, run: () => navigate('/profile') },
+    { id: 'docs', type: 'feature' as const, title: t('shell.command.docs'), subtitle: t('shell.command.docsHint'), icon: BookOpen, run: () => navigate('/docs') },
   ], [navigate, roles, t])
   const mobileNav = useMemo(() => ['/', '/calendar', '/tasks', '/chat'].map((to) => nav.find((item) => item.to === to)).filter(Boolean) as typeof nav, [nav])
   const moreNav = useMemo(() => nav.filter((item) => !mobileNav.includes(item)), [mobileNav, nav])

@@ -214,8 +214,8 @@ def test_notification_push_is_delivered_on_the_default_channel_with_a_safe_link(
         title="Ажлын цаг автоматаар эхэллээ", body="Оффисын бүсэд орсон тул ажлын цаг эхэллээ.", target_url="//evil.example/steal",
     )
     registrations = [
-        SimpleNamespace(provider="fcm", encrypted_token=encrypt_secret("android-token"), is_active=True, revoked_at=None),
-        SimpleNamespace(provider="apns", encrypted_token=encrypt_secret("ios-token"), is_active=True, revoked_at=None),
+        SimpleNamespace(id=1, provider="fcm", encrypted_token=encrypt_secret("android-token"), is_active=True, revoked_at=None),
+        SimpleNamespace(id=2, provider="apns", encrypted_token=encrypt_secret("ios-token"), is_active=True, revoked_at=None),
     ]
 
     class Database:

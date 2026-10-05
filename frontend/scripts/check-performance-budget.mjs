@@ -22,19 +22,26 @@ function manifestGraph() {
   const manifestPath = join(dist, '.vite', 'manifest.json')
   if (!statSync(manifestPath, { throwIfNoEntry: false })) return new Set()
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  const byFile = new Map(Object.values(manifest).map((entry) => [entry.file, entry]))
   const visited = new Set()
-  const visit = (file) => {
-    if (visited.has(file)) return
-    visited.add(file)
-    const entry = byFile.get(file)
-    entry?.imports?.forEach((importKey) => visit(byFile.get(importKey.replace(/^_/, ''))?.file || importKey.replace(/^_/, '')))
+  // `imports` holds manifest keys (shared chunks are keyed `_name-hash.js`,
+  // entries by source path); `file` is `assets/<name>`, while `sizes` is keyed
+  // by the bare file name.
+  const visit = (key) => {
+    if (visited.has(key)) return
+    const entry = manifest[key]
+    if (!entry) return
+    visited.add(key)
+    entry.imports?.forEach(visit)
   }
-  const entry = manifest['index.html']?.file
-  if (entry) visit(entry)
-  const dashboard = Object.values(manifest).find((value) => value.src === 'src/pages/EnterpriseDashboardPage.tsx')
-  if (dashboard?.file) visit(dashboard.file)
-  return new Set([...visited].filter((file) => sizes.has(file)))
+  visit('index.html')
+  // The active language's catalogue is imported before first render (src/i18n.ts); count the
+  // largest one so the figure holds for every language.
+  const bundleSize = (key) => sizes.get(manifest[key].file.replace(/^assets\//, '')) || 0
+  const catalogues = Object.keys(manifest).filter((key) => key.startsWith('virtual:oyuns-locale/')).sort((a, b) => bundleSize(b) - bundleSize(a))
+  if (catalogues[0]) visit(catalogues[0])
+  const dashboard = Object.entries(manifest).find(([, value]) => value.src === 'src/pages/EnterpriseDashboardPage.tsx')
+  if (dashboard) visit(dashboard[0])
+  return new Set([...visited].map((key) => manifest[key].file.replace(/^assets\//, '')).filter((file) => sizes.has(file)))
 }
 
 const failures = []

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import docs from './docs'
 import { messageSets, resources } from './index'
 
 const placeholders = (value: string) => [...value.matchAll(/(?<!{)\{([^{}]+)\}(?!})|{{\s*(\w+)\s*}}/g)].map((match) => match[1] ?? match[2]).sort()
-const entries = Object.entries(messageSets)
+// The docs set loads with its route rather than in `messageSets`, so it is added here explicitly.
+const entries = Object.entries({ ...messageSets, docs })
+const catalogue = (language: 'mn' | 'ru' | 'en'): Record<string, string> => ({ ...resources[language].translation, ...docs[language] })
 
 describe('locale catalogue', () => {
   it('declares every key in exactly one domain', () => {
@@ -43,18 +46,18 @@ describe('locale catalogue', () => {
   })
 
   it('has no empty strings', () => {
-    const empty = (['mn', 'ru', 'en'] as const).flatMap((language) => Object.entries(resources[language].translation).filter(([, value]) => !value.trim()).map(([key]) => `${language}:${key}`))
+    const empty = (['mn', 'ru', 'en'] as const).flatMap((language) => Object.entries(catalogue(language)).filter(([, value]) => !value.trim()).map(([key]) => `${language}:${key}`))
     expect(empty).toEqual([])
   })
 
   it('does not leave Mongolian text in the Russian catalogue', () => {
     // Ө/Ү (and ө/ү) exist in Mongolian Cyrillic but not in Russian.
-    const leaked = Object.entries(resources.ru.translation).filter(([, value]) => /[ӨҮөү]/.test(value)).map(([key]) => key)
+    const leaked = Object.entries(catalogue('ru')).filter(([, value]) => /[ӨҮөү]/.test(value)).map(([key]) => key)
     expect(leaked).toEqual([])
   })
 
   it('does not leave unexpected Cyrillic text in the English catalogue', () => {
-    const leaked = Object.entries(resources.en.translation)
+    const leaked = Object.entries(catalogue('en'))
       .filter(([, value]) => /[Ѐ-ӿ]/.test(value.replaceAll('{нэр}', '').replaceAll('{цаг}', '')))
       .map(([key]) => key)
     expect(leaked).toEqual([])

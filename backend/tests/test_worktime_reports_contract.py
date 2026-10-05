@@ -47,7 +47,7 @@ def test_report_service_contract_covers_scope_timezone_pagination_and_exports():
         "async def iter_worker_blocks",
         "Workday Average Hours",
         "Shift Intervals / Breakdown",
-        "wrap_text",
+        "shrink_to_fit",
         "column_dimensions",
         "async def csv_report",
         "async def xlsx_report",

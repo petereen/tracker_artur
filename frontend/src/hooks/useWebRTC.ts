@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { io, Socket } from 'socket.io-client'
+import type { Socket } from 'socket.io-client'
 import type {
   CallIncomingPayload, CallState, CallType, ClientToServerEvents, ServerToClientEvents,
   SignalingAck,
@@ -8,6 +8,8 @@ import { useAuthStore } from '../store/auth'
 import { setCallAudioRoute, type AudioRoute } from '../platform/audio-route'
 import { createIncomingRingtone, createOutgoingRingback, SoundEffect } from '../utils/soundEffects'
 import i18n from '../i18n'
+
+type SignalingSocket = Socket<ServerToClientEvents, ClientToServerEvents>
 
 export interface CallPeer { userId: string; name: string; avatar?: string | null; conversationId: string }
 export interface ActiveCall extends CallPeer { callId: string; callType: CallType; incoming: boolean }
@@ -42,7 +44,7 @@ export function useWebRTC() {
   const [signalingConnected, setSignalingConnected] = useState(false)
   const [onlineUsers, setOnlineUsers] = useState<Record<string, boolean>>({})
   const [durationSeconds, setDurationSeconds] = useState(0)
-  const socketRef = useRef<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null)
+  const socketRef = useRef<SignalingSocket | null>(null)
   const peerRef = useRef<RTCPeerConnection | null>(null)
   const localRef = useRef<MediaStream | null>(null)
   const callRef = useRef<ActiveCall | null>(null)
@@ -162,64 +164,72 @@ export function useWebRTC() {
 
   useEffect(() => {
     if (!token) return
-    const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io({ path: '/socket.io', auth: { token }, transports: ['websocket', 'polling'], reconnection: true })
-    socketRef.current = socket
-    socket.on('connect', () => {
-      setSignalingConnected(true)
-      const call = callRef.current
-      if (call) socket.emit('call:resume', { callId: call.callId }, (result) => {
-        if (!result.ok) return finishLocally()
-        if (peerRef.current?.connectionState === 'connected') setState('connected')
-        else if (peerRef.current) setState('connecting')
-        else setState(call.incoming ? 'incoming_ring' : 'outgoing_ring')
+    let cancelled = false
+    let connected: SignalingSocket | null = null
+    // socket.io-client (~12 KiB gzip) is fetched after first paint instead of
+    // shipping in the entry graph; calls can only start once it has connected.
+    void import('socket.io-client').then(({ io }) => {
+      if (cancelled) return
+      const socket: SignalingSocket = io({ path: '/socket.io', auth: { token }, transports: ['websocket', 'polling'], reconnection: true })
+      socketRef.current = socket
+      connected = socket
+      socket.on('connect', () => {
+        setSignalingConnected(true)
+        const call = callRef.current
+        if (call) socket.emit('call:resume', { callId: call.callId }, (result) => {
+          if (!result.ok) return finishLocally()
+          if (peerRef.current?.connectionState === 'connected') setState('connected')
+          else if (peerRef.current) setState('connecting')
+          else setState(call.incoming ? 'incoming_ring' : 'outgoing_ring')
+        })
       })
+      socket.on('disconnect', () => { setSignalingConnected(false); if (callRef.current) setState('reconnecting') })
+      socket.on('connect_error', () => setSignalingConnected(false))
+      socket.on('user:status', ({ userId, isOnline }) => setOnlineUsers((current) => ({ ...current, [userId]: isOnline })))
+      socket.on('call:incoming', (payload: CallIncomingPayload) => {
+        if (callRef.current) { socket.emit('call:reject', { callId: payload.callId, targetUserId: payload.callerId, reason: 'busy' }); return }
+        const call: ActiveCall = { callId: payload.callId, conversationId: payload.conversationId, userId: payload.callerId, name: payload.callerName, avatar: payload.callerAvatar, callType: payload.callType, incoming: true }
+        callRef.current = call; setActiveCall(call); setState('incoming_ring'); setError(null)
+        const tone = createIncomingRingtone(); toneRef.current = tone; void tone.start()
+      })
+      socket.on('call:accepted', async ({ callId, acceptedBy }) => {
+        const call = callRef.current
+        if (!call || call.callId !== callId) return
+        if (call.incoming && !accepting.current) { finishLocally(); return }
+        stopTone(); setState('connecting')
+        if (!call.incoming && acceptedBy === call.userId) { canNegotiate.current = true; ensurePeer(); await negotiate() }
+      })
+      const receiveDescription = async (description: RTCSessionDescriptionInit) => {
+        const call = callRef.current
+        if (!call) return
+        const peer = ensurePeer()
+        const collision = description.type === 'offer' && (makingOffer.current || peer.signalingState !== 'stable')
+        const polite = ownUserId.localeCompare(call.userId) > 0
+        ignoreOffer.current = !polite && collision
+        if (ignoreOffer.current) return
+        try {
+          if (collision) await peer.setLocalDescription({ type: 'rollback' })
+          await peer.setRemoteDescription(description)
+          for (const candidate of candidateQueue.current.splice(0)) await peer.addIceCandidate(candidate)
+          if (description.type === 'offer') {
+            canNegotiate.current = true
+            await peer.setLocalDescription(await peer.createAnswer())
+            await emitDescription('answer', peer.localDescription!)
+          }
+        } catch { setError(i18n.t('chat.call.error.signal')) }
+      }
+      socket.on('call:offer', ({ sdp }) => void receiveDescription(sdp))
+      socket.on('call:answer', ({ sdp }) => void receiveDescription(sdp))
+      socket.on('call:ice-candidate', async ({ candidate }) => {
+        const peer = peerRef.current
+        if (!peer?.remoteDescription) candidateQueue.current.push(candidate)
+        else await peer.addIceCandidate(candidate).catch(() => undefined)
+      })
+      socket.on('call:reject', ({ reason }) => { setError(reason === 'busy' ? i18n.t('chat.call.error.peerBusy') : reason === 'offline' ? i18n.t('chat.call.error.offline') : i18n.t('chat.call.error.declined')); finishLocally() })
+      socket.on('call:ended', () => finishLocally())
+      socket.on('call:error', ({ message }) => setError(message))
     })
-    socket.on('disconnect', () => { setSignalingConnected(false); if (callRef.current) setState('reconnecting') })
-    socket.on('connect_error', () => setSignalingConnected(false))
-    socket.on('user:status', ({ userId, isOnline }) => setOnlineUsers((current) => ({ ...current, [userId]: isOnline })))
-    socket.on('call:incoming', (payload: CallIncomingPayload) => {
-      if (callRef.current) { socket.emit('call:reject', { callId: payload.callId, targetUserId: payload.callerId, reason: 'busy' }); return }
-      const call: ActiveCall = { callId: payload.callId, conversationId: payload.conversationId, userId: payload.callerId, name: payload.callerName, avatar: payload.callerAvatar, callType: payload.callType, incoming: true }
-      callRef.current = call; setActiveCall(call); setState('incoming_ring'); setError(null)
-      const tone = createIncomingRingtone(); toneRef.current = tone; void tone.start()
-    })
-    socket.on('call:accepted', async ({ callId, acceptedBy }) => {
-      const call = callRef.current
-      if (!call || call.callId !== callId) return
-      if (call.incoming && !accepting.current) { finishLocally(); return }
-      stopTone(); setState('connecting')
-      if (!call.incoming && acceptedBy === call.userId) { canNegotiate.current = true; ensurePeer(); await negotiate() }
-    })
-    const receiveDescription = async (description: RTCSessionDescriptionInit) => {
-      const call = callRef.current
-      if (!call) return
-      const peer = ensurePeer()
-      const collision = description.type === 'offer' && (makingOffer.current || peer.signalingState !== 'stable')
-      const polite = ownUserId.localeCompare(call.userId) > 0
-      ignoreOffer.current = !polite && collision
-      if (ignoreOffer.current) return
-      try {
-        if (collision) await peer.setLocalDescription({ type: 'rollback' })
-        await peer.setRemoteDescription(description)
-        for (const candidate of candidateQueue.current.splice(0)) await peer.addIceCandidate(candidate)
-        if (description.type === 'offer') {
-          canNegotiate.current = true
-          await peer.setLocalDescription(await peer.createAnswer())
-          await emitDescription('answer', peer.localDescription!)
-        }
-      } catch { setError(i18n.t('chat.call.error.signal')) }
-    }
-    socket.on('call:offer', ({ sdp }) => void receiveDescription(sdp))
-    socket.on('call:answer', ({ sdp }) => void receiveDescription(sdp))
-    socket.on('call:ice-candidate', async ({ candidate }) => {
-      const peer = peerRef.current
-      if (!peer?.remoteDescription) candidateQueue.current.push(candidate)
-      else await peer.addIceCandidate(candidate).catch(() => undefined)
-    })
-    socket.on('call:reject', ({ reason }) => { setError(reason === 'busy' ? i18n.t('chat.call.error.peerBusy') : reason === 'offline' ? i18n.t('chat.call.error.offline') : i18n.t('chat.call.error.declined')); finishLocally() })
-    socket.on('call:ended', () => finishLocally())
-    socket.on('call:error', ({ message }) => setError(message))
-    return () => { socket.removeAllListeners(); socket.disconnect(); socketRef.current = null; setSignalingConnected(false); teardown('idle') }
+    return () => { cancelled = true; connected?.removeAllListeners(); connected?.disconnect(); socketRef.current = null; setSignalingConnected(false); teardown('idle') }
   }, [emitDescription, ensurePeer, finishLocally, negotiate, ownUserId, stopTone, teardown, token])
 
   useEffect(() => {

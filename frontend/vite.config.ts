@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { localeSplit } from './vite-plugins/localeSplit.ts'
 
 // Vite runs on the host during local development, while Compose publishes
 // the backend on localhost:8010. Containerized callers can override this.
@@ -7,7 +8,7 @@ const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:80
 const callProxyTarget = process.env.VITE_CALL_PROXY_TARGET || 'http://localhost:8020'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), localeSplit()],
   build: {
     manifest: true,
     cssMinify: 'lightningcss',
@@ -31,7 +32,7 @@ export default defineConfig({
             },
             {
               name: 'motion',
-              test: /node_modules[\\/]motion[\\/]/,
+              test: /node_modules[\\/](?:motion|framer-motion|motion-dom|motion-utils)[\\/]/,
               priority: 34,
             },
             {
@@ -48,6 +49,30 @@ export default defineConfig({
               name: 'editor',
               test: /node_modules[\\/](?:@tiptap|prosemirror)[\\/]/,
               priority: 31,
+            },
+            // The catch-all `vendor` chunk is loaded on first paint (it holds
+            // Astryx), so anything that lands in it is downloaded even when only
+            // a lazy page needs it. Keep these page-specific libraries in their
+            // own chunks so they load with the page that imports them.
+            {
+              name: 'markdown',
+              test: /node_modules[\\/](?:react-markdown|remark-[^\\/]+|micromark[^\\/]*|mdast-[^\\/]+|hast-[^\\/]+|unified|vfile[^\\/]*|unist-[^\\/]+|property-information|decode-named-character-reference|character-entities[^\\/]*|space-separated-tokens|comma-separated-tokens|html-url-attributes|devlop|bail|trough|is-plain-obj|estree-util-[^\\/]+|zwitch|longest-streak|ccount|markdown-table|trim-lines|style-to-[^\\/]+|inline-style-parser|@ungap)[\\/]/,
+              priority: 30,
+            },
+            {
+              name: 'realtime',
+              test: /node_modules[\\/](?:socket\.io-[^\\/]+|engine\.io-[^\\/]+|@socket\.io)[\\/]/,
+              priority: 30,
+            },
+            {
+              name: 'qr',
+              test: /node_modules[\\/]qrcode\.react[\\/]/,
+              priority: 30,
+            },
+            {
+              name: 'dnd',
+              test: /node_modules[\\/]@dnd-kit[\\/]/,
+              priority: 30,
             },
             {
               name: 'lucide',

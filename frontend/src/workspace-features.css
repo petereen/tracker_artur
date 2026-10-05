@@ -50,3 +50,8 @@
 .oyuns-voice-engines button { background: transparent; border: 0; border-radius: var(--radius-full); color: var(--color-muted); cursor: pointer; font-size: var(--font-size-sm); padding: var(--spacing-1) var(--spacing-3); white-space: nowrap; }
 .oyuns-voice-engines button[aria-checked="true"] { background: var(--color-surface); box-shadow: 0 1px 3px color-mix(in srgb, var(--color-ink) 12%, transparent); color: var(--color-text); font-weight: var(--font-weight-semibold); }
 .oyuns-voice-engines button:disabled { cursor: default; opacity: .6; }
+
+/* Docs (/docs): the section navigation and the page outline stay in view beside the article. */
+.docs-main { padding-inline-start: var(--spacing-8); }
+.docs-outline { padding-inline-start: var(--spacing-6); }
+.docs-rail { align-self: flex-start; max-height: calc(100vh - 80px - var(--spacing-4) - 56px); overflow-y: auto; position: sticky; top: calc(80px + var(--spacing-4)); }

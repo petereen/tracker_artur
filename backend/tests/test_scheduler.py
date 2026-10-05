@@ -68,7 +68,7 @@ def test_work_time_end_reminders_have_distinct_daily_notification_slots():
 def test_daily_report_reminder_respects_manager_setting(monkeypatch):
     from app.bot import scheduler
 
-    employee = SimpleNamespace(id=7, organization_id=1, telegram_id="123", timezone="Asia/Ulaanbaatar")
+    employee = SimpleNamespace(id=7, organization_id=1, telegram_id="123", timezone="Asia/Ulaanbaatar", primary_language="mn")
 
     class Result:
         def scalars(self):
@@ -105,6 +105,7 @@ def test_daily_report_reminder_respects_manager_setting(monkeypatch):
     monkeypatch.setattr("app.bot.db.get_session", lambda: FakeSession())
     monkeypatch.setattr("app.bot.db.get_manager_settings", lambda organization_id=None: SimpleNamespace(daily_report_reminders_enabled=False))
     monkeypatch.setattr(scheduler, "_make_bot", lambda organization_id=None: bot)
+    monkeypatch.setattr(scheduler, "_employee_language", lambda _employee_id, _primary_language=None: "mn")
 
     import asyncio
     asyncio.run(scheduler.send_reminder(employee.id, 1))
@@ -128,7 +129,7 @@ def test_birthday_greeting_sends_exact_text_and_mirrors_platform(monkeypatch):
 
     employee = SimpleNamespace(
         id=7, organization_id=1, name="Бат", birthday=date(1990, 1, 10), timezone="Asia/Ulaanbaatar",
-        telegram_id="123", is_active=True,
+        telegram_id="123", is_active=True, primary_language="mn",
     )
 
     class FakeSession:
@@ -157,6 +158,8 @@ def test_birthday_greeting_sends_exact_text_and_mirrors_platform(monkeypatch):
     monkeypatch.setattr("app.bot.db.get_session", lambda: FakeSession())
     monkeypatch.setattr(scheduler, "_make_bot", lambda organization_id=None: bot)
     monkeypatch.setattr(scheduler, "_local_today", lambda _timezone: date(2026, 1, 10))
+    monkeypatch.setattr(scheduler, "_employee_language", lambda _employee_id, _primary_language=None: "mn")
+    monkeypatch.setattr("app.services.notification_preferences.delivery_for_employee_sync", lambda *_args, **_kwargs: SimpleNamespace(telegram=True))
     monkeypatch.setattr("app.services.user_notifications.mirror_existing_telegram_notification", lambda **kwargs: mirrored.append(kwargs))
 
     import asyncio

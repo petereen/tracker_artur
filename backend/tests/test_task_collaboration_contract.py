@@ -30,5 +30,5 @@ def test_collaboration_notifications_stay_web_only_and_history_is_task_scoped():
     router_source = (Path(__file__).parents[1] / "app/routers/enterprise.py").read_text()
     assert "deliver_telegram: bool = True" in notification_source
     assert "deliver_telegram=False" in router_source
-    assert 'AuditLog.after_data["task_id"].as_integer() == task_id' in router_source
-    assert 'AuditLog.after_data["parent_task_id"].as_integer() == task_id' in router_source
+    assert 'AuditLog.after_data.op("->>")("task_id") == str(task_id)' in router_source
+    assert 'AuditLog.after_data.op("->>")("parent_task_id") == str(task_id)' in router_source

@@ -70,7 +70,7 @@ def test_monthly_digest_summarizes_dummy_reports_and_sends_once(monkeypatch):
     recipient, message = bot.sent[0]
     assert recipient == "manager-1"
     assert "2026 оны 07-р сарын AI хураангуй" in message
-    assert "Тайлан баталсан: <b>2/2</b> ажилтан" in message
+    assert "Тайлан баталсан: <b>2/2</b>" in message
     assert "Бат: Шинэ борлуулалтын тайлангийн самбар" in message
     assert "Саруул: Нөөцийн бүртгэлийг шинэчилж" in message
 

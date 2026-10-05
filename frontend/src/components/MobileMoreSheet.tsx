@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ChevronRight, FolderArchive, LogOut, Moon, Search, Sun, Users2, type LucideIcon } from 'lucide-react'
+import { BookOpen, ChevronRight, FolderArchive, LogOut, Moon, Search, Sun, Users2, type LucideIcon } from 'lucide-react'
 import { preloadRoute } from '../platform/route-preload'
 import { resolvePublicAssetUrl } from '../platform/runtime'
 import { WorkspaceModeToggle } from './WorkspaceModeToggle'
@@ -109,6 +109,9 @@ export function MobileMoreSheet({ open, onClose, items, unreadChat, actor, role,
             <button type="button" className="mobile-more-row" onClick={() => { onClose(); onWorkers() }}>
               <Users2 size={18} aria-hidden /><span>{t('shell.workers.title')}</span><ChevronRight size={17} aria-hidden />
             </button>
+            <NavLink to="/docs" className="mobile-more-row" onClick={onClose}>
+              <BookOpen size={18} aria-hidden /><span>{t('shell.account.docs')}</span><ChevronRight size={17} aria-hidden />
+            </NavLink>
             <button type="button" className="mobile-more-row" role="switch" aria-checked={theme === 'dark'} onClick={onToggleTheme}>
               {theme === 'dark' ? <Moon size={18} aria-hidden /> : <Sun size={18} aria-hidden />}<span>{t('shell.theme.dark')}</span><i className={`mobile-switch ${theme === 'dark' ? 'on' : ''}`} aria-hidden />
             </button>
