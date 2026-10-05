@@ -4,11 +4,12 @@ import logging
 import secrets
 import hmac
 from datetime import date, datetime, timedelta, timezone
-from urllib.parse import quote, urlencode
+from html import escape
+from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -330,6 +331,33 @@ def _set_refresh_cookie(response: Response, token: str, expires_at: datetime, pe
         samesite="lax",
         path="/api/v1/auth",
     )
+
+
+def _android_app_handoff(params: dict[str, str]) -> HTMLResponse:
+    """Hand a native Android login back to the app from the browser.
+
+    Chrome keeps a redirect that was not started by a tap, so an unverified or
+    ignored App Link leaves the person in the browser. An explicit-package intent
+    works without App Link verification; the code is single-use and bound to the
+    state the app created.
+    """
+    callback = urlparse(settings.TELEGRAM_OIDC_NATIVE_REDIRECT_URI)
+    intent = f"intent://{callback.netloc}{callback.path}?{urlencode(params)}#Intent;scheme=https;package={settings.OTA_APP_ID};end"
+    href = escape(intent, quote=True)
+    script_value = json.dumps(intent).replace("<", "\\u003c")
+    body = (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>OYUNS</title></head>"
+        "<body style=\"font-family:system-ui;text-align:center;padding:48px 24px\">"
+        f"<p><a href=\"{href}\" style=\"display:inline-block;padding:14px 28px;background:#2563eb;color:#fff;border-radius:10px;text-decoration:none;font-size:18px\">Open OYUNS</a></p>"
+        f"<script>window.location.replace({script_value})</script>"
+        "</body></html>"
+    )
+    response = HTMLResponse(body)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 def _web_telegram_error(code: str) -> RedirectResponse:
@@ -782,6 +810,20 @@ async def telegram_web_callback(
     """Validate the browser transaction, redeem the code, and set the app session."""
     if not telegram_oidc.is_configured():
         return _web_telegram_error("not_configured")
+    if state and not state_cookie and (code or provider_error):
+        # A native Android login that finished in the browser: send it back to the app.
+        native = (
+            await db.execute(
+                select(TelegramOAuthState.id).where(
+                    TelegramOAuthState.state_hash == hashlib.sha256(state.encode()).hexdigest(),
+                    TelegramOAuthState.platform == "android",
+                    TelegramOAuthState.used_at.is_(None),
+                    TelegramOAuthState.expires_at > datetime.now(timezone.utc),
+                )
+            )
+        ).first()
+        if native:
+            return _android_app_handoff({k: v for k, v in (("code", code), ("state", state), ("error", provider_error)) if v})
     if not state or not state_cookie:
         return _web_telegram_error("invalid_state")
     try:

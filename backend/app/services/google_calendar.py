@@ -460,7 +460,9 @@ async def incremental_sync(db: AsyncSession, connection_id: int) -> None:
                 continue
             private = ((event.get("extendedProperties") or {}).get("private") or {})
             recurring_id = event.get("recurringEventId")
-            link = (await db.execute(select(CalendarEventLink).where(CalendarEventLink.connection_id == connection.id, or_(CalendarEventLink.external_event_id == external_id, CalendarEventLink.external_recurring_event_id == external_id, CalendarEventLink.external_event_id == recurring_id, CalendarEventLink.external_recurring_event_id == recurring_id)))).scalar_one_or_none()
+            candidates = (await db.execute(select(CalendarEventLink).where(CalendarEventLink.connection_id == connection.id, or_(CalendarEventLink.external_event_id == external_id, CalendarEventLink.external_recurring_event_id == external_id, CalendarEventLink.external_event_id == recurring_id, CalendarEventLink.external_recurring_event_id == recurring_id)).order_by(CalendarEventLink.id))).scalars().all()
+            # A recurring series and its instances share ids, so several links can match; prefer the exact event.
+            link = next((c for c in candidates if c.external_event_id == external_id), candidates[0] if candidates else None)
             entity_type, entity_id = private.get("oyunsEntityType"), private.get("oyunsEntityId")
             if not link and entity_type in {"task", "calendar_entry"} and str(entity_id).isdigit():
                 link = await _link_for_entity(db, connection.id, entity_type, int(entity_id))
