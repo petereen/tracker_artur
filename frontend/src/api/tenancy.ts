@@ -12,6 +12,8 @@ export interface TenantBranding {
   name: string
   logo_url: string
   dark_logo_url: string
+  /** The tenant set its own logo (as opposed to the legacy uploaded/default one). */
+  custom_logo?: boolean
   favicon_url: string
   primary_color: string | null
   secondary_color: string | null

@@ -5,6 +5,7 @@ import { addTelemetryBreadcrumb, captureTelemetryException } from './telemetry'
 
 const APP_ID = 'mn.oyuns.workspace'
 const UPDATE_CHANNEL = import.meta.env.VITE_OTA_CHANNEL === 'staging' ? 'staging' : 'production'
+const OTA_DISABLED = import.meta.env.VITE_OTA_ENABLED === 'false'
 let checkPromise: Promise<void> | null = null
 
 type UpdateDescriptor = {
@@ -36,7 +37,7 @@ export async function checkSelfHostedUpdate(): Promise<void> {
 
   checkPromise = (async () => {
     const platform = nativePlatform()
-    if (!platform) return
+    if (!platform || OTA_DISABLED) return
 
     const current = await CapacitorUpdater.current()
     const currentVersion = current.bundle?.version || 'builtin'

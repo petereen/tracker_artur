@@ -64,23 +64,12 @@ describe('BiometricLockGate', () => {
     expect(await screen.findByText('workspace')).toBeInTheDocument()
   })
 
-  it('locks again after a minute in the background, not after a glance away', async () => {
+  it('does not lock again when the app returns from the background', async () => {
     mocks.authenticate.mockResolvedValue(true)
     render(<BiometricLockGate><p>workspace</p></BiometricLockGate>)
     expect(await screen.findByText('workspace')).toBeInTheDocument()
-    await waitFor(() => expect(mocks.stateListener).not.toBeNull())
-    const now = vi.spyOn(Date, 'now')
-    now.mockReturnValue(1_000_000)
-    mocks.stateListener?.({ isActive: false })
-    now.mockReturnValue(1_000_000 + 5_000)
-    mocks.stateListener?.({ isActive: true })
-    expect(screen.getByText('workspace')).toBeInTheDocument()
-    mocks.authenticate.mockResolvedValue(false)
-    mocks.stateListener?.({ isActive: false })
-    now.mockReturnValue(1_000_000 + 5_000 + 61_000)
-    mocks.stateListener?.({ isActive: true })
-    await waitFor(() => expect(screen.queryByText('workspace')).not.toBeInTheDocument())
-    now.mockRestore()
+    expect(mocks.authenticate).toHaveBeenCalledTimes(1)
+    expect(mocks.stateListener).toBeNull()
   })
 
   it('does not trap the user when the phone lost its screen lock', async () => {

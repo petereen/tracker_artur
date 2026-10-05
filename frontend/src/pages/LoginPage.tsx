@@ -33,6 +33,7 @@ export function LoginPage() {
   const capabilities = useAuthCapabilities()
   const branding = useTenantBranding()
   // Tenant workspaces (other than OYUNS itself) show their own name.
+  const loginLogo = branding.data?.custom_logo ? branding.data.logo_url : capabilities.data?.light_logo
   const workspaceName = branding.data?.name && !/^oyuns( erp)?$/i.test(branding.data.name.trim()) ? branding.data.name : null
   const [telegramState, setTelegramState] = useState<NativeTelegramAuthState>({ status: 'idle' })
   // Kept as a code, not text, so the message follows a language switch.
@@ -89,7 +90,7 @@ export function LoginPage() {
         <div className="auth-lang"><LanguageSwitcher /></div>
         <div className="auth-form-wrap">
           <header className="auth-form-head">
-            {capabilities.isPending ? <div className="login-logo" aria-hidden /> : <img src={capabilities.data?.light_logo || '/oyuns-aio-logo.png'} alt="OYUNS All-in-One" className={capabilities.data?.light_logo ? 'login-logo' : 'login-logo is-default'} />}
+            {capabilities.isPending || branding.isPending ? <div className="login-logo" aria-hidden /> : <img src={loginLogo || '/oyuns-aio-logo.png'} alt="OYUNS All-in-One" className={loginLogo ? 'login-logo' : 'login-logo is-default'} />}
             <div className="auth-form-heading">
               <h1 id="login-title">{t('auth.login.welcome')}</h1>
               <p>{workspaceName ?? t('auth.login.subtitle')}</p>

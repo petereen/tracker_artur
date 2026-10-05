@@ -1,7 +1,6 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
-import { App } from '@capacitor/app'
 import { Fingerprint, LogOut } from 'lucide-react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -16,12 +15,9 @@ import { authenticateBiometric, biometricAvailability, isBiometricLockEnabled, s
 import { isNativePlatform } from '../platform/runtime'
 import { InitialWorkspaceSkeleton } from './Loading'
 
-/** Away from the app for longer than this locks it again. */
-const RELOCK_AFTER_MS = 60_000
-
 /**
  * App lock for the native app: Face ID / fingerprint (or the phone's screen
- * lock) on a cold start and after the app was in the background. `active` is false while
+ * lock) on a cold start only; returning from recent apps never locks it. `active` is false while
  * signed out, so the login screen is never behind the lock. The session
  * itself stays in the Keychain/Keystore; this only gates the screen.
  */
@@ -30,7 +26,6 @@ export function BiometricLockGate({ children, active = true }: { children: React
   const logout = useEnterpriseLogout()
   const [locked, setLocked] = useState(() => isNativePlatform() && isBiometricLockEnabled())
   const [prompting, setPrompting] = useState(false)
-  const leftAt = useRef<number | null>(null)
 
   const unlock = useCallback(async () => {
     setPrompting(true)
@@ -57,20 +52,6 @@ export function BiometricLockGate({ children, active = true }: { children: React
     // Prompt once when the lock appears; "Unlock" retries.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locked, active])
-
-  useEffect(() => {
-    if (!isNativePlatform()) return
-    const listener = App.addListener('appStateChange', ({ isActive }) => {
-      if (!isActive) {
-        leftAt.current = Date.now()
-        return
-      }
-      const away = leftAt.current === null ? 0 : Date.now() - leftAt.current
-      leftAt.current = null
-      if (isBiometricLockEnabled() && away >= RELOCK_AFTER_MS) setLocked(true)
-    })
-    return () => { void listener.then((handle) => handle.remove()) }
-  }, [])
 
   if (!active || !locked) return children
   return <>

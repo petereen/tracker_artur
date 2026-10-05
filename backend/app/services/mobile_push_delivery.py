@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -21,6 +22,8 @@ from app.models.models import (
 )
 from app.services.attachment_storage import delete_attachment
 from app.services.secret_box import decrypt_secret
+
+logger = logging.getLogger(__name__)
 
 
 _fcm_access_token: tuple[str, datetime] | None = None
@@ -159,6 +162,7 @@ async def deliver_notification_push(db: AsyncSession, notification_id: int) -> N
     preferences; one the recipient has read meanwhile is not pushed.
     """
     if not settings.MOBILE_PUSH_DELIVERY_ENABLED:
+        logger.warning("push.skipped notification=%s reason=MOBILE_PUSH_DELIVERY_ENABLED_off", notification_id)
         return
     notification = await db.get(UserNotification, notification_id)
     if notification is None or notification.read_at is not None:
@@ -169,6 +173,7 @@ async def deliver_notification_push(db: AsyncSession, notification_id: int) -> N
         MobilePushRegistration.is_active.is_(True),
     ))).scalars().all())
     if not registrations:
+        logger.warning("push.skipped notification=%s account=%s reason=no_active_registration", notification_id, notification.recipient_account_id)
         return
     title, body = notification.title[:120], (notification.body or "")[:180]
     target_url = notification.target_url if notification.target_url and notification.target_url.startswith("/") and not notification.target_url.startswith("//") else "/"
@@ -177,6 +182,7 @@ async def deliver_notification_push(db: AsyncSession, notification_id: int) -> N
             token = decrypt_secret(registration.encrypted_token)
             if registration.provider == "fcm":
                 if not _fcm_ready():
+                    logger.warning("push.skipped notification=%s reason=FCM_SERVICE_ACCOUNT_JSON_missing", notification_id)
                     continue
                 valid = await _fcm_send(
                     client, token, title=title, body=body,
@@ -185,6 +191,7 @@ async def deliver_notification_push(db: AsyncSession, notification_id: int) -> N
                 )
             else:
                 if not _apns_ready():
+                    logger.warning("push.skipped notification=%s reason=APNS_credentials_missing", notification_id)
                     continue
                 valid = await _apns_send(
                     client, token, title=title, body=body,
@@ -192,8 +199,11 @@ async def deliver_notification_push(db: AsyncSession, notification_id: int) -> N
                     collapse_id=f"notification-{notification.id}", thread_id=f"kind-{notification.kind}",
                 )
             if not valid:
+                logger.warning("push.token_rejected notification=%s registration=%s provider=%s (check FCM project / APNS_USE_SANDBOX)", notification_id, registration.id, registration.provider)
                 registration.is_active = False
                 registration.revoked_at = _now()
+            else:
+                logger.info("push.sent notification=%s registration=%s provider=%s", notification_id, registration.id, registration.provider)
 
 
 async def deliver_chat_push(db: AsyncSession, message_id: int, recipient_account_id: int) -> None:

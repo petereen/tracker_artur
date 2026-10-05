@@ -12663,7 +12663,7 @@ body { -webkit-tap-highlight-color: transparent; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 800px) {
-  html, body { overscroll-behavior-y: none; }
+  html, body { overscroll-behavior-y: none; overflow-x: clip; }
   html { scroll-padding-top: calc(var(--m-header-h) + var(--safe-area-top) + 8px); }
   .workspace-header, .mobile-tabbar, .mobile-more-grid, .mobile-more-list, .mobile-more-profile {
     -webkit-touch-callout: none;
@@ -13050,6 +13050,8 @@ body { -webkit-tap-highlight-color: transparent; }
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
   select,
   textarea { font-size: max(var(--font-size-lg), 1em); font-weight: var(--font-weight-medium); }
+  /* Component rules (e.g. .assistant-footer textarea) out-rank the element selectors above and re-introduce <16px text, which zooms iOS. */
+  :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]) { font-size: max(16px, 1em) !important; }
   /* Hover lifts feel broken on touch (they stick after a tap); use press feedback instead. */
   .admin-hub a:hover, .settings-category-grid a:hover, .project-card:hover, .kanban-card:hover, .panel:hover { transform: none; }
   :is(.primary-action, .secondary-action, .workspace-btn, .admin-hub a, .settings-category-grid a, .project-card, .worker-list > button, .today-task-row):active:not(:disabled) {

@@ -57,8 +57,15 @@ export function applyDocumentBranding(branding: TenantBranding, defaultTitle: st
   if (typeof document === 'undefined') return
   // The OYUNS workspace itself keeps its product title.
   document.title = branding.name && !/^oyuns( erp)?$/i.test(branding.name.trim()) ? `${branding.name} · OYUNS ERP` : defaultTitle
-  const icon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
-  if (icon && branding.favicon_url && icon.getAttribute('href') !== branding.favicon_url) icon.setAttribute('href', branding.favicon_url)
+  // Without a tenant favicon the default OYUNS mark (favicon.svg / favicon.png in index.html) stays.
+  if (branding.favicon_url) {
+    document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((icon, index) => {
+      // The tenant URL replaces every default <link>; a single one is kept so the type hint can't clash.
+      if (index > 0) return icon.remove()
+      icon.removeAttribute('type')
+      if (icon.getAttribute('href') !== branding.favicon_url) icon.setAttribute('href', branding.favicon_url as string)
+    })
+  }
   const root = document.documentElement.style
   if (isHexColor(branding.primary_color)) {
     const primary = branding.primary_color.toLowerCase()

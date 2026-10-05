@@ -321,7 +321,8 @@ export function EnterpriseShell() {
     const section = Object.keys(TITLES).filter((path) => path !== '/' && location.pathname.startsWith(`${path}/`)).sort((a, b) => b.length - a.length)[0]
     return t(section ? TITLES[section] : 'shell.title.default')
   }, [location.pathname, t])
-  const logo = theme === 'dark' ? branding.data?.dark_logo : branding.data?.light_logo
+  const tenantBranding = tenant.data?.branding
+  const logo = tenantBranding?.custom_logo ? tenantBranding.logo_url : theme === 'dark' ? branding.data?.dark_logo : branding.data?.light_logo
   const commandChannels = useMemo(() => [...nav, { to: '/company-files', label: 'nav.companyFiles', icon: FolderArchive, roles: [] }].map((item) => ({ id: item.to, type: 'channel' as const, title: t(item.label), subtitle: t('shell.command.sectionSubtitle'), icon: item.icon, run: () => navigate(item.to) })), [nav, navigate, t])
   const commandFeatures = useMemo(() => [
     { id: 'create-task', type: 'feature' as const, title: t('shell.command.createTask'), subtitle: t('shell.command.createTaskHint'), icon: CheckSquare2, run: () => navigate('/tasks?create=1') },
