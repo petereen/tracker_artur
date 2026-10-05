@@ -4,6 +4,7 @@ import { defineMessages } from './define'
 export default defineMessages({
   mn: {
     'auth.login.welcome': 'Тавтай морил',
+    'auth.login.subtitle': 'Ажлаа үргэлжлүүлэхийн тулд нэвтэрнэ үү',
     'auth.login.telegram': 'Telegram-аар нэвтрэх',
     'auth.login.telegramWaiting': 'Telegram нэвтрэлтийг хүлээж байна…',
     'auth.login.orEmail': 'эсвэл и-мэйлээр',
@@ -104,6 +105,7 @@ export default defineMessages({
   },
   ru: {
     'auth.login.welcome': 'Добро пожаловать',
+    'auth.login.subtitle': 'Войдите, чтобы продолжить работу',
     'auth.login.telegram': 'Войти через Telegram',
     'auth.login.telegramWaiting': 'Ожидание входа через Telegram…',
     'auth.login.orEmail': 'или по e-mail',
@@ -204,6 +206,7 @@ export default defineMessages({
   },
   en: {
     'auth.login.welcome': 'Welcome',
+    'auth.login.subtitle': 'Sign in to continue to your workspace',
     'auth.login.telegram': 'Continue with Telegram',
     'auth.login.telegramWaiting': 'Waiting for Telegram sign-in…',
     'auth.login.orEmail': 'or use email',

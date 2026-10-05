@@ -1413,6 +1413,49 @@ body {
   .auth-brand-side { display: none; }
 }
 
+/* Sign-in polish: calmer form column on desktop, brand header + sheet on phones. */
+.auth-form-side { --auth-hero-top: color-mix(in srgb, var(--color-accent) 78%, var(--color-stage)); position: relative; }
+:root[data-theme="dark"] .auth-form-side { --auth-hero-top: color-mix(in srgb, var(--color-accent) 38%, var(--color-stage)); }
+.auth-lang { position: absolute; right: clamp(var(--spacing-4), 3vw, var(--spacing-7)); top: clamp(var(--spacing-4), 3vw, var(--spacing-7)); z-index: 5; }
+.auth-lang .language-menu-list { bottom: auto; top: calc(100% + 0.5rem); transform-origin: top right; }
+.auth-form-wrap { max-width: 400px; }
+.auth-form-wrap .login-logo { height: 40px; margin-bottom: var(--spacing-9); }
+.auth-form-heading { margin-bottom: var(--spacing-6); }
+.auth-form-heading h1 { font-size: clamp(var(--font-size-3xl), 2.6vw, 2.25rem); font-weight: var(--font-weight-bold); letter-spacing: -0.03em; margin: 0 0 var(--spacing-2); }
+.auth-form-heading p { line-height: 1.5; }
+.auth-form-wrap .telegram-login.telegram-login-primary { border-top: 0; gap: 0; margin: 0; padding-top: 0; align-items: stretch; }
+.auth-form-wrap .telegram-login-primary .native-telegram-action { min-height: 48px; }
+.auth-form-wrap .native-telegram-action { margin-top: 0; }
+.auth-form-wrap .login-divider { margin-top: var(--spacing-5); margin-bottom: var(--spacing-1); font-size: var(--font-size-xs); letter-spacing: 0.06em; color: var(--color-muted-2, var(--color-muted)); }
+.auth-form-wrap .login-form { margin-top: var(--spacing-3); gap: var(--spacing-4); }
+.auth-form-wrap .login-form > .primary-action { margin-top: var(--spacing-1); font-weight: var(--font-weight-bold); }
+.auth-form-wrap .field-with-icon { min-height: 48px; }
+.auth-form-wrap .field-with-icon input { min-height: 46px; font-size: var(--font-size-base); }
+.auth-form-wrap footer { gap: var(--spacing-5); margin-top: var(--spacing-7); font-size: var(--font-size-sm); }
+.auth-form-wrap footer a { color: var(--color-muted); text-decoration: none; }
+.auth-form-wrap footer a:hover { color: var(--color-accent); text-decoration: underline; }
+.auth-brand-copy h2 { color: #fff; font-weight: var(--font-weight-bold); letter-spacing: -0.04em; }
+@media (max-width: 720px) {
+  .login-stage.auth-layout { background: var(--auth-hero-top, var(--color-bg)); }
+  .auth-form-side { align-items: stretch; background: linear-gradient(165deg, var(--auth-hero-top), var(--color-stage)); justify-content: flex-start; min-height: 100vh; min-height: 100svh; overflow: hidden; padding: 0; }
+  .auth-form-side::before { border: 1px solid color-mix(in srgb, white 18%, transparent); border-radius: 50%; content: ''; height: 320px; pointer-events: none; position: absolute; right: -120px; top: -90px; width: 320px; }
+  .auth-form-side::after { background: color-mix(in srgb, white 7%, transparent); border-radius: 50%; content: ''; height: 180px; left: -70px; pointer-events: none; position: absolute; top: 70px; width: 180px; }
+  .auth-lang { right: var(--spacing-4); top: max(var(--spacing-4), env(safe-area-inset-top)); }
+  .auth-lang .language-menu-trigger { background: color-mix(in srgb, white 16%, transparent); border-color: color-mix(in srgb, white 30%, transparent); color: #fff; }
+  .auth-lang .language-menu-trigger:hover, .auth-lang .language-menu-trigger[aria-expanded="true"] { border-color: color-mix(in srgb, white 60%, transparent); color: #fff; }
+  .auth-form-wrap { display: flex; flex: 1; flex-direction: column; max-width: none; position: relative; z-index: 1; }
+  .auth-form-head { color: #fff; padding: max(var(--spacing-8), calc(env(safe-area-inset-top) + var(--spacing-6))) var(--spacing-6) var(--spacing-9); }
+  .auth-form-wrap .login-logo { height: 36px; margin-bottom: var(--spacing-6); }
+  .auth-form-wrap .login-logo:not(.is-default) { background: #fff; border-radius: var(--radius-control); box-sizing: content-box; padding: var(--spacing-2) var(--spacing-3); }
+  .auth-form-heading { margin-bottom: 0; }
+  .auth-form-heading h1 { color: #fff; font-size: var(--font-size-3xl); }
+  .auth-form-heading p { color: color-mix(in srgb, white 80%, transparent); }
+  .auth-form-card { background: var(--color-surface); border-radius: 28px 28px 0 0; box-shadow: 0 -10px 32px rgb(0 0 0 / 0.14); flex: 1; padding: var(--spacing-7) var(--spacing-6) max(var(--spacing-7), calc(env(safe-area-inset-bottom) + var(--spacing-5))); }
+  .auth-form-wrap .field-with-icon { background: var(--color-bg); }
+  .auth-form-wrap footer { margin-top: var(--spacing-6); }
+}
+@media (max-width: 720px) and (prefers-reduced-transparency: reduce) { .auth-form-card { box-shadow: none; } }
+
 .workspace-shell {
   min-height: 100vh;
 }
