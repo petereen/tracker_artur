@@ -26,12 +26,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   </CallContext.Provider>
 }
 
-export function useCall() {
-  const value = useContext(CallContext)
-  if (!value) throw new Error('useCall must be used inside CallProvider')
-  return value
-}
-
 export function useOptionalCall() {
   return useContext(CallContext)
 }

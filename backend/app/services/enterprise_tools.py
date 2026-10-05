@@ -445,7 +445,7 @@ async def index_company_knowledge(db: AsyncSession, entry: CompanyKnowledge) -> 
                 raise ValueError("invalid attachment path")
             async with aiofiles.open(candidate, "rb") as handle:
                 attachment_bytes = await handle.read()
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError):
             attachment_error = "attachment_unavailable"
     checksum_input = "\n".join((entry.title, entry.category or "", entry.content, entry.attachment_filename or "", entry.attachment_content_type or "" )).encode() + attachment_bytes
     checksum = hashlib.sha256(checksum_input).hexdigest()
@@ -584,7 +584,6 @@ async def calendar(db: AsyncSession, actor: ActorContext, data: CalendarInput) -
         can_details = requested in allowed
     if requested != actor.employee_id and not can_details and data.scope != "team":
         return _result("denied", {})
-    account_ids = select(ProjectMember.employee_id)  # placeholder avoids accidental broad calendar disclosure
     account_id = actor.account_id
     if requested and requested != actor.employee_id:
         from app.models.models import UserAccount

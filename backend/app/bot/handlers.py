@@ -101,7 +101,6 @@ async def cmd_start(message: Message, state: FSMContext, employee=None, bot_tena
         return
 
     mark_employee_onboarded(emp.id)
-    ms = get_manager_settings()
     onboarding_mn = (
         f"👋 Сайн байна уу, {emp.name.split()[0]}!\n\n"
         f"Би OYUNS Agent байна.\n\n"

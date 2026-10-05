@@ -73,8 +73,6 @@ export function useDelayedLoading(pending: boolean, { delay = 150, minDuration =
   return visible
 }
 
-export const useDelayedPending = useDelayedLoading
-
 interface RouteLoadErrorBoundaryProps {
   children: ReactNode
 }
@@ -153,22 +151,6 @@ function useRetainedSkeleton(visible: boolean, resolved: boolean, exitDuration =
 export function Skeleton({ variant = 'text', className = '', count = 1 }: { variant?: SkeletonVariant; className?: string; count?: number }) {
   return <div className={`skeleton-group skeleton-${variant} ${className}`.trim()} aria-hidden="true">
     {Array.from({ length: count }, (_, index) => <span className="skeleton" key={index} />)}
-  </div>
-}
-
-export function SkeletonBox({ className = '', ...props }: React.HTMLAttributes<HTMLSpanElement>) {
-  return <span {...props} className={`skeleton-box skeleton ${className}`.trim()} aria-hidden="true" />
-}
-
-export function SkeletonText({ lines = 1, className = '' }: { lines?: number; className?: string }) {
-  return <span className={`skeleton-text-lines ${className}`.trim()} aria-hidden="true">
-    {Array.from({ length: lines }, (_, index) => <span className="skeleton-text-line skeleton" key={index} />)}
-  </span>
-}
-
-export function SkeletonRow({ columns = 4, className = '' }: { columns?: number; className?: string }) {
-  return <div className={`skeleton-row ${className}`.trim()} aria-hidden="true">
-    {Array.from({ length: columns }, (_, index) => <span className="skeleton" key={index} />)}
   </div>
 }
 

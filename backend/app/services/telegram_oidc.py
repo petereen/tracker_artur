@@ -122,7 +122,7 @@ async def validate_id_token(id_token: str, nonce: str | None = None) -> dict[str
             issuer=str(metadata["issuer"]),
             options={"verify_at_hash": False},
         )
-    except JWTError as exc:
+    except JWTError:
         # A rotated signing key may not be in the cached JWKS. Retry once.
         try:
             _jwks_cache = (now + DISCOVERY_TTL, await _get_json(str(metadata["jwks_uri"])))

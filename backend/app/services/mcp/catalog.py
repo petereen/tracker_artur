@@ -7,8 +7,6 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app.core.enterprise_deps import ActorContext, permissions_for_roles
-from app.core.config import settings
-from app.core.security import create_mcp_access_token
 from app.services.mcp import schemas
 
 
@@ -113,43 +111,3 @@ def tool_list(actor: ActorContext, intents: set[str] | frozenset[str] | None = N
     ]
 
 
-def mcp_remote_tool(*, authorization: str, allowed_tools: list[str]) -> dict:
-    return {
-        "type": "mcp",
-        "server_label": "oyuns_enterprise",
-        "server_description": "Permission-scoped OYUNS company knowledge and ERP tools. Task changes are previews requiring explicit Web or Telegram confirmation.",
-        "server_url": settings.AI_MCP_SERVER_URL,
-        "authorization": authorization,
-        "defer_loading": True,
-        "allowed_tools": allowed_tools,
-        # Only reads and non-executing previews are in the catalog. A trusted
-        # channel callback, not the model, performs confirmation.
-        "require_approval": "never",
-    }
-
-
-def enabled_for(actor: ActorContext) -> bool:
-    if not settings.AI_MCP_ENABLED or not settings.AI_MCP_SERVER_URL.strip().startswith("https://"):
-        return False
-    raw = settings.AI_MCP_ORGANIZATION_ALLOWLIST.strip()
-    if not raw:
-        return True
-    try:
-        allowed = {int(value.strip()) for value in raw.split(",") if value.strip()}
-    except ValueError:
-        return False
-    return actor.organization_id in allowed
-
-
-def gateway_tool_for(actor: ActorContext, *, channel: str, conversation_id: int | None) -> dict | None:
-    if not enabled_for(actor):
-        return None
-    allowed = allowed_tool_names(actor)
-    token = create_mcp_access_token(
-        account_id=actor.account_id,
-        organization_id=actor.organization_id,
-        channel=channel,
-        conversation_id=conversation_id,
-        allowed_tools=allowed,
-    )
-    return mcp_remote_tool(authorization=f"Bearer {token}", allowed_tools=allowed)

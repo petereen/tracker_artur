@@ -4,13 +4,6 @@ import { api } from './client'
 import i18n from '../i18n'
 
 // --- Auth ---
-export function useLogin() {
-  return useMutation({
-    mutationFn: (data: { email: string; password: string }) =>
-      api.post<{ access_token: string }>('/auth/login', data).then((r) => r.data),
-  })
-}
-
 // --- Admin access ---
 export interface AdminUser {
   id: number
@@ -150,27 +143,8 @@ function dashboardParams(filters: DateRangeFilters) {
   if (filters.all_time) params.set('all_time', 'true')
   return params
 }
-export function useDashboardSummary(filters: DateRangeFilters = {}) {
-  return useQuery({ queryKey: ['dashboard', 'summary', filters], queryFn: () => api.get(`/dashboard/summary?${dashboardParams(filters)}`).then((r) => r.data) })
-}
-export function useDashboardMetrics(metric: string, filters: DateRangeFilters = {}) {
-  return useQuery({ queryKey: ['dashboard', 'metrics', metric, filters], queryFn: () => api.get(`/dashboard/metrics?metric=${metric}&${dashboardParams(filters)}`).then((r) => r.data) })
-}
-export function useWorkPerformance(filters: DateRangeFilters = {}) {
-  return useQuery({ queryKey: ['dashboard', 'work-performance', filters], queryFn: () => api.get(`/dashboard/work-performance?${dashboardParams(filters)}`).then((r) => r.data) })
-}
-export function useTopEmployees() {
-  return useQuery({ queryKey: ['dashboard', 'top'], queryFn: () => api.get('/dashboard/top-employees').then((r) => r.data) })
-}
 
 // --- Journal ---
-export function useAnswers(filters: { emp_id?: number; date_from?: string; date_to?: string } = {}) {
-  const params = new URLSearchParams()
-  if (filters.emp_id) params.set('emp_id', String(filters.emp_id))
-  if (filters.date_from) params.set('date_from', filters.date_from)
-  if (filters.date_to) params.set('date_to', filters.date_to)
-  return useQuery({ queryKey: ['answers', filters], queryFn: () => api.get(`/answers?${params}`).then((r) => r.data) })
-}
 
 export interface WorkReportOut {
   id: number
@@ -194,15 +168,6 @@ export interface WorkReportOut {
   updated_at: string
   revisions?: { id: number; text: string; status: string; created_at: string; updated_at: string }[]
 }
-export function useWorkReports(filters: { employee_id?: number; date_from?: string; date_to?: string; report_type?: string; status?: string } = {}) {
-  const params = new URLSearchParams()
-  if (filters.employee_id) params.set('employee_id', String(filters.employee_id))
-  if (filters.date_from) params.set('date_from', filters.date_from)
-  if (filters.date_to) params.set('date_to', filters.date_to)
-  if (filters.report_type) params.set('report_type', filters.report_type)
-  if (filters.status) params.set('status', filters.status)
-  return useQuery<WorkReportOut[]>({ queryKey: ['work-reports', filters], queryFn: () => api.get(`/work-reports?${params}`).then((r) => r.data) })
-}
 export function useWorkReport(reportId: number | null) {
   return useQuery<WorkReportOut & { revisions: NonNullable<WorkReportOut['revisions']> }>({
     queryKey: ['work-report', reportId],
@@ -220,9 +185,6 @@ export interface CompanyPlanItem {
 export interface PlanSuggestion {
   id: number; employee_id: number; employee_name: string; period_date: string; text: string | null
   created_at: string; updated_at: string; company_plan_item_count: number
-}
-export function usePlanSuggestions(month: string) {
-  return useQuery<PlanSuggestion[]>({ queryKey: ['company-plan-suggestions', month], queryFn: () => api.get(`/company-plans/suggestions?month=${month}`).then((r) => r.data) })
 }
 export function useCompanyPlan(month: string) {
   return useQuery<CompanyPlanItem[]>({ queryKey: ['company-plan', month], queryFn: () => api.get(`/company-plans?month=${month}`).then((r) => r.data) })
@@ -533,60 +495,4 @@ export interface TaskOut {
   created_by_tg: string | null
   creator_name: string | null
   reminder_intervals_min: number[]
-}
-
-export function useTasks(filters: { status?: string; assignee_id?: number; active?: boolean; due_from?: string; due_to?: string } = {}) {
-  const params = new URLSearchParams()
-  if (filters.status) params.set('status', filters.status)
-  if (filters.assignee_id) params.set('assignee_id', String(filters.assignee_id))
-  if (filters.active !== undefined) params.set('active', String(filters.active))
-  if (filters.due_from) params.set('due_from', filters.due_from)
-  if (filters.due_to) params.set('due_to', filters.due_to)
-  return useQuery<TaskOut[]>({
-    queryKey: ['tasks', filters],
-    queryFn: () => api.get(`/tasks?${params}`).then((r) => r.data),
-  })
-}
-
-export function useTask(id: number) {
-  return useQuery<TaskOut>({
-    queryKey: ['tasks', id],
-    queryFn: () => api.get(`/tasks/${id}`).then((r) => r.data),
-  })
-}
-
-export function useCreateTask() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (d: { title: string; description?: string; assignee_id?: number; deadline_at?: string; priority: number }) =>
-      api.post('/tasks', d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success(i18n.t('api.task.created')) },
-    onError: () => toast.error(i18n.t('api.task.createFailed')),
-  })
-}
-
-export function useUpdateTask() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, ...d }: { id: number; title?: string; description?: string; assignee_id?: number; deadline_at?: string; priority?: number; status?: string }) =>
-      api.patch(`/tasks/${id}`, d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); toast.success(i18n.t('api.task.updated')) },
-    onError: () => toast.error(i18n.t('api.task.updateFailed')),
-  })
-}
-
-export function useTaskComments(taskId: number) {
-  return useQuery({
-    queryKey: ['tasks', taskId, 'comments'],
-    queryFn: () => api.get(`/tasks/${taskId}/comments`).then((r) => r.data),
-    enabled: taskId > 0,
-  })
-}
-
-export function useAddTaskComment(taskId: number) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (text: string) => api.post(`/tasks/${taskId}/comments`, { text }).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', taskId, 'comments'] }),
-  })
 }

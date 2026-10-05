@@ -40,8 +40,3 @@ export function getNativeCapabilities(): Promise<NativeCapabilities> {
   if (!cached) cached = read()
   return cached
 }
-
-/** Test seam. */
-export function resetNativeCapabilitiesCache() {
-  cached = null
-}

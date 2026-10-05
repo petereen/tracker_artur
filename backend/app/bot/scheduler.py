@@ -456,7 +456,6 @@ async def send_reminder(employee_id: int, num: int):
                 )
             ).scalars().first()
             telegram_id = emp.telegram_id
-            timezone_name = emp.timezone
         daily_report_reminders_enabled = getattr(get_manager_settings(organization_id), "daily_report_reminders_enabled", True)
         if not daily_report_reminders_enabled:
             return
@@ -676,7 +675,6 @@ async def send_periodic_report_prompts(employee_id: int, default_hour: int | Non
         telegram_id = emp.telegram_id
         timezone_name = emp.timezone
         organization_id = emp.organization_id
-        primary_language = emp.primary_language
     local_now = _local_now(timezone_name)
     local_day = local_now.date()
     scope = work_report_service.employee_report_scope(employee_id)

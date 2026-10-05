@@ -38,11 +38,6 @@ SUPPORTING_TYPES = {"application/pdf", "application/vnd.openxmlformats-officedoc
 FINAL_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/tiff"}
 
 
-class ContractBody(BaseModel):
-    type: str = "doc"
-    content: list[dict[str, Any]] = Field(default_factory=list)
-
-
 class ContractCreate(registry.ContractRegistryInput):
     title: str = Field(min_length=1, max_length=500)
     document_type: Literal["contract", "agreement", "official_letter", "other"]

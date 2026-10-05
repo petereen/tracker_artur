@@ -55,7 +55,6 @@ export function formatMoney(value: string | number | null | undefined, currency 
   return `${numberFormat('money').format(amount)}${currency === 'MNT' ? '₮' : ` ${currency}`}`
 }
 export const formatAmount = (value: string | number | null | undefined) => (value === null || value === undefined || value === '' ? '' : numberFormat('money').format(Number(value)))
-export const formatCompact = (value: string | number | null | undefined) => (value === null || value === undefined ? '—' : numberFormat('compact').format(Number(value)))
 export const formatPct = (value: string | null | undefined) => (value === null || value === undefined ? '—' : `${Number(value).toLocaleString(intlLocale(), { maximumFractionDigits: 1 })}%`)
 
 export const formatDate = (value: string | null | undefined) => (value ? value.slice(0, 10).replaceAll('-', '.') : '—')
@@ -92,8 +91,6 @@ export function splitEvenly(total: number, periods: number): number[] {
   values[periods - 1] = Math.round((total - share * (periods - 1)) * 100) / 100
   return values
 }
-
-export const isoToday = () => { const now = new Date(); return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10) }
 
 /** Lets Astryx Link / Button `href` navigate through react-router instead of reloading. */
 export const RouterLink = forwardRef<HTMLAnchorElement, Omit<LinkProps, 'to'> & { href: string }>(function RouterLink({ href, ...props }, ref) {

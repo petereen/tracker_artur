@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func, select, update
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -291,7 +290,3 @@ async def revoke_license(db: AsyncSession, license_row: TenantLicense, *, operat
     tenant_directory.invalidate(license_row.organization_id)
 
 
-def translate_db_error(exc: DBAPIError) -> HTTPException | None:
-    if is_seat_limit_error(exc):
-        return HTTPException(status_code=409, detail={"code": "seat_limit_reached", "message": "Лицензийн хэрэглэгчийн хязгаар дүүрсэн байна."})
-    return None

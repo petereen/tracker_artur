@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { LucideIcon } from 'lucide-react'
-import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
 import type { DateRange } from '../../../api/enterprise'
 import i18n from '../../../i18n'
 import { intlLocale } from '../../../utils/locale'
@@ -52,17 +51,6 @@ export function weekRanges(period: WeekPeriod, today = new Date()): { range: Dat
 
 export function normalizePeriod(value: unknown): WeekPeriod {
   return value === 'previous_week' ? 'previous_week' : 'this_week'
-}
-
-/** The [ This Week | Previous Week ] radio used by every period-aware widget. */
-export function WeekPeriodField({ value, onChange }: { value: WeekPeriod; onChange: (value: WeekPeriod) => void }) {
-  const { t } = useTranslation()
-  return (
-    <RadioList label={t('today.period.label')} value={value} onChange={(next) => onChange(normalizePeriod(next))} orientation="horizontal" size="sm">
-      <RadioListItem value="this_week" label={t('today.period.thisWeek')} />
-      <RadioListItem value="previous_week" label={t('today.period.previousWeek')} />
-    </RadioList>
-  )
 }
 
 /** Compact [ This | Previous ] switch for a widget header: changes the period straight from the Today screen. */

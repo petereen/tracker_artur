@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import { BriefcaseBusiness, CheckSquare2, File, Folder, Keyboard, LayoutDashboard, Search, Settings2, Upload, UserCircle2, Users2, X, type LucideIcon } from 'lucide-react'
+import { CheckSquare2, File, Folder, Keyboard, Search, Users2, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useGlobalSearch, type GlobalSearchResult } from '../api/enterprise'
 
@@ -52,5 +52,3 @@ export function GlobalCommandBar({ open, onClose, accountId, channels, features,
   const taskResults = search.data?.groups.tasks ?? []; const workerResults = search.data?.groups.workers ?? []; const fileResults = search.data?.groups.files ?? []
   return <div className="command-backdrop" onMouseDown={onClose}><div className="command-panel global-command-panel" role="dialog" aria-modal="true" aria-label={t('shell.command.search')} onMouseDown={(event) => event.stopPropagation()} onKeyDown={onKeyDown}><div className="command-input"><Search size={18} /><input ref={input} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('shell.command.placeholder')} role="combobox" aria-expanded aria-controls="command-results" aria-activedescendant={items[active] ? `command-item-${active}` : undefined} /><kbd>Esc</kbd></div><div className="command-list" id="command-results" role="listbox">{!deferredQuery && recents.length > 0 && <section className="command-recents"><div><h3>{t('shell.command.recent')}</h3><button onClick={() => { setRecents([]); localStorage.removeItem(storageKey) }}>{t('shell.command.clear')}</button></div>{recents.map((item) => <button key={item} onClick={() => setQuery(item)}><Keyboard size={15} />{item}</button>)}</section>}{deferredQuery ? <>{group(t('shell.command.groupTasks'), taskResults)}{group(t('shell.command.groupWorkers'), workerResults)}{group(t('shell.command.groupFiles'), fileResults)}{group(t('shell.command.groupWorkspace'), localMatches)}{search.isFetching && <p className="command-state">{t('shell.command.searching')}</p>}{!search.isFetching && items.length === 0 && <p className="command-state">{t('shell.command.noResults')}</p>}</> : <>{group(t('shell.command.groupWorkspace'), channels)}{group(t('shell.command.groupQuick'), features)}</>}</div></div></div>
 }
-
-export const commandIcons = { LayoutDashboard, BriefcaseBusiness, Settings2, Upload, UserCircle2 }

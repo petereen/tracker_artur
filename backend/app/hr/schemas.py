@@ -271,20 +271,6 @@ class CompensationItemInput(BaseModel):
         return self
 
 
-class PayrollGenerateInput(BaseModel):
-    period_start: date
-    period_end: date
-    tax_point_date: date | None = None
-    employee_ids: list[int] = Field(default_factory=list)
-    statutory_profile_id: int | None = None
-
-    @model_validator(mode="after")
-    def valid_range(self):
-        if self.period_end < self.period_start:
-            raise ValueError("Payroll end date must not precede start date")
-        return self
-
-
 class InviteBindInput(BaseModel):
     token: str = Field(min_length=20, max_length=512)
     init_data: str = Field(min_length=1, max_length=4096)

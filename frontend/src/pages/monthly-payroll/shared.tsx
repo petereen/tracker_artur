@@ -42,14 +42,6 @@ export const runTitle = (run: { run_type: string; pay_date: string }) => (run.ru
 
 /** Mirror of the backend BLOCKING_ROW_WARNINGS: these keep a row out of approval. */
 export const BLOCKING_WARNINGS = new Set(['negative_final_pay', 'profile_missing', 'salary_history_missing_or_incomplete', 'allowance_daily_rate_required', 'row_flagged', 'advance_changed', 'advance_not_due', 'advance_not_positive'])
-
-const WARNING_CODES = [
-  'negative_final_pay', 'profile_missing', 'profile_incomplete', 'salary_history_missing_or_incomplete', 'allowance_daily_rate_required', 'advance_changed', 'advance_not_calculated',
-  'advance_not_due', 'advance_not_positive', 'zero_worked_hours', 'advance_above_estimated_net', 'worked_to_date_without_time', 'deduction_details_missing',
-  'worked_hours_above_planned', 'base_below_minimum_wage', 'overtime_work', 'computed_cell_overridden', 'row_flagged', 'hr_changed', 'shi_cap_hit',
-  'invalid_input', 'final_run_required', 'all_runs_must_be_approved', 'all_rows_must_be_approved', 'row_payroll_equation_mismatch', 'advance_reconciliation_mismatch',
-] as const
-export const WARNING_LABELS: Record<string, string> = labelMap('mp.warning', WARNING_CODES)
 export const warningLabel = (code: string) => labelOr('mp.warning', code)
 
 export function requestError(error: any): string {

@@ -146,7 +146,6 @@ def _crm_morning_lines(emp_id: int, tz: str | None, now: datetime, language: str
 # ─── Сотрудник: вечер ─────────────────────────────────────────────────────────
 
 def build_employee_evening(emp_id: int, tz: str | None, language: str = "mn") -> str | None:
-    now = _now_utc()
     active = task_service.list_assigned_to(emp_id, only_active=True)
     done_today = _done_today(emp_id, tz)
     if not active and not done_today:

@@ -327,12 +327,6 @@ class ProtectedPayslipInput(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
-class ReplacementRunInput(PayrollRunInput):
-    """Inputs for a replacement run linked to a finalized run."""
-
-    acknowledge_example: bool = False
-
-
 class TaxExemptionCategoryInput(BaseModel):
     code: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
     name: str = Field(min_length=1, max_length=160)
@@ -524,21 +518,6 @@ class StatementImportInput(BaseModel):
 
 class PayrollCancelInput(BaseModel):
     reason: str = Field(default="Cancelled by payroll administrator", min_length=1, max_length=1000)
-
-
-# Public document names used by the Frappe-style API.  The input contracts
-# retain the explicit ``Input`` suffix while these aliases keep generated
-# clients and integration tests aligned with ERP document terminology.
-class SalarySlip(BaseModel):
-    id: int
-    payroll_run_id: int
-    employee_id: int
-    gross: Decimal
-    employee_shi: Decimal
-    employer_shi: Decimal
-    pit: Decimal
-    net_pay: Decimal
-    document_status: Literal["draft", "submitted", "cancelled"] = "draft"
 
 
 PayrollEntry = PayrollEntryInput
